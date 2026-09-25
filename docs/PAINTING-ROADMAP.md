@@ -274,8 +274,10 @@ Implementation requirements:
 - restart/resume preserves the same immutable evidence identities;
 - this strengthens, rather than relaxes, the existing exact-evidence-identity baseline.
 
-**Verification:** targeted escalation test **7/7**; required C.4 linked suite **114/114**; final shared
-P0-C.4/P0-C.6 baseline **201/201** across the six requested test files.
+**Verification:** targeted escalation test **7/7**; required C.4 linked suite **114/114**; current shared
+P0-C.4/P0-C.6 baseline **203/203** across the six requested test files. The canonical repository gate
+also passes **608/608** Vitest tests plus build/typecheck, pack, compact-v2 contract, painting-policy,
+prompt-coverage, tool-count and live-evidence-ledger checks.
 
 **Remaining:** no known repository correctness blocker remains in P0-C.4. A future real-Photoshop run
 may provide additional live evidence, but it is not needed to reopen the fixed overwrite semantics.
@@ -333,13 +335,18 @@ Promotion is now evidence-scoped and resolution-aware:
   `primitive-footprint-repeating` from repeated `primitive_footprint=suspect`, counts recurrence and
   creates a durable cumulative-trend problem.
 - Trend support now carries source operation, sequence, signal evidence identity, declared
-  region/scale and exact normalized `review_findings.region_bounds` when available. Severity remains
-  independent from scope.
+  region/scale and exact spatial provenance. Review-finding coordinates may contribute to a trend
+  only when the finding is causally bound to that signal: either explicitly through the additive
+  `review_findings[].trend_signals` field or through a semantically direct finding kind such as
+  `repeated_dab_pattern` / `mechanical_patterning` for `primitive-footprint-repeating`. Unrelated
+  findings are never borrowed as spatial evidence for another trend. When there is no signal-bound
+  finding, Guard falls back to the operation's exact `region_bounds` / verified focus region rather
+  than unrelated finding coordinates. Severity remains independent from scope.
 - Repeated overlapping/localized support remains local/medium. Global promotion requires either
   explicit whole-frame `global_readability=degraded` evidence or geometrically materially separate
   exact source regions from independent operations; signal names alone never imply global scope.
-- Durable trend problems retain `source_operations`, `supporting_regions`, `supporting_evidence` and a
-  deterministic `promotion_reason`. `active_problem` is selected through the existing
+- Durable trend problems retain `source_operations`, `supporting_regions` (including `region_source`),
+  `supporting_evidence` and a deterministic `promotion_reason`. `active_problem` is selected through the existing
   `largestOpenMustFix()` ordering rather than forcibly seized by every synthetic trend.
 - Resolving or reclassifying a cumulative trend advances a durable `resolution_epoch` and
   `resolution_cutoff_sequence`; pre-resolution verdict history is excluded from later recurrence.
@@ -369,11 +376,15 @@ Implementation requirements:
 - resolving the trend prevents stale pre-resolution source operations from reopening it;
 - unrelated medium tasks remain dispatchable when no larger open problem is supported by evidence.
 
-**Verification:** the four new regression controls cover localized repetition, materially separate
-multi-region promotion, explicit whole-frame degradation and resolution stability. The required C.6
-linked suite passes **159/159**; final shared baseline passes **201/201** across the six requested test
-files, including `priorityGate`, `active_problem`, `largestOpenMustFix`, restart/resume and
-resolved-trend non-resurrection coverage.
+**Verification:** the original four regression controls cover localized repetition, materially
+separate multi-region promotion, explicit whole-frame degradation and resolution stability. A
+follow-up correctness audit then reproduced one additional false-global case: two
+`primitive_footprint=suspect` operations in the same face region were promoted globally because
+unrelated distant `proportion` findings were borrowed as footprint evidence. Commit `735d5ce` closes
+that causal-binding gap and adds two controls proving (a) unrelated distant findings cannot promote
+the footprint trend and (b) explicitly signal-bound distant findings can. The current shared six-file
+baseline passes **203/203**; `npm run verify:canonical` passes **608/608** Vitest tests plus all canonical
+build/policy/contract/ledger gates.
 
 **Remaining:** no known repository correctness blocker remains in P0-C.6. Broader trend-quality or
 critic-authority calibration remains separate later roadmap work and is not implied by this slice.

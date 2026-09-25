@@ -83,6 +83,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- 2026-09-25: close the follow-up P0-C.6 causal-evidence binding blocker found during independent
+  post-implementation review. Cumulative trend scope no longer borrows arbitrary
+  `review_findings.region_bounds` from the same verdict: spatial findings must be explicitly bound to
+  the trend through additive `review_findings[].trend_signals` or be a semantically direct finding
+  kind, otherwise Guard falls back to the operation's exact region/focus. This prevents unrelated
+  distant proportion/readability findings from turning a localized repeated brush-footprint signal
+  into a false global must-fix while preserving real global promotion for signal-bound distant
+  evidence and explicit whole-frame degradation. Commit `735d5ce`; the requested six-file baseline
+  now passes **203/203**, and `npm run verify:canonical` passes **608/608** tests plus all canonical
+  build/pack/policy/contract/tool-count/live-ledger checks.
+
 - 2026-09-25: complete the P0-C.4/P0-C.6 correctness foundation for the canonical Painter/Guard
   review loop. Multiscale review escalation now gives every logical requirement a deterministic
   identity and every capture a durable unique sequence/id; runtime crop materialization uses that
