@@ -27,12 +27,15 @@ are consolidated in `CHANGELOG.md`; detailed acceptance evidence remains in the 
 Git history and referenced test/live artifacts.
 
 1. **P0-A — host routing / CoS attribution:** Tasks **3 and 4 are closed**; continue Tasks **1 → 2**.
-2. **P0-D — human critic calibration / stop-decision calibration:** Tasks **8 / 8a → 8b**, then
+2. **P0-C — Painter/Guard semantic-pass throughput and bounded autonomy:** implement Tasks
+   **P0-C.1 → P0-C.10** below as one coordinated contract change, with the evidence-identity and
+   bookkeeping invariants treated as correctness work rather than optional speed polish.
+3. **P0-D — human critic calibration / stop-decision calibration:** Tasks **8 / 8a → 8b**, then
    close the residual human claims from Tasks **6, 11 and 13a.1A/13a.1C** from the same labelled
    evidence where possible.
-3. **P1 — human artistic acceptance:** Task **23 human pack → 22 → 15d.3**,
+4. **P1 — human artistic acceptance:** Task **23 human pack → 22 → 15d.3**,
    then the real-artwork artistic-preference part of Task **21**.
-4. **Conditional / P2 only after evidence:** Task **5** if ordinary ChatGPT/CoS routing remains
+5. **Conditional / P2 only after evidence:** Task **5** if ordinary ChatGPT/CoS routing remains
    unreliable; Task **10** only if Task 8/8a demonstrates measurable decision-quality gain; Task
    **15c** remains optional exploration.
 
@@ -40,9 +43,14 @@ Rationale:
 
 - Host routing is the first remaining external gate because losing the established Photoshop/CoS route can bypass the entire
   painting architecture regardless of its internal quality.
-- Accepted-state recovery is now closed and archived; critic calibration is the next painting-side
-  quality gate because it controls any claim of perceptual reliability and broader critic authority,
-  and it also decides whether Task 10 should exist at all.
+- Accepted-state recovery is now closed and archived. The 2026-09-25 representative real-Photoshop
+  painting run then exposed a separate production-loop problem: too much model-visible Guard
+  choreography per useful artistic pass, plus concrete evidence/materialization and trend-scope
+  failure modes. P0-C therefore comes before critic calibration so the later human calibration is not
+  measuring avoidable orchestration friction or stale review-state behavior.
+- Critic calibration remains the next **perceptual-authority** gate after P0-C because it controls any
+  claim of perceptual reliability and broader critic authority, and it also decides whether Task 10
+  should exist at all.
 - Progressive refinement comes before final-target fidelity: Task 23 already has a machine-enforced
   de-block-in gate and a completed disposable real-Photoshop progression run; only its blinded human
   perceptual pack remains as the forward acceptance gate. Final target fidelity and the remaining
@@ -67,6 +75,495 @@ discovered while producing it and remain active:
 3. **Negative regression sentinel normalization.** A compact visual observation carrying
    `regression: "none observed"` is currently treated as truthy regression evidence. Normalize
    explicit negative sentinel text so a resolved visual pass cannot be mislabeled `regression`.
+
+---
+
+## P0-C — Painter/Guard semantic-pass throughput and bounded autonomy
+
+**Trigger:** a representative real-Photoshop painting run on 2026-09-25 reached a useful structural
+block-in, but a disproportionate amount of the interaction budget was spent on Guard choreography:
+preflight correction, report/ack closure, recovery bookkeeping, review-evidence recapture,
+priority reclassification and repeated Art Director transitions. The same run also reproduced an
+evidence-file overwrite/oscillation failure and a trend-scope error where a localized repeated-brush
+problem became a global blocker.
+
+**Goal:** move the canonical lane from command-level choreography to **semantic artistic-pass
+control**. Guard still owns safety, receipts, evidence identity, recovery and review barriers; Painter
+gets enough bounded freedom to execute a coherent pass before control is escalated. Do not weaken
+the existing compact-v2 no-replay, document-incarnation, multiscale-review or UXP-first guarantees.
+
+These ten items are one coordinated design. Implement them in small reviewable slices, but do not
+solve one item by violating another. In particular, "more autonomy" never means blind mutation,
+skipping visual evidence, replaying an uncertain operation, or maximizing raw tool count.
+
+**Code-audit snapshot — 2026-09-25.** This section was checked against the current implementation,
+not only against roadmap prose. Targeted baseline verification passed **196/196 tests** across
+`visual-microplan`, `embedded-guard`, `artistic-recovery-policy`, `planner-painter`,
+`visual-review-escalation-state` and `session-store-regressions`. Status labels below mean:
+`MOSTLY PRESENT` = the core mechanism exists and this task is primarily hardening/finishing;
+`PARTIAL` = important reusable machinery exists but the requested behavior is incomplete;
+`FOUNDATION ONLY` = supporting primitives exist but the central requested behavior is absent or
+currently behaves in the opposite way.
+
+### P0-C.1 — Make one Guard semantic cycle represent one artistic pass
+
+**Code audit: MOSTLY PRESENT — finish/extend, do not redesign from zero.**
+
+- `next_pass.actions` already compiles one root goal/request identity into one VisualMicroPlan;
+  `request_key` is durable idempotency identity and `problem_id` is stable artistic-problem identity
+  (`src/tools/guard-tools.ts`, `src/core/guard/cycle-compiler.ts`).
+- `photoshop_execute_visual_microplan` already supports **1–4 contiguous visual mutations** under one
+  region/intent/method/risk envelope with one mandatory AFTER preview and no preview between those
+  mutations (`VISUAL_MICROPLAN_MAX_MUTATIONS = 4`). Preparation actions may precede them, and one
+  logical layer creation is currently supported.
+- Middle-mutation failure already stops later mutations, records completed mutation results plus the
+  failed step, captures a reconciliation preview, and explicitly forbids automatic replay
+  (`src/tools/visual-microplan-tools.ts`).
+- **Still missing:** make pass/sub-action outcome projection explicit enough to distinguish
+  `completed / failed-or-uncertain / not-started` for every planned action; broaden the existing
+  bounded pass only where P0-C.2 allows it; avoid forcing otherwise coherent non-paint action chains
+  back into one-action direct-operation semantics. The architectural primitive itself already exists.
+
+The model-facing unit should be a bounded **artistic pass**, not an individual Photoshop command.
+A pass may compile to several related Photoshop actions when they share one artistic hypothesis,
+one target region/task and one verification boundary. Examples include create-layer → paint masses →
+soften transition, or create-light-layer → build key/fill/fog → bounded cleanup.
+
+Implementation requirements:
+
+- add/clarify a pass-level identity in the compact cycle and keep individual executor actions internal
+  implementation details of that pass;
+- permit multiple already-supported compact actions to execute under one pass when their combined
+  risk stays within the current task/scale/region contract;
+- do not require an externally visible report/ack/preview barrier between successful sub-actions;
+- if a sub-action fails or becomes uncertain, return exact completed/not-started/uncertain action
+  state and reconcile the pass from fresh evidence; never replay the whole pass blindly;
+- preserve the normal whole-frame + required local review at the **pass boundary**.
+
+**Acceptance**
+
+- a representative multi-action painting pass executes as one model-facing semantic cycle and yields
+  one pass-level visual review boundary;
+- an injected middle-action failure proves partial-state accounting and zero replay of already
+  completed visual actions;
+- single-action/high-risk passes continue to work unchanged;
+- no new public full-operation schema or retired controller/report path is introduced.
+
+### P0-C.2 — Add an adaptive per-pass mutation budget
+
+**Code audit: PARTIAL — fixed limits and risk primitives exist; adaptive budgeting does not.**
+
+- Existing hard limits are fixed: compact `actions` max 11, VisualMicroPlan max 4 visual mutations,
+  max 1 created logical layer. These are executor constants, not an adaptive budget.
+- VisualMicroPlan already carries `risk = low|moderate|high`, validates that a step cannot hide a
+  higher risk than the enclosing pass, and Guard checkpoint debt already weights mutation risk rather
+  than using elapsed time or a fixed pass count.
+- **Missing:** no function derives allowed semantic-action count from risk + stage + scale + region +
+  protected qualities/relations; no deterministic budget is emitted in diagnostics; no automatic
+  split/defer behavior exists for a coherent request that exceeds a risk-derived budget.
+
+Give each semantic pass a bounded budget of low-risk **semantic Photoshop actions**. This budget is
+not a target to maximize and does not count individual stroke points, dabs, path vertices or internal
+UXP sub-operations. For ordinary low-risk painting, experimentally support roughly **5–20 related
+semantic actions** before the next external review boundary; reduce the budget automatically for
+higher-risk operations.
+
+Implementation requirements:
+
+- derive the allowed budget from risk class, stage, scale, affected region, destructive potential and
+  whether protected qualities/relations are touched;
+- composition/global destructive changes, document replacement, uncertain recovery and similarly
+  high-risk work may collapse the budget to one action;
+- exceeding the budget must split/defer the remaining actions before dispatch rather than silently
+  weakening verification;
+- budget selection must be deterministic and visible in Guard diagnostics/receipts.
+
+**Acceptance**
+
+- a low-risk representative pass can execute at least five related semantic Photoshop actions inside
+  one pass without intermediate bookkeeping round-trips;
+- an over-budget request is deterministically segmented/rejected before unsafe dispatch;
+- a high-risk control proves the budget contracts to the stricter boundary;
+- no acceptance criterion rewards adding meaningless actions merely to increase the count.
+
+### P0-C.3 — Eliminate leaked bookkeeping from the compact hot loop
+
+**Code audit: MOSTLY PRESENT — contract implemented; recovery/finalization edge cases need hardening.**
+
+- Public compact-v2 already rejects legacy `previous_report`, `previous_operation_ack`,
+  `previous_visual_verdict` and `previous_report_ack` fields. `previous_observation` is expanded
+  internally, and `compactClosureDefaults()` supplies the technical report and exact receipt token
+  before `closePreviousCycle()` runs (`src/core/guard/cycle-compiler.ts`).
+- Existing embedded-Guard tests prove one compact continuation records
+  `technical_execution_record`, exact operation receipt acknowledgement and the visual verdict without
+  public standalone closure calls.
+- The lower-level session store still retains explicit report/ack machinery as an internal primitive,
+  which is compatible with compact-v2 as long as it does not leak to the model-facing path.
+- **Still missing / reproduced live:** multiscale/recovery edge cases can strand the operation in a
+  closure/review loop even after the artistic fact is known. P0-C.3 should therefore be treated as a
+  regression-hardening task: stable one-step compact closure after recovery, plus table-driven proof
+  that bookkeeping-only state cannot oscillate or demand model choreography.
+
+Compact-v2 already says Guard owns technical receipt/report/verdict closure internally. Treat any
+model-visible requirement to manually shepherd report/ack bookkeeping on the happy path as a
+**regression of the canonical contract**, not as a new workflow to document.
+
+Implementation requirements:
+
+- completed visual passes close technical receipt/report/ack state behind
+  `photoshop_guard_cycle_auto` when the next honest visual observation arrives;
+- completed non-visual/read-only passes close behind the same compact facade without standalone
+  report/ack calls;
+- recovery may require fresh evidence/reconciliation, but bookkeeping-only closure must not create a
+  chain of model-visible calls after the artistic/recovery decision is already known;
+- when closure cannot proceed, return one stable `next_required_action` describing the missing fact;
+  do not oscillate among equivalent report/ack/verdict states.
+
+**Acceptance**
+
+- table-driven coverage for completed visual, completed non-visual, rejected-before-dispatch,
+  partial, uncertain and reconciled operations shows no standalone public report/ack dependency;
+- one compact continuation closes all derivable technical debt exactly once;
+- the canonical hot loop does not gain extra model-visible calls solely for bookkeeping;
+- legacy explicit report/ack surfaces remain retired.
+
+### P0-C.4 — Make review evidence immutable and content-addressed
+
+**Implementation status: COMPLETE (repository correctness slice, 2026-09-25).**
+
+The prior audit correctly found that SHA validation/persistence were strong while materialized capture
+identity was mutable. That gap is now closed:
+
+- Existing code binds review evidence to document id + whole-frame SHA + review level + exact source
+  region and verifies the materialized crop bytes against their SHA before accepting them.
+- Persisted evidence survives restart; tests already prove deleted or byte-replaced crop files become
+  invalid and must be recaptured (`tests/visual-review-escalation-state.test.ts`).
+- Each logical requirement now has a deterministic `requirement_id`; each read-only recapture gets a
+  durable monotonic `capture_sequence` plus unique `capture_id`, and runtime materialization keys are
+  derived from `capture_id` rather than the per-round semantic role.
+- Accepted evidence is append-only and carries source operation, requirement, capture and content-bound
+  `artifact_id` provenance. Re-capturing the same logical requirement creates a new record/path rather
+  than mutating the old one.
+- `reviewEvidenceState()` distinguishes `captured`, `artifact_missing_or_corrupt` and
+  `never_captured` while retaining strict materialized-byte/SHA verification. No SHA, document pinning,
+  no-replay or multiscale evidence check was relaxed.
+- Regression coverage reproduces the original three-requirement/two-round overwrite failure, proves
+  old bytes and paths remain immutable, verifies recapture after corruption is append-only, prevents
+  captured→pending resurrection, and preserves all identities across restart.
+
+Fix the reproduced failure where later escalation crops reused a materialized filename, overwrote
+earlier evidence bytes, and caused a requirement to oscillate `captured → pending → captured` when
+the stored SHA no longer matched the file on disk.
+
+Implementation requirements:
+
+- every materialized review artifact gets immutable identity including operation, requirement/role,
+  escalation round and/or content SHA;
+- never overwrite bytes referenced by an accepted/captured evidence record;
+- `captured` must be monotonic while the referenced artifact is still present and its SHA verifies;
+- recapturing the same logical requirement creates a new evidence record rather than mutating the old
+  file in place;
+- recovery/status must distinguish "artifact missing/corrupt" from "requirement never captured".
+
+**Acceptance**
+
+- add a regression reproducing two or more same-operation object crops across escalation rounds and
+  prove their paths/bytes/SHA identities remain distinct and stable;
+- once all requirements are captured, repeated verdict submission cannot resurrect an older pending
+  requirement merely because a later crop was materialized;
+- restart/resume preserves the same immutable evidence identities;
+- this strengthens, rather than relaxes, the existing exact-evidence-identity baseline.
+
+**Verification:** targeted escalation test **7/7**; required C.4 linked suite **114/114**; final shared
+P0-C.4/P0-C.6 baseline **201/201** across the six requested test files.
+
+**Remaining:** no known repository correctness blocker remains in P0-C.4. A future real-Photoshop run
+may provide additional live evidence, but it is not needed to reopen the fixed overwrite semantics.
+
+### P0-C.5 — Normalize only unambiguous preflight classification mismatches
+
+**Code audit: PARTIAL — safe normalization framework exists, but not this artistic-contract case.**
+
+- The cycle/compiler already performs narrow deterministic normalizations: compact root goal/id
+  defaults, duplicate preview document-id removal, explicit stage aliases, legacy
+  `region-fill-closed-contours → region-block-in`, created-layer target wiring and Guard-selected
+  preflighted brush presets.
+- These normalizations are surfaced through a `normalizations[]` result and tests explicitly require
+  that wrong explicit targets are **not** silently rewritten.
+- Artistic method selection already knows the valid `(visual_intent, impact_class) → method`
+  relationships through `selectPaintingMethod()` / `compileArtisticOperation()`.
+- **Missing:** when the declared intent/impact pair is invalid but the actual tool + action + goal admit
+  exactly one semantics-preserving classification, the compiler still rejects with
+  `No available method...`; it does not infer that unique classification. The live
+  `tonal-contrast + construct` structural-stroke rejection is therefore still reproducible in
+  principle.
+
+The live run showed a pass rejected because an otherwise valid `photoshop_paint_strokes` structural
+operation was labelled with an intent/impact pair unsupported by the method palette. Do not make the
+model inspect internal enum tables for a correction that is mechanically unique and semantics-
+preserving.
+
+Implementation requirements:
+
+- add a deterministic normalization step that may rewrite **classification metadata only** when the
+  requested tool, target, action class and artistic goal admit exactly one valid method/intent/impact
+  interpretation;
+- record every normalization in the preflight result/receipt;
+- never silently change document/layer target, stage, scale, destructive risk, action class,
+  requested Photoshop tool or artistic goal;
+- if more than one materially different interpretation is possible, remain fail-closed and return a
+  compact correction recipe instead of guessing.
+
+**Acceptance**
+
+- table-driven tests cover a unique semantics-preserving normalization and prove it dispatches the
+  same intended Photoshop method;
+- ambiguous and risk-changing controls still reject before mutation;
+- normalized requests produce the same verification expectations as an explicitly correct request;
+- this mechanism does not become a generic "make invalid plans pass" fallback.
+
+### P0-C.6 — Scope cumulative trend problems from evidence, not from the trend name
+
+**Implementation status: COMPLETE (repository correctness slice, 2026-09-25).**
+
+The prior audit correctly found that trend detection existed while promotion hard-coded global scope.
+Promotion is now evidence-scoped and resolution-aware:
+
+- Guard already collects verdict trend signals in a bounded recent window, synthesizes
+  `primitive-footprint-repeating` from repeated `primitive_footprint=suspect`, counts recurrence and
+  creates a durable cumulative-trend problem.
+- Trend support now carries source operation, sequence, signal evidence identity, declared
+  region/scale and exact normalized `review_findings.region_bounds` when available. Severity remains
+  independent from scope.
+- Repeated overlapping/localized support remains local/medium. Global promotion requires either
+  explicit whole-frame `global_readability=degraded` evidence or geometrically materially separate
+  exact source regions from independent operations; signal names alone never imply global scope.
+- Durable trend problems retain `source_operations`, `supporting_regions`, `supporting_evidence` and a
+  deterministic `promotion_reason`. `active_problem` is selected through the existing
+  `largestOpenMustFix()` ordering rather than forcibly seized by every synthetic trend.
+- Resolving or reclassifying a cumulative trend advances a durable `resolution_epoch` and
+  `resolution_cutoff_sequence`; pre-resolution verdict history is excluded from later recurrence.
+  Reopening requires enough new post-resolution evidence and survives restart/resume.
+- Priority semantics are unchanged: a medium/local must-fix does not block unrelated medium work, but
+  an evidence-supported larger blocker still gates finer dependent work.
+
+A repeated-brush-footprint problem confined to the woman's head/neck was promoted to a global
+must-fix and blocked unrelated medium work. Trend severity and trend **scope** must be separate.
+
+Implementation requirements:
+
+- derive initial trend region/scale from the union of current supporting evidence regions;
+- keep a repeated localized defect local/medium even when it is severe;
+- promote to global only when independent evidence spans materially separate regions or a whole-frame
+  review demonstrates global degradation;
+- allow a resolved/down-scoped trend to remain resolved/down-scoped; old source operations must not
+  automatically resurrect a stale global copy without new post-resolution evidence;
+- preserve provenance linking the trend to all source operations and regions.
+
+**Acceptance**
+
+- repeated primitive-footprint findings on one face produce a medium/local must-fix, not a global
+  blocker;
+- the same signal reproduced in independent distant regions promotes according to the declared
+  evidence rule;
+- resolving the trend prevents stale pre-resolution source operations from reopening it;
+- unrelated medium tasks remain dispatchable when no larger open problem is supported by evidence.
+
+**Verification:** the four new regression controls cover localized repetition, materially separate
+multi-region promotion, explicit whole-frame degradation and resolution stability. The required C.6
+linked suite passes **159/159**; final shared baseline passes **201/201** across the six requested test
+files, including `priorityGate`, `active_problem`, `largestOpenMustFix`, restart/resume and
+resolved-trend non-resurrection coverage.
+
+**Remaining:** no known repository correctness blocker remains in P0-C.6. Broader trend-quality or
+critic-authority calibration remains separate later roadmap work and is not implied by this slice.
+
+### P0-C.7 — Turn repeated strategy failure into a concrete causal method switch
+
+**Code audit: PARTIAL — bounded causal recovery is implemented; actionable alternative selection is not.**
+
+- `artistic-recovery-policy.ts` already implements the bounded policy: one same-strategy retry,
+  `require_distinct_strategy`, then block dependent work or continue explicitly independent work
+  after two causally distinct failures.
+- Guard already computes a structural `visualStrategyFingerprint()` from problem/region/stage/scale,
+  method class, action class, brush role and mutation structure. Color/opacity/count-style parameter
+  changes are intentionally not sufficient to become a new strategy; `strategyChanged()` enforces
+  this at preflight.
+- Useful partial work is already represented and may be preserved by the recovery policy.
+- **Missing:** durable/exposed set of exhausted method classes and a machine-readable list of viable
+  **available causal alternatives** from the current method palette/capability snapshot. Today the
+  caller gets essentially “make a causally distinct structural strategy change” and must rediscover
+  the alternative manually. There is also no explicit “no alternative remains → Art Director” result
+  derived from current tool availability.
+
+The current recovery gate can correctly detect that two strategies failed, but it can stop at
+"strategy change required" and leave the Painter to rediscover the method palette manually. Make the
+recovery output operational without automatically mutating the image.
+
+Implementation requirements:
+
+- track attempted **method classes / causal strategies** per problem/hypothesis, not merely parameter
+  variants;
+- after the configured failure horizon (initially two causally distinct failed strategies), mark the
+  exhausted classes for that problem and return `strategy_change_required` with currently available
+  materially different method classes;
+- parameter-only changes to the same underlying method do not count as a new strategy;
+- retain useful pixels/anchors from partial progress unless the visual verdict explicitly rejects
+  them;
+- if no causally distinct method remains, escalate to Art Director/human review rather than looping.
+
+**Acceptance**
+
+- two failed Hard-Round/paint-style strategies cause the next plan to exclude the exhausted class and
+  surface a valid transition/region/filter alternative when available;
+- a radius/opacity/size-only variant is rejected as non-distinct;
+- a successful strategy clears the strategy-debt for that problem without erasing unrelated history;
+- no strategy suggestion itself dispatches Photoshop work without normal preflight/review.
+
+### P0-C.8 — Expose one primary blocking artistic problem at a time
+
+**Code audit: PARTIAL — problem ledger and active blocker already exist, but promotion semantics are incomplete.**
+
+- Painting state already stores `visual_problems`, one `active_problem`,
+  `largest_open_must_fix`, `priority_review_required`, relation review and Art Director task state.
+- `priorityGate()` already blocks a finer-scale mutation only when a larger unresolved must-fix
+  exists, and `largestOpenMustFix()` deterministically orders must-fix problems by scale.
+- `setPriorityState()` can retain multiple problems while selecting a must-fix active problem, so the
+  data model already supports “one active + backlog”.
+- **Missing/weak:** selection is mainly `must-fix + scale`; there is no explicit dependency/causal-order
+  scheduler across must-fix/should-fix backlog, and `active_problem` can remain stale when no new
+  must-fix is selected (`nextMustFix ?? current.active_problem`). The live trend incident also showed
+  that a mis-scoped synthetic problem can seize `active_problem` and force manual reclassification.
+- P0-C.8 is therefore scheduler/promotion hardening, not a new problem-memory subsystem.
+
+Critic/review may detect several real issues, but the scheduler should not turn all of them into
+simultaneous active gates. Preserve all findings as backlog/evidence while selecting one explicit
+primary problem for the next pass.
+
+Implementation requirements:
+
+- maintain `primary_blocker` / active problem separately from non-blocking findings/backlog;
+- select by severity, scale dependency and causal order: larger prerequisite problems block finer
+  dependent work;
+- a newly detected independent higher-severity regression may pre-empt the current primary problem;
+- resolving/reclassifying the primary problem deterministically promotes the next eligible backlog
+  item;
+- do not discard secondary critic findings merely because they are not currently active.
+
+**Acceptance**
+
+- a fixture with form, lighting and texture findings schedules the prerequisite form problem first
+  while retaining the other two for later;
+- resolving form promotes lighting without requiring the critic to rediscover it;
+- a new severe whole-frame regression can pre-empt a smaller active task;
+- the compact next-step output contains one actionable primary mismatch rather than a flat list of
+  competing corrections.
+
+### P0-C.9 — Add a task-scoped Painter autonomy window
+
+**Code audit: PARTIAL / CLOSE FOUNDATION — cadence and interrupts exist, but the counter is directive-wide rather than task-scoped.**
+
+- Art Director directives already require `review_after_microplans` (1–20, documented as normally
+  around 5–10), persist `completed_microplans`, track `current_task_id`, and automatically move to the
+  next pending task when `planner_task_assessment.status=completed`.
+- `advanceArtDirectorAfterVerdict()` already forces review on serious regression/global readability
+  degradation, explicit interrupt, task failure/block, all-tasks-complete, stage boundary/global
+  change whole-image glance, or cadence exhaustion. The state is durable and survives restart.
+- **Key gap:** `completed_microplans` is accumulated across the **whole directive** and is not reset or
+  separately tracked per current task. Thus the implemented cadence is not yet the requested
+  “N successful passes inside one unchanged task” autonomy window. There is no explicit remaining
+  task-window count or task-local successful-pass counter.
+- The required per-pass visual barrier already remains intact, so P0-C.9 should reuse this mechanism
+  rather than introduce a second autonomy state machine.
+
+Use the existing Planner/Art-Director task concept to avoid a full directive/replanning round-trip
+after every successful pass. This is **not** permission to skip per-pass visual observation. The
+Painter may continue within one approved task for a bounded number of semantic passes while Guard
+still captures/verifies each pass and the producer still supplies an honest visual observation.
+
+Implementation requirements:
+
+- make `review_after_microplans` (or its successor) an enforced task-scoped autonomy horizon;
+- start with an experimental default of roughly **three successful passes** inside one unchanged task
+  before mandatory Art Director re-review;
+- interrupt the window immediately for a new must-fix regression, uncertainty/recovery, strategy
+  exhaustion, stage transition, composition/global-scope change, protected-quality loss or explicit
+  user interruption;
+- ordinary progress within the same task should not require a new directive merely because one pass
+  completed successfully.
+
+**Acceptance**
+
+- three representative successful passes can progress one Planner task under one directive with
+  normal per-pass evidence but without forced Art Director replanning between them;
+- an injected severe regression interrupts after the first affected pass;
+- stage/global/composition changes still trigger the stricter review path;
+- restart/resume preserves the remaining autonomy-window count and task identity.
+
+### P0-C.10 — Measure artistic throughput without optimizing the metric itself
+
+**Code audit: PARTIAL — latency telemetry is mature; artistic-throughput/choreography aggregation is absent.**
+
+- Guard already records per-cycle `guard_preflight_ms`, Photoshop dispatch wall time, preview
+  materialization time where separable, visual-evaluation/inter-call gap, report/ack closure,
+  recovery reconciliation, `guard_invocation_count_observed`, total Guard time and
+  `semantic_cycle_wall_ms`; status exposes aggregate median/p95 summaries.
+- VisualMicroPlan already reports per-pass `mutation_count`, and existing Task-19 cache benchmarking
+  compares semantic-cycle wall time / preparation host calls before and after caching.
+- **Missing:** no durable aggregation currently classifies semantic artistic actions versus
+  bookkeeping-only/recovery-only model-visible round trips; no
+  `artistic semantic actions / model-visible Guard round-trip` metric exists; `mutation_count` is not
+  rolled into the latency summary; there is no P0-C before/after report combining throughput with
+  regression/recovery/evidence-integrity outcomes.
+- Therefore the telemetry foundation should be extended, not replaced with a new timing system.
+
+Add telemetry that makes Guard overhead visible, but keep semantic-cycle wall time and artistic
+correctness as the real optimization targets. The useful diagnostic from this run is the ratio of
+meaningful artistic work to model-visible Guard choreography, not raw Photoshop command volume.
+
+Record at least:
+
+- semantic artistic actions dispatched;
+- model-visible Guard round-trips;
+- bookkeeping-only/recovery-only round-trips;
+- artistic semantic actions per model-visible Guard round-trip;
+- share of semantic-cycle wall time spent in Guard/host bookkeeping versus Photoshop dispatch and
+  visual evaluation where measurable;
+- pass completion, regression/recovery and evidence-integrity outcomes alongside the timing data.
+
+For ordinary low-risk passes, **5:1–10:1 artistic semantic actions per model-visible Guard
+round-trip** is a useful experimental health range, not a hard production score. Never inflate the
+ratio by bundling unrelated work, skipping review, counting stroke points as actions or weakening
+recovery evidence.
+
+**Acceptance**
+
+- run the same representative task before/after P0-C and report both semantic-cycle wall time and the
+  new choreography metrics;
+- the new path reduces bookkeeping-only round-trips and/or end-to-end semantic-cycle latency without
+  increasing unresolved regressions, uncertain replays or evidence failures;
+- quality/recovery controls can fail the optimization even when the action/round-trip ratio improves;
+- telemetry is diagnostic only and is never used as proof that an artwork improved.
+
+### P0-C compatibility constraints
+
+The P0-C work is explicitly compatible with the existing roadmap only under these constraints:
+
+- **No contradiction with "do not maximize mutations per bundle":** the mutation budget is an upper
+  bound chosen from semantic/risk context, not a throughput quota. Unrelated actions must not be
+  bundled to improve a metric.
+- **No contradiction with multiscale review:** P0-C reduces intermediate bookkeeping boundaries, not
+  the required pass-level whole-frame/local visual evidence or escalation crops.
+- **No contradiction with compact-v2 closure:** P0-C.3 is a regression/invariant task because compact-v2
+  already promises Guard-owned receipt/report/verdict closure. Do not reintroduce standalone closure
+  tools to solve it.
+- **No contradiction with exact evidence identity:** P0-C.4 repairs a reproduced implementation bug
+  against an already-declared baseline guarantee; it does not define a weaker evidence model.
+- **No contradiction with critic calibration:** P0-C.8 changes scheduling/priority presentation, not
+  critic artistic authority. Human reliability claims still require P0-D calibration.
+- **No blind autonomy:** P0-C.9 removes unnecessary Art Director/replanning churn while retaining an
+  honest visual observation after every semantic pass and immediate interruption on safety/artistic
+  regression triggers.
 
 ---
 
@@ -645,7 +1142,8 @@ Do not optimize these merely because they are measurable:
 
 - migrating every remaining Photoshop primitive to UXP when it is not on the canonical required
   painting path;
-- maximizing mutations per bundle;
+- maximizing mutations per bundle, or chasing an actions/round-trip ratio independently of semantic
+  pass quality and safety; P0-C may use that ratio only as diagnostic telemetry;
 - caching arbitrary Photoshop state without invalidation proof;
 - weakening preview/verdict/recovery evidence to save calls;
 - optimizing raw tool count instead of semantic-cycle wall time;
@@ -663,6 +1161,7 @@ Do not add these without new evidence:
 - universal numeric composition/style/expressiveness scores;
 - one aggregate artistic “quality score”;
 - full Art Director critique after every stroke/pass;
+- blind multi-pass autonomy without per-pass visual observation and interruption triggers;
 - mandatory rendered thumbnails for every scene;
 - more Guard safety layers without a reproduced integrity failure;
 - large required schemas whose fields do not change execution or review behavior;

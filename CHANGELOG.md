@@ -83,6 +83,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- 2026-09-25: complete the P0-C.4/P0-C.6 correctness foundation for the canonical Painter/Guard
+  review loop. Multiscale review escalation now gives every logical requirement a deterministic
+  identity and every capture a durable unique sequence/id; runtime crop materialization uses that
+  capture identity, accepted evidence is append-only/content-bound, corrupt or missing artifacts are
+  distinguished from never-captured requirements, and strict whole-frame/crop SHA plus document
+  pinning remain fail-closed. Cumulative trend promotion now derives scope from evidence provenance:
+  repeated localized findings remain medium/local, exact materially separate regions or explicit
+  whole-frame degradation can promote global, provenance/reason are durable, and a resolution epoch
+  prevents pre-resolution source operations from resurrecting the same trend until fresh evidence
+  accumulates. Priority-gate semantics therefore no longer let a localized repeated defect block
+  unrelated medium work. Commits `c2863f4` and `07cbff4`; the requested six-file baseline passes
+  **201/201** tests (up from 196/196 because five focused regressions were added).
+
 - 2026-09-25: close P0-A Task 4 host-recovery wording/state semantics. CoS commit `b1ce9ed`
   publishes one explicit three-state recovery contract to Core and Plugins model-facing initialize
   instructions: **Tool not selected** means discover/use the existing connector; **Caller
