@@ -18,7 +18,7 @@ const { tryHandleP3LayerAdvancedOperation } = require('./p3-layer-advanced-ops')
 
 const BRIDGE_PORT = 38452;
 const BRIDGE_BASE = `http://127.0.0.1:${BRIDGE_PORT}`;
-const BRIDGE_REVISION = 'compact-v2-20260926-brush-pack';
+const BRIDGE_REVISION = 'compact-v2-20260926-brush-profile';
 const REGISTRATION_PROTOCOL = 'photoshop.uxp.registration.v1';
 const COMMAND_PROTOCOL = 'photoshop.uxp.command.v1';
 const RESULT_PROTOCOL = 'photoshop.uxp.command_result.v1';
@@ -2904,6 +2904,85 @@ async function importBrushPackAsset(params = {}) {
   };
 }
 
+async function probeMediaBrush(params = {}) {
+  const presetName = typeof params.preset_name === 'string' ? params.preset_name.trim() : '';
+  if (!presetName) throw new Error('brush_probe_requires_preset_name');
+  let documentId = null;
+  try {
+    const created = await createDocumentMutation({ width: 960, height: 820, resolution: 72, colorMode: 'RGB' });
+    documentId = Number(created?.document?.id);
+    if (!Number.isInteger(documentId) || documentId <= 0) throw new Error('brush_probe_document_id_unavailable');
+    const layer = await createLayerMutation({ document_id: documentId, name: '__MCP_BRUSH_PROBE__' });
+    const layerId = Number(layer?.layer?.id ?? layer?.layerId ?? layer?.layer_id);
+    if (!Number.isInteger(layerId) || layerId <= 0) throw new Error('brush_probe_layer_id_unavailable');
+    const selected = await selectBrushPreset({ name: presetName });
+    const baseSize = Math.max(24, Math.min(120, Number(selected?.settings?.size) || 64));
+    const small = Math.max(12, Math.round(baseSize * 0.45));
+    const medium = Math.max(24, Math.round(baseSize));
+    const large = Math.max(48, Math.min(220, Math.round(baseSize * 1.8)));
+
+    await paintDabsBatch({
+      document_id: documentId,
+      layer_id: layerId,
+      groups: [
+        { size: small, opacity: 100, flow: 100, color: { red: 35, green: 35, blue: 35 }, points: [{ x: 120, y: 120 }] },
+        { size: medium, opacity: 100, flow: 100, color: { red: 35, green: 35, blue: 35 }, points: [{ x: 300, y: 120 }] },
+        { size: large, opacity: 100, flow: 100, color: { red: 35, green: 35, blue: 35 }, points: [{ x: 540, y: 120 }] },
+        { size: medium, opacity: 35, flow: 35, color: { red: 35, green: 35, blue: 35 }, points: [{ x: 760, y: 120 }, { x: 760, y: 120 }, { x: 760, y: 120 }] },
+      ],
+    });
+    const makeStroke = (x1, y1, x2, y2, size, simulatePressure = false) => ({
+      points: [{ x: x1, y: y1 }, { x: x2, y: y2 }],
+      size,
+      opacity: 100,
+      flow: 100,
+      color: { red: 35, green: 35, blue: 35 },
+      tool: 'BRUSH',
+      simulatePressure,
+    });
+    await paintStrokesBatch({
+      document_id: documentId,
+      layer_id: layerId,
+      strokes: [
+        makeStroke(90, 300, 300, 300, medium, false),
+        makeStroke(90, 430, 870, 430, medium, false),
+        makeStroke(90, 585, 420, 700, medium, false),
+        makeStroke(540, 585, 870, 700, medium, true),
+      ],
+    });
+    const preview = await capturePreview({ document_id: documentId, max_dimension_px: 1200 });
+    return {
+      operation: 'probe_media_brush',
+      preset_name: presetName,
+      effective_settings: selected?.settings ?? {},
+      probe_document: { width: 960, height: 820 },
+      layout: {
+        isolated_dabs: { left: 40, top: 40, right: 650, bottom: 220 },
+        buildup: { left: 675, top: 40, right: 900, bottom: 220 },
+        short_stroke: { left: 40, top: 240, right: 350, bottom: 360 },
+        long_stroke: { left: 40, top: 370, right: 920, bottom: 500 },
+        directional: { left: 40, top: 520, right: 480, bottom: 770 },
+        pressure_response: { left: 500, top: 520, right: 920, bottom: 770 },
+      },
+      preview,
+    };
+  } finally {
+    if (Number.isInteger(documentId) && documentId > 0) {
+      try {
+        await core.executeAsModal(
+          () => action.batchPlay([{
+            _obj: 'close',
+            _target: [{ _ref: 'document', _id: documentId }],
+            saving: { _enum: 'yesNo', _value: 'no' },
+            _options: { dialogOptions: 'silent' },
+          }], { synchronousExecution: true }),
+          { commandName: 'MCP Close Brush Probe' }
+        );
+      } catch {}
+    }
+  }
+}
+
 function snapshotPersistenceState(targetDocument) {
   const activeDocument = app.activeDocument;
   let selectionBounds = null;
@@ -3217,6 +3296,11 @@ async function handleCommand(cmd) {
 
     if (cmdAction === 'import_brush_pack_asset') {
       await postResult({ id, ok: true, data: await importBrushPackAsset(params) });
+      return;
+    }
+
+    if (cmdAction === 'probe_media_brush') {
+      await postResult({ id, ok: true, data: await probeMediaBrush(params) });
       return;
     }
 

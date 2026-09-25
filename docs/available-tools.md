@@ -1,6 +1,6 @@
 # Available Tools
 
-**147 tools total** — 131 atomic/non-recipe `photoshop_*` tools plus 16 recipe `photoshop_recipe_*` workflows (single undo step each). The atomic/non-recipe count includes 12 public `photoshop_guard_*` tools for durable native-MCP orchestration.
+**148 tools total** — 132 atomic/non-recipe `photoshop_*` tools plus 16 recipe `photoshop_recipe_*` workflows (single undo step each). The atomic/non-recipe count includes 13 public `photoshop_guard_*` tools for durable native-MCP orchestration.
 
 The Guard surface includes `photoshop_guard_art_director`, which manages the high-level
 Planner directive independently from Painter mutations. `action=review` records global

@@ -10,8 +10,11 @@ import {
   cancelUxpStableCommandIfQueued,
   getUxpBridgeReadiness,
   invokeUxpGetState,
+  invokeUxpProbeMediaBrush,
   probeUxpStableCommandReceipt,
 } from '../../platform/uxp-bridge-client.js';
+import { readBrushPackRecord, resolveBrushPackRecordDirectory } from '../brush-pack.js';
+import { writeBrushProbeReceipt } from '../brush-pack-profile.js';
 import {
   BOOTSTRAP_EXACT_OUTCOME_PROTOCOL,
   SessionStore,
@@ -619,6 +622,79 @@ export class EmbeddedGuardRuntime {
       const body = parseTexts(result).find((item: unknown) => item && typeof item === 'object' && !Array.isArray(item));
       if (!body) throw new Error('brush_pack_ingestion_invalid_result: no structured result body');
       return body as Record<string, unknown>;
+    } finally {
+      releaseExecution?.();
+    }
+  }
+
+  async brushPackProbe(input: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const brushPackId = typeof input.brush_pack_id === 'string' ? input.brush_pack_id.trim() : '';
+    const presetName = typeof input.preset_name === 'string' ? input.preset_name.trim() : '';
+    const occurrenceIndex = Number(input.occurrence_index);
+    if (!brushPackId || !presetName || !Number.isSafeInteger(occurrenceIndex) || occurrenceIndex < 0) {
+      throw new Error('brush_pack_probe requires brush_pack_id, preset_name and non-negative occurrence_index');
+    }
+    const recordDirectory = resolveBrushPackRecordDirectory();
+    const pack = readBrushPackRecord(recordDirectory, brushPackId);
+    if (!pack || pack.ingestion_status !== 'imported') throw new Error('brush_pack_probe_requires_imported_pack');
+    const attributed = (pack.attributed_presets ?? []).some(row =>
+      row.name === presetName && row.occurrence_index === occurrenceIndex
+    );
+    if (!attributed) throw new Error(`brush_pack_probe_preset_not_attributed: ${presetName}#${occurrenceIndex}`);
+
+    let releaseExecution: (() => void) | undefined;
+    try {
+      releaseExecution = this.executionLease.acquire('photoshop_guard_brush_pack_profile');
+      const commandId = `brush-probe:${createHash('sha256').update(JSON.stringify({
+        brush_pack_id: brushPackId,
+        preset_name: presetName,
+        occurrence_index: occurrenceIndex,
+        bridge_revision: UXP_BRIDGE_REVISION,
+      })).digest('hex')}`;
+      const result = await invokeUxpProbeMediaBrush({ preset_name: presetName }, commandId);
+      if (!result.ok || !result.data) {
+        throw new Error(result.error ?? `brush_pack_probe_failed:${commandId}`);
+      }
+      const preview = recordOrEmpty(result.data.preview);
+      const whole = recordOrEmpty(preview.whole);
+      const base64 = typeof whole.base64 === 'string' ? whole.base64 : '';
+      if (!base64) throw new Error(`brush_pack_probe_preview_missing:${commandId}`);
+      const bytes = Buffer.from(base64, 'base64');
+      const sha = createHash('sha256').update(bytes).digest('hex');
+      const evidenceDir = path.join(recordDirectory, 'probes', brushPackId.replace(/[^a-zA-Z0-9._-]+/g, '_'));
+      fs.mkdirSync(evidenceDir, { recursive: true });
+      const evidencePath = path.join(evidenceDir, `${sha}.jpg`);
+      if (!fs.existsSync(evidencePath)) fs.writeFileSync(evidencePath, bytes);
+      const evidence = {
+        preview_path: evidencePath,
+        preview_sha256: sha,
+        operation_id: commandId,
+      };
+      writeBrushProbeReceipt({
+        protocol: 'photoshop.brush_pack.probe_receipt.v1',
+        brush_pack_id: brushPackId,
+        probe_operation_id: commandId,
+        preset_name: presetName,
+        occurrence_index: occurrenceIndex,
+        effective_settings: recordOrEmpty(result.data.effective_settings),
+        backend: 'uxp',
+        runtime_revision: RUNTIME_STATE_VERSION,
+        bridge_revision: UXP_BRIDGE_REVISION,
+        evidence,
+        layout: recordOrEmpty(result.data.layout),
+        recorded_at: new Date().toISOString(),
+      }, { recordDirectory });
+      return {
+        ok: true,
+        brush_pack_id: brushPackId,
+        preset_name: presetName,
+        occurrence_index: occurrenceIndex,
+        effective_settings: result.data.effective_settings ?? {},
+        layout: result.data.layout ?? {},
+        evidence,
+        stable_command_id: commandId,
+        receipt_state: result.receipt?.state ?? null,
+      };
     } finally {
       releaseExecution?.();
     }

@@ -30,7 +30,7 @@ are consolidated in `CHANGELOG.md`; detailed acceptance evidence remains in the 
 Git history and referenced test/live artifacts.
 
 1. **P0-A — host routing / CoS attribution:** Tasks **3 and 4 are closed**; continue Tasks **1 → 2**.
-2. **P0-E — brush/stamp-pack onboarding and motif-aware painting:** implement **P0-E.1 → P0-E.7**
+2. **P0-E — brush/stamp-pack onboarding and motif-aware painting:** implement **P0-E.3 → P0-E.7**
    below before the next user-facing real-art test that starts from a supplied brush folder/pack. This
    is an immediate production prerequisite, not optional tooling polish.
 3. **P0-C — Painter/Guard semantic-pass throughput and bounded autonomy:** implement Tasks
@@ -161,46 +161,6 @@ Do **not** rebuild the painting lane or brush contract from zero. Current implem
 
 The missing work is **pack ingestion, evidence-based profiling, stamp-instance execution and
 scene-level integration**, not another brush subsystem.
-
-### P0-E.2 — Evidence-based brush-pack profiling, not name-based guessing
-
-For unknown painting/media brushes, build a bounded **probe sheet** and classify actual Photoshop
-marks. A preset called `Charcoal`, `Water`, `Cloud`, etc. is not evidence of what it really does.
-
-For each candidate worth profiling, generate a compact probe set such as:
-
-- isolated dab/footprint;
-- short and long stroke;
-- slow/fast or sparse/dense stroke where the host exposes a meaningful difference;
-- small/medium/large working scale;
-- pressure/opacity/size response where available;
-- overlap/build-up behavior;
-- directional/edge behavior.
-
-Persist evidence-bound profile fields sufficient to drive brush roles, including at least:
-
-- usable visual intents / material roles;
-- mark character such as soft, hard, broken, bristly, directional, granular, glazing or textural;
-- useful scale range;
-- edge behavior and buildup behavior;
-- whether rotation/orientation is visually meaningful;
-- recommended pressure policy;
-- known caveats / unsuitable uses;
-- exact probe preview/evidence identity and pack revision used for the classification.
-
-Do not require exhaustive probing of thousands of presets. Use bounded candidate selection and stop
-once the active scene has enough role coverage. Cache profiles by **pack revision + preset identity +
-effective host state**, with explicit invalidation when those change.
-
-**Acceptance**
-
-- at least one deliberately misleading-name fixture proves classification follows visual probe
-  evidence rather than the preset name;
-- the resulting durable `brush_preflight` can be generated from the profile without the model manually
-  retyping internal enum tables or inventing settings;
-- a scene can select a broad-form, atmosphere/soft, broken/texture and detail/edge role from the pack
-  when the actual probes support those roles, or explicitly report missing role coverage when they do
-  not.
 
 ### P0-E.3 — Profile stamp/motif brushes as a reusable visual vocabulary
 

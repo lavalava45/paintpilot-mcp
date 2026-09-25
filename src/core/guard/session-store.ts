@@ -313,6 +313,7 @@ function parseBrushPreflight(raw) {
       pressure_policy: pressurePolicy,
       probe_status: probeStatus,
       caveat: textOrUndefined(role.caveat) ?? null,
+      profile_id: textOrUndefined(role.profile_id) ?? null,
     };
   });
   return {
@@ -320,6 +321,7 @@ function parseBrushPreflight(raw) {
     inventory_observed: true,
     inventory_total: inventoryTotal,
     inventory_query: textOrUndefined(raw.inventory_query) ?? null,
+    brush_pack_id: textOrUndefined(raw.brush_pack_id) ?? null,
     roles,
     recorded_at: new Date().toISOString(),
   };

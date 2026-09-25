@@ -97,6 +97,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- 2026-09-26: complete repository implementation for **P0-E.2 evidence-based media-brush profiling**.
+  `photoshop_guard_brush_pack_profile` now exposes a bounded `plan → probe_media → record_media →
+  build_preflight` workflow. `probe_media` is one stable no-replay UXP command that creates a disposable
+  probe document, samples isolated footprints, multiple scales, buildup, short/long/directional and
+  pressure-response strokes, materializes the exact JPEG evidence by SHA-256, then closes the probe
+  document. Durable probe receipts supply preset identity, effective settings and host revisions to
+  `record_media`, so the model classifies observed mark behavior without inventing or retyping those
+  fields. Profiles are keyed by pack revision + preset occurrence + effective-settings fingerprint +
+  backend/runtime/bridge revision; stale settings/revisions are rejected from current coverage.
+  `build_preflight` derives broad-form, atmosphere/soft, broken/texture and detail/edge roles from
+  evidence-backed visual intents and reports missing role coverage instead of inferring suitability
+  from preset names. A deliberately misleading `Cloud` fixture proves name-independent selection.
+  `brush_pack_id` and exact `profile_id` provenance now survive durable `brush_preflight` parsing.
+  Companion readiness revision is `compact-v2-20260926-brush-profile`; current catalog is 148 tools /
+  132 non-recipe / 16 recipes with 13 public Guard tools. Focused E.1/E.2/session-store verification
+  passes **48/48** tests; full `npm run verify:canonical` passes **622/622** plus all canonical gates.
+  Real Photoshop probe rendering remains explicitly part of the P0-E.7 supplied-pack live run rather
+  than being claimed from repository fixtures.
+
 - 2026-09-26: complete **P0-E.1 brush-pack ingestion**. A supplied folder or explicit `.abr` set is
   recursively enumerated and content-fingerprinted into a durable `brush_pack_id`; per-asset SHA-256,
   relative path and byte size are persisted independently of display names. The canonical

@@ -1,9 +1,19 @@
 import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 export const BRUSH_PACK_MANIFEST_PROTOCOL = 'photoshop.brush_pack.manifest.v1' as const;
 export const SUPPORTED_BRUSH_PACK_EXTENSIONS = new Set(['.abr']);
+export const DEFAULT_BRUSH_PACK_RECORD_DIRECTORY = fileURLToPath(
+  new URL('../../.photoshop-runtime/brush-packs/', import.meta.url)
+);
+
+export function resolveBrushPackRecordDirectory(explicit?: string): string {
+  return explicit?.trim()
+    || process.env.PHOTOSHOP_BRUSH_PACK_RECORD_DIR?.trim()
+    || DEFAULT_BRUSH_PACK_RECORD_DIRECTORY;
+}
 
 export interface BrushPackAsset {
   relative_path: string;

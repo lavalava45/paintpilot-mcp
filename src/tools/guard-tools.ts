@@ -10,6 +10,11 @@ import {
 } from '../core/guard/protocol-version.js';
 import { PAINTING_VISUAL_INTENTS } from '../core/painting-method-palette.js';
 import {
+  DEFAULT_BRUSH_SCENE_ROLES,
+  MEDIA_MARK_CHARACTERS,
+  executeBrushPackProfileAction,
+} from '../core/brush-pack-profile.js';
+import {
   VISUAL_MICROPLAN_ACTION_CLASSES,
   VISUAL_MICROPLAN_MAX_LAYER_CREATIONS,
   VISUAL_MICROPLAN_MAX_MUTATIONS,
@@ -476,6 +481,110 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
     },
     {
       tool: {
+        name: 'photoshop_guard_brush_pack_profile',
+        description:
+          'Canonical bounded brush-pack profiling surface. plan returns a finite probe plan; probe_media executes one disposable UXP probe sheet under a stable no-replay command and returns exact preview evidence; record_media stores evidence-bound mark behavior using probe_operation_id; build_preflight generates the durable brush-role map from current exact profiles without name-based guessing.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            action: { type: 'string', enum: ['plan', 'probe_media', 'record_media', 'build_preflight'] },
+            brush_pack_id: { type: 'string' },
+            preset_name: { type: 'string' },
+            occurrence_index: { type: 'number', minimum: 0 },
+            inventory_total: { type: 'number', minimum: 1 },
+            candidate_limit: { type: 'number', minimum: 1, maximum: 8 },
+            required_roles: {
+              type: 'array',
+              items: { type: 'string', enum: [...DEFAULT_BRUSH_SCENE_ROLES] },
+            },
+            preset_states: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  preset_name: { type: 'string' },
+                  occurrence_index: { type: 'number', minimum: 0 },
+                  effective_settings: { type: 'object', additionalProperties: true },
+                  backend: { type: 'string' },
+                  runtime_revision: { type: 'string' },
+                  bridge_revision: { type: 'string' },
+                },
+                required: ['preset_name', 'occurrence_index', 'effective_settings', 'backend', 'runtime_revision'],
+                additionalProperties: false,
+              },
+            },
+            profile: {
+              type: 'object',
+              properties: {
+                probe_operation_id: { type: 'string' },
+                brush_pack_id: { type: 'string' },
+                preset_name: { type: 'string' },
+                occurrence_index: { type: 'number', minimum: 0 },
+                effective_settings: { type: 'object', additionalProperties: true },
+                backend: { type: 'string' },
+                runtime_revision: { type: 'string' },
+                bridge_revision: { type: 'string' },
+                usable_visual_intents: { type: 'array', minItems: 1, items: { type: 'string', enum: [...PAINTING_VISUAL_INTENTS] } },
+                material_roles: { type: 'array', minItems: 1, items: { type: 'string' } },
+                mark_character: { type: 'array', minItems: 1, items: { type: 'string', enum: [...MEDIA_MARK_CHARACTERS] } },
+                useful_scale_range: {
+                  type: 'object',
+                  properties: { min_px: { type: 'number', minimum: 1 }, max_px: { type: 'number', minimum: 1 } },
+                  required: ['min_px', 'max_px'],
+                  additionalProperties: false,
+                },
+                edge_behavior: { type: 'string', enum: ['soft', 'hard', 'broken', 'variable', 'directional', 'unknown'] },
+                buildup_behavior: { type: 'string', enum: ['glazing', 'opaque', 'layered', 'granular', 'streaking', 'unknown'] },
+                rotation_meaningful: { type: 'boolean' },
+                recommended_pressure_policy: {
+                  type: 'string',
+                  enum: ['none', 'native-preset', 'simulated-size', 'simulated-opacity', 'simulated-size-opacity'],
+                },
+                known_caveats: { type: 'array', items: { type: 'string' } },
+                evidence: { type: 'object', additionalProperties: true },
+              },
+              required: [
+                'usable_visual_intents', 'material_roles', 'mark_character', 'useful_scale_range',
+                'edge_behavior', 'buildup_behavior', 'rotation_meaningful', 'recommended_pressure_policy',
+                'known_caveats'
+              ],
+              additionalProperties: true,
+            },
+          },
+          required: ['action'],
+          additionalProperties: false,
+        },
+      },
+      handler: async (args) => {
+        try {
+          if (args.action === 'probe_media') {
+            const result = await runtime.brushPackProbe(args);
+            const evidence = result.evidence && typeof result.evidence === 'object'
+              ? result.evidence as Record<string, unknown>
+              : {};
+            const previewPath = typeof evidence.preview_path === 'string' ? evidence.preview_path : '';
+            const previewSha = typeof evidence.preview_sha256 === 'string' ? evidence.preview_sha256 : '';
+            const output = json(result);
+            if (previewPath && previewSha && existsSync(previewPath)) {
+              const bytes = readFileSync(previewPath);
+              const actualSha = createHash('sha256').update(bytes).digest('hex');
+              if (actualSha !== previewSha) throw new Error('brush_pack_probe_materialized_sha_mismatch');
+              output.content.push({ type: 'image', data: bytes.toString('base64'), mimeType: 'image/jpeg' });
+            }
+            return output;
+          }
+          return json(executeBrushPackProfileAction(args));
+        } catch (error) {
+          return json({
+            ok: false,
+            code: 'brush_pack_profile_rejected',
+            message: error instanceof Error ? error.message : String(error),
+          }, true);
+        }
+      },
+    },
+    {
+      tool: {
         name: 'photoshop_guard_set_art_run',
         description:
           'Bind a Photoshop document to one repository-local art-project folder. Non-trivial painting is the default profile and remains fail-closed until this same art run records a live brush_preflight role map from the installed Photoshop preset inventory. Re-call with the same immutable process_dir after inventory/probes to persist brush_preflight.',
@@ -515,6 +624,7 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
                 inventory_observed: { type: 'boolean' },
                 inventory_total: { type: 'number', minimum: 1 },
                 inventory_query: { type: 'string' },
+                brush_pack_id: { type: 'string' },
                 roles: {
                   type: 'array',
                   minItems: 1,
@@ -561,6 +671,7 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
                       },
                       probe_status: { type: 'string', enum: ['pass', 'cached', 'not-needed'] },
                       caveat: { type: 'string' },
+                      profile_id: { type: 'string' },
                     },
                     required: [
                       'role_id', 'purpose', 'material_roles', 'visual_intents', 'preferred_preset',

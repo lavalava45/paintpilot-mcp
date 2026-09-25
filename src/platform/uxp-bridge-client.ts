@@ -45,6 +45,7 @@ const UXP_DOCUMENT_TARGET_EXEMPT_ACTIONS = new Set([
   // target enforced for ordinary document-bound operations.
   'create_document',
   'open_image',
+  'probe_media_brush',
   'set_active_document',
 ]);
 
@@ -286,6 +287,7 @@ async function invokeUxpStableCommand<T extends Record<string, unknown>>(
     | 'set_brush'
     | 'select_brush_preset'
     | 'import_brush_pack_asset'
+    | 'probe_media_brush'
     | 'set_foreground_color',
   params: Record<string, unknown>,
   commandId: string,
@@ -607,6 +609,18 @@ export async function invokeUxpImportBrushPackAsset(
     { filePath },
     commandId,
     30_000
+  );
+}
+
+export async function invokeUxpProbeMediaBrush(
+  params: { preset_name: string },
+  commandId: string
+): Promise<UxpStableCommandResult<Record<string, unknown>>> {
+  return invokeUxpStableCommand<Record<string, unknown>>(
+    'probe_media_brush',
+    { preset_name: params.preset_name },
+    commandId,
+    90_000
   );
 }
 

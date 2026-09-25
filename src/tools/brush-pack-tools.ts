@@ -1,4 +1,3 @@
-import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import type { ToolDefinition, ToolResult } from '../core/tool-registry.js';
 import type { PhotoshopConnection } from '../platform/connection.js';
@@ -7,6 +6,7 @@ import { invokeUxpImportBrushPackAsset } from '../platform/uxp-bridge-client.js'
 import {
   attributeNewBrushPresets,
   buildBrushPackManifest,
+  resolveBrushPackRecordDirectory,
   inventoryContainsOccurrences,
   readBrushPackRecord,
   writeBrushPackRecord,
@@ -15,10 +15,6 @@ import {
 } from '../core/brush-pack.js';
 import { atomicFailureFromError, atomicSuccess } from './atomic-shared.js';
 import type { PhotoshopErrorCode } from '../errors/envelope.js';
-
-const DEFAULT_BRUSH_PACK_RECORD_DIRECTORY = fileURLToPath(
-  new URL('../../.photoshop-runtime/brush-packs/', import.meta.url)
-);
 
 export interface BrushPackToolOptions {
   recordDirectory?: string;
@@ -58,9 +54,7 @@ export function createBrushPackTools(
   backendRouter = new PhotoshopBackendRouter(connection),
   options: BrushPackToolOptions = {}
 ): ToolDefinition[] {
-  const recordDirectory = options.recordDirectory
-    ?? process.env.PHOTOSHOP_BRUSH_PACK_RECORD_DIR?.trim()
-    ?? DEFAULT_BRUSH_PACK_RECORD_DIRECTORY;
+  const recordDirectory = resolveBrushPackRecordDirectory(options.recordDirectory);
   const now = options.now ?? (() => new Date().toISOString());
   const importAsset = options.importAsset ?? invokeUxpImportBrushPackAsset;
 
