@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -60,8 +60,8 @@ function fixture() {
 }
 
 function capturedPreview(dir: string, capture: any, patch: Record<string, unknown> = {}) {
-  const crop = path.join(dir, `${capture.role}.jpg`);
-  const cropBytes = Buffer.from(String(capture.role));
+  const crop = path.join(dir, `${capture.capture_id ?? capture.role}.jpg`);
+  const cropBytes = Buffer.from(`${capture.role}:${JSON.stringify(capture.requested_region)}`);
   writeFileSync(crop, cropBytes);
   return {
     sha256: 'a'.repeat(64),
@@ -196,14 +196,35 @@ describe('durable multiscale review escalation state', () => {
       visualBarrierDirectory: path.join(dir, 'barriers'),
       workspaceRoot: dir,
     });
-    expect((afterDeletion.planReviewEscalation as any)('review-op', [], { persist: false }).required).toBe(true);
+    const deletedPlan = (afterDeletion.planReviewEscalation as any)('review-op', [], { persist: false });
+    expect(deletedPlan.required).toBe(true);
+    expect(deletedPlan.requirements[0]).toMatchObject({
+      status: 'pending',
+      evidence_state: 'artifact_missing_or_corrupt',
+    });
 
     writeFileSync(cropPath, 'replacement-bytes');
     const afterReplacement = new SessionStore(controller, {
       visualBarrierDirectory: path.join(dir, 'barriers'),
       workspaceRoot: dir,
     });
-    expect((afterReplacement.planReviewEscalation as any)('review-op', [], { persist: false }).required).toBe(true);
+    const replacementPlan = (afterReplacement.planReviewEscalation as any)('review-op', [], { persist: true });
+    expect(replacementPlan.required).toBe(true);
+    expect(replacementPlan.requirements[0]).toMatchObject({
+      status: 'pending',
+      evidence_state: 'artifact_missing_or_corrupt',
+    });
+    expect(replacementPlan.captures[0].capture_id).not.toBe(capture.capture_id);
+    afterReplacement.attachReviewEvidence(
+      'review-op',
+      replacementPlan.captures[0],
+      capturedPreview(dir, replacementPlan.captures[0])
+    );
+    const recaptured = afterReplacement.read('review-op') as any;
+    expect(recaptured.review_evidence).toHaveLength(2);
+    expect(recaptured.review_evidence[0].materialized_path).toBe(cropPath);
+    expect(recaptured.review_evidence[1].materialized_path).not.toBe(cropPath);
+    expect((afterReplacement.planReviewEscalation as any)('review-op', [], { persist: false }).required).toBe(false);
   });
 
   it('requires fresh evidence when the requested region changes', () => {
@@ -220,6 +241,71 @@ describe('durable multiscale review escalation state', () => {
     }], { persist: false }) as any;
     expect(changed.required).toBe(true);
     expect(changed.captures.some((capture: any) => capture.requested_region.left === 220)).toBe(true);
+  });
+
+  it('keeps accepted review artifacts immutable across escalation rounds and restart', () => {
+    const { dir, controller, store } = fixture();
+    const findings = [
+      {
+        kind: 'proportion',
+        severity: 'must-fix',
+        region_bounds: { left: 20, top: 30, right: 90, bottom: 120 },
+      },
+      {
+        kind: 'proportion',
+        severity: 'must-fix',
+        region_bounds: { left: 150, top: 40, right: 220, bottom: 130 },
+      },
+      {
+        kind: 'proportion',
+        severity: 'must-fix',
+        region_bounds: { left: 280, top: 70, right: 350, bottom: 160 },
+      },
+    ];
+
+    const firstRound = store.planReviewEscalation('review-op', findings, { persist: true }) as any;
+    expect(firstRound.captures).toHaveLength(2);
+    for (const capture of firstRound.captures) {
+      store.attachReviewEvidence('review-op', capture, capturedPreview(dir, capture));
+    }
+
+    const afterFirstRound = store.read('review-op') as any;
+    const firstEvidence = afterFirstRound.review_evidence[0];
+    const secondEvidence = afterFirstRound.review_evidence[1];
+    const firstBytesBefore = readFileSync(firstEvidence.materialized_path);
+    const secondBytesBefore = readFileSync(secondEvidence.materialized_path);
+    expect(afterFirstRound.pending_review.requirements.filter((item: any) => item.status === 'captured')).toHaveLength(2);
+    expect(afterFirstRound.pending_review.requirements.filter((item: any) => item.status === 'pending')).toHaveLength(1);
+
+    const secondRound = store.planReviewEscalation('review-op', [], { persist: true }) as any;
+    expect(secondRound.captures).toHaveLength(1);
+    store.attachReviewEvidence('review-op', secondRound.captures[0], capturedPreview(dir, secondRound.captures[0]));
+
+    const complete = store.read('review-op') as any;
+    expect(complete.review_evidence).toHaveLength(3);
+    expect(new Set(complete.review_evidence.map((item: any) => item.materialized_path)).size).toBe(3);
+    expect(new Set(complete.review_evidence.map((item: any) => item.capture_id)).size).toBe(3);
+    expect(complete.review_evidence.every((item: any) =>
+      item.source_operation_id === 'review-op'
+      && typeof item.requirement_id === 'string'
+      && item.requirement_id.length === 64
+      && typeof item.artifact_id === 'string'
+      && item.artifact_id.length === 64
+    )).toBe(true);
+    expect(readFileSync(firstEvidence.materialized_path)).toEqual(firstBytesBefore);
+    expect(readFileSync(secondEvidence.materialized_path)).toEqual(secondBytesBefore);
+    expect(complete.pending_review.requirements.every((item: any) => item.status === 'captured')).toBe(true);
+    expect((store.planReviewEscalation as any)('review-op', [], { persist: false }).required).toBe(false);
+
+    const restarted = new SessionStore(controller, {
+      visualBarrierDirectory: path.join(dir, 'barriers'),
+      workspaceRoot: dir,
+    });
+    const restartedRecord = restarted.read('review-op') as any;
+    expect(restartedRecord.review_evidence).toHaveLength(3);
+    expect(new Set(restartedRecord.review_evidence.map((item: any) => item.materialized_path)).size).toBe(3);
+    expect(restartedRecord.review_capture_sequence).toBe(3);
+    expect((restarted.planReviewEscalation as any)('review-op', [], { persist: false }).required).toBe(false);
   });
 
   it('reports review_findings as an additive compact-v2 capability rather than a protocol replacement', () => {

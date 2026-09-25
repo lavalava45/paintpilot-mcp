@@ -3947,28 +3947,39 @@ export class SessionStore {
     });
   }
   reviewEvidenceSatisfies(record, requirement) {
-    if (requirement.level === 'composition') return true;
+    return this.reviewEvidenceState(record, requirement) === 'captured';
+  }
+  reviewEvidenceState(record, requirement) {
+    if (requirement.level === 'composition') return 'captured';
     const documentId = record.args?.document_id;
     const wholeSha = record.preview?.sha256;
     const requested = requirement.requested_region;
-    if (!requested || !wholeSha) return false;
+    if (!requested || !wholeSha) return 'never_captured';
     const levelRank = { composition: 0, object: 1, micro: 2 };
     const initialProfileLevel = record.visual_review_profile?.level ?? 'composition';
     const initialRegion = record.preview?.focus?.region;
+    let matchingEvidenceExists = false;
     if (
       initialRegion
       && levelRank[initialProfileLevel] >= levelRank[requirement.level]
       && regionContains(initialRegion, requested)
-      && materializedEvidenceMatches(record.preview?.focus)
-    ) return true;
-    return (record.review_evidence ?? []).some(evidence =>
+    ) {
+      matchingEvidenceExists = true;
+      if (materializedEvidenceMatches(record.preview?.focus)) return 'captured';
+    }
+    for (const evidence of record.review_evidence ?? []) {
+      const matchesRequirement = (
       evidence.document_id === documentId
       && evidence.bound_whole_sha256 === wholeSha
       && levelRank[evidence.review_level] >= levelRank[requirement.level]
       && evidence.effective_region
       && regionContains(evidence.effective_region, requested)
-      && materializedEvidenceMatches(evidence)
-    );
+      );
+      if (!matchesRequirement) continue;
+      matchingEvidenceExists = true;
+      if (materializedEvidenceMatches(evidence)) return 'captured';
+    }
+    return matchingEvidenceExists ? 'artifact_missing_or_corrupt' : 'never_captured';
   }
   planReviewEscalation(id, findings = [], options = {}) {
     const record = this.read(id);
@@ -4034,7 +4045,20 @@ export class SessionStore {
       }
       current.source_index = Math.min(current.source_index, requirement.source_index);
     }
+    for (const requirement of merged) {
+      requirement.requirement_id = fingerprint({
+        source_operation_id: id,
+        review_level: requirement.level,
+        finding_kind: requirement.kind,
+        requested_region: requirement.requested_region,
+      });
+    }
     const unresolved = merged.filter(requirement => !this.reviewEvidenceSatisfies(record, requirement));
+    const captureSequenceBase = Math.max(
+      Number.isSafeInteger(record.review_capture_sequence) ? record.review_capture_sequence : 0,
+      ...(record.review_evidence ?? [])
+        .map(evidence => Number.isSafeInteger(evidence.capture_sequence) ? evidence.capture_sequence : 0)
+    );
     const captures = unresolved.slice(0, 2).map((requirement, captureIndex) => {
       if (!Number.isFinite(canvasWidth) || canvasWidth <= 0 || !Number.isFinite(canvasHeight) || canvasHeight <= 0) {
         throw new Error('Review escalation requires current preview canvas dimensions');
@@ -4048,13 +4072,19 @@ export class SessionStore {
         ...requirement,
         ...regions,
         role: `${requirement.level}_after_${captureIndex + 1}`,
+        capture_sequence: captureSequenceBase + captureIndex + 1,
+        capture_id: `capture-${String(captureSequenceBase + captureIndex + 1).padStart(4, '0')}-${requirement.requirement_id.slice(0, 16)}`,
         focus_max_dimension_px: requirement.level === 'micro' ? 1600 : 1200,
       };
     });
-    const requirements = merged.map(requirement => ({
-      ...requirement,
-      status: this.reviewEvidenceSatisfies(record, requirement) ? 'captured' : 'pending',
-    }));
+    const requirements = merged.map(requirement => {
+      const evidenceState = this.reviewEvidenceState(record, requirement);
+      return {
+        ...requirement,
+        status: evidenceState === 'captured' ? 'captured' : 'pending',
+        evidence_state: evidenceState,
+      };
+    });
     const required = captures.length > 0;
     const plan = {
       required,
@@ -4080,6 +4110,9 @@ export class SessionStore {
         state: required ? 'capturing' : 'awaiting_observation',
         updated_at: new Date().toISOString(),
       };
+      if (captures.length) {
+        record.review_capture_sequence = captureSequenceBase + captures.length;
+      }
       this.write(record);
     }
     return plan;
@@ -4107,6 +4140,10 @@ export class SessionStore {
       throw new Error('Review evidence crop region does not match the requested effective source-document region');
     }
     const evidence = {
+      source_operation_id: id,
+      requirement_id: capture.requirement_id,
+      capture_id: capture.capture_id,
+      capture_sequence: capture.capture_sequence,
       role: capture.role,
       finding_kind: capture.kind,
       severity: capture.severity,
@@ -4127,19 +4164,35 @@ export class SessionStore {
       materialized_for_review: true,
       captured_at: new Date().toISOString(),
     };
+    evidence.artifact_id = fingerprint({
+      source_operation_id: id,
+      requirement_id: evidence.requirement_id,
+      capture_id: evidence.capture_id,
+      sha256: evidence.sha256,
+    });
     record.review_evidence ??= [];
-    record.review_evidence = record.review_evidence.filter(existing =>
-      !(existing.bound_whole_sha256 === evidence.bound_whole_sha256
-        && existing.review_level === evidence.review_level
-        && JSON.stringify(existing.requested_region) === JSON.stringify(evidence.requested_region))
-    );
+    const existingCapture = record.review_evidence.find(existing => existing.capture_id === evidence.capture_id);
+    if (existingCapture) {
+      if (
+        existingCapture.artifact_id === evidence.artifact_id
+        && existingCapture.materialized_path === evidence.materialized_path
+        && materializedEvidenceMatches(existingCapture)
+      ) return existingCapture;
+      throw new Error(`Review evidence capture_id ${evidence.capture_id} is already bound to a different artifact`);
+    }
     record.review_evidence.push(evidence);
     if (record.pending_review) {
-      record.pending_review.requirements = (record.pending_review.requirements ?? []).map(requirement => ({
-        ...requirement,
-        status: this.reviewEvidenceSatisfies({ ...record, review_evidence: record.review_evidence }, requirement)
-          ? 'captured' : 'pending',
-      }));
+      record.pending_review.requirements = (record.pending_review.requirements ?? []).map(requirement => {
+        const evidenceState = this.reviewEvidenceState(
+          { ...record, review_evidence: record.review_evidence },
+          requirement
+        );
+        return {
+          ...requirement,
+          status: evidenceState === 'captured' ? 'captured' : 'pending',
+          evidence_state: evidenceState,
+        };
+      });
       record.pending_review.state = record.pending_review.requirements.every(item => item.status === 'captured')
         ? 'awaiting_observation'
         : 'pending_more_evidence';

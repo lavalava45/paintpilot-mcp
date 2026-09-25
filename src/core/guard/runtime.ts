@@ -1124,6 +1124,9 @@ export class EmbeddedGuardRuntime {
             Number(previousRecordBeforeClosure?.preview?.height) || 0
           ) || Number(previousRecordBeforeClosure?.visual_review_profile?.whole_max_dimension_px) || 1600;
           for (const capture of persistedPlan.captures) {
+            if (typeof capture.capture_id !== 'string' || !capture.capture_id) {
+              throw new Error('Review escalation capture is missing immutable capture_id');
+            }
             const previewArgs = this.materializeArguments(
               'photoshop_get_preview',
               {
@@ -1133,7 +1136,7 @@ export class EmbeddedGuardRuntime {
                 focus_region: capture.effective_region,
                 focus_max_dimension_px: capture.focus_max_dimension_px,
               },
-              `${previousOperationId}-review-${capture.role}`
+              `${previousOperationId}-review-${capture.capture_id}`
             );
             const result = await this.invoke('photoshop_get_preview', previewArgs, 60_000, {
               guardOperationId: previousOperationId,
