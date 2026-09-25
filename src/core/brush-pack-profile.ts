@@ -10,6 +10,7 @@ import { effectiveSettingsFingerprint } from './brush-method-evidence.js';
 import { PAINTING_VISUAL_INTENTS, type PaintingVisualIntent } from './painting-method-palette.js';
 
 export const BRUSH_PACK_MEDIA_PROFILE_PROTOCOL = 'photoshop.brush_pack.media_profile.v1' as const;
+export const BRUSH_PACK_STAMP_PROFILE_PROTOCOL = 'photoshop.brush_pack.stamp_profile.v1' as const;
 
 export const MEDIA_MARK_CHARACTERS = [
   'soft', 'hard', 'broken', 'bristly', 'directional', 'granular', 'glazing', 'textural', 'smooth',
@@ -67,6 +68,37 @@ export interface MediaBrushProfileInput extends BrushPresetState {
 
 export interface MediaBrushProfile extends MediaBrushProfileInput {
   protocol: typeof BRUSH_PACK_MEDIA_PROFILE_PROTOCOL;
+  profile_id: string;
+  effective_settings_fingerprint: string;
+  recorded_at: string;
+}
+
+export const STAMP_INTENDED_USES = [
+  'foreground', 'support', 'background', 'detail', 'ornament', 'texture',
+] as const;
+export type StampIntendedUse = (typeof STAMP_INTENDED_USES)[number];
+export type StampRepetitionClass = 'intentional_regular' | 'organic_instances' | 'unclassified';
+
+export interface StampMotifProfileInput extends BrushPresetState {
+  brush_pack_id: string;
+  classification_status: 'classified' | 'unclassified';
+  motif_category?: string;
+  semantic_description?: string;
+  canonical_footprint_bounds: { left: number; top: number; right: number; bottom: number };
+  canonical_orientation_degrees: number;
+  useful_scale_range: { min_px: number; max_px: number };
+  mirror_x: 'allowed' | 'restricted' | 'unknown';
+  mirror_y: 'allowed' | 'restricted' | 'unknown';
+  rotation_policy: 'free' | 'restricted' | 'fixed' | 'unknown';
+  intended_use: StampIntendedUse[];
+  repetition_class: StampRepetitionClass;
+  raw_placement: 'finished-acceptable' | 'needs-integration' | 'unknown';
+  known_caveats: string[];
+  evidence: BrushProbeEvidence;
+}
+
+export interface StampMotifProfile extends StampMotifProfileInput {
+  protocol: typeof BRUSH_PACK_STAMP_PROFILE_PROTOCOL;
   profile_id: string;
   effective_settings_fingerprint: string;
   recorded_at: string;
@@ -200,6 +232,47 @@ function validateProfileInput(input: MediaBrushProfileInput, record: BrushPackIn
   }
 }
 
+function validateStampProfileInput(input: StampMotifProfileInput, record: BrushPackIngestionRecord): void {
+  assertPackPreset(record, input.preset_name, input.occurrence_index);
+  assertEvidence(input.evidence);
+  if (!input.backend?.trim() || !input.runtime_revision?.trim()) throw new Error('brush_pack_stamp_profile_host_state_incomplete');
+  if (!input.effective_settings || typeof input.effective_settings !== 'object') throw new Error('brush_pack_stamp_profile_effective_settings_required');
+  if (input.classification_status !== 'classified' && input.classification_status !== 'unclassified') {
+    throw new Error('brush_pack_stamp_profile_classification_status_invalid');
+  }
+  const category = input.motif_category?.trim();
+  const description = input.semantic_description?.trim();
+  if (input.classification_status === 'classified' && (!category || !description)) {
+    throw new Error('brush_pack_stamp_profile_classified_requires_evidence_based_semantics');
+  }
+  if (input.classification_status === 'unclassified' && (category || description)) {
+    throw new Error('brush_pack_stamp_profile_unclassified_must_not_assign_semantics');
+  }
+  const bounds = input.canonical_footprint_bounds;
+  if (!bounds || ![bounds.left, bounds.top, bounds.right, bounds.bottom].every(Number.isFinite)
+    || bounds.right <= bounds.left || bounds.bottom <= bounds.top) {
+    throw new Error('brush_pack_stamp_profile_footprint_bounds_invalid');
+  }
+  if (!Number.isFinite(input.canonical_orientation_degrees)) throw new Error('brush_pack_stamp_profile_orientation_invalid');
+  if (!Number.isFinite(input.useful_scale_range?.min_px) || !Number.isFinite(input.useful_scale_range?.max_px)
+    || input.useful_scale_range.min_px <= 0 || input.useful_scale_range.max_px < input.useful_scale_range.min_px) {
+    throw new Error('brush_pack_stamp_profile_scale_range_invalid');
+  }
+  const mirrorValues = new Set(['allowed', 'restricted', 'unknown']);
+  if (!mirrorValues.has(input.mirror_x) || !mirrorValues.has(input.mirror_y)) throw new Error('brush_pack_stamp_profile_mirror_policy_invalid');
+  if (!new Set(['free', 'restricted', 'fixed', 'unknown']).has(input.rotation_policy)) throw new Error('brush_pack_stamp_profile_rotation_policy_invalid');
+  if (!Array.isArray(input.intended_use) || !input.intended_use.length
+    || input.intended_use.some(use => !STAMP_INTENDED_USES.includes(use))) {
+    throw new Error('brush_pack_stamp_profile_intended_use_invalid');
+  }
+  if (!new Set(['intentional_regular', 'organic_instances', 'unclassified']).has(input.repetition_class)) {
+    throw new Error('brush_pack_stamp_profile_repetition_class_invalid');
+  }
+  if (!new Set(['finished-acceptable', 'needs-integration', 'unknown']).has(input.raw_placement)) {
+    throw new Error('brush_pack_stamp_profile_raw_placement_invalid');
+  }
+}
+
 export function recordMediaBrushProfile(
   input: MediaBrushProfileInput,
   options: { recordDirectory?: string; now?: string } = {}
@@ -245,6 +318,56 @@ export function listMediaBrushProfiles(
       if (parsed.protocol === BRUSH_PACK_MEDIA_PROFILE_PROTOCOL && parsed.brush_pack_id === brushPackId) out.push(parsed);
     } catch {
       // A corrupt unrelated cache entry is ignored here; exact requested profile ids are never synthesized.
+    }
+  }
+  return out.sort((a, b) => a.profile_id.localeCompare(b.profile_id));
+}
+
+export function recordStampMotifProfile(
+  input: StampMotifProfileInput,
+  options: { recordDirectory?: string; now?: string } = {}
+): StampMotifProfile {
+  const recordDirectory = resolveBrushPackRecordDirectory(options.recordDirectory);
+  const pack = readBrushPackRecord(recordDirectory, input.brush_pack_id);
+  if (!pack) throw new Error(`brush_pack_stamp_profile_pack_not_found: ${input.brush_pack_id}`);
+  validateStampProfileInput(input, pack);
+  const key = `stamp|${cacheKey(input)}`;
+  const profileId = `stamp-profile-sha256:${sha256(key)}`;
+  const profile: StampMotifProfile = {
+    ...structuredClone(input),
+    preset_name: input.preset_name.trim(),
+    motif_category: input.classification_status === 'classified' ? input.motif_category!.trim() : undefined,
+    semantic_description: input.classification_status === 'classified' ? input.semantic_description!.trim() : undefined,
+    intended_use: [...new Set(input.intended_use)],
+    known_caveats: [...new Set((input.known_caveats ?? []).map(item => item.trim()).filter(Boolean))],
+    protocol: BRUSH_PACK_STAMP_PROFILE_PROTOCOL,
+    profile_id: profileId,
+    effective_settings_fingerprint: effectiveSettingsFingerprint(input.effective_settings),
+    recorded_at: options.now ?? new Date().toISOString(),
+  };
+  fs.mkdirSync(profileDirectory(recordDirectory), { recursive: true });
+  const file = profileFile(recordDirectory, profileId);
+  const temp = `${file}.${process.pid}.${randomUUID()}.tmp`;
+  fs.writeFileSync(temp, JSON.stringify(profile, null, 2), 'utf8');
+  fs.renameSync(temp, file);
+  return profile;
+}
+
+export function listStampMotifProfiles(
+  brushPackId: string,
+  options: { recordDirectory?: string } = {}
+): StampMotifProfile[] {
+  const recordDirectory = resolveBrushPackRecordDirectory(options.recordDirectory);
+  const dir = profileDirectory(recordDirectory);
+  if (!fs.existsSync(dir)) return [];
+  const out: StampMotifProfile[] = [];
+  for (const name of fs.readdirSync(dir).sort()) {
+    if (!name.endsWith('.json')) continue;
+    try {
+      const parsed = JSON.parse(fs.readFileSync(path.join(dir, name), 'utf8')) as StampMotifProfile;
+      if (parsed.protocol === BRUSH_PACK_STAMP_PROFILE_PROTOCOL && parsed.brush_pack_id === brushPackId) out.push(parsed);
+    } catch {
+      continue;
     }
   }
   return out.sort((a, b) => a.profile_id.localeCompare(b.profile_id));
@@ -473,6 +596,33 @@ export function executeBrushPackProfileAction(
       profile: recordMediaBrushProfile(profile as unknown as MediaBrushProfileInput, options),
     };
   }
+  if (action === 'record_stamp') {
+    const profile = args.profile;
+    if (!profile || typeof profile !== 'object' || Array.isArray(profile)) throw new Error('brush_pack_profile record_stamp requires profile');
+    const row = profile as Record<string, unknown>;
+    if (typeof row.probe_operation_id !== 'string' || !row.probe_operation_id.trim()) {
+      throw new Error('brush_pack_profile record_stamp requires probe_operation_id; filename/name semantics are not accepted as evidence');
+    }
+    const receipt = readBrushProbeReceipt(row.probe_operation_id.trim(), options);
+    if (!receipt) throw new Error(`brush_pack_probe_receipt_not_found:${row.probe_operation_id}`);
+    const classification = { ...row };
+    delete classification.probe_operation_id;
+    return {
+      ok: true,
+      action,
+      profile: recordStampMotifProfile({
+        ...classification,
+        brush_pack_id: receipt.brush_pack_id,
+        preset_name: receipt.preset_name,
+        occurrence_index: receipt.occurrence_index,
+        effective_settings: receipt.effective_settings,
+        backend: receipt.backend,
+        runtime_revision: receipt.runtime_revision,
+        ...(receipt.bridge_revision ? { bridge_revision: receipt.bridge_revision } : {}),
+        evidence: receipt.evidence,
+      } as unknown as StampMotifProfileInput, options),
+    };
+  }
   if (action === 'build_preflight') {
     if (typeof args.brush_pack_id !== 'string' || !args.brush_pack_id.trim()) throw new Error('brush_pack_profile build_preflight requires brush_pack_id');
     const inventoryTotal = Number(args.inventory_total);
@@ -488,5 +638,5 @@ export function executeBrushPackProfileAction(
       }, options),
     };
   }
-  throw new Error('brush_pack_profile action must be plan|record_media|build_preflight');
+  throw new Error('brush_pack_profile action must be plan|record_media|record_stamp|build_preflight');
 }

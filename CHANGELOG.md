@@ -97,6 +97,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- 2026-09-26: complete repository implementation for **P0-E.3 stamp/motif visual vocabulary**.
+  The brush-pack profile store now keeps stamp profiles as a separate protocol from media-brush mark
+  profiles. `record_stamp` can only be created from an exact durable `probe_operation_id`; it carries
+  pack/preset/effective-host identity, probe SHA evidence, canonical footprint bounds/orientation,
+  useful scale range, horizontal/vertical mirror policy, rotation policy, intended scene uses,
+  repetition class, raw-placement integration requirement and caveats. Classified motifs require an
+  evidence-supported category + semantic description; ambiguous probes are stored explicitly as
+  `unclassified` and are forbidden from carrying guessed semantic labels. A fixture whose preset name
+  explicitly claims to be a bird remains unclassified when the visual evidence is ambiguous, proving
+  filename text cannot supply motif semantics. Focused E.2/E.3 verification passes **10/10** tests and
+  `npm run build:server` is green; real Photoshop motif classification remains part of the P0-E.7 live
+  supplied-pack run.
+
 - 2026-09-26: complete repository implementation for **P0-E.2 evidence-based media-brush profiling**.
   `photoshop_guard_brush_pack_profile` now exposes a bounded `plan → probe_media → record_media →
   build_preflight` workflow. `probe_media` is one stable no-replay UXP command that creates a disposable

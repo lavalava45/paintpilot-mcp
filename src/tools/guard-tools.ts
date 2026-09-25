@@ -12,6 +12,7 @@ import { PAINTING_VISUAL_INTENTS } from '../core/painting-method-palette.js';
 import {
   DEFAULT_BRUSH_SCENE_ROLES,
   MEDIA_MARK_CHARACTERS,
+  STAMP_INTENDED_USES,
   executeBrushPackProfileAction,
 } from '../core/brush-pack-profile.js';
 import {
@@ -483,11 +484,11 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
       tool: {
         name: 'photoshop_guard_brush_pack_profile',
         description:
-          'Canonical bounded brush-pack profiling surface. plan returns a finite probe plan; probe_media executes one disposable UXP probe sheet under a stable no-replay command and returns exact preview evidence; record_media stores evidence-bound mark behavior using probe_operation_id; build_preflight generates the durable brush-role map from current exact profiles without name-based guessing.',
+          'Canonical bounded brush-pack profiling surface. plan returns a finite probe plan; probe_media executes one disposable UXP probe sheet under a stable no-replay command and returns exact preview evidence; record_media stores evidence-bound mark behavior; record_stamp stores a separate evidence-bound motif vocabulary without guessing semantics from names; build_preflight generates the durable media-brush role map.',
         inputSchema: {
           type: 'object',
           properties: {
-            action: { type: 'string', enum: ['plan', 'probe_media', 'record_media', 'build_preflight'] },
+            action: { type: 'string', enum: ['plan', 'probe_media', 'record_media', 'record_stamp', 'build_preflight'] },
             brush_pack_id: { type: 'string' },
             preset_name: { type: 'string' },
             occurrence_index: { type: 'number', minimum: 0 },
@@ -542,12 +543,25 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
                 },
                 known_caveats: { type: 'array', items: { type: 'string' } },
                 evidence: { type: 'object', additionalProperties: true },
+                classification_status: { type: 'string', enum: ['classified', 'unclassified'] },
+                motif_category: { type: 'string' },
+                semantic_description: { type: 'string' },
+                canonical_footprint_bounds: {
+                  type: 'object',
+                  properties: {
+                    left: { type: 'number' }, top: { type: 'number' }, right: { type: 'number' }, bottom: { type: 'number' },
+                  },
+                  required: ['left', 'top', 'right', 'bottom'],
+                  additionalProperties: false,
+                },
+                canonical_orientation_degrees: { type: 'number' },
+                mirror_x: { type: 'string', enum: ['allowed', 'restricted', 'unknown'] },
+                mirror_y: { type: 'string', enum: ['allowed', 'restricted', 'unknown'] },
+                rotation_policy: { type: 'string', enum: ['free', 'restricted', 'fixed', 'unknown'] },
+                intended_use: { type: 'array', minItems: 1, items: { type: 'string', enum: [...STAMP_INTENDED_USES] } },
+                repetition_class: { type: 'string', enum: ['intentional_regular', 'organic_instances', 'unclassified'] },
+                raw_placement: { type: 'string', enum: ['finished-acceptable', 'needs-integration', 'unknown'] },
               },
-              required: [
-                'usable_visual_intents', 'material_roles', 'mark_character', 'useful_scale_range',
-                'edge_behavior', 'buildup_behavior', 'rotation_meaningful', 'recommended_pressure_policy',
-                'known_caveats'
-              ],
               additionalProperties: true,
             },
           },

@@ -30,7 +30,7 @@ are consolidated in `CHANGELOG.md`; detailed acceptance evidence remains in the 
 Git history and referenced test/live artifacts.
 
 1. **P0-A — host routing / CoS attribution:** Tasks **3 and 4 are closed**; continue Tasks **1 → 2**.
-2. **P0-E — brush/stamp-pack onboarding and motif-aware painting:** implement **P0-E.3 → P0-E.7**
+2. **P0-E — brush/stamp-pack onboarding and motif-aware painting:** implement **P0-E.4 → P0-E.7**
    below before the next user-facing real-art test that starts from a supplied brush folder/pack. This
    is an immediate production prerequisite, not optional tooling polish.
 3. **P0-C — Painter/Guard semantic-pass throughput and bounded autonomy:** implement Tasks
@@ -161,28 +161,6 @@ Do **not** rebuild the painting lane or brush contract from zero. Current implem
 
 The missing work is **pack ingestion, evidence-based profiling, stamp-instance execution and
 scene-level integration**, not another brush subsystem.
-
-### P0-E.3 — Profile stamp/motif brushes as a reusable visual vocabulary
-
-When probes reveal a discrete stamp-like footprint, classify it separately from ordinary media
-brushes. Store a **stamp/motif profile** rather than pretending it is just another texture brush.
-
-Record, where the evidence supports it:
-
-- stable preset/pack identity;
-- motif category/semantic description;
-- canonical footprint bounds and orientation;
-- useful size/scale range;
-- whether horizontal/vertical mirroring is visually admissible;
-- whether rotation is meaningful or restricted;
-- intended use: foreground/support/background/detail/ornament/texture;
-- repetition class: `intentional_regular`, `organic_instances`, or explicitly unclassified;
-- whether raw placement is acceptable as a finished element or normally requires
-  overlap/erase/overpaint/integration;
-- representative probe evidence identity.
-
-Do not fabricate semantic labels from filenames alone. If the visual probe is ambiguous, keep the
-motif unclassified/advisory rather than assigning a false category.
 
 ### P0-E.4 — Add a bounded per-instance stamp placement primitive
 
