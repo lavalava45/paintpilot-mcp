@@ -36,9 +36,16 @@ Git history and referenced test/live artifacts.
 4. **P0-D — human critic calibration / stop-decision calibration:** Tasks **8 / 8a → 8b**, then
    close the residual human claims from Tasks **6, 11 and 13a.1A/13a.1C** from the same labelled
    evidence where possible.
-5. **P1 — human artistic acceptance:** Task **23 human pack → 22 → 15d.3**,
+5. **P1-A — autonomous-product cleanup / legacy retirement:** physically remove retired controller,
+   daemon, historical provider code and other no-longer-owned compatibility surfaces once their
+   canonical replacements are proven. Reduce the repository to the code paths we actually maintain.
+6. **P1-B — human artistic acceptance:** Task **23 human pack → 22 → 15d.3**,
    then the real-artwork artistic-preference part of Task **21**.
-6. **Conditional / P2 only after evidence:** Task **5** if ordinary ChatGPT/CoS routing remains
+7. **P2 — upstream-derived substrate review and independent-product cutover:** systematically review
+   the remaining inherited Photoshop/MCP substrate, keep/rewrite/remove it according to our actual
+   product needs, remove dependence on upstream release cadence, and reframe the GitHub/project
+   identity as an independently maintained derivative product with explicit origin attribution.
+8. **Conditional / P3 only after evidence:** Task **5** if ordinary ChatGPT/CoS routing remains
    unreliable; Task **10** only if Task 8/8a demonstrates measurable decision-quality gain; Task
    **15c** remains optional exploration.
 
@@ -64,6 +71,17 @@ Rationale:
   de-block-in gate and a completed disposable real-Photoshop progression run; only its blinded human
   perceptual pack remains as the forward acceptance gate. Final target fidelity and the remaining
   compositing/final-selection questions follow after that.
+- The repository has now diverged far enough from upstream that **cleanup is architectural work, not
+  cosmetics**. Against the current upstream tree, most source files are either ours or modified, and
+  the canonical painting-control stack (embedded Guard, compact-v2, VisualMicroPlan, Art
+  Director/Painter, recovery/evidence, UXP routing, painting methods and review) is predominantly our
+  implementation. Retired controller/daemon code and compatibility artifacts therefore obscure the
+  actual architecture and should be removed at P1-A after their replacement coverage is proven.
+- The longer-term goal is an **independently maintained derivative product**: upstream remains the
+  historical origin and a source of selectively reviewed ideas/fixes, but our runtime, release plan,
+  architecture and roadmap must not depend on upstream releases or ownership decisions. P2 turns
+  that de-facto state into an explicit codebase/product boundary while preserving license and origin
+  attribution.
 - Optional 3D/reference support should not compete with routing or calibration work.
 
 ---
@@ -1228,7 +1246,132 @@ Do not reopen compact-v2 transport/state-machine work to address these human cla
 
 ---
 
-## P1 — Human artistic acceptance on representative real artwork
+## P1-A — Autonomous-product cleanup / retire historical fork scaffolding
+
+**Priority:** high. Execute after the current P0 implementation gates are stable enough that deletion
+does not compete with active correctness work. This is no longer a cosmetic cleanup: the canonical
+product architecture has moved away from the historical controller/provider model, while the
+repository still contains several retired implementations, acceptance fixtures and compatibility
+paths that make ownership and maintenance boundaries harder to see.
+
+### Current divergence snapshot — 2026-09-25
+
+The current repository should no longer be reasoned about as "upstream plus a few painting tools".
+After refreshing `upstream/master`, the `src` trees have the following structural relationship:
+
+- current project: **189** tracked TypeScript source files under `src`;
+- current upstream: **149**;
+- **58** current source files do not exist in upstream at all;
+- **67** source files exist in both trees but are modified here;
+- only **64** current source files remain byte-for-byte identical to upstream;
+- **18** upstream source files are absent from the current project;
+- the current-vs-upstream `src` diff is roughly **+32k / -6k lines**;
+- the obviously project-owned painting/control core alone (embedded Guard, compact-v2,
+  VisualMicroPlan, artistic/recovery/review/state modules and related canonical surfaces) is already
+  tens of thousands of lines and determines normal production behavior.
+
+These counts are a maintenance snapshot, **not a code-ownership percentage** and not a reason to
+erase provenance. They demonstrate that the canonical behavior is now predominantly defined by this
+project, while the remaining inherited substrate should be treated deliberately rather than assumed
+to be the product architecture.
+
+### P1-A.1 — Produce a deletion/retention manifest from actual reachability
+
+Before deleting files, classify every historical/compatibility surface into exactly one category:
+
+```text
+canonical_required
+bounded_compatibility_required
+test_or_migration_fixture_only
+historical_archaeology_only
+unreachable_dead_code
+```
+
+At minimum audit:
+
+- `scripts/photoshop-session.mjs`;
+- `scripts/lib/photoshop-session-store.mjs`;
+- `scripts/lib/photoshop-cycle.mjs`;
+- persistent MCP daemon/client/provider code;
+- controller/Stage A/C/D historical acceptance scripts;
+- compatibility Guard entry points/modes that are not used by the canonical CoS path;
+- duplicated state/recovery implementations;
+- obsolete docs/examples that describe removed public contracts;
+- generated/runtime artifacts accidentally living close enough to source to look maintained.
+
+Use call/import/package-script reachability plus the maintained acceptance suite; do not retain code
+only because Git history once used it.
+
+### P1-A.2 — Delete the retired controller/daemon implementation after replacement proof
+
+The historical controller/daemon is already non-canonical. Remove its provider implementation once
+the deletion manifest proves every still-required invariant has a native embedded-Guard owner.
+
+Required proof before deletion:
+
+- operation journaling and exact receipt/outcome recovery are covered by native tests;
+- preview/verdict and multiscale evidence barriers are covered natively;
+- durable async jobs / interruption / restart-resume behavior needed by production are covered
+  natively;
+- accepted-anchor restore and no-replay behavior are covered natively;
+- `package.json`, CI and release checks invoke no retired controller/daemon provider;
+- maintained docs/prompts/examples do not instruct users or agents to use the retired path.
+
+Historical information belongs in Git history and, only where genuinely useful, concise archival
+documentation. Do **not** keep an executable duplicate architecture merely as archaeology.
+
+### P1-A.3 — Remove obsolete duplicate fixtures and migrate the last useful assertions
+
+For each historical controller/live fixture, either:
+
+1. port the unique behavioral assertion to the canonical Vitest/embedded-Guard suite; or
+2. document why the assertion describes a retired provider property and delete/archive the fixture.
+
+Do not preserve tests whose only purpose is to keep dead providers buildable. The maintained
+acceptance suite should test **current product invariants**, not historical implementation parity.
+
+### P1-A.4 — Separate production source from historical evidence
+
+Clean the repository layout so a new maintainer can distinguish, without oral history:
+
+- current production runtime;
+- current tests/acceptance;
+- development diagnostics;
+- generated evidence/artifacts;
+- deliberately retained historical documentation.
+
+Prefer deletion + Git history over creating a large permanent `legacy/` source subtree. Archive only
+small documents/evidence that remain useful for explaining a decision or reproducing a migration
+claim.
+
+### P1-A.5 — Remove clearly unused generic surfaces, but only from reachability evidence
+
+Once canonical painting behavior is stable, identify generic inherited tools/UI/recipes that are not
+used by this product, its supported workflows or its acceptance suite. Remove them when doing so
+reduces maintenance/runtime/tool-catalog complexity without removing a capability required by
+current scene construction, compositing, persistence, recovery or diagnostics.
+
+This is deliberately narrower than P2. P1-A removes **clearly dead or retired baggage**. P2 decides
+whether still-live inherited substrate is the right long-term implementation for this product.
+
+### P1-A.6 — Cleanup acceptance
+
+P1-A is complete only when:
+
+- the canonical CoS → embedded Guard → UXP-first route builds and passes from a clean checkout;
+- `npm run verify:canonical` passes after the deletions;
+- repository search finds no production import/package command that reaches a retired provider;
+- no current prompt/README/agent instruction recommends the deleted route;
+- no second durable Guard/controller/state machine remains executable in parallel with the canonical
+  one;
+- removed source is recoverable from Git history, so compatibility code is not retained merely from
+  fear of losing history;
+- `CHANGELOG.md` and the acceptance matrix record what was removed and which native evidence replaced
+  it.
+
+---
+
+## P1-B — Human artistic acceptance on representative real artwork
 
 ### Task 23 — Progressive form refinement / de-block-in
 
@@ -1262,7 +1405,8 @@ counts, producer verdicts and the expected answer stay hidden.
 
 ### Task 22 — Final target fidelity / prompt-to-frame acceptance
 
-**Priority:** second P1 gate, after Task 23 and before compositing polish or anchor preference.
+**Priority:** second P1-B artistic gate, after Task 23 and before compositing polish or anchor
+preference.
 
 Before a real artwork is called finished, evaluate the exact final frame against the important
 user-visible perceptual requirements in the original request. A readable composition or technically
@@ -1351,6 +1495,190 @@ Use a human comparison when a real run contains a meaningful current-vs-anchor t
 
 ---
 
+## P2 — Upstream-derived substrate review and independent-product cutover
+
+**Goal:** turn the project's current de-facto architectural independence into an explicit,
+maintainable product boundary. The project began as a fork of `alisaitteke/photoshop-mcp`; that origin
+must remain visible and correctly attributed. But normal development, releases and runtime behavior
+should depend on **our repository and our decisions**, not on upstream release cadence, upstream
+internal architecture or the assumption that inherited code is automatically the right long-term
+implementation.
+
+Here, **autonomous** means:
+
+- a fresh clone of our repository can build/test/run without configuring the upstream Git remote;
+- no runtime component downloads or imports implementation from the upstream repository;
+- our canonical APIs, state contracts, release/versioning and architecture are owned here;
+- upstream can still be consulted and selectively ported like any other external open-source source;
+- external platform dependencies such as Photoshop, UXP, Node/MCP and the chosen host remain explicit
+  product dependencies. Autonomy does not mean pretending those platforms do not exist.
+
+### P2.1 — Build a provenance/ownership map for the remaining live inherited substrate
+
+After P1-A removes obviously dead baggage, inventory every still-live source area and classify it as:
+
+```text
+project_owned
+upstream_derived_heavily_modified
+upstream_derived_lightly_modified
+upstream_identical_but_still_required
+external_protocol_or_platform_adapter
+candidate_for_removal_or_rewrite
+```
+
+The purpose is engineering ownership, not assigning simplistic authorship percentages. For each
+remaining inherited subsystem, record:
+
+- why the product still needs it;
+- current canonical callers;
+- whether its public shape constrains our architecture;
+- whether upstream-specific abstractions/compatibility assumptions remain;
+- whether keeping, simplifying, rewriting or deleting it best serves the current product.
+
+At minimum review MCP/server bootstrap, generic tool registration, connection/platform layer,
+document/layer/mask/selection/filter/export primitives, recipes/UI, analytics and retained
+ExtendScript/COM implementations.
+
+### P2.2 — Optimize inherited live code for our product instead of preserving upstream parity
+
+For code we keep, remove accidental compatibility with upstream design where it adds complexity and
+does not serve an accepted workflow. Examples include:
+
+- APIs shaped around generic automation use-cases that conflict with the canonical painting lane;
+- duplicate wrappers/state reads made unnecessary by compact-v2 or UXP;
+- tool-catalog breadth that increases routing ambiguity without serving painting/compositing;
+- abstractions whose only justification is matching upstream file/module structure;
+- generic error/transport behavior weaker than our document-target/no-replay/evidence requirements.
+
+Do not rewrite stable code merely to make it "ours". Rewrite only when there is a concrete
+maintainability, correctness, latency, catalog-simplicity or product-boundary benefit. Preserve
+behavioral tests across any rewrite.
+
+### P2.3 — Make an explicit long-term decision on the retained ExtendScript/COM backend
+
+The current canonical path is UXP-first and already prevents post-dispatch cross-backend replay, but
+ordinary migrated primitives may retain a bounded **pre-dispatch** ExtendScript/COM fallback. Decide
+from real compatibility evidence whether the independent product should:
+
+1. keep a **small, explicitly supported fallback subset**;
+2. make the UXP companion a hard runtime requirement and remove the remaining production fallback;
+   or
+3. maintain a separately bounded compatibility edition/profile.
+
+Do not let historical fallback code survive indefinitely without a declared product policy. If UXP
+coverage proves sufficient for supported environments, prefer deleting unreachable legacy backend
+surface over carrying two execution architectures forever.
+
+Acceptance requires real-host evidence for every capability whose backend policy changes, including
+no-focus/no-replay/document-target behavior.
+
+### P2.4 — Prove repository and release autonomy
+
+Add a clean-room project acceptance that starts from **our origin only**:
+
+1. fresh clone with no `upstream` remote configured;
+2. dependency install from declared package manifests;
+3. build/typecheck/lint and canonical tests;
+4. package/build the CoS entry point and UXP companion from this repository;
+5. start the canonical server/Guard surface;
+6. verify no build/runtime script expects an upstream checkout, branch, tag or generated file;
+7. where the environment permits Photoshop live acceptance, execute the canonical smoke from these
+   artifacts.
+
+Git history may retain the original fork ancestry. **Operational autonomy does not require rewriting
+history or squashing away upstream commits.**
+
+### P2.5 — Establish our own release/versioning compatibility policy
+
+Define release ownership around this project's contracts rather than inherited upstream version
+numbers:
+
+- product/package version is advanced by our release criteria;
+- compact Guard protocol, runtime-state version and UXP bridge revision remain explicitly versioned;
+- release notes describe our canonical lane and migration requirements;
+- compatibility statements name supported Photoshop/UXP/host versions directly;
+- upstream releases do not automatically trigger our release or version bump;
+- selectively ported upstream fixes are credited and tested like any other external contribution.
+
+### P2.6 — Reframe GitHub/project identity as an independent derivative product
+
+After P1-A cleanup and the P2 substrate review make the boundary truthful, update the public project
+presentation so **fork ancestry is provenance, not the primary product definition**.
+
+Target framing:
+
+> **Photoshop MCP — Digital Painting Edition is an independently maintained digital-painting system
+> for Photoshop, originally derived from the MIT-licensed `alisaitteke/photoshop-mcp` project.**
+
+The exact product name may be revisited separately, but the GitHub page should make these facts clear:
+
+- what the product does now: autonomous/agent-driven digital painting, Guard-controlled execution,
+  scene construction, brush/stamp workflows, evidence/recovery and UXP-first Photoshop integration;
+- that it is maintained/released independently and is not an official upstream or Adobe product;
+- that it **originated from and still contains MIT-licensed upstream-derived code**;
+- which architecture/components are project-owned additions;
+- how upstream attribution and selectively ported contributions are credited;
+- which runtime dependencies are actually required.
+
+Update as applicable:
+
+- repository description/About text and topics;
+- README opening/architecture diagrams/features;
+- package description/name if a rename is chosen;
+- installation and release docs;
+- issue/PR templates and contribution guidance;
+- screenshots/branding that still present the project mainly as "a fork" rather than the current
+  product;
+- links between `origin`, historical upstream attribution and current releases.
+
+Do **not** hide or erase the fork history to make the project look more original than it is.
+
+### P2.7 — Preserve explicit license/origin attribution while adding our project ownership notice
+
+The upstream project is MIT-licensed. Preserve the required upstream copyright/license notice for
+upstream-derived portions and distributions. Add an appropriate project copyright/notice for new
+work if desired, without replacing or obscuring the original notice.
+
+Create a concise `UPSTREAM.md`, `NOTICE`, or equivalent if useful, documenting:
+
+- original project and repository;
+- original MIT license;
+- that this project began as a fork/derivative;
+- major architectural divergence at a high level;
+- policy for crediting selectively ported upstream changes.
+
+This roadmap item is an engineering/repository hygiene requirement, not a claim that attribution can
+be removed once enough code has changed.
+
+### P2.8 — Change upstream integration from fork-synchronization to selective external intake
+
+Once the product boundary is explicit, treat upstream as a useful external source rather than a
+branch that our architecture is expected to converge back toward:
+
+- keep an `upstream` remote only if it remains useful for discovery/comparison;
+- do not wholesale merge upstream history into canonical branches;
+- inspect individual fixes/features against our architecture;
+- port/cherry-pick/reimplement only when they solve a current problem or provide measured value;
+- record provenance for non-trivial ports;
+- prefer a small adaptation/reimplementation when an upstream change assumes architecture we have
+  intentionally retired.
+
+### P2 completion acceptance
+
+P2 is complete when:
+
+- a fresh origin-only clone proves build/test/package independence from an upstream checkout/remote;
+- the canonical runtime has no hidden upstream runtime dependency;
+- every retained inherited subsystem has an explicit keep/rewrite/remove rationale;
+- the long-term ExtendScript/COM compatibility policy is decided and enforced in code/tests/docs;
+- project versioning/releases are defined independently;
+- GitHub/README/package presentation describes an **independently maintained derivative product**,
+  not merely "our fork with extra tools";
+- upstream MIT/origin attribution remains explicit and correct;
+- future upstream work enters through selective review rather than synchronization pressure.
+
+---
+
 ## Conditional work — do not implement before its trigger
 
 ### Task 5 — Thin Photoshop-only host with fail-closed tool allowlist
@@ -1404,7 +1732,7 @@ If the experiment only lengthens explanations without changing decisions, close 
 
 ---
 
-## P2 — Optional exploration
+## P3 — Optional exploration
 
 ### Task 15c — Reference / 3D construction support
 
@@ -1436,8 +1764,10 @@ Do not optimize these merely because they are measurable:
 - caching arbitrary Photoshop state without invalidation proof;
 - weakening preview/verdict/recovery evidence to save calls;
 - optimizing raw tool count instead of semantic-cycle wall time;
-- deleting historical backend source solely for cleanliness **after** P0-0 has proven production
-  reachability fail-closed; reachability proof comes before source cleanup.
+- deleting or rewriting still-live inherited source **without reachability/ownership proof**. P1-A
+  explicitly promotes deletion of retired historical providers once native replacement coverage is
+  proven; P2 may simplify/rewrite retained inherited substrate only from an explicit product benefit,
+  not merely to increase a superficial "percent ours" metric.
 
 Current measurements show that real semantic-cycle latency is often dominated by the
 host/model/visual-evaluation interval rather than Photoshop dispatch alone. New speed work must
@@ -1459,9 +1789,14 @@ Do not add these without new evidence:
 
 ## Upstream integration policy
 
-Upstream changes must continue to be evaluated selectively against the current fork. Do not perform
-wholesale merges that can restore retired controller/raw-script paths or overwrite the compact-v2
-UXP-first/pre-dispatch-fallback painting architecture.
+Upstream changes must continue to be evaluated selectively against the **current project
+architecture**. The project is not expected to converge back toward upstream. Do not perform
+wholesale merges that can restore retired controller/raw-script paths, reintroduce upstream-specific
+assumptions, or overwrite the compact-v2 UXP-first/pre-dispatch-fallback painting architecture.
+
+Until P2 formalizes the independent-product cutover, the `upstream` remote remains useful for
+comparison and selective intake only. After P2 it may remain as a convenience, but no build, release,
+runtime or roadmap process may depend on it being configured.
 
 Interrupt this roadmap for upstream work only when a change:
 
