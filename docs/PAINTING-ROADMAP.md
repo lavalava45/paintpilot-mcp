@@ -27,15 +27,18 @@ are consolidated in `CHANGELOG.md`; detailed acceptance evidence remains in the 
 Git history and referenced test/live artifacts.
 
 1. **P0-A — host routing / CoS attribution:** Tasks **3 and 4 are closed**; continue Tasks **1 → 2**.
-2. **P0-C — Painter/Guard semantic-pass throughput and bounded autonomy:** implement Tasks
+2. **P0-E — brush/stamp-pack onboarding and motif-aware painting:** implement **P0-E.1 → P0-E.7**
+   below before the next user-facing real-art test that starts from a supplied brush folder/pack. This
+   is an immediate production prerequisite, not optional tooling polish.
+3. **P0-C — Painter/Guard semantic-pass throughput and bounded autonomy:** implement Tasks
    **P0-C.1 → P0-C.10** below as one coordinated contract change, with the evidence-identity and
    bookkeeping invariants treated as correctness work rather than optional speed polish.
-3. **P0-D — human critic calibration / stop-decision calibration:** Tasks **8 / 8a → 8b**, then
+4. **P0-D — human critic calibration / stop-decision calibration:** Tasks **8 / 8a → 8b**, then
    close the residual human claims from Tasks **6, 11 and 13a.1A/13a.1C** from the same labelled
    evidence where possible.
-4. **P1 — human artistic acceptance:** Task **23 human pack → 22 → 15d.3**,
+5. **P1 — human artistic acceptance:** Task **23 human pack → 22 → 15d.3**,
    then the real-artwork artistic-preference part of Task **21**.
-5. **Conditional / P2 only after evidence:** Task **5** if ordinary ChatGPT/CoS routing remains
+6. **Conditional / P2 only after evidence:** Task **5** if ordinary ChatGPT/CoS routing remains
    unreliable; Task **10** only if Task 8/8a demonstrates measurable decision-quality gain; Task
    **15c** remains optional exploration.
 
@@ -43,6 +46,12 @@ Rationale:
 
 - Host routing is the first remaining external gate because losing the established Photoshop/CoS route can bypass the entire
   painting architecture regardless of its internal quality.
+- The next planned real-art experiment is explicitly a **user-supplied brush/stamp-pack → coherent
+  detailed scene** workflow. The current lane can inventory/select installed presets and enforce a
+  durable brush-role preflight, but it cannot yet accept a folder/ABR pack as a first-class input,
+  visually profile unknown brushes, or place heterogeneous stamp instances with per-instance
+  orientation/flip while preserving anti-copy semantics. P0-E is therefore promoted ahead of the
+  next test rather than discovering those gaps during the test itself.
 - Accepted-state recovery is now closed and archived. The 2026-09-25 representative real-Photoshop
   painting run then exposed a separate production-loop problem: too much model-visible Guard
   choreography per useful artistic pass, plus concrete evidence/materialization and trend-scope
@@ -75,6 +84,274 @@ discovered while producing it and remain active:
 3. **Negative regression sentinel normalization.** A compact visual observation carrying
    `regression: "none observed"` is currently treated as truthy regression evidence. Normalize
    explicit negative sentinel text so a resolved visual pass cannot be mislabeled `regression`.
+
+---
+
+## P0-E — Brush/stamp-pack onboarding and motif-aware painting
+
+**Priority:** immediate implementation prerequisite for the **next real-art test**. The intended user
+workflow is: provide a folder/brush pack, provide a scene brief, then let the canonical CoS → embedded
+Guard → Photoshop lane inspect/import/profile those brushes and use them deliberately to build a
+coherent, detailed image with foreground subject, environment/background, lighting/atmosphere and
+refinement. The next test should not require the user to manually pre-classify the pack or tell the
+Painter which preset to use for each mark.
+
+This task covers two related but distinct inputs:
+
+1. **painting/media brushes** — brushes whose main value is mark character, edge quality, glazing,
+   broken mass, texture or material rendering;
+2. **stamp/motif brushes** — brushes whose main value is placing a recognizable discrete motif such
+   as foliage, cloud, rock, bird, architecture fragment, ornament, crowd/figure silhouette or other
+   reusable form.
+
+Do not collapse the two into one heuristic. A useful media brush is classified mainly by **mark
+behavior**; a stamp brush is classified mainly by **motif identity, placement affordances and
+repetition risk**.
+
+### Existing foundation — reuse it
+
+Do **not** rebuild the painting lane or brush contract from zero. Current implementation already has:
+
+- `photoshop_list_brush_presets` and `photoshop_select_brush_preset` for installed Photoshop presets;
+- `photoshop_get_brush_settings` and `photoshop_set_brush`, including size, hardness, opacity/flow,
+  spacing, angle, roundness, flip and pressure-related settings;
+- durable `brush_preflight` with 1–16 concrete roles, material roles, visual intents, preferred and
+  alternative presets, effective-settings readback, working scale, pressure policy and probe status;
+- `paint_strategy` enforcement that binds material role → visual intent → brush role → accepted
+  preset/pressure policy instead of allowing arbitrary brush choice;
+- `photoshop_paint_dabs` for efficient point placements, but individual dab records currently expose
+  only x/y, color, size, opacity and flow; angle/flip remain brush-state-wide rather than
+  per-instance;
+- `pattern_intent`, `motif_instances` and `mechanical-patterning` Guard analysis that distinguishes
+  intentional regular rhythm from repeated organic/character motifs and already detects near-copy
+  geometry despite translation/rotation/reflection/uniform-scale/small-jitter variants.
+
+The missing work is **pack ingestion, evidence-based profiling, stamp-instance execution and
+scene-level integration**, not another brush subsystem.
+
+### P0-E.1 — Make a supplied brush folder/ABR pack a first-class canonical input
+
+Add a canonical pack-ingestion path rather than assuming the brushes were already installed manually.
+
+Implementation requirements:
+
+- accept a user-supplied folder or explicit brush-pack file set and enumerate supported brush assets
+  deterministically; nested folders must not silently disappear;
+- compute a durable `brush_pack_id` / manifest fingerprint from the supplied source assets and record
+  filenames, sizes/hashes and ingestion time without depending on display names alone;
+- add a canonical Photoshop-facing import/load operation through the existing backend router if the
+  installed Photoshop/UXP surface supports it; preserve UXP-first/no-replay semantics;
+- compare preset inventory before/after ingestion and bind newly available presets to that pack
+  manifest instead of guessing by name;
+- repeated ingestion of the same unchanged pack must be idempotent and must not duplicate presets or
+  silently remap a profile to a different pack revision;
+- if the actual Photoshop host cannot programmatically import the supplied pack format, return a
+  deterministic `brush_pack_import_unavailable` capability result with the exact missing host
+  capability. Do not pretend the folder was loaded. A one-time user/UI fallback may be documented,
+  but the production path remains fail-closed until post-install inventory proves the presets exist.
+
+**Acceptance**
+
+- fixture/test coverage for unchanged re-ingestion, changed pack revision, nested assets and
+  before/after inventory attribution;
+- the next live test can start from the supplied pack/folder and end with a durable pack manifest plus
+  exact installed-preset identities, without the model inventing preset names;
+- no ImageGen or alternate rendering engine is introduced as an ingestion fallback.
+
+### P0-E.2 — Evidence-based brush-pack profiling, not name-based guessing
+
+For unknown painting/media brushes, build a bounded **probe sheet** and classify actual Photoshop
+marks. A preset called `Charcoal`, `Water`, `Cloud`, etc. is not evidence of what it really does.
+
+For each candidate worth profiling, generate a compact probe set such as:
+
+- isolated dab/footprint;
+- short and long stroke;
+- slow/fast or sparse/dense stroke where the host exposes a meaningful difference;
+- small/medium/large working scale;
+- pressure/opacity/size response where available;
+- overlap/build-up behavior;
+- directional/edge behavior.
+
+Persist evidence-bound profile fields sufficient to drive brush roles, including at least:
+
+- usable visual intents / material roles;
+- mark character such as soft, hard, broken, bristly, directional, granular, glazing or textural;
+- useful scale range;
+- edge behavior and buildup behavior;
+- whether rotation/orientation is visually meaningful;
+- recommended pressure policy;
+- known caveats / unsuitable uses;
+- exact probe preview/evidence identity and pack revision used for the classification.
+
+Do not require exhaustive probing of thousands of presets. Use bounded candidate selection and stop
+once the active scene has enough role coverage. Cache profiles by **pack revision + preset identity +
+effective host state**, with explicit invalidation when those change.
+
+**Acceptance**
+
+- at least one deliberately misleading-name fixture proves classification follows visual probe
+  evidence rather than the preset name;
+- the resulting durable `brush_preflight` can be generated from the profile without the model manually
+  retyping internal enum tables or inventing settings;
+- a scene can select a broad-form, atmosphere/soft, broken/texture and detail/edge role from the pack
+  when the actual probes support those roles, or explicitly report missing role coverage when they do
+  not.
+
+### P0-E.3 — Profile stamp/motif brushes as a reusable visual vocabulary
+
+When probes reveal a discrete stamp-like footprint, classify it separately from ordinary media
+brushes. Store a **stamp/motif profile** rather than pretending it is just another texture brush.
+
+Record, where the evidence supports it:
+
+- stable preset/pack identity;
+- motif category/semantic description;
+- canonical footprint bounds and orientation;
+- useful size/scale range;
+- whether horizontal/vertical mirroring is visually admissible;
+- whether rotation is meaningful or restricted;
+- intended use: foreground/support/background/detail/ornament/texture;
+- repetition class: `intentional_regular`, `organic_instances`, or explicitly unclassified;
+- whether raw placement is acceptable as a finished element or normally requires
+  overlap/erase/overpaint/integration;
+- representative probe evidence identity.
+
+Do not fabricate semantic labels from filenames alone. If the visual probe is ambiguous, keep the
+motif unclassified/advisory rather than assigning a false category.
+
+### P0-E.4 — Add a bounded per-instance stamp placement primitive
+
+`photoshop_paint_dabs` is not sufficient for a serious stamp pack because angle/flip are global brush
+state. Add a canonical stamp-instance operation (name may differ, e.g.
+`photoshop_paint_stamp_instances`) whose individual instances can carry at least:
+
+```text
+instance_id
+x / y
+size or scale
+angle
+flip_x / flip_y
+opacity
+color when the brush supports colorized placement
+```
+
+Implementation constraints:
+
+- target a stable raster `layer_id` and preserve/restore the prior active layer/brush state where the
+  existing painting tools promise that behavior;
+- execute a bounded list as **one semantic placement pass**, not one model-visible Guard call per
+  stamp;
+- internal partial execution must report completed / failed-or-uncertain / not-started instances or
+  an equivalent exact partial receipt, capture reconciliation evidence, and **never replay** already
+  dispatched stamps after uncertainty;
+- return exact instance ids and source-document bounds sufficient to populate `motif_instances` and
+  later crop/review provenance;
+- keep the operation bounded; thousands of decorative placements must be chunked into coherent
+  semantic passes rather than one unreviewable mega-call.
+
+**Acceptance**
+
+- one call places heterogeneous rotations/scales/flips of the same preset without model-visible
+  setter choreography between instances;
+- a simulated mid-batch failure proves no replay and preserves exact completed/not-started identity;
+- instance bounds survive into Guard review metadata.
+
+### P0-E.5 — Prevent visible copy-paste while preserving legitimate pattern use
+
+Stamp support must not recreate the already observed failure mode where repeated birds/figures/trees
+look mechanically copied. Transform jitter alone is **not** enough to qualify repeated organic motifs
+as artistically varied.
+
+Reuse and extend the existing `pattern_intent` / `motif_instances` / `mechanical-patterning` path:
+
+- `intentional_regular` patterns such as ornament, tiles or deliberate decorative rhythm remain
+  allowed when explicitly intended;
+- repeated `organic_instances` remain reviewable even after translation, rotation, reflection,
+  uniform scale, color/opacity changes or small jitter;
+- stamp-instance execution must emit the metadata needed by the current anti-copy detector rather
+  than becoming invisible to it;
+- for organic or hero-visible motifs, the Planner/Painter should prefer multiple source stamps,
+  meaningful overlap/occlusion/cropping, selective erase, overpaint or structural redraw when needed;
+- one stamp placement is not automatically a finished object. For hero/foreground organic elements,
+  raw stamp-only completion should require an explicit user/style contract that actually calls for
+  that collage/stamp language;
+- do not introduce a universal numeric "maximum repetitions" aesthetic rule. Use motif class,
+  visibility/importance and evidence of near-copy repetition to decide when intervention is needed.
+
+**Acceptance**
+
+- a bird/figure/tree fixture using one stamp with only transform/parameter jitter still triggers the
+  appropriate anti-copy review;
+- a deliberately regular ornament/tile fixture remains exempt when declared intentional;
+- a mixed-source/overpainted organic fixture can pass without being forced into pointless variation;
+- the detector reasons from actual instances/evidence, not from how many tool calls occurred.
+
+### P0-E.6 — Integrate brush/stamp packs into scene planning, not as asset dumping
+
+The target workflow is a **coherent image**, not a contact sheet. Art Director/Painter must use the
+pack as a visual vocabulary inside the existing composition → form → light → materials → detail →
+atmosphere process.
+
+Required behavior:
+
+- plan the scene independently of the available stamps first: establish composition, focal hierarchy,
+  major masses, foreground/midground/background and lighting intent before decorative filling;
+- map brush/stamp roles onto those scene tasks only where they are causally useful;
+- use stamps readily for foliage, clouds, rocks, distant architecture/crowds, ornament, texture breakup
+  and similar supporting motifs when the pack supports them;
+- do not let a convenient humanoid/creature/object stamp replace the structural drawing of a hero
+  subject, face, pose, gesture or key silhouette unless the user explicitly requests a collage/stamp
+  aesthetic;
+- after motif placement, integrate stamps through overlap, erase/masks, paint-over, value/color/light
+  unification, atmospheric depth and edge hierarchy as needed so the result reads as one scene;
+- if the user says **use exactly this brush pack for painting marks**, every brush-based mutation must
+  select a preset bound to that pack profile. Non-brush Photoshop operations such as masks,
+  transforms/adjustments or compositing may still be used when artistically justified; do not silently
+  fall back to a generic unrelated brush because a role is missing.
+
+### P0-E.7 — Gate the next real-art test on an end-to-end brush/stamp-pack workflow
+
+Before declaring this feature ready, run one representative real-Photoshop test in a fresh chat with
+a user-supplied pack/folder and a scene brief that genuinely requires:
+
+- a readable foreground/primary subject or focal element;
+- a developed environment/background rather than a blank or token backdrop;
+- spatial depth / foreground-midground-background relationship;
+- lighting or atmosphere;
+- material/texture/detail refinement beyond block-in;
+- deliberate use of the supplied pack rather than generic default-brush substitution.
+
+The run must exercise:
+
+1. pack ingestion/attribution;
+2. bounded visual profiling;
+3. durable brush/stamp role map;
+4. at least one semantic pass using a media-brush role when the pack contains one;
+5. stamp-instance placement when the pack contains stamp/motif brushes;
+6. anti-copy review for any repeated organic motifs;
+7. integration/overpaint or equivalent unification pass where raw stamps would remain visibly pasted;
+8. whole-frame and multiscale review through the canonical Guard path;
+9. final exact-frame comparison against the original scene brief.
+
+**Repository acceptance before the live test**
+
+- unit/integration tests cover pack manifest identity, inventory attribution, profile cache invalidation,
+  evidence-based brush/stamp classification, per-instance stamp transforms, partial execution/no-replay,
+  anti-copy metadata propagation and pack-only brush enforcement;
+- `npm run verify:canonical` passes;
+- roadmap/CHANGELOG and the acceptance matrix identify which parts are repo-pass versus live/human
+  evidence rather than calling visual quality proven from mocks.
+
+**Live/human acceptance for the next test**
+
+- no manual per-stroke preset selection by the user after supplying the pack;
+- the final work visibly contains a composed scene with background, subject/focal structure,
+  lighting/atmosphere and refinement, not merely stamped assets on a canvas;
+- the user can identify that the supplied brush/stamp vocabulary materially shaped the image;
+- obvious same-stamp copy/paste repetition in organic/hero-visible content is a failure even when
+  rotation/scale/color differ;
+- tool success, preset count or detail count alone never proves that the artwork succeeded.
 
 ---
 
@@ -794,8 +1071,9 @@ Never repair binding by repainting or replaying a successful mutation.
 
 ### Tasks 8 / 8a — Human adjudication of the isolated critic
 
-**Priority:** highest remaining painting-quality task after route integrity, Guard correctness and
-accepted-state recovery.
+**Priority:** after the immediate P0-E brush/stamp-pack implementation and the remaining P0-C
+semantic-pass work in the priority order above. This remains the next perceptual-authority gate, not
+a reason to delay the pack workflow required for the next real-art test.
 
 The machine infrastructure is already present. The remaining work is real human reference
 judgment, not more critic plumbing.
