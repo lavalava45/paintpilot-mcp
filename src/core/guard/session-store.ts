@@ -670,10 +670,24 @@ function normalizeTrendSignal(value) {
   const signal = value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
   return signal.length >= 3 ? signal.slice(0, 80) : undefined;
 }
-function trendFindingRegions(record) {
+function findingTrendSignals(finding) {
+  if (!Array.isArray(finding?.trend_signals)) return [];
+  return [...new Set(finding.trend_signals.map(normalizeTrendSignal).filter(Boolean))];
+}
+function findingSupportsTrendSignal(finding, signal) {
+  const explicit = findingTrendSignals(finding);
+  if (explicit.includes(signal)) return true;
+  const kind = textOrUndefined(finding?.kind)?.toLowerCase();
+  if (!kind) return false;
+  if (normalizeTrendSignal(kind) === signal) return true;
+  return signal === 'primitive-footprint-repeating'
+    && ['repeated_dab_pattern', 'mechanical_patterning'].includes(kind);
+}
+function trendFindingRegions(record, signal) {
   const regions = [];
   for (const finding of record?.verdict?.review_findings ?? []) {
     if (!finding || typeof finding !== 'object' || Array.isArray(finding) || finding.region_bounds === undefined) continue;
+    if (!findingSupportsTrendSignal(finding, signal)) continue;
     try {
       regions.push(normalizeRegion(finding.region_bounds));
     } catch {
@@ -681,6 +695,21 @@ function trendFindingRegions(record) {
     }
   }
   return regions;
+}
+function operationTrendRegion(record) {
+  const micro = record?.tool === 'photoshop_execute_visual_microplan'
+    && record?.args && typeof record.args === 'object' && !Array.isArray(record.args)
+    ? record.args
+    : {};
+  for (const candidate of [record?.region_bounds, micro.region_bounds, record?.preview?.focus?.region]) {
+    if (!candidate) continue;
+    try {
+      return normalizeRegion(candidate);
+    } catch {
+      // Legacy/foreign records may not carry a usable exact operation region.
+    }
+  }
+  return undefined;
 }
 function unionTrendRegions(regions) {
   if (!regions.length) return undefined;
@@ -703,8 +732,9 @@ function materiallySeparateTrendRegions(a, b) {
 }
 function trendSupportForRecord(record, signal) {
   const context = visualContext(record);
-  const reviewRegions = trendFindingRegions(record);
-  const representativeRegion = unionTrendRegions(reviewRegions);
+  const reviewRegions = trendFindingRegions(record, signal);
+  const operationRegion = operationTrendRegion(record);
+  const representativeRegion = unionTrendRegions(reviewRegions) ?? operationRegion;
   return {
     operation_id: record.id,
     sequence: Number.isSafeInteger(record.sequence) ? record.sequence : 0,
@@ -719,6 +749,11 @@ function trendSupportForRecord(record, signal) {
     scale: context.scale ?? null,
     ...(representativeRegion ? { region_bounds: representativeRegion } : {}),
     review_regions: reviewRegions,
+    region_source: reviewRegions.length
+      ? 'signal_bound_review_findings'
+      : operationRegion
+        ? 'operation_region'
+        : 'none',
     whole_frame_global: signal === 'global-readability-degraded'
       && record.verdict?.global_readability === 'degraded',
   };
@@ -2664,6 +2699,7 @@ export class SessionStore {
       ...(support.named_region ? { named_region: support.named_region } : {}),
       ...(support.scale ? { scale: support.scale } : {}),
       ...(support.region_bounds ? { region_bounds: support.region_bounds } : {}),
+      region_source: support.region_source,
     }));
     const supportingEvidence = supports.map(support => ({
       operation_id: support.operation_id,
@@ -4106,11 +4142,19 @@ export class SessionStore {
       if (level !== 'composition' && !requestedRegion) {
         throw new Error(`review_findings[${index}] kind=${kind} requires exact source-document region_bounds`);
       }
+      if (finding.trend_signals !== undefined && !Array.isArray(finding.trend_signals)) {
+        throw new Error(`review_findings[${index}].trend_signals must be an array when supplied`);
+      }
+      const trendSignals = findingTrendSignals(finding);
+      if (Array.isArray(finding.trend_signals) && finding.trend_signals.some(signal => !normalizeTrendSignal(signal))) {
+        throw new Error(`review_findings[${index}].trend_signals must contain only non-empty stable signal strings`);
+      }
       return {
         kind,
         level,
         severity,
         ...(requestedRegion ? { requested_region: requestedRegion } : {}),
+        ...(trendSignals.length ? { trend_signals: trendSignals } : {}),
         source_index: index,
       };
     });
@@ -4221,6 +4265,11 @@ export class SessionStore {
       if (severityRank[requirement.severity] < severityRank[current.severity]) {
         current.severity = requirement.severity;
       }
+      const combinedTrendSignals = [...new Set([
+        ...(current.trend_signals ?? []),
+        ...(requirement.trend_signals ?? []),
+      ])];
+      if (combinedTrendSignals.length) current.trend_signals = combinedTrendSignals;
       current.source_index = Math.min(current.source_index, requirement.source_index);
     }
     for (const requirement of merged) {
@@ -4935,6 +4984,7 @@ export class SessionStore {
     if (!Array.isArray(input.trend_signals) || input.trend_signals.some(x => !normalizeTrendSignal(x))) {
       throw new Error('trend_signals must be an array of non-empty stable signal strings');
     }
+    this.normalizeReviewFindings(input.review_findings ?? []);
     if (input.planner_interrupt_reason !== undefined) {
       const reason = textOrUndefined(input.planner_interrupt_reason)?.toLowerCase();
       if (!ART_DIRECTOR_INTERRUPT_REASONS.has(reason)) {

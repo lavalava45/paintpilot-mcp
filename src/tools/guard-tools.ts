@@ -338,6 +338,11 @@ function compactObservationSchema(): Record<string, unknown> {
               additionalProperties: false,
             },
             severity: { type: 'string', enum: ['must-fix', 'should-fix', 'optional'] },
+            trend_signals: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Optional explicit binding from this spatial finding to one or more cumulative trend signals. Unrelated findings are never borrowed as spatial evidence for another signal.',
+            },
           },
           required: ['kind'],
           additionalProperties: false,

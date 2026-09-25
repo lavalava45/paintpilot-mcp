@@ -207,6 +207,9 @@ function seedTrendSignal(
   sequence: number,
   options: {
     bounds?: { left: number; top: number; right: number; bottom: number };
+    findingBounds?: { left: number; top: number; right: number; bottom: number };
+    findingKind?: string;
+    findingTrendSignals?: string[];
     region?: string;
     scale?: 'global' | 'medium' | 'small';
     signal?: string;
@@ -235,6 +238,7 @@ function seedTrendSignal(
     failed: false,
     region: options.region ?? 'face',
     scale: options.scale ?? 'medium',
+    ...(options.bounds ? { region_bounds: options.bounds } : {}),
     preview: {
       sha256,
       materialized_path: framePath,
@@ -251,10 +255,11 @@ function seedTrendSignal(
       trend_signals: options.signal ? [options.signal] : [],
       primitive_footprint: options.primitiveFootprint ?? 'suspect',
       global_readability: options.globalReadability ?? 'stable',
-      review_findings: options.bounds ? [{
-        kind: 'object_readability',
+      review_findings: (options.findingBounds ?? options.bounds) ? [{
+        kind: options.findingKind ?? 'object_readability',
         severity: 'must-fix',
-        region_bounds: options.bounds,
+        region_bounds: options.findingBounds ?? options.bounds,
+        ...(options.findingTrendSignals ? { trend_signals: options.findingTrendSignals } : {}),
       }] : [],
       at: new Date(sequence * 1000 + 2).toISOString(),
     },
@@ -333,6 +338,66 @@ describe('Art Director / Painter controller contract', () => {
       region: 'multiple materially separate regions',
       promotion_reason: 'materially_separate_regions',
       source_operations: ['trend-left', 'trend-right'],
+    });
+  });
+
+  it('does not use unrelated distant review findings as spatial evidence for primitive-footprint trend scope', () => {
+    const s = store();
+    seedTrendSignal(s, 'trend-face-a', 1, {
+      bounds: { left: 100, top: 100, right: 280, bottom: 320 },
+      findingBounds: { left: 20, top: 40, right: 140, bottom: 180 },
+      findingKind: 'proportion',
+      region: 'face',
+    });
+    seedTrendSignal(s, 'trend-face-b', 2, {
+      bounds: { left: 120, top: 115, right: 300, bottom: 335 },
+      findingBounds: { left: 780, top: 520, right: 920, bottom: 700 },
+      findingKind: 'proportion',
+      region: 'face',
+    });
+
+    const trend = (s as any).cumulativeTrendState(42);
+    const promoted = (s as any).promoteCumulativeTrendProblem(
+      42,
+      s.paintingState().documents['42'] ?? {},
+      trend
+    );
+    expect(promoted.visual_problems['cumulative-trend-primitive-footprint-repeating']).toMatchObject({
+      scale: 'medium',
+      region: 'face',
+      promotion_reason: 'localized_repeated_evidence',
+      source_operations: ['trend-face-a', 'trend-face-b'],
+    });
+  });
+
+  it('allows explicitly signal-bound distant findings to support global trend promotion', () => {
+    const s = store();
+    seedTrendSignal(s, 'trend-bound-a', 1, {
+      bounds: { left: 100, top: 100, right: 280, bottom: 320 },
+      findingBounds: { left: 20, top: 40, right: 140, bottom: 180 },
+      findingKind: 'object_readability',
+      findingTrendSignals: ['primitive-footprint-repeating'],
+      region: 'face',
+    });
+    seedTrendSignal(s, 'trend-bound-b', 2, {
+      bounds: { left: 120, top: 115, right: 300, bottom: 335 },
+      findingBounds: { left: 780, top: 520, right: 920, bottom: 700 },
+      findingKind: 'object_readability',
+      findingTrendSignals: ['primitive-footprint-repeating'],
+      region: 'face',
+    });
+
+    const trend = (s as any).cumulativeTrendState(42);
+    const promoted = (s as any).promoteCumulativeTrendProblem(
+      42,
+      s.paintingState().documents['42'] ?? {},
+      trend
+    );
+    expect(promoted.visual_problems['cumulative-trend-primitive-footprint-repeating']).toMatchObject({
+      scale: 'global',
+      region: 'multiple materially separate regions',
+      promotion_reason: 'materially_separate_regions',
+      source_operations: ['trend-bound-a', 'trend-bound-b'],
     });
   });
 

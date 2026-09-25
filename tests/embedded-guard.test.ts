@@ -1114,6 +1114,10 @@ describe('embedded Photoshop Guard', () => {
       preservation_facts: expect.any(Object),
       independent_region: expect.any(Object),
     });
+    expect(
+      schema('photoshop_guard_cycle_auto')
+        .properties.previous_observation.properties.review_findings.items.properties.trend_signals
+    ).toMatchObject({ type: 'array' });
     const artSchema = schema('photoshop_guard_art_director');
     expect(artSchema.properties.directive.properties.composition_freedom.enum).toEqual(['fixed', 'constrained', 'free']);
     expect(artSchema.properties.directive.properties.composition_exploration.properties.mode).toBeUndefined();
