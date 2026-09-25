@@ -670,6 +670,101 @@ function normalizeTrendSignal(value) {
   const signal = value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
   return signal.length >= 3 ? signal.slice(0, 80) : undefined;
 }
+function trendFindingRegions(record) {
+  const regions = [];
+  for (const finding of record?.verdict?.review_findings ?? []) {
+    if (!finding || typeof finding !== 'object' || Array.isArray(finding) || finding.region_bounds === undefined) continue;
+    try {
+      regions.push(normalizeRegion(finding.region_bounds));
+    } catch {
+      // Old/foreign verdict history must not make trend projection fail.
+    }
+  }
+  return regions;
+}
+function unionTrendRegions(regions) {
+  if (!regions.length) return undefined;
+  return regions.slice(1).reduce((union, region) => ({
+    left: Math.min(union.left, region.left),
+    top: Math.min(union.top, region.top),
+    right: Math.max(union.right, region.right),
+    bottom: Math.max(union.bottom, region.bottom),
+  }), { ...regions[0] });
+}
+function materiallySeparateTrendRegions(a, b) {
+  if (!a || !b || overlapRatioAgainstSmaller(a, b) >= 0.1) return false;
+  const horizontalGap = Math.max(0, Math.max(a.left, b.left) - Math.min(a.right, b.right));
+  const verticalGap = Math.max(0, Math.max(a.top, b.top) - Math.min(a.bottom, b.bottom));
+  const gap = Math.hypot(horizontalGap, verticalGap);
+  const maxDimensionA = Math.max(a.right - a.left, a.bottom - a.top);
+  const maxDimensionB = Math.max(b.right - b.left, b.bottom - b.top);
+  const localScale = Math.max(1, Math.min(maxDimensionA, maxDimensionB));
+  return gap > localScale * 0.5;
+}
+function trendSupportForRecord(record, signal) {
+  const context = visualContext(record);
+  const reviewRegions = trendFindingRegions(record);
+  const representativeRegion = unionTrendRegions(reviewRegions);
+  return {
+    operation_id: record.id,
+    sequence: Number.isSafeInteger(record.sequence) ? record.sequence : 0,
+    verdict_at: record.verdict?.at ?? null,
+    evidence_identity: fingerprint({
+      operation_id: record.id,
+      signal,
+      verdict_at: record.verdict?.at ?? null,
+      preview_sha256: record.preview?.sha256 ?? null,
+    }),
+    named_region: context.region ?? null,
+    scale: context.scale ?? null,
+    ...(representativeRegion ? { region_bounds: representativeRegion } : {}),
+    review_regions: reviewRegions,
+    whole_frame_global: signal === 'global-readability-degraded'
+      && record.verdict?.global_readability === 'degraded',
+  };
+}
+function localizedTrendScale(supports) {
+  const scales = supports
+    .map(support => normalizeScale(support.scale))
+    .filter(scale => scale && scale !== 'global');
+  if (scales.includes('medium')) return 'medium';
+  if (scales.length) return 'small';
+  return 'medium';
+}
+function trendScopeFromSupports(supports) {
+  if (supports.some(support => support.whole_frame_global)) {
+    return {
+      scale: 'global',
+      region: 'whole image',
+      promotion_reason: 'whole_frame_global_evidence',
+    };
+  }
+  for (let i = 0; i < supports.length; i++) {
+    for (let j = i + 1; j < supports.length; j++) {
+      if (
+        supports[i].operation_id !== supports[j].operation_id
+        && materiallySeparateTrendRegions(supports[i].region_bounds, supports[j].region_bounds)
+      ) {
+        return {
+          scale: 'global',
+          region: 'multiple materially separate regions',
+          promotion_reason: 'materially_separate_regions',
+        };
+      }
+    }
+  }
+  const namedRegions = [...new Set(supports.map(support => textOrUndefined(support.named_region)).filter(Boolean))];
+  return {
+    scale: localizedTrendScale(supports),
+    region: namedRegions.length === 1 ? namedRegions[0] : 'localized repeated region',
+    promotion_reason: 'localized_repeated_evidence',
+  };
+}
+function trendRepeatLimit(signal, supports) {
+  return signal === 'global-readability-degraded' && supports.some(support => support.whole_frame_global)
+    ? 1
+    : TREND_SIGNAL_REPEAT_LIMIT;
+}
 function ageSeconds(value, nowMs = Date.now()) {
   const parsed = Date.parse(value ?? '');
   if (!Number.isFinite(parsed)) return null;
@@ -2433,7 +2528,7 @@ export class SessionStore {
     if (!Number.isSafeInteger(documentId) || documentId <= 0) throw new Error('priority state requires a positive document_id');
     if (!Array.isArray(input?.problems)) throw new Error('priority state requires problems[]');
     const currentStage = textOrUndefined(input.current_stage);
-    const normalized = {};
+    const requested = {};
     for (const problem of input.problems) {
       const problemId = textOrUndefined(problem?.problem_id);
       const scale = normalizeScale(problem?.scale);
@@ -2441,21 +2536,53 @@ export class SessionStore {
       if (!problemId || !scale || !severity) throw new Error('Each priority problem requires problem_id, scale and severity');
       const status = problem.status ?? 'open';
       if (!['open', 'resolved'].includes(status)) throw new Error('priority problem status must be open|resolved');
-      normalized[problemId] = {
+      requested[problemId] = {
         problem_id: problemId, scale, severity, status,
         ...(textOrUndefined(problem.region) ? { region: problem.region.trim() } : {}),
         ...(textOrUndefined(problem.hypothesis) ? { hypothesis: problem.hypothesis.trim() } : {}),
       };
     }
-    const nextMustFix = this.largestOpenMustFix(normalized);
-    return this.updatePaintingState(documentId, current => ({
-      ...current,
-      ...(currentStage ? { current_stage: currentStage } : {}),
-      visual_problems: normalized,
-      active_problem: nextMustFix ?? current.active_problem,
-      ...(nextMustFix?.scale ? { active_scale: nextMustFix.scale } : {}),
-      priority_review_required: false,
-    }));
+    const latestClassifiedSequence = Math.max(
+      0,
+      ...this.currentDocumentRecords(documentId, this.records())
+        .filter(record => record.visual && record.verdict)
+        .map(record => Number.isSafeInteger(record.sequence) ? record.sequence : 0)
+    );
+    return this.updatePaintingState(documentId, current => {
+      const normalized = {};
+      for (const [problemId, problem] of Object.entries(requested)) {
+        const prior = current.visual_problems?.[problemId];
+        const merged = { ...(prior ?? {}), ...problem };
+        const isTrend = problemId.startsWith('cumulative-trend-');
+        const reclassified = !!prior && (
+          prior.status !== merged.status
+          || normalizeScale(prior.scale) !== normalizeScale(merged.scale)
+          || normalizeSeverity(prior.severity) !== normalizeSeverity(merged.severity)
+          || (textOrUndefined(prior.region) ?? null) !== (textOrUndefined(merged.region) ?? null)
+        );
+        if (isTrend && reclassified) {
+          merged.resolution_epoch = Number(prior.resolution_epoch ?? 0) + 1;
+          merged.resolution_cutoff_sequence = latestClassifiedSequence;
+          merged.resolution_at = new Date().toISOString();
+          merged.resolution_reason = merged.status === 'resolved' ? 'resolved' : 'reclassified';
+        }
+        normalized[problemId] = merged;
+      }
+      const nextMustFix = this.largestOpenMustFix(normalized);
+      return {
+        ...current,
+        ...(currentStage ? { current_stage: currentStage } : {}),
+        visual_problems: normalized,
+        active_problem: nextMustFix ?? (
+          current.active_problem?.problem_id
+            && normalized[current.active_problem.problem_id]?.status !== 'resolved'
+            ? normalized[current.active_problem.problem_id]
+            : undefined
+        ),
+        ...(nextMustFix?.scale ? { active_scale: nextMustFix.scale } : {}),
+        priority_review_required: false,
+      };
+    });
   }
   largestOpenMustFix(problems) {
     const values = Object.values(problems ?? {}).filter(p => p?.status !== 'resolved' && p?.severity === 'must-fix' && normalizeScale(p?.scale));
@@ -2478,52 +2605,103 @@ export class SessionStore {
     const records = this.currentDocumentRecords(documentId, suppliedRecords ?? this.records())
       .filter(r => r.visual && r.verdict)
       .slice(-TREND_SIGNAL_WINDOW);
-    const counts = new Map();
+    const documentState = this.paintingState().documents?.[String(documentId)];
+    const supportsBySignal = new Map();
     for (const record of records) {
       const signals = new Set((record.verdict?.trend_signals ?? []).map(normalizeTrendSignal).filter(Boolean));
       if (record.verdict?.global_readability === 'degraded') signals.add('global-readability-degraded');
       if (record.verdict?.primitive_footprint === 'suspect') signals.add('primitive-footprint-repeating');
-      for (const signal of signals) counts.set(signal, (counts.get(signal) ?? 0) + 1);
+      for (const signal of signals) {
+        const problemId = `cumulative-trend-${signal}`.slice(0, 80);
+        const cutoff = Number(documentState?.visual_problems?.[problemId]?.resolution_cutoff_sequence ?? 0);
+        const sequence = Number.isSafeInteger(record.sequence) ? record.sequence : 0;
+        if (sequence <= cutoff) continue;
+        const supports = supportsBySignal.get(signal) ?? [];
+        supports.push(trendSupportForRecord(record, signal));
+        supportsBySignal.set(signal, supports);
+      }
     }
-    const repeated = [...counts.entries()]
-      .filter(([, count]) => count >= TREND_SIGNAL_REPEAT_LIMIT)
-      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+    const repeated = [...supportsBySignal.entries()]
+      .map(([signal, supports]) => ({
+        signal,
+        count: supports.length,
+        supports,
+        source_operations: supports.map(support => support.operation_id),
+      }))
+      .filter(item => item.count >= trendRepeatLimit(item.signal, item.supports))
+      .sort((a, b) => b.count - a.count || a.signal.localeCompare(b.signal));
     return {
       window: records.map(r => r.id),
-      repeated_signals: repeated.map(([signal, count]) => ({ signal, count })),
+      repeated_signals: repeated,
       triggered: repeated.length > 0,
     };
   }
   promoteCumulativeTrendProblem(documentId, current, trendState) {
     if (!trendState?.triggered) return current;
-    const signal = trendState.repeated_signals[0].signal;
+    const repeatedSignal = trendState.repeated_signals[0];
+    const signal = repeatedSignal.signal;
     const problemId = `cumulative-trend-${signal}`.slice(0, 80);
     const problems = { ...(current.visual_problems ?? {}) };
     const existing = problems[problemId];
+    const cutoff = Number(existing?.resolution_cutoff_sequence ?? 0);
+    const supports = (repeatedSignal.supports ?? []).filter(support =>
+      Number(support.sequence ?? 0) > cutoff
+    );
+    if (supports.length < trendRepeatLimit(signal, supports)) {
+      return {
+        ...current,
+        cumulative_trend_guard: {
+          ...trendState,
+          triggered: false,
+          suppressed_by_resolution_epoch: Number(existing?.resolution_epoch ?? 0),
+          resolution_cutoff_sequence: cutoff,
+        },
+      };
+    }
+    const scope = trendScopeFromSupports(supports);
+    const supportingRegions = supports.map(support => ({
+      operation_id: support.operation_id,
+      ...(support.named_region ? { named_region: support.named_region } : {}),
+      ...(support.scale ? { scale: support.scale } : {}),
+      ...(support.region_bounds ? { region_bounds: support.region_bounds } : {}),
+    }));
+    const supportingEvidence = supports.map(support => ({
+      operation_id: support.operation_id,
+      sequence: support.sequence,
+      signal,
+      evidence_identity: support.evidence_identity,
+    }));
     problems[problemId] = {
       ...(existing ?? {}),
       problem_id: problemId,
-      scale: 'global',
+      scale: scope.scale,
       severity: 'must-fix',
       status: 'open',
-      region: 'whole image',
-      hypothesis: `Repeated visual trend detected across recent classified passes: ${signal}. Resolve the cumulative global degradation before finer work.`,
+      region: scope.region,
+      hypothesis: `Repeated visual trend detected across classified passes: ${signal}. Resolve the evidence-supported ${scope.scale} defect before dependent finer work.`,
       trend_signal: signal,
-      trend_count: trendState.repeated_signals[0].count,
-      source_operations: trendState.window,
+      trend_count: supports.length,
+      source_operations: supports.map(support => support.operation_id),
+      supporting_regions: supportingRegions,
+      supporting_evidence: supportingEvidence,
+      promotion_reason: scope.promotion_reason,
     };
+    const nextMustFix = this.largestOpenMustFix(problems);
     return {
       ...current,
       visual_problems: problems,
-      active_problem: problems[problemId],
-      active_scale: 'global',
+      active_problem: nextMustFix ?? problems[problemId],
+      active_scale: nextMustFix?.scale ?? scope.scale,
       priority_review_required: true,
       cumulative_trend_guard: {
         triggered: true,
         problem_id: problemId,
         signal,
-        count: trendState.repeated_signals[0].count,
+        count: supports.length,
         window: trendState.window,
+        source_operations: supports.map(support => support.operation_id),
+        supporting_regions: supportingRegions,
+        promotion_reason: scope.promotion_reason,
       },
     };
   }
@@ -4926,8 +5104,14 @@ export class SessionStore {
       };
       const problems = { ...(current.visual_problems ?? {}) };
       if (context.problem_id) {
+        const priorProblem = problems[context.problem_id];
+        const problemStatus = input.target_resolved === 'yes' && input.verdict === 'improvement' && input.disposition === 'accept'
+          ? 'resolved' : 'open';
+        const resolvesCumulativeTrend = context.problem_id.startsWith('cumulative-trend-')
+          && problemStatus === 'resolved'
+          && priorProblem?.status !== 'resolved';
         problems[context.problem_id] = {
-          ...(problems[context.problem_id] ?? {}),
+          ...(priorProblem ?? {}),
           problem_id: context.problem_id,
           ...(context.region ? { region: context.region } : {}),
           ...(context.stage ? { stage: context.stage } : {}),
@@ -4944,9 +5128,14 @@ export class SessionStore {
             uncertainty: input.uncertainty,
           },
           confirmation: assessment,
-          severity: context.severity ?? problems[context.problem_id]?.severity ?? 'should-fix',
-          status: input.target_resolved === 'yes' && input.verdict === 'improvement' && input.disposition === 'accept'
-            ? 'resolved' : 'open',
+          severity: context.severity ?? priorProblem?.severity ?? 'should-fix',
+          status: problemStatus,
+          ...(resolvesCumulativeTrend ? {
+            resolution_epoch: Number(priorProblem?.resolution_epoch ?? 0) + 1,
+            resolution_cutoff_sequence: Number.isSafeInteger(record.sequence) ? record.sequence : 0,
+            resolution_at: record.verdict.at,
+            resolution_reason: 'resolved',
+          } : {}),
         };
       }
       const nextMustFix = this.largestOpenMustFix(problems);

@@ -201,7 +201,226 @@ function acceptedVerdict() {
   };
 }
 
+function seedTrendSignal(
+  s: SessionStore,
+  id: string,
+  sequence: number,
+  options: {
+    bounds?: { left: number; top: number; right: number; bottom: number };
+    region?: string;
+    scale?: 'global' | 'medium' | 'small';
+    signal?: string;
+    primitiveFootprint?: 'none' | 'acceptable' | 'suspect' | 'unknown';
+    globalReadability?: 'improved' | 'stable' | 'degraded' | 'unknown';
+  } = {}
+) {
+  const frameBytes = Buffer.from('trend-frame:' + id);
+  const framePath = path.join(s.directory, 'trend-frames', id + '.jpg');
+  mkdirSync(path.dirname(framePath), { recursive: true });
+  writeFileSync(framePath, frameBytes);
+  const sha256 = createHash('sha256').update(frameBytes).digest('hex');
+  s.write({
+    id,
+    tool: 'photoshop_set_layer_opacity',
+    args: { document_id: 42, opacity: 50 },
+    summary: 'Trend fixture ' + id,
+    purpose: 'Provide cumulative visual trend provenance',
+    hash: 'trend-hash-' + id,
+    sequence,
+    created_at: new Date(sequence * 1000).toISOString(),
+    completed_at: new Date(sequence * 1000 + 1).toISOString(),
+    phase: 'completed',
+    execution: 'completed',
+    visual: true,
+    failed: false,
+    region: options.region ?? 'face',
+    scale: options.scale ?? 'medium',
+    preview: {
+      sha256,
+      materialized_path: framePath,
+      document_id: 42,
+      width: 1000,
+      height: 800,
+      canvas_width: 1000,
+      canvas_height: 800,
+    },
+    verdict: {
+      verdict: 'neutral',
+      disposition: 'correct',
+      target_resolved: 'no',
+      trend_signals: options.signal ? [options.signal] : [],
+      primitive_footprint: options.primitiveFootprint ?? 'suspect',
+      global_readability: options.globalReadability ?? 'stable',
+      review_findings: options.bounds ? [{
+        kind: 'object_readability',
+        severity: 'must-fix',
+        region_bounds: options.bounds,
+      }] : [],
+      at: new Date(sequence * 1000 + 2).toISOString(),
+    },
+  });
+}
+
 describe('Art Director / Painter controller contract', () => {
+  it('keeps a repeated localized cumulative trend medium-scoped and allows unrelated medium work', () => {
+    const s = store();
+    seedTrendSignal(s, 'trend-local-1', 1, {
+      bounds: { left: 100, top: 100, right: 260, bottom: 300 },
+      region: 'face',
+    });
+    seedTrendSignal(s, 'trend-local-2', 2, {
+      bounds: { left: 120, top: 120, right: 280, bottom: 315 },
+      region: 'face',
+    });
+
+    const trend = (s as any).cumulativeTrendState(42);
+    expect(trend.triggered).toBe(true);
+    const promoted = (s as any).promoteCumulativeTrendProblem(
+      42,
+      s.paintingState().documents['42'] ?? {},
+      trend
+    );
+    s.updatePaintingState(42, () => promoted);
+
+    const problem = promoted.visual_problems['cumulative-trend-primitive-footprint-repeating'];
+    expect(problem).toMatchObject({
+      scale: 'medium',
+      severity: 'must-fix',
+      status: 'open',
+      promotion_reason: 'localized_repeated_evidence',
+      source_operations: ['trend-local-1', 'trend-local-2'],
+    });
+    expect(problem.supporting_regions).toHaveLength(2);
+    expect(promoted.active_problem.problem_id).toBe(problem.problem_id);
+    expect((s as any).largestOpenMustFix(promoted.visual_problems)).toMatchObject({
+      problem_id: problem.problem_id,
+      scale: 'medium',
+    });
+    expect((s as any).priorityGate(42, painterRequest({
+      id: 'unrelated-medium',
+      args: {
+        planner_directive_id: 'face-focus',
+        planner_task_id: 'shadow-side',
+        painter_scope: 'medium',
+        change_domains: ['local-tone'],
+        stage: 'FORM_AND_LIGHT',
+        scale: 'medium',
+        region: 'background',
+        problem_id: 'background-tone',
+      },
+    }))).toBeNull();
+  });
+
+  it('promotes a repeated cumulative trend to global only when source regions are materially separate', () => {
+    const s = store();
+    seedTrendSignal(s, 'trend-left', 1, {
+      bounds: { left: 50, top: 100, right: 180, bottom: 260 },
+      region: 'left-face',
+    });
+    seedTrendSignal(s, 'trend-right', 2, {
+      bounds: { left: 760, top: 480, right: 900, bottom: 660 },
+      region: 'lower-right',
+    });
+
+    const trend = (s as any).cumulativeTrendState(42);
+    const promoted = (s as any).promoteCumulativeTrendProblem(
+      42,
+      s.paintingState().documents['42'] ?? {},
+      trend
+    );
+    expect(promoted.visual_problems['cumulative-trend-primitive-footprint-repeating']).toMatchObject({
+      scale: 'global',
+      region: 'multiple materially separate regions',
+      promotion_reason: 'materially_separate_regions',
+      source_operations: ['trend-left', 'trend-right'],
+    });
+  });
+
+  it('allows explicit whole-frame degradation evidence to create a global trend immediately', () => {
+    const s = store();
+    seedTrendSignal(s, 'trend-global', 1, {
+      region: 'whole image',
+      scale: 'global',
+      primitiveFootprint: 'acceptable',
+      globalReadability: 'degraded',
+    });
+
+    const trend = (s as any).cumulativeTrendState(42);
+    expect(trend.triggered).toBe(true);
+    const promoted = (s as any).promoteCumulativeTrendProblem(
+      42,
+      s.paintingState().documents['42'] ?? {},
+      trend
+    );
+    expect(promoted.visual_problems['cumulative-trend-global-readability-degraded']).toMatchObject({
+      scale: 'global',
+      region: 'whole image',
+      promotion_reason: 'whole_frame_global_evidence',
+      source_operations: ['trend-global'],
+    });
+  });
+
+  it('does not resurrect a resolved trend from pre-resolution evidence and reopens only from fresh evidence', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'planner-painter-trend-resolution-'));
+    dirs.push(dir);
+    const s = storeAt(dir);
+    seedTrendSignal(s, 'trend-old-1', 1, {
+      bounds: { left: 100, top: 100, right: 250, bottom: 300 },
+    });
+    seedTrendSignal(s, 'trend-old-2', 2, {
+      bounds: { left: 120, top: 110, right: 270, bottom: 310 },
+    });
+    const initialTrend = (s as any).cumulativeTrendState(42);
+    const initialPromoted = (s as any).promoteCumulativeTrendProblem(
+      42,
+      s.paintingState().documents['42'] ?? {},
+      initialTrend
+    );
+    s.updatePaintingState(42, () => initialPromoted);
+
+    s.setPriorityState({
+      document_id: 42,
+      problems: [{
+        problem_id: 'cumulative-trend-primitive-footprint-repeating',
+        scale: 'medium',
+        severity: 'must-fix',
+        status: 'resolved',
+        region: 'face',
+      }],
+    });
+
+    const restarted = storeAt(dir);
+    const resolvedProblem = restarted.paintingState().documents['42'].visual_problems['cumulative-trend-primitive-footprint-repeating'];
+    expect(resolvedProblem.status).toBe('resolved');
+    expect(resolvedProblem.resolution_epoch).toBe(1);
+    expect(resolvedProblem.resolution_cutoff_sequence).toBe(2);
+    const resumed = restarted.resume(42) as any;
+    expect(resumed.document.active_problem).toBeNull();
+    expect(resumed.document.largest_open_must_fix).toBeNull();
+    expect((restarted as any).cumulativeTrendState(42).triggered).toBe(false);
+
+    seedTrendSignal(restarted, 'trend-new-1', 3, {
+      bounds: { left: 130, top: 120, right: 275, bottom: 315 },
+    });
+    expect((restarted as any).cumulativeTrendState(42).triggered).toBe(false);
+
+    seedTrendSignal(restarted, 'trend-new-2', 4, {
+      bounds: { left: 140, top: 125, right: 285, bottom: 320 },
+    });
+    const freshTrend = (restarted as any).cumulativeTrendState(42);
+    expect(freshTrend.triggered).toBe(true);
+    const reopened = (restarted as any).promoteCumulativeTrendProblem(
+      42,
+      restarted.paintingState().documents['42'],
+      freshTrend
+    );
+    expect(reopened.visual_problems['cumulative-trend-primitive-footprint-repeating']).toMatchObject({
+      status: 'open',
+      resolution_epoch: 1,
+      source_operations: ['trend-new-1', 'trend-new-2'],
+    });
+  });
+
   it('upgrades simple_graphic to nontrivial_painting in place only after stronger obligations are present', () => {
     const s = store();
     s.setArtRunState({
