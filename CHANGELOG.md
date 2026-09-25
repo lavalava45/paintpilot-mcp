@@ -97,6 +97,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- 2026-09-26: complete **P0-E.1 brush-pack ingestion**. A supplied folder or explicit `.abr` set is
+  recursively enumerated and content-fingerprinted into a durable `brush_pack_id`; per-asset SHA-256,
+  relative path and byte size are persisted independently of display names. The canonical
+  `photoshop_guard_brush_pack_ingest` path serializes a Guard-owned global preparation operation,
+  selects the UXP-only `brush.presets.import` primitive through `PhotoshopBackendRouter`, dispatches
+  each ABR under a durable stable UXP command id, and never cross-replays through ExtendScript after
+  UXP claim/uncertainty. Before/after installed-preset inventories are compared as exact name
+  occurrences, unchanged successful ingestion is reused without redispatch, changed source bytes form
+  a new revision, inventory drift fails closed, and a host that cannot load ABR returns deterministic
+  `brush_pack_import_unavailable` with the missing `uxp.localFileSystem+photoshop.app.open(ABR)`
+  capability rather than pretending import succeeded. The companion revision is now
+  `compact-v2-20260926-brush-pack`; catalog accounting is 147 tools / 131 non-recipe / 16 recipes.
+  Focused E.1/backend/receipt verification passes **56/56** tests; full `npm run verify:canonical`
+  passes **616/616** tests plus build/pack/lint/policy/contract/catalog/live-ledger gates. Real supplied-pack Photoshop acceptance remains part of the
+  P0-E.7 live run and is not inferred from repository fixtures.
+
 - 2026-09-25: close the follow-up P0-C.6 causal-evidence binding blocker found during independent
   post-implementation review. Cumulative trend scope no longer borrows arbitrary
   `review_findings.region_bounds` from the same verdict: spatial findings must be explicitly bound to

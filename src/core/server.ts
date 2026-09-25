@@ -48,6 +48,7 @@ import { createDataTools } from '../tools/data-tools.js';
 import { createStackTools } from '../tools/stack-tools.js';
 import { createExportTools } from '../tools/export-tools.js';
 import { createPaintingTools } from '../tools/painting-tools.js';
+import { createBrushPackTools } from '../tools/brush-pack-tools.js';
 import { createMeasurementTools } from '../tools/measurement-tools.js';
 import { createMethodPaletteTools } from '../tools/method-palette-tools.js';
 import { createValueCheckTools } from '../tools/value-check-tools.js';
@@ -178,6 +179,7 @@ export class PhotoshopMCPServer {
     this.registerToolDefinitions(createStackTools(connection));
     this.registerToolDefinitions(createExportTools(connection));
     this.registerToolDefinitions(createPaintingTools(connection));
+    this.registerToolDefinitions(createBrushPackTools(connection));
     this.registerToolDefinitions(createMeasurementTools(connection));
     this.registerToolDefinitions(createRecipeTools(connection));
     this.registerToolDefinitions(createMethodPaletteTools(this.toolRegistry));

@@ -162,35 +162,6 @@ Do **not** rebuild the painting lane or brush contract from zero. Current implem
 The missing work is **pack ingestion, evidence-based profiling, stamp-instance execution and
 scene-level integration**, not another brush subsystem.
 
-### P0-E.1 — Make a supplied brush folder/ABR pack a first-class canonical input
-
-Add a canonical pack-ingestion path rather than assuming the brushes were already installed manually.
-
-Implementation requirements:
-
-- accept a user-supplied folder or explicit brush-pack file set and enumerate supported brush assets
-  deterministically; nested folders must not silently disappear;
-- compute a durable `brush_pack_id` / manifest fingerprint from the supplied source assets and record
-  filenames, sizes/hashes and ingestion time without depending on display names alone;
-- add a canonical Photoshop-facing import/load operation through the existing backend router if the
-  installed Photoshop/UXP surface supports it; preserve UXP-first/no-replay semantics;
-- compare preset inventory before/after ingestion and bind newly available presets to that pack
-  manifest instead of guessing by name;
-- repeated ingestion of the same unchanged pack must be idempotent and must not duplicate presets or
-  silently remap a profile to a different pack revision;
-- if the actual Photoshop host cannot programmatically import the supplied pack format, return a
-  deterministic `brush_pack_import_unavailable` capability result with the exact missing host
-  capability. Do not pretend the folder was loaded. A one-time user/UI fallback may be documented,
-  but the production path remains fail-closed until post-install inventory proves the presets exist.
-
-**Acceptance**
-
-- fixture/test coverage for unchanged re-ingestion, changed pack revision, nested assets and
-  before/after inventory attribution;
-- the next live test can start from the supplied pack/folder and end with a durable pack manifest plus
-  exact installed-preset identities, without the model inventing preset names;
-- no ImageGen or alternate rendering engine is introduced as an ingestion fallback.
-
 ### P0-E.2 — Evidence-based brush-pack profiling, not name-based guessing
 
 For unknown painting/media brushes, build a bounded **probe sheet** and classify actual Photoshop

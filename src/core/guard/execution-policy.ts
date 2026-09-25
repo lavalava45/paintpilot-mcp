@@ -42,6 +42,7 @@ const PREPARATION_ONLY_TOOLS = new Set([
   'photoshop_feather_selection',
   'photoshop_invert_selection',
   'photoshop_open_image',
+  'photoshop_ingest_brush_pack',
   'photoshop_select_all',
   'photoshop_select_brush_preset',
   'photoshop_select_ellipse',

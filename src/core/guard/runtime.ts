@@ -611,6 +611,19 @@ export class EmbeddedGuardRuntime {
     return normalizedAnchorRestoreSnapshot(documentId, stateResult, layersResult, selectionResult);
   }
 
+  async brushPackIngest(input: Record<string, unknown>): Promise<Record<string, unknown>> {
+    let releaseExecution: (() => void) | undefined;
+    try {
+      releaseExecution = this.executionLease.acquire('photoshop_guard_brush_pack_ingest');
+      const result = await this.invoke('photoshop_ingest_brush_pack', input, 120_000);
+      const body = parseTexts(result).find((item: unknown) => item && typeof item === 'object' && !Array.isArray(item));
+      if (!body) throw new Error('brush_pack_ingestion_invalid_result: no structured result body');
+      return body as Record<string, unknown>;
+    } finally {
+      releaseExecution?.();
+    }
+  }
+
   async artDirector(input: Record<string, unknown>): Promise<Record<string, unknown>> {
     const document = this.store.setArtDirectorState(input);
     const documentId = Number(input.document_id);

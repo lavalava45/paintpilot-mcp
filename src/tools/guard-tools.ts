@@ -443,6 +443,39 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
     },
     {
       tool: {
+        name: 'photoshop_guard_brush_pack_ingest',
+        description:
+          'Canonical Guard entry for a supplied Photoshop brush pack. Recursively fingerprints .abr assets, performs idempotent UXP import with durable command receipts, compares exact before/after installed-preset inventory, and returns a durable brush_pack_id plus attributed preset occurrences. This is a global Photoshop preparation operation, not a canvas mutation.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            source_path: { type: 'string', description: 'Folder or one explicit .abr file path.' },
+            source_files: {
+              type: 'array',
+              minItems: 1,
+              maxItems: 128,
+              items: { type: 'string' },
+              description: 'Explicit .abr files. Use instead of source_path.',
+            },
+          },
+          additionalProperties: false,
+        },
+      },
+      handler: async (args) => {
+        try {
+          const result = await runtime.brushPackIngest(args);
+          return json(result, result.ok === false);
+        } catch (error) {
+          return json({
+            ok: false,
+            code: guardRuntimeErrorCode(error, 'brush_pack_ingestion_failed'),
+            message: error instanceof Error ? error.message : String(error),
+          }, true);
+        }
+      },
+    },
+    {
+      tool: {
         name: 'photoshop_guard_set_art_run',
         description:
           'Bind a Photoshop document to one repository-local art-project folder. Non-trivial painting is the default profile and remains fail-closed until this same art run records a live brush_preflight role map from the installed Photoshop preset inventory. Re-call with the same immutable process_dir after inventory/probes to persist brush_preflight.',

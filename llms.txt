@@ -1,6 +1,6 @@
 # Photoshop MCP — Digital Painting Fork
 
-> Independent digital-painting fork of Photoshop MCP, based on upstream 1.7.6 — 145 tools including painting, VisualMicroPlan execution, color sampling, landmarks/guides, previews, generative AI, embedded Guard orchestration and 16 recipes. Unofficial; not affiliated with Adobe.
+> Independent digital-painting fork of Photoshop MCP, based on upstream 1.7.6 — 147 tools including painting, VisualMicroPlan execution, color sampling, landmarks/guides, previews, generative AI, embedded Guard orchestration and 16 recipes. Unofficial; not affiliated with Adobe.
 
 **This fork:** https://github.com/lavalava45/photoshop-mcp-digital-painting
 **Original/upstream:** https://github.com/alisaitteke/photoshop-mcp
@@ -47,7 +47,7 @@ Prefer `photoshop_recipe_*` for multi-step outcomes (single undo step). Use atom
 
 ## Tool surface
 
-- **145 tools** — 129 atomic/non-recipe + 16 recipe (`photoshop_recipe_*`); 11 of the non-recipe tools are the embedded `photoshop_guard_*` surface
+- **147 tools** — 131 atomic/non-recipe + 16 recipe (`photoshop_recipe_*`); 12 of the non-recipe tools are the embedded `photoshop_guard_*` surface
 - **21 MCP prompts** — including `ps.digital_painting_control`
 - **Native Sky Replacement** — optional sky replacement using Photoshop's built-in feature
 - **State** — `photoshop_get_state`, `photoshop_get_preview`, `photoshop_get_capabilities`

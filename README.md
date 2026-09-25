@@ -49,7 +49,7 @@ The upstream project already provides a broad Photoshop automation MCP. This edi
 - a Photoshop-side UXP companion on localhost long-poll for Neural Filters, foreground-safe `asCopy` PSD/JPEG/PNG persistence, and low-latency fast-lane development/diagnostics;
 - an agent visual-control workflow with semantic passes, previews, measurement checkpoints, occlusion reasoning, cleanup, sticky Photoshop routing, and a state-based Definition of Done.
 
-The current build exposes **145 tools** (**129 atomic/non-recipe + 16 recipes**) and **21 prompts**.
+The current build exposes **147 tools** (**131 atomic/non-recipe + 16 recipes**) and **21 prompts**.
 
 The dedicated Chat On Steroids entry point is `dist/cos-plugin.js`. It starts the same MCP server with `PHOTOSHOP_GUARD_MODE=required`, so read-only tools remain directly callable while raw mutating tools fail closed and must be dispatched through `photoshop_guard_cycle_auto`. This native Plugins route has passed dedicated live acceptance and is the canonical Chat On Steroids path. The older `scripts/photoshop-session.mjs` route remains available for dev/debug/recovery compatibility and regression coverage.
 
@@ -245,7 +245,7 @@ npm run test:document-targeting-live
 The current verified tool-count result is:
 
 ```text
-tool counts consistent: 145 = 129 atomic + 16 recipes
+tool counts consistent: 147 = 131 atomic + 16 recipes
 ```
 
 The fork has been live-tested primarily on **Photoshop 2026 for Windows**. During the current validation, 123 installed brush presets were enumerated and the painting smoke test completed with `PAINTING_TEST_OK`.

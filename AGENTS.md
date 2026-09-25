@@ -494,14 +494,14 @@ Agent routing rules:
 
 - **Canonical:** `Chat_On_Steroids_Plugins` → this fork's `dist/cos-plugin.js` → embedded Guard → internal `ToolRegistry` → Photoshop.
 - **Retiring:** `Chat_On_Steroids_Core` → `photoshop-session.mjs` → repository-local persistent daemon → this fork's `dist/index.js`; migrate remaining real consumers, do not select it for new work.
-- The current compact-only native catalog is 145 tools / 11 public Guard tools. Do not interpret a stale legacy connector snapshot as a server limitation.
+- The current compact-only native catalog is 147 tools / 12 public Guard tools. Do not interpret a stale legacy connector snapshot as a server limitation.
 - If the native Plugins route is genuinely absent/stale, inspect its discovery/readiness state and repair that route. Do not silently switch an art run onto the retiring Core path.
 - `Chat_On_Steroids_Desktop` is for read-only desktop/UI inspection when useful, not the Photoshop MCP transport.
-- The Adobe UXP bridge in `uxp-plugin/` is a separate Photoshop-side runtime; it is not the Chat On Steroids Plugins route. Production Photoshop dispatch is UXP-first. Ordinary migrated primitives may select retained ExtendScript/COM only before any UXP dispatch when the router establishes UXP unavailability; there is no cross-backend replay after dispatch/claim/uncertainty/failure. `photoshop_save_document` and `photoshop_neural_filter` remain UXP-only/fail-closed, while raw `photoshop_execute_script` is retired. The current readiness target is bridge revision `compact-v2-20260924-targeting`.
+- The Adobe UXP bridge in `uxp-plugin/` is a separate Photoshop-side runtime; it is not the Chat On Steroids Plugins route. Production Photoshop dispatch is UXP-first. Ordinary migrated primitives may select retained ExtendScript/COM only before any UXP dispatch when the router establishes UXP unavailability; there is no cross-backend replay after dispatch/claim/uncertainty/failure. `photoshop_save_document`, `photoshop_neural_filter`, and brush-pack import remain UXP-only/fail-closed, while raw `photoshop_execute_script` is retired. The current readiness target is bridge revision `compact-v2-20260926-brush-pack`.
 
 **Prerequisites:** Photoshop running on Windows or macOS, Node.js 18+. This is unofficial and not affiliated with Adobe.
 
-**Tool surface:** 145 MCP tools — 129 atomic/non-recipe `photoshop_*` + 16 recipe `photoshop_recipe_*`; 11 of the non-recipe tools are the public embedded `photoshop_guard_*` façade; 21 MCP prompt templates (`ps.*`).
+**Tool surface:** 147 MCP tools — 131 atomic/non-recipe `photoshop_*` + 16 recipe `photoshop_recipe_*`; 12 of the non-recipe tools are the public embedded `photoshop_guard_*` façade; 21 MCP prompt templates (`ps.*`).
 
 ### Continuing painting-pipeline development
 

@@ -27,6 +27,7 @@ export type PhotoshopPrimitive =
   | 'selection.bounds'
   | 'layers.list'
   | 'brush.presets.list'
+  | 'brush.presets.import'
   | 'brush.settings.read'
   | 'preview.read'
   | 'color.sample'
@@ -255,6 +256,7 @@ export class UxpPhotoshopBackend implements PhotoshopBackend {
       primitive === 'selection.bounds' ||
       primitive === 'layers.list' ||
       primitive === 'brush.presets.list' ||
+      primitive === 'brush.presets.import' ||
       primitive === 'brush.settings.read' ||
       primitive === 'preview.read' ||
       primitive === 'color.sample' ||

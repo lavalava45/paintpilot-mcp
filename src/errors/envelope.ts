@@ -13,6 +13,9 @@ export type PhotoshopErrorCode =
   | 'version_unsupported'
   | 'capability_unavailable'
   | 'uxp_bridge_unavailable'
+  | 'brush_pack_import_unavailable'
+  | 'brush_pack_ingestion_failed'
+  | 'brush_pack_manifest_invalid'
   | 'extendscript_runtime_error'
   | 'file_not_found'
   | 'font_not_found'
@@ -45,6 +48,9 @@ const ERROR_PATTERNS: Array<{
   { pattern: /version_unsupported|not supported.*version/i, code: 'version_unsupported', suggested_next_tool: 'photoshop_get_capabilities' },
   { pattern: /capability_unavailable/i, code: 'capability_unavailable', suggested_next_tool: 'photoshop_get_capabilities' },
   { pattern: /uxp.?bridge|neural filter.*bridge/i, code: 'uxp_bridge_unavailable', suggested_next_tool: 'photoshop_get_capabilities' },
+  { pattern: /brush_pack_import_unavailable/i, code: 'brush_pack_import_unavailable', suggested_next_tool: 'photoshop_guard_status' },
+  { pattern: /brush_pack_manifest_invalid|brush_pack_(source|format|no_supported_assets)/i, code: 'brush_pack_manifest_invalid', suggested_next_tool: 'photoshop_guard_brush_pack_ingest' },
+  { pattern: /brush_pack_/i, code: 'brush_pack_ingestion_failed', suggested_next_tool: 'photoshop_guard_status' },
   { pattern: /font_not_found/i, code: 'font_not_found', suggested_next_tool: 'photoshop_list_fonts' },
   { pattern: /file not found|does not exist/i, code: 'file_not_found' },
   { pattern: /color mode/i, code: 'unsupported_color_mode', suggested_next_tool: 'photoshop_get_document_info' },

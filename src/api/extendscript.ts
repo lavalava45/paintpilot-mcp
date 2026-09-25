@@ -4209,7 +4209,7 @@ export const ExtendScriptSnippets = {
    */
   listBrushPresets: (query = '', limit = 200) => {
     const q = JSON.stringify(String(query).toLowerCase());
-    const cappedLimit = Math.max(1, Math.min(1000, Math.round(limit)));
+    const cappedLimit = Math.max(1, Math.min(10000, Math.round(limit)));
     return `
       function __mcp_sTID(s) { return app.stringIDToTypeID(s); }
       var ref = new ActionReference();

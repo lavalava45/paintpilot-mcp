@@ -265,6 +265,21 @@ describe('PhotoshopBackendRouter', () => {
     expect(legacy.counts().availabilityChecks).toBe(0);
   });
 
+  it('keeps brush-pack import UXP-only and fail-closed when the companion is unavailable', async () => {
+    const uxp = new UxpPhotoshopBackend(unusedConnection);
+    const legacy = new ExtendScriptPhotoshopBackend(unusedConnection);
+    expect(uxp.supports('brush.presets.import')).toBe(true);
+    expect(legacy.supports('brush.presets.import')).toBe(false);
+
+    const unavailableUxp = backendFixture('uxp', { available: false });
+    const legacyFixture = backendFixture('extendscript');
+    const router = new PhotoshopBackendRouter(unusedConnection, [
+      { ...unavailableUxp.backend, supports: (primitive) => primitive === 'brush.presets.import' },
+      { ...legacyFixture.backend, supports: () => false },
+    ]);
+    await expect(router.backendFor('brush.presets.import')).rejects.toThrow(/photoshop_backend_unavailable/);
+  });
+
   it('advertises the Phase-9/10 layer mutation clusters on both semantic backends', () => {
     const primitives: PhotoshopPrimitive[] = [
       'layer.create',

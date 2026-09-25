@@ -285,6 +285,7 @@ async function invokeUxpStableCommand<T extends Record<string, unknown>>(
     | 'open_image'
     | 'set_brush'
     | 'select_brush_preset'
+    | 'import_brush_pack_asset'
     | 'set_foreground_color',
   params: Record<string, unknown>,
   commandId: string,
@@ -588,6 +589,25 @@ export async function invokeUxpListBrushPresets(
         ? (result.data as Record<string, unknown>)
         : undefined,
   };
+}
+
+export async function invokeUxpImportBrushPackAsset(
+  filePath: string,
+  commandId: string
+): Promise<{
+  ok: boolean;
+  data?: Record<string, unknown>;
+  error?: string;
+  command_id: string;
+  receipt?: UxpBridgeCommandReceipt | null;
+  pre_dispatch_rejected?: boolean;
+}> {
+  return invokeUxpStableCommand<Record<string, unknown>>(
+    'import_brush_pack_asset',
+    { filePath },
+    commandId,
+    30_000
+  );
 }
 
 export async function invokeUxpGetBrushSettings(): Promise<{

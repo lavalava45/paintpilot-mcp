@@ -18,7 +18,7 @@ const { tryHandleP3LayerAdvancedOperation } = require('./p3-layer-advanced-ops')
 
 const BRIDGE_PORT = 38452;
 const BRIDGE_BASE = `http://127.0.0.1:${BRIDGE_PORT}`;
-const BRIDGE_REVISION = 'compact-v2-20260925-instance-witness';
+const BRIDGE_REVISION = 'compact-v2-20260926-brush-pack';
 const REGISTRATION_PROTOCOL = 'photoshop.uxp.registration.v1';
 const COMMAND_PROTOCOL = 'photoshop.uxp.command.v1';
 const RESULT_PROTOCOL = 'photoshop.uxp.command_result.v1';
@@ -613,7 +613,7 @@ async function snapshotBrushPresets(params = {}) {
   const query = String(params.query ?? '').toLowerCase();
   const requestedLimit = Number(params.limit ?? 200);
   const limit = Number.isFinite(requestedLimit)
-    ? Math.max(1, Math.min(1000, Math.round(requestedLimit)))
+    ? Math.max(1, Math.min(10000, Math.round(requestedLimit)))
     : 200;
   const [descriptor] = await action.batchPlay(
     [{
@@ -2875,6 +2875,35 @@ async function openImageMutation(params = {}) {
   });
 }
 
+async function importBrushPackAsset(params = {}) {
+  const filePath = typeof params.filePath === 'string' ? params.filePath.trim() : '';
+  if (!filePath) throw new Error('brush_pack_import_unavailable: missing filePath');
+  if (!filePath.toLowerCase().endsWith('.abr')) {
+    throw new Error(`brush_pack_import_unavailable: unsupported brush-pack format for ${filePath}`);
+  }
+  let entry;
+  try {
+    entry = await localFileSystem.getEntryWithUrl(fileUrlFromNativePath(filePath, 'brush_pack_import'));
+  } catch (error) {
+    throw new Error(`brush_pack_import_unavailable: localFileSystem.getEntryWithUrl failed: ${error?.message ?? String(error)}`);
+  }
+  if (entry?.isFile === false) throw new Error(`brush_pack_import_unavailable: path is not a file: ${filePath}`);
+  try {
+    await core.executeAsModal(
+      () => app.open(entry),
+      { commandName: 'MCP Import Brush Pack' }
+    );
+  } catch (error) {
+    throw new Error(`brush_pack_import_unavailable: Photoshop UXP app.open could not load this ABR: ${error?.message ?? String(error)}`);
+  }
+  return {
+    imported: true,
+    operation: 'import_brush_pack_asset',
+    path: filePath,
+    host_capability: 'uxp.localFileSystem+photoshop.app.open',
+  };
+}
+
 function snapshotPersistenceState(targetDocument) {
   const activeDocument = app.activeDocument;
   let selectionBounds = null;
@@ -3183,6 +3212,11 @@ async function handleCommand(cmd) {
 
     if (cmdAction === 'open_image') {
       await postResult({ id, ok: true, data: await openImageMutation(params) });
+      return;
+    }
+
+    if (cmdAction === 'import_brush_pack_asset') {
+      await postResult({ id, ok: true, data: await importBrushPackAsset(params) });
       return;
     }
 

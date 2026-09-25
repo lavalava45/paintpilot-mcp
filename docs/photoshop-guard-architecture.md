@@ -103,7 +103,7 @@ mutation returns `guard_required`. The Guard invokes the underlying handler inte
 only after its durable preflight succeeds.
 
 The native route has now passed both offline validation and the dedicated live
-CoS/Photoshop acceptance sequence. The current compact-only source catalog is 145 tools / 11 public Guard tools;
+CoS/Photoshop acceptance sequence. The current compact-only source catalog is 147 tools / 12 public Guard tools;
 publication and schema budget, fail-closed raw mutation gating, direct reads, guarded
 mutation + materialized preview + visual verdict closure, async jobs, durable
 process-restart resume, fresh-evidence reconciliation, and no-blind-replay behavior.
