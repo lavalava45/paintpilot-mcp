@@ -207,6 +207,12 @@ Current live evidence verified on disk:
 | MR.3 | Requested/effective region, document id, whole-frame SHA and crop identity are durable/recovery-safe; stale or mismatched evidence is rejected; review fan-out is bounded. | **repo-pass** | `visual-review-region.test.ts` and `visual-review-escalation-state.test.ts` cover integer/source coordinates, deterministic padding/clamp, max-two capture rounds, overlap dedupe/priority, wrong-document rejection, stale whole-SHA rejection, changed-region recapture and restart/status/resume projection. |
 | MR.4 | Real Photoshop/CoS smoke proves COMPOSITION no-crop behavior, bounded OBJECT/MICRO crop delivery and same-operation escalation with no second mutation/history step. | **live-pass** | Real document 59 smoke completed on 2026-09-24. COMPOSITION operation `multiscale-live-20260924-composition-01` delivered whole-frame review without a focus crop. OBJECT operation `multiscale-live-20260924-host-refresh-02` delivered exact bounded crop `500,100..700,280` at 200×180 and whole SHA `57ec1871694e3f1ea8ae1dd310ed9f88af058813435b350fd53dd219ecba60f9`; an `edge_transition` finding escalated the **same operation** to MICRO requested `530,130..570,170`, effective `518,118..582,182`, 64×64 crop SHA `6cb8bffb611847fd9625e3b7db58cad3767579f9b97c38fcdd71ced44194dd25`. Durable operation state records `mutation_count=1`; current Photoshop history has exactly one additional `MCP Paint Regions` state for the bounded pass and no history entry from the read-only escalation. Final Guard debt is zero. |
 
+MR.1–MR.4 certify the implemented **baseline** multiscale extension; they do not claim that the
+stronger research model in `docs/adaptive-multiscale-visual-verification.md` is complete. Residual
+theory-to-runtime gaps — uncertainty/final-comparison driven escalation, guaranteed object-context +
+micro hierarchy, delivery-aware closure, and full canvas/scale-invariance provenance — are tracked as
+P0-V in `docs/PAINTING-ROADMAP.md`.
+
 ## Tasks 14–21
 
 | ID | Literal acceptance requirement | Status | Current evidence / remaining gate |

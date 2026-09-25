@@ -249,6 +249,11 @@ Multiscale review is an additive compact-v2 Guard capability, not a second workf
 profile is derived from durable/compiled facts such as scale, significance mode, action/impact class,
 bounded region and same-problem state. Whole-frame evidence remains mandatory at every level.
 
+The broader research model behind this mechanism is described in
+[`adaptive-multiscale-visual-verification.md`](adaptive-multiscale-visual-verification.md). That
+document deliberately distinguishes the implemented baseline from stronger open P0-V hypotheses such
+as uncertainty-driven escalation, contextual MICRO evidence and delivery-aware closure.
+
 `previous_observation.review_findings[]` is optional and subject-agnostic. OBJECT/MICRO finding kinds
 must carry exact source-document `region_bounds`. If adequate current evidence is missing, the Guard:
 

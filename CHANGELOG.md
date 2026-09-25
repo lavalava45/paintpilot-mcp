@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- 2026-09-25: add `docs/adaptive-multiscale-visual-verification.md`, a publishable technical concept
+  for treating visual review as adaptive, provenance-bound evidence acquisition across COMPOSITION /
+  OBJECT / MICRO scales. A point-by-point audit against the original multiscale task also separates
+  the already-live-accepted baseline from four stronger open P0-V guarantees: runtime
+  uncertainty/final-comparison escalation, object-context-preserving MICRO review, delivery-aware
+  visual closure, and complete canvas/scale-invariance crop provenance. The roadmap and acceptance
+  matrix now make that boundary explicit instead of treating the research model as fully closed.
+
 - 2026-09-24: add deterministic multiscale Guard visual review with COMPOSITION / OBJECT / MICRO
   profiles on the canonical compact-v2 path. Whole-frame context remains mandatory; bounded passes
   prefetch exact source-document crops at the minimum justified scale; existing local/detail

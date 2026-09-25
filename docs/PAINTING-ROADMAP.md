@@ -17,8 +17,11 @@ read-only crop escalation and the later P0-B state/evidence/recovery correctness
 compact-v2 Guard behavior rather than remaining roadmap items. Future roadmap work must preserve
 whole-frame context, broad semantic review coverage, source-document crop coordinates, exact
 materialized evidence identity, artistic-frame identity, document-incarnation isolation, bounded
-structural recovery, instance-scale anti-copy review and no-mutation-replay semantics. The
-implementation/live evidence belongs in `CHANGELOG.md` and the acceptance matrix.
+structural recovery, instance-scale anti-copy review and no-mutation-replay semantics. A later audit
+against the original multiscale-review task found several **stronger theory-to-runtime guarantees that
+are not yet complete**; they are tracked separately under **P0-V** rather than reopening the accepted
+baseline. The implementation/live evidence belongs in `CHANGELOG.md` and the acceptance matrix. The
+research rationale is documented in `docs/adaptive-multiscale-visual-verification.md`.
 
 ## Priority order
 
@@ -33,19 +36,23 @@ Git history and referenced test/live artifacts.
 3. **P0-C — Painter/Guard semantic-pass throughput and bounded autonomy:** implement Tasks
    **P0-C.1 → P0-C.10** below as one coordinated contract change, with the evidence-identity and
    bookkeeping invariants treated as correctness work rather than optional speed polish.
-4. **P0-D — human critic calibration / stop-decision calibration:** Tasks **8 / 8a → 8b**, then
+4. **P0-V — adaptive multiscale visual-verification hardening:** close **P0-V.1 → P0-V.4** below.
+   The baseline multiscale Guard is already implemented; these are the residual gaps between that
+   implementation and the stronger review theory: uncertainty-driven escalation, hierarchical
+   object→micro context, delivery-aware closure and explicit scale-invariance/semantic-trigger proof.
+5. **P0-D — human critic calibration / stop-decision calibration:** Tasks **8 / 8a → 8b**, then
    close the residual human claims from Tasks **6, 11 and 13a.1A/13a.1C** from the same labelled
    evidence where possible.
-5. **P1-A — autonomous-product cleanup / legacy retirement:** physically remove retired controller,
+6. **P1-A — autonomous-product cleanup / legacy retirement:** physically remove retired controller,
    daemon, historical provider code and other no-longer-owned compatibility surfaces once their
    canonical replacements are proven. Reduce the repository to the code paths we actually maintain.
-6. **P1-B — human artistic acceptance:** Task **23 human pack → 22 → 15d.3**,
+7. **P1-B — human artistic acceptance:** Task **23 human pack → 22 → 15d.3**,
    then the real-artwork artistic-preference part of Task **21**.
-7. **P2 — upstream-derived substrate review and independent-product cutover:** systematically review
+8. **P2 — upstream-derived substrate review and independent-product cutover:** systematically review
    the remaining inherited Photoshop/MCP substrate, keep/rewrite/remove it according to our actual
    product needs, remove dependence on upstream release cadence, and reframe the GitHub/project
    identity as an independently maintained derivative product with explicit origin attribution.
-8. **Conditional / P3 only after evidence:** Task **5** if ordinary ChatGPT/CoS routing remains
+9. **Conditional / P3 only after evidence:** Task **5** if ordinary ChatGPT/CoS routing remains
    unreliable; Task **10** only if Task 8/8a demonstrates measurable decision-quality gain; Task
    **15c** remains optional exploration.
 
@@ -64,7 +71,15 @@ Rationale:
   choreography per useful artistic pass, plus concrete evidence/materialization and trend-scope
   failure modes. P0-C therefore comes before critic calibration so the later human calibration is not
   measuring avoidable orchestration friction or stale review-state behavior.
-- Critic calibration remains the next **perceptual-authority** gate after P0-C because it controls any
+- The multiscale visual-review baseline is already live-accepted, but a point-by-point audit against
+  the original design found four stronger guarantees that are still only partial: the resolver has
+  uncertainty/final-comparison inputs that are not driven by the normal runtime, MICRO review does not
+  yet guarantee a distinct object-context view alongside the tight crop, MCP image-delivery
+  completeness is reported but is not yet a durable prerequisite for visual closure, and durable
+  escalation evidence does not yet project the full canvas/scale-invariance provenance required by
+  the original brief. These are perceptual-evidence correctness gaps, not speed optimizations, so
+  P0-V closes them before critic calibration.
+- Critic calibration remains the next **perceptual-authority** gate after P0-C/P0-V because it controls any
   claim of perceptual reliability and broader critic authority, and it also decides whether Task 10
   should exist at all.
 - Progressive refinement comes before final-target fidelity: Task 23 already has a machine-enforced
@@ -870,6 +885,165 @@ The P0-C work is explicitly compatible with the existing roadmap only under thes
 - **No blind autonomy:** P0-C.9 removes unnecessary Art Director/replanning churn while retaining an
   honest visual observation after every semantic pass and immediate interruption on safety/artistic
   regression triggers.
+
+---
+
+## P0-V — Adaptive multiscale visual verification: residual theory-to-runtime gaps
+
+**Status:** baseline implemented and live-accepted; stronger review theory remains partially open.
+
+The original implementation brief (`docs/guard-multiscale-visual-review-task.md`) and the publishable
+research concept (`docs/adaptive-multiscale-visual-verification.md`) define a stronger claim than the
+already-accepted COMPOSITION / OBJECT / MICRO baseline. A 2026-09-25 point-by-point audit found that
+most of the brief is implemented in code/tests, but the following items are not yet fully represented
+in production behavior or regression coverage. Do not mark them complete merely because the baseline
+MR.1–MR.4 acceptance is green.
+
+Already present and **not** reopened here:
+
+- deterministic minimum COMPOSITION / OBJECT / MICRO profile resolution from pass scale,
+  action/impact class, significance mode and current problem scale;
+- whole-frame context at every review level;
+- exact source-document `region_bounds`, requested/effective region separation and deterministic
+  OBJECT/MICRO padding/clamp for escalation crops;
+- structured subject-agnostic `review_findings[]` with exact bounds for OBJECT/MICRO findings;
+- same-operation read-only crop escalation, maximum two new crops per round, overlap dedupe and
+  deterministic priority;
+- wrong-document/stale-whole-SHA/changed-region rejection;
+- durable status/resume state and immutable review artifacts;
+- additive compact-v2 schema behavior;
+- no artistic mutation replay and no second Photoshop history step during read-only evidence
+  enrichment;
+- live COMPOSITION → OBJECT → MICRO evidence from the 2026-09-24 smoke run.
+
+### P0-V.1 — Drive review escalation from runtime uncertainty and final-comparison semantics
+
+**Code audit: PARTIAL.**
+
+`resolveVisualReviewProfile()` already models `unresolved_after_overview`,
+`unresolved_after_object`, `has_tighter_region` and `final_comparison`, and unit tests exercise the
+uncertainty ladder. The normal compiler/runtime path does **not** currently drive those inputs as a
+general production policy; `final_comparison` is likewise a dormant resolver input rather than a
+production trigger.
+
+Implement:
+
+- when an honest review reports unresolved **local** uncertainty after a whole-frame view and an exact
+  semantic region is available, escalate the same operation to at least OBJECT evidence without a new
+  artistic mutation;
+- when OBJECT evidence remains insufficient and an exact tighter region is supplied, escalate the
+  same operation to MICRO;
+- keep this structured: do not infer coordinates or escalation level from free-text keywords;
+- make final artistic comparison explicitly require the COMPOSITION/whole-frame evidence contract,
+  with any local evidence treated as supplemental rather than substituting for the whole frame;
+- preserve the existing `review_findings[]` path for concrete localized findings; uncertainty-driven
+  escalation is complementary, not a duplicate mutation path.
+
+**Acceptance**
+
+- integration tests prove overview uncertainty → OBJECT and OBJECT uncertainty + tighter exact region
+  → MICRO on the same operation id with zero mutation replay;
+- final comparison cannot be completed from crop-only/local evidence;
+- unrelated resolved/global passes do not acquire unnecessary local crops;
+- restart/status/resume preserve an uncertainty-driven pending review exactly as they do structured
+  finding escalation.
+
+### P0-V.2 — Preserve object context during MICRO review
+
+**Code audit: PARTIAL.**
+
+Direct detail/micro passes currently preserve the whole frame and one exact focus crop at the MICRO
+target size. The stronger Level-3 contract from the original design calls for a contextual ladder:
+
+```text
+whole frame -> object-context crop -> tight micro crop
+```
+
+This hierarchy appears naturally when a later MICRO finding escalates an already-OBJECT-reviewed
+operation, but it is **not guaranteed** for a direct MICRO pass.
+
+Implement a deterministic context-preserving MICRO contract:
+
+- retain the whole frame unconditionally;
+- when a broader exact semantic/object region and a tighter micro region are both known, deliver both
+  roles and bind both to the same document and whole-frame SHA;
+- never invent a wider object region or a tighter center crop geometrically when semantic bounds are
+  unknown;
+- define an explicit compact representation for the broader context region if the existing
+  `region_bounds` field cannot distinguish object context from the micro target;
+- avoid duplicate image roles when object and micro regions are materially identical;
+- if response/image-count budgets cannot carry all mandatory roles in one result, split the review
+  into bounded read-only evidence rounds rather than silently dropping the context role.
+
+**Acceptance**
+
+- direct MICRO coverage proves whole + object-context + tight micro evidence when both exact regions
+  are available;
+- a control proves no synthetic/guessed object-context crop is created when only the tight region is
+  known;
+- whole/object/micro evidence keeps source-document coordinates and one shared whole-frame identity;
+- blinded or human calibration can later compare `whole+micro` against
+  `whole+object-context+micro` without changing the mutation itself.
+
+### P0-V.3 — Make model-facing image delivery a closure prerequisite
+
+**Code audit: PARTIAL.**
+
+The public tool wrapper already records `image_delivered_for_review`, `delivery_complete`,
+`undelivered_roles` and concrete omission reasons such as response-byte budget or unreadable artifact.
+However, those response-delivery facts are not yet a durable Guard prerequisite for the next visual
+closure. A crop can therefore exist and verify by path/SHA while the model-facing MCP response reports
+that a mandatory image role was not actually delivered.
+
+Implement:
+
+- distinguish durable artifact capture from model-facing MCP image delivery;
+- persist or otherwise causally bind a delivery receipt for every mandatory review role before the
+  Guard accepts a visual observation that depends on that role;
+- if `delivery_complete=false`, keep the same artistic operation pending and request bounded read-only
+  re-delivery/re-encoding/re-capture as appropriate; never replay the mutation;
+- treat path/SHA as artifact identity only, not proof of visual delivery or interpretation;
+- continue using conservative terminology such as `image_delivered_for_review`; do not introduce
+  `image_seen` / `image_understood` claims;
+- if the host cannot prove UI rendering, scope the guarantee precisely to **MCP image-content delivery
+  to the model-facing tool result**, not user-visible rendering.
+
+**Acceptance**
+
+- the existing unreadable-artifact and response-byte-budget fixtures cannot close the visual verdict
+  while a mandatory role is undelivered;
+- a successful re-delivery for the same SHA/role clears only the delivery debt, not by replaying or
+  reclassifying the mutation;
+- status/resume exposes pending delivery debt distinctly from missing/corrupt artifact debt;
+- normal successful delivery adds no extra model-visible round-trip.
+
+### P0-V.4 — Complete the crop provenance and scale-invariance contract
+
+**Code audit: PARTIAL TEST/PROJECTION GAP.**
+
+Escalation evidence currently persists crop scale metadata but does not persist/project explicit
+`canvas_width` / `canvas_height` on each durable `review_evidence` record. The original exact-coordinate
+contract required canvas dimensions with every crop, and the original test plan also required direct
+proof that source-document regions remain identical when the overview is captured at different
+downscale sizes.
+
+Implement/verify:
+
+- store and project canvas width/height alongside every durable escalation crop, including
+  status/resume;
+- add a regression where the same requested source-document region is reviewed with two different
+  whole-frame `max_dimension_px` values and prove `requested_region` / `effective_region` remain
+  unchanged while only preview scale metadata changes;
+- cover both initial prefetched local evidence and later escalation evidence;
+- retain integer floor/ceil normalization, canvas-edge clamp and exact requested/effective provenance;
+- keep native-resolution behavior explicit: larger review limits may downsample less, but must never
+  be represented as creating new source detail by upscaling.
+
+**Acceptance**
+
+- unit/state tests assert canvas dimensions, source coordinates and scale metadata after restart;
+- changing overview resolution cannot change the semantic crop coordinates;
+- all existing wrong-document, stale-SHA, immutable-artifact and no-replay regressions remain green.
 
 ---
 
