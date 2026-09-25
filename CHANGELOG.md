@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- 2026-09-25: expose three core visual-agent research directions in the public README: Adaptive
+  Multiscale Visual Verification, Bounded Artistic Autonomy, and Evidence-Bound Recovery. The README
+  now presents the project not only as a Photoshop tool extension but as an experimental platform for
+  stateful visual-agent control, with links to the multiscale research concept, the P0-C autonomy
+  roadmap, and the Guard/recovery architecture.
+
 - 2026-09-25: add `docs/adaptive-multiscale-visual-verification.md`, a publishable technical concept
   for treating visual review as adaptive, provenance-bound evidence acquisition across COMPOSITION /
   OBJECT / MICRO scales. A point-by-point audit against the original multiscale task also separates

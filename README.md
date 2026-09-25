@@ -53,6 +53,64 @@ The current build exposes **145 tools** (**129 atomic/non-recipe + 16 recipes**)
 
 The dedicated Chat On Steroids entry point is `dist/cos-plugin.js`. It starts the same MCP server with `PHOTOSHOP_GUARD_MODE=required`, so read-only tools remain directly callable while raw mutating tools fail closed and must be dispatched through `photoshop_guard_cycle_auto`. This native Plugins route has passed dedicated live acceptance and is the canonical Chat On Steroids path. The older `scripts/photoshop-session.mjs` route remains available for dev/debug/recovery compatibility and regression coverage.
 
+## Research directions
+
+This project is also a testbed for stateful visual-agent control: how a multimodal model can inspect,
+modify, verify, recover, and progressively refine an image through a real editor rather than producing
+one opaque one-shot render. Three research ideas currently shape the painting architecture.
+
+### Adaptive Multiscale Visual Verification
+
+A single screenshot is not equally useful for every visual decision. Composition, object structure,
+and micro-detail require different observational scales, so the Guard selects a minimum review level:
+
+```text
+COMPOSITION -> OBJECT -> MICRO
+```
+
+Whole-frame context is retained at every level. Exact source-document crops are added only when the
+semantic scope of the operation or a structured review finding requires more local evidence. If the
+first view is insufficient, the same artistic operation can acquire additional crops read-only without
+replaying the mutation. Review evidence is bound to exact document/frame identity so stale local
+evidence cannot silently satisfy a later verdict.
+
+The working theory, formalization, open hypotheses, and proposed experiments are documented in
+[`docs/adaptive-multiscale-visual-verification.md`](docs/adaptive-multiscale-visual-verification.md).
+
+### Bounded Artistic Autonomy
+
+Useful painting requires more than safe atomic tool calls, but unconstrained multi-step autonomy can
+drift, compound errors, or hide regressions. The project therefore explores a middle regime:
+**semantic-pass autonomy inside an explicit artistic task**.
+
+The Art Director owns global intent, task boundaries, stage changes, and re-review. The Painter may
+execute a bounded sequence of coherent semantic passes inside the delegated task, while every pass
+still crosses a visual-evidence barrier. Serious regressions, uncertainty, strategy exhaustion,
+protected-quality loss, global/composition changes, or the autonomy horizon immediately return
+control to the stricter review path.
+
+The research question is not "how many commands can the agent run by itself?" but rather **how much
+locally coherent artistic work can be delegated without weakening perceptual control**. Current and
+planned semantics are tracked under
+[`P0-C — Painter/Guard semantic-pass throughput and bounded autonomy`](docs/PAINTING-ROADMAP.md#p0-c--painterguard-semantic-pass-throughput-and-bounded-autonomy).
+
+### Evidence-Bound Recovery
+
+In a stateful editor, repeating an uncertain mutation is not a harmless retry: a brush stroke,
+transform, erase, fill, or composite may be applied twice and permanently diverge from the state that
+was being evaluated. Recovery therefore treats **evidence, not replay, as the default response to
+uncertainty**.
+
+Operations are journaled with document identity, execution receipts, preview identity, visual-review
+state, and accepted artistic anchors. After interruption or ambiguous transport failure, the Guard
+recovers from fresh state/preview evidence, reconciles the existing operation, and only then permits a
+new mutation. Accepted-anchor restoration is likewise verified against the exact registered visual
+state rather than inferred from tool success alone.
+
+This makes recovery part of the visual control theory: a system should preserve causal identity across
+failures and prove what state it is in before continuing. The current implementation is described in
+[`docs/photoshop-guard-architecture.md`](docs/photoshop-guard-architecture.md).
+
 ## Digital-painting tools
 
 ```text
@@ -195,6 +253,7 @@ The fork has been live-tested primarily on **Photoshop 2026 for Windows**. Durin
 ## Documentation
 
 - [`INSTALL.md`](INSTALL.md) — installation and MCP host configuration
+- [`docs/adaptive-multiscale-visual-verification.md`](docs/adaptive-multiscale-visual-verification.md) — research concept for adaptive, provenance-bound COMPOSITION / OBJECT / MICRO visual evidence
 - [`docs/photoshop-guard-architecture.md`](docs/photoshop-guard-architecture.md) — current Guard/gateway architecture, host boundary, upstream COS requests, and proxy fallback
 - [`docs/digital-painting.md`](docs/digital-painting.md) — painting API and design notes
 - [`docs/digital-painting-agent-skill.md`](docs/digital-painting-agent-skill.md) — visual-control workflow, checkpoints, cleanup, and Definition of Done
