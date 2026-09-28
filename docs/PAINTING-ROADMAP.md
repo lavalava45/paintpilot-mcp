@@ -19,9 +19,10 @@ Execute the remaining work in this order:
 1. **P1-B human/artistic acceptance:** Task 23 independent blinded labels → Task 22 final target
    fidelity → Task 15d.3 compositing/material/atmosphere artistic gain → Task 21 real-artwork
    current-vs-anchor preference.
-2. **P2 independent-product cutover:** only P2.4 remains open.
-   - P2.4 final fresh-origin proof after the current packaging repair is published — **external
-     release-proof blocker; it does not block local repository implementation work**;
+2. **P2 independent-product cutover:** **CLOSED (2026-09-28).**
+   - P2.4 fresh-origin release-autonomy proof passed from published `2be5260` in a completely new
+     origin-only clone with no `upstream` remote;
+   - P2.5–P2.8 remain closed and regression-protected;
 3. **P0-D human critic calibration**, when an independent human evaluator is available:
    Tasks 8/8a → 8b, with Tasks 6, 11 and 13a.1A/13a.1C inheriting the same held-out evidence.
 4. **P0-E.7 supplied-pack live/human acceptance** when the user provides a real brush/stamp pack.
@@ -294,29 +295,33 @@ coherent scene, not merely prove that presets imported or stamps were placed.
 
 ## P2 — Independent-product cutover
 
-Only the following forward work remains in P2.
+**Status: CLOSED (2026-09-28).**
 
 ### P2.4 — Final fresh-origin release-autonomy proof
 
-The current worktree already fixes the Windows packaging defect discovered by the first literal
-origin-only clone: the Windows-only `build:mcpb` path now packages with PowerShell
-`Compress-Archive` and fails closed on unsupported host platforms instead of assuming Unix `zip`.
-The repaired worktree builds both MCPB archives, archive contents were inspected, and a local MCP
-stdio startup smoke succeeded.
+**DONE (2026-09-28).** Final proof used published commit
+`2be5260012ce026da4fd6b79437ac4beb1fa6fb4` from the completely new clone
+`E:\Downloads\devspace-test\experiments\photoshop-mcp-digital-painting-p2.4-proof-2be5260`.
+The clone had only `origin`, no `upstream`, and was clean before install.
 
-**Remaining proof only:**
+Fresh-clone evidence:
 
-1. publish the packaging repair and dependent current work to `origin`;
-2. clone that published revision into a completely fresh directory with **no `upstream` remote**;
-3. install dependencies from declared manifests;
-4. run canonical build/typecheck/lint/tests;
-5. build MCPB and UXP artifacts from that clone;
-6. inspect the archive for `manifest.json`, `server/dist/index.js` and the UXP manifest;
-7. start the canonical MCP/Guard surface from the fresh clone;
-8. where the environment permits, run the bounded real-Photoshop smoke from those artifacts.
-
-Do not close P2.4 from the current dirty development worktree or from the older published revision
-that still contains the Windows packer defect.
+- dependency installation from declared manifests passed;
+- `npm run verify:canonical` passed with **74/74 Vitest files / 740/740 tests**, lint
+  **0 errors / 30 existing warnings**, **124 packed dist JS**, **130 atomic tools / 14 Guard tools /
+  5 prompts**, source independence **626 / 40,972 = 1.53%**, and all identity/provenance/intake/live
+  evidence gates green;
+- `npm run build:mcpb` passed on Windows and produced both
+  `photoshop-mcp-digital-painting-1.7.6.mcpb` and `photoshop-mcp-digital-painting.mcpb`;
+- both archives contain `manifest.json`, `server/dist/index.js`,
+  `server/uxp-plugin/manifest.json`, `server/LICENSE`, and `server/NOTICE`; both have 4,193 entries and
+  identical SHA-256 `E5F1E52BB423DD9BFCDAB15C32644B9365E94C1F5C8BCE725BCA5FC505E99A85`;
+- fresh-clone MCP stdio startup/initialize passed with product identity
+  `photoshop-mcp-digital-painting v1.7.6`, 5 guide prompts, tool listing, and capabilities;
+- the installed COS Photoshop route was separately verified live as UXP-ready with matching bridge
+  revision. The fresh-clone stdio child itself did not acquire that UXP bridge revision, so no
+  Photoshop mutation was claimed from the fresh artifact; the bounded live check remained
+  non-mutating and did not interfere with an already-active artistic workflow.
 
 ### P2.5–P2.8 — Closed repository gates
 
@@ -334,16 +339,21 @@ Do not expand these closed items back into forward work unless one of those main
 
 ### P2 completion gate
 
-All repository-owned P2 gates are already closed and regression-protected. Overall P2 completion now
-depends only on the P2.4 fresh-origin proof below.
+**CLOSED (2026-09-28).** P2.4–P2.8 are all closed. The final fresh-origin proof above establishes that
+the published standalone product can be installed, canonically verified, packaged and started from
+`origin` without an `upstream` remote or upstream checkout.
 
-**Current status (2026-09-28): BLOCKED ONLY BY P2.4.** P2.5–P2.8 are closed and their canonical gates
-are green. The latest fetched `origin/digital-painting` revision
-`0f3363a976ae35277de324f52163b45cf35f9e58` still uses the historical direct `zip -rq` MCPB command;
-it does not contain the current Windows `Compress-Archive` repair. Because this task explicitly does
-not publish/commit the dirty worktree, the required fresh clone of a **published repaired revision**
-cannot yet be performed honestly. Publish the integrated repair first, then repeat P2.4 from a new
-origin-only clone with no `upstream` remote; only that evidence can close the overall P2 gate.
+### Post-P2 cleanup — GitHub repository identity
+
+This is a separate metadata cleanup and is **not** part of the closed P2 release-autonomy gate.
+
+1. review the GitHub **Leave fork network** option and confirm repository eligibility;
+2. assess metadata consequences before execution, including PRs, issues, stars/watchers, wiki,
+   comments, child forks and irreversibility;
+3. if acceptable, detach the repository from the fork network;
+4. update the repository description to standalone product wording;
+5. verify the GitHub header no longer shows `Forked from alisaitteke/photoshop-mcp`;
+6. retain historical origin/attribution in `LICENSE`, `NOTICE` and project documentation.
 
 ---
 

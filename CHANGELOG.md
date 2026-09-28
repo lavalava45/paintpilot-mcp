@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- 2026-09-28: close **P2.4 fresh-origin release autonomy** and therefore the overall **P2
+  independent-product cutover**. Published commit
+  `2be5260012ce026da4fd6b79437ac4beb1fa6fb4` was cloned into a completely new Windows directory with
+  only `origin` and no `upstream`; dependency install and full canonical verification passed
+  (**74/74 Vitest files / 740/740 tests**, lint **0 errors / 30 existing warnings**, 124 packed dist
+  JS, 130 atomic tools / 14 Guard tools / 5 prompts, source independence 626/40,972 = 1.53%).
+  `build:mcpb` produced both 1.7.6 and stable archives; each contains the product manifest, compiled
+  server entrypoint, UXP manifest, LICENSE and NOTICE, with 4,193 entries and identical SHA-256
+  `E5F1E52BB423DD9BFCDAB15C32644B9365E94C1F5C8BCE725BCA5FC505E99A85`. Fresh-clone MCP stdio
+  initialize/prompt/tool/capability smoke passed. The installed COS Photoshop route was separately
+  verified UXP-ready with matching bridge revision; no Photoshop mutation is claimed from the fresh
+  stdio artifact because that child did not acquire the live bridge revision. GitHub fork-network
+  detachment/description cleanup is now tracked as a separate post-P2 metadata task, while historical
+  attribution remains in LICENSE/NOTICE/project docs.
+
 - 2026-09-28: complete **P1-C.9 qualitative material-response decomposition**. MATERIAL planning
   and exact-current refinement review now share one subject-agnostic `material_response` contract
   covering base response, form-driven light, specular/reflection, transmission where applicable,
