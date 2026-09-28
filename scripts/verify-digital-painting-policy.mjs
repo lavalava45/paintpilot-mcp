@@ -1,5 +1,19 @@
 import { readFile } from 'node:fs/promises';
 
+function normalizeTextEol(text) {
+  return text.replace(/\r\n?/g, '\n');
+}
+
+async function readText(url) {
+  return normalizeTextEol(await readFile(url, 'utf8'));
+}
+
+const eolProbeLf = 'alpha\nbeta\n';
+const eolProbeCrlf = eolProbeLf.replaceAll('\n', '\r\n');
+if (normalizeTextEol(eolProbeLf) !== normalizeTextEol(eolProbeCrlf)) {
+  throw new Error('text EOL normalization must be LF/CRLF invariant');
+}
+
 const skillPath = new URL('../docs/digital-painting-agent-skill.md', import.meta.url);
 const promptPath = new URL('../src/prompts/templates/digital-painting-control.ts', import.meta.url);
 const implementationPath = new URL('../docs/digital-painting.md', import.meta.url);
@@ -17,19 +31,19 @@ const [
   guardRuntime,
   instructions,
 ] = await Promise.all([
-  readFile(skillPath, 'utf8'),
-  readFile(promptPath, 'utf8'),
-  readFile(implementationPath, 'utf8'),
-  readFile(connectionPath, 'utf8'),
-  readFile(backendRouterPath, 'utf8'),
-  readFile(guardRuntimePath, 'utf8'),
-  readFile(instructionsPath, 'utf8'),
+  readText(skillPath),
+  readText(promptPath),
+  readText(implementationPath),
+  readText(connectionPath),
+  readText(backendRouterPath),
+  readText(guardRuntimePath),
+  readText(instructionsPath),
 ]);
 
 // Detailed policy stays in scoped modules; the entry kernel is audited separately.
 const policyModules = ['foundations.md', 'methods.md', 'inspection.md', 'operations.md'];
 const moduleTexts = await Promise.all(policyModules.map(name =>
-  readFile(new URL('../docs/painting-policy/' + name, import.meta.url), 'utf8')));
+  readText(new URL('../docs/painting-policy/' + name, import.meta.url))));
 const skill = moduleTexts.join('\n');
 
 const sharedInvariants = [

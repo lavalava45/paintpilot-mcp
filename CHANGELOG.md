@@ -248,6 +248,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- 2026-09-28: harden the P2.4 fresh-origin Windows proof against checkout line-ending variance.
+  A literal published Windows clone at `a32e184` passed all 740 Vitest tests but exposed that
+  `verify:painting-policy` counted raw CRLF characters against the compact kernel/prompt budgets,
+  causing false failures (`>13000` / `>18000`) despite the same committed content passing under LF.
+  The verifier now normalizes `CRLF`/`CR` to `LF` immediately after reading text before applying
+  compactness budgets and policy regexes, with an internal LF/CRLF invariance probe. Re-running the
+  updated verifier against that CRLF checkout restores the canonical `kernel=12970` and
+  `prompt=17888` counts.
+
 - 2026-09-28: close the live-discovered compact compiler gap for global `continuous-field` passes.
   `photoshop_paint_color_gradient` now participates in automatic mandatory AFTER-preview insertion,
   and compact passes can carry an explicit subject-agnostic `construction_role` through to the
