@@ -1,97 +1,41 @@
 #!/usr/bin/env node
 
-import {
-  capture,
-  captureMcpPageview,
-  endMcpAnalyticsSession,
-  ensureAnalyticsIdentity,
-  getAppVersion,
-  identifyAnalyticsPerson,
-  onMcpClientDisconnected,
-  shutdownAnalytics,
-  startMcpAnalyticsSession,
-} from './analytics/index.js';
-import type { McpShutdownReason } from './analytics/mcp-session.js';
+import { getAppVersion } from './core/app-version.js';
 import { PhotoshopMCPServer } from './core/server.js';
 import { Logger } from './utils/logger.js';
 
-const logger = new Logger('Main');
+const log = new Logger('Main');
+const runtime: { server?: PhotoshopMCPServer; closing: boolean } = { closing: false };
 
-let mcpServer: PhotoshopMCPServer | null = null;
-let shuttingDown = false;
-
-async function main() {
+async function boot(): Promise<void> {
+  log.info('Starting Photoshop MCP Server...');
   try {
-    logger.info('Starting Photoshop MCP Server...');
-
-    ensureAnalyticsIdentity();
-
-    mcpServer = new PhotoshopMCPServer({ serverVersion: getAppVersion() });
-    await mcpServer.start();
-
-    const photoshopVersion = await mcpServer.getPhotoshopVersion();
-    identifyAnalyticsPerson({
-      usage_surface: 'mcp',
-      event_source: 'mcp',
-      ...(photoshopVersion ? { photoshop_version: photoshopVersion } : {}),
-    });
-
-    startMcpAnalyticsSession();
-    captureMcpPageview();
-    capture('mcp_session_started', {
-      photoshop_detected: mcpServer.isPhotoshopConnected(),
-      tools_registered_count: mcpServer.getToolCount(),
-      event_source: 'mcp',
-    });
-
-    logger.info('Photoshop MCP Server is running');
+    const server = new PhotoshopMCPServer({ serverVersion: getAppVersion() });
+    runtime.server = server;
+    await server.start();
+    log.info('Photoshop MCP Server is running');
   } catch (error) {
-    logger.error('Failed to start server:', error);
-    capture('mcp_session_startup_failed', {
-      ok: false,
-      error_code: 'startup_failed',
-      event_source: 'mcp',
-    });
-    await shutdownAnalytics();
+    log.error('Failed to start server:', error);
     process.exit(1);
   }
 }
 
-async function handleShutdown(signal: string): Promise<void> {
-  if (shuttingDown) return;
-  shuttingDown = true;
+async function shutdown(reason: string): Promise<void> {
+  if (runtime.closing) return;
+  runtime.closing = true;
+  log.info(`Received ${reason}, shutting down`);
 
-  logger.info(`Received ${signal}, shutting down`);
-
-  const reason: McpShutdownReason =
-    signal === 'SIGTERM'
-      ? 'sigterm'
-      : signal === 'stdio_closed'
-        ? 'stdio_closed'
-        : signal === 'SIGINT'
-          ? 'sigint'
-          : 'error';
-
-  if (mcpServer) {
-    await mcpServer.stop();
-    mcpServer = null;
+  try {
+    await runtime.server?.stop();
+  } finally {
+    runtime.server = undefined;
+    process.exit(0);
   }
-
-  onMcpClientDisconnected();
-  endMcpAnalyticsSession(reason);
-  await shutdownAnalytics();
-  process.exit(0);
 }
 
-process.on('SIGINT', () => {
-  void handleShutdown('SIGINT');
-});
-process.on('SIGTERM', () => {
-  void handleShutdown('SIGTERM');
-});
+for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+  process.on(signal, () => void shutdown(signal));
+}
+process.stdin.once('end', () => void shutdown('stdio_closed'));
 
-process.stdin.on('end', () => {
-  void handleShutdown('stdio_closed');
-});
-
-main();
+void boot();

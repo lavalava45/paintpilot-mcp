@@ -93,7 +93,7 @@ $photoshopForegroundTransitions = @(
   $foregroundTransitions |
     Where-Object { $photoshopPids -contains [int]$_.pid }
 )
-$legacyHelperNames = @('cscript', 'wscript', 'cmd', 'osascript')
+$legacyHelperNames = @('cscript', 'wscript', 'cmd')
 $legacyHelpers = @(
   $newProcesses.Values |
     Where-Object { $legacyHelperNames -contains ([string]$_.name).ToLowerInvariant() }

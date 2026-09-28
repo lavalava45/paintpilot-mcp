@@ -102,6 +102,21 @@ describe('microplan request compilation and pre-dispatch diagnostics', () => {
     expect(compiled.stage).toBe('GLOBAL_BLOCK_IN');
   });
 
+  it('adds the mandatory AFTER preview after a continuous color-gradient mutation', () => {
+    const compiled = compileVisualMicroPlan({
+      steps: [{
+        id: 'field',
+        tool: 'photoshop_paint_color_gradient',
+        method_id: 'continuous-color-field',
+        args: { layer_id: 7 },
+      }],
+    }) as any;
+    expect(compiled.steps).toEqual([
+      expect.objectContaining({ tool: 'photoshop_paint_color_gradient' }),
+      expect.objectContaining({ tool: 'photoshop_get_preview' }),
+    ]);
+  });
+
   it('never overwrites explicit wrong targets and treats legacy step intent as description', () => {
     const input = template();
     input.steps[1].args.regions[0].layer_id = 999;

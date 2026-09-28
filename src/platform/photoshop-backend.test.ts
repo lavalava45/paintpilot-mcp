@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { PhotoshopConnection } from './connection.js';
 import {
-  ExtendScriptPhotoshopBackend,
   PhotoshopBackendRouter,
   UxpPhotoshopBackend,
   type PhotoshopBackend,
@@ -170,7 +169,7 @@ describe('PhotoshopBackendRouter', () => {
     })]);
   });
 
-  it('records a legacy route only as a pre-dispatch UXP-unavailable fallback', async () => {
+  it('fails closed without probing legacy when UXP is unavailable', async () => {
     const uxp = backendFixture('uxp', { available: false });
     const legacy = backendFixture('extendscript', { available: true });
     const events: BackendRouteTraceInput[] = [];
@@ -180,16 +179,18 @@ describe('PhotoshopBackendRouter', () => {
       (event) => events.push(event)
     );
 
-    await expect(router.backendFor('filter.gaussian_blur')).resolves.toBe(legacy.backend);
+    await expect(router.backendFor('filter.gaussian_blur')).rejects.toThrow(/uxp_bridge_unavailable/);
     expect(events).toEqual([expect.objectContaining({
       primitive: 'filter.gaussian_blur',
-      selected_backend: 'extendscript',
+      selected_backend: null,
       uxp_supported: true,
       uxp_available: false,
-      legacy_available: true,
-      fallback_used: true,
-      reason: 'uxp_unavailable_pre_dispatch_fallback',
+      legacy_supported: false,
+      legacy_available: null,
+      fallback_used: false,
+      reason: 'uxp_unavailable_fail_closed',
     })]);
+    expect(legacy.counts().availabilityChecks).toBe(0);
   });
   const canonicalPaintingMutations: PhotoshopPrimitive[] = [
     'brush.presets.select',
@@ -239,17 +240,17 @@ describe('PhotoshopBackendRouter', () => {
     expect(legacy.counts().availabilityChecks).toBe(0);
   });
 
-  it('selects the legacy backend before dispatch when UXP is unavailable', async () => {
+  it('fails closed for canonical painting mutations when UXP is unavailable', async () => {
     const uxp = backendFixture('uxp', { available: false });
     const legacy = backendFixture('extendscript');
     const router = new PhotoshopBackendRouter(unusedConnection, [uxp.backend, legacy.backend]);
 
     for (const primitive of canonicalPaintingMutations) {
-      await expect(router.backendFor(primitive)).resolves.toBe(legacy.backend);
+      await expect(router.backendFor(primitive)).rejects.toThrow(/uxp_bridge_unavailable/);
     }
 
     expect(uxp.counts().availabilityChecks).toBe(canonicalPaintingMutations.length);
-    expect(legacy.counts().availabilityChecks).toBe(canonicalPaintingMutations.length);
+    expect(legacy.counts().availabilityChecks).toBe(0);
   });
 
   it('chooses UXP for canonical Guard painting reads when ready and adds zero legacy calls', async () => {
@@ -267,9 +268,7 @@ describe('PhotoshopBackendRouter', () => {
 
   it('keeps brush-pack import UXP-only and fail-closed when the companion is unavailable', async () => {
     const uxp = new UxpPhotoshopBackend(unusedConnection);
-    const legacy = new ExtendScriptPhotoshopBackend(unusedConnection);
     expect(uxp.supports('brush.presets.import')).toBe(true);
-    expect(legacy.supports('brush.presets.import')).toBe(false);
 
     const unavailableUxp = backendFixture('uxp', { available: false });
     const legacyFixture = backendFixture('extendscript');
@@ -277,10 +276,10 @@ describe('PhotoshopBackendRouter', () => {
       { ...unavailableUxp.backend, supports: (primitive) => primitive === 'brush.presets.import' },
       { ...legacyFixture.backend, supports: () => false },
     ]);
-    await expect(router.backendFor('brush.presets.import')).rejects.toThrow(/photoshop_backend_unavailable/);
+    await expect(router.backendFor('brush.presets.import')).rejects.toThrow(/uxp_bridge_unavailable/);
   });
 
-  it('advertises the Phase-9/10 layer mutation clusters on both semantic backends', () => {
+  it('advertises the Phase-9/10 layer mutation clusters on the UXP backend', () => {
     const primitives: PhotoshopPrimitive[] = [
       'layer.create',
       'layer.delete',
@@ -293,10 +292,8 @@ describe('PhotoshopBackendRouter', () => {
       'layer.order.write',
     ];
     const uxp = new UxpPhotoshopBackend();
-    const legacy = new ExtendScriptPhotoshopBackend(unusedConnection);
     for (const primitive of primitives) {
       expect(uxp.supports(primitive)).toBe(true);
-      expect(legacy.supports(primitive)).toBe(true);
     }
   });
 
@@ -356,7 +353,7 @@ describe('PhotoshopBackendRouter', () => {
     expect(legacy.counts().availabilityChecks).toBe(0);
   });
 
-  it('advertises and routes every P2/P3 migration primitive UXP-first with pre-dispatch legacy fallback', async () => {
+  it('advertises and routes every P2/P3 migration primitive UXP-only and fail-closed', async () => {
     const primitives: PhotoshopPrimitive[] = [
       'adjustment.brightness_contrast', 'adjustment.curves', 'adjustment.exposure',
       'adjustment.hue_saturation', 'adjustment.vibrance', 'adjustment.gradient_map',
@@ -366,17 +363,14 @@ describe('PhotoshopBackendRouter', () => {
       'filter.sharpen', 'filter.smart_blur',
       'text.fonts.list', 'text.alignment.write', 'text.color.write', 'text.font.write',
       'text.content.write', 'document.export',
-      'action.play', 'datasets.list', 'datasets.import', 'datasets.generate',
       'document.resize', 'document.crop', 'document.place',
       'guides.add', 'guides.list', 'guides.clear', 'history.redo', 'image.stack',
       'layer.style.apply', 'layer.text.create', 'layer.rasterize', 'sky.replace',
       'smart_object.convert', 'smart_object.copy', 'smart_object.edit', 'smart_object.replace',
     ];
     const uxpBackend = new UxpPhotoshopBackend();
-    const legacyBackend = new ExtendScriptPhotoshopBackend(unusedConnection);
     for (const primitive of primitives) {
       expect(uxpBackend.supports(primitive)).toBe(true);
-      expect(legacyBackend.supports(primitive)).toBe(true);
     }
 
     const uxp = backendFixture('uxp');
@@ -394,19 +388,19 @@ describe('PhotoshopBackendRouter', () => {
       [unavailableUxp.backend, fallback.backend]
     );
     for (const primitive of primitives) {
-      await expect(fallbackRouter.backendFor(primitive)).resolves.toBe(fallback.backend);
+      await expect(fallbackRouter.backendFor(primitive)).rejects.toThrow(/uxp_bridge_unavailable/);
     }
-    expect(fallback.counts().availabilityChecks).toBe(primitives.length);
+    expect(fallback.counts().availabilityChecks).toBe(0);
   });
 
-  it('uses the pre-dispatch legacy fallback for migrated painting mutations when UXP is unavailable', async () => {
+  it('fails closed for migrated painting mutations when UXP is unavailable', async () => {
     const uxp = backendFixture('uxp', { available: false });
     const legacy = backendFixture('extendscript');
     const router = new PhotoshopBackendRouter(unusedConnection, [uxp.backend, legacy.backend]);
 
-    await expect(router.backendFor('painting.strokes')).resolves.toBe(legacy.backend);
+    await expect(router.backendFor('painting.strokes')).rejects.toThrow(/uxp_bridge_unavailable/);
     expect(uxp.counts().availabilityChecks).toBe(1);
-    expect(legacy.counts().availabilityChecks).toBe(1);
+    expect(legacy.counts().availabilityChecks).toBe(0);
   });
 
   it('uses UXP for migrated painting mutations when the companion is available', async () => {
@@ -447,14 +441,14 @@ describe('PhotoshopBackendRouter', () => {
     });
   });
 
-  it('selects ExtendScript before dispatch when UXP is unavailable', async () => {
+  it('fails closed before dispatch when UXP is unavailable', async () => {
     const uxp = backendFixture('uxp', { available: false });
     const legacy = backendFixture('extendscript', {
       state: { hasDocument: false },
     });
     const router = new PhotoshopBackendRouter(unusedConnection, [uxp.backend, legacy.backend]);
 
-    await expect(router.readState()).resolves.toEqual({ hasDocument: false });
+    await expect(router.readState()).rejects.toThrow(/uxp_bridge_unavailable/);
     expect(uxp.counts()).toEqual({
       reads: 0,
       documentInfoReads: 0,
@@ -470,7 +464,7 @@ describe('PhotoshopBackendRouter', () => {
       availabilityChecks: 1,
     });
     expect(legacy.counts()).toEqual({
-      reads: 1,
+      reads: 0,
       documentInfoReads: 0,
       documentLists: 0,
       selectionReads: 0,
@@ -481,16 +475,16 @@ describe('PhotoshopBackendRouter', () => {
       colorSampleReads: 0,
       colorSamplesReads: 0,
       historyReads: 0,
-      availabilityChecks: 1,
+      availabilityChecks: 0,
     });
   });
 
-  it('selects ExtendScript when UXP does not support the primitive', async () => {
+  it('rejects a primitive not supported by the UXP backend without probing legacy', async () => {
     const uxp = backendFixture('uxp', { supports: false });
     const legacy = backendFixture('extendscript');
     const router = new PhotoshopBackendRouter(unusedConnection, [uxp.backend, legacy.backend]);
 
-    await expect(router.readState()).resolves.toEqual({ hasDocument: false });
+    await expect(router.readState()).rejects.toThrow(/capability_unavailable/);
     expect(uxp.counts()).toEqual({
       reads: 0,
       documentInfoReads: 0,
@@ -506,7 +500,7 @@ describe('PhotoshopBackendRouter', () => {
       availabilityChecks: 0,
     });
     expect(legacy.counts()).toEqual({
-      reads: 1,
+      reads: 0,
       documentInfoReads: 0,
       documentLists: 0,
       selectionReads: 0,
@@ -517,7 +511,7 @@ describe('PhotoshopBackendRouter', () => {
       colorSampleReads: 0,
       colorSamplesReads: 0,
       historyReads: 0,
-      availabilityChecks: 1,
+      availabilityChecks: 0,
     });
   });
 

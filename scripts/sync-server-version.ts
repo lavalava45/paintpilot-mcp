@@ -1,6 +1,6 @@
 /**
- * Sync fork server.json metadata with package.json.
- * The fork is source-distributed and has no npm/MCP Registry publication target;
+ * Sync project server.json metadata with package.json.
+ * The project is source-distributed and has no npm/MCP Registry publication target;
  * this helper only keeps version/description metadata consistent for local bundles.
  */
 import { readFileSync, writeFileSync } from 'node:fs';

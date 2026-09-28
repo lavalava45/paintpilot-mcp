@@ -3,10 +3,11 @@ type Point = { x: number; y: number };
 
 type Primitive = {
   id: string;
-  kind: 'stroke' | 'region';
+  kind: 'stroke' | 'region' | 'stamp';
   order: number;
   lines: Point[][];
   bounds: Bounds;
+  sourceKey?: string;
 };
 
 type Instance = {
@@ -27,6 +28,8 @@ export type MechanicalPatterningAnalysis = {
   reason: string;
   instance_count: number;
   repeated_cluster_size: number;
+  distribution_intent?: 'organic-clustered' | 'directional-broken' | 'perspective-regular' | 'intentional-uniform';
+  distribution_failure?: 'uniform-organic-spacing' | 'unbroken-directional-spacing' | 'perspective-progression-mismatch';
   representative_instance_ids: string[];
   representative_regions: Bounds[];
   most_similar_pair?: { a: string; b: string; normalized_error: number };
@@ -36,6 +39,54 @@ export type MechanicalPatterningAnalysis = {
     region_bounds: Bounds;
   }>;
 };
+
+const DISTRIBUTION_INTENTS = ['organic-clustered', 'directional-broken', 'perspective-regular', 'intentional-uniform'] as const;
+type DistributionIntent = (typeof DISTRIBUTION_INTENTS)[number];
+
+function distributionIntent(request: Record<string, any>): DistributionIntent | undefined {
+  const micro = request.args && typeof request.args === 'object' && !Array.isArray(request.args) ? request.args : {};
+  const value = text(micro.distribution_intent)?.toLowerCase();
+  return (DISTRIBUTION_INTENTS as readonly string[]).includes(value ?? '') ? value as DistributionIntent : undefined;
+}
+
+function distributionFailure(request: Record<string, any>): { kind: MechanicalPatterningAnalysis['distribution_failure']; regions: Bounds[]; reason: string } | null {
+  const intent = distributionIntent(request);
+  if (!intent || intent === 'intentional-uniform') return null;
+  const rows = motifRows(request).map(row => ({ row, bounds: normalizeBounds(row?.region_bounds) })).filter(item => item.bounds) as Array<{ row: any; bounds: Bounds }>;
+  if (rows.length < 4) return null;
+  const centers = rows.map(item => center(item.bounds));
+  const nearest = centers.map((point, index) => Math.min(...centers.filter((_, other) => other !== index).map(other => Math.hypot(point.x - other.x, point.y - other.y))));
+  const mean = nearest.reduce((sum, value) => sum + value, 0) / nearest.length;
+  const variance = nearest.reduce((sum, value) => sum + (value - mean) ** 2, 0) / nearest.length;
+  const cv = mean > 0 ? Math.sqrt(variance) / mean : 0;
+  if ((intent === 'organic-clustered' || intent === 'directional-broken') && cv < 0.12) {
+    return {
+      kind: intent === 'organic-clustered' ? 'uniform-organic-spacing' : 'unbroken-directional-spacing',
+      regions: rows.slice(0, 3).map(item => item.bounds),
+      reason: intent === 'organic-clustered'
+        ? 'declared organic-clustered distribution has mechanically uniform nearest-neighbour spacing; jitter/instance variation is not evidence of clustering, gaps or density hierarchy'
+        : 'declared directional-broken distribution has an unbroken mechanically uniform spacing rhythm',
+    };
+  }
+  if (intent === 'perspective-regular') {
+    const micro = request.args as Record<string, any>;
+    const frame = micro.logical_layer?.surface_frame;
+    const depth = frame?.depth_progression;
+    const anchor = frame?.convergence_anchor;
+    if (depth && anchor && Number.isFinite(Number(anchor.x)) && Number.isFinite(Number(anchor.y))) {
+      const expectedRatio = Number(depth.far_scale) / Number(depth.near_scale);
+      const sizes = rows.map(item => Math.sqrt(area(item.bounds)));
+      const sizeRange = Math.max(...sizes) / Math.max(1e-9, Math.min(...sizes));
+      if (Number.isFinite(expectedRatio) && Math.abs(expectedRatio - 1) > 0.15 && sizeRange < 1.12) {
+        return {
+          kind: 'perspective-progression-mismatch', regions: rows.slice(0, 3).map(item => item.bounds),
+          reason: 'declared perspective-regular distribution keeps motif scale effectively depth-invariant despite a materially changing surface-frame depth progression',
+        };
+      }
+    }
+  }
+  return null;
+}
 
 const ORGANIC_RE =
   /(?:\bbird\b|\bbirds\b|\bninja\b|\bninjas\b|\bcharacter\b|\bcharacters\b|\bfigure\b|\bfigures\b|\bcreature\b|\bcreatures\b|\banimal\b|\banimals\b|\borganic\b|\bflower\b|\bflowers\b|\bfoliage\b|\bperson\b|\bpeople\b|\bhuman\b)/i;
@@ -113,6 +164,36 @@ function unionBounds(primitives: Primitive[]): Bounds | null {
   };
 }
 
+function stampPrimitivePoints(instance: Record<string, unknown>): Point[] | null {
+  const x = Number(instance.x);
+  const y = Number(instance.y);
+  const size = Number(instance.size);
+  if (![x, y, size].every(Number.isFinite) || size <= 0) return null;
+  const angle = Number.isFinite(Number(instance.angle)) ? Number(instance.angle) : 0;
+  const radians = angle * Math.PI / 180;
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+  const sx = instance.flip_x === true ? -1 : 1;
+  const sy = instance.flip_y === true ? -1 : 1;
+  // Use an asymmetric normalized footprint so the descriptor has stable geometry while
+  // remaining invariant to translation/rotation/reflection/uniform scale. The profile id
+  // remains part of topology, so different source stamps are never collapsed together.
+  const normalized = [
+    { x: -0.5, y: -0.35 },
+    { x: 0.5, y: -0.2 },
+    { x: 0.35, y: 0.5 },
+    { x: -0.4, y: 0.3 },
+  ];
+  return normalized.map(point => {
+    const px = point.x * size * sx;
+    const py = point.y * size * sy;
+    return {
+      x: px * cos - py * sin + x,
+      y: px * sin + py * cos + y,
+    };
+  });
+}
+
 function extractPrimitives(request: Record<string, any>): Primitive[] {
   if (request.tool !== 'photoshop_execute_visual_microplan') return [];
   const micro = request.args && typeof request.args === 'object' && !Array.isArray(request.args)
@@ -157,12 +238,41 @@ function extractPrimitives(request: Record<string, any>): Primitive[] {
         result.push({ id: `${stepId}:region:${index}`, kind: 'region', order: order++, lines, bounds });
       }
     }
+    if (step.tool === 'photoshop_paint_stamp_instances' && Array.isArray(args.instances)) {
+      const profileKey = text(args.stamp_profile_id) ?? text(args.preset_name) ?? 'unidentified-stamp';
+      for (let index = 0; index < args.instances.length; index++) {
+        const instance = args.instances[index];
+        if (!instance || typeof instance !== 'object' || Array.isArray(instance)) continue;
+        const points = stampPrimitivePoints(instance as Record<string, unknown>);
+        if (!points) continue;
+        const lines = [points];
+        const bounds = boundsForLines(lines);
+        if (!bounds) continue;
+        result.push({
+          id: `${stepId}:stamp:${text((instance as Record<string, unknown>).instance_id) ?? index}`,
+          kind: 'stamp',
+          order: order++,
+          lines,
+          bounds,
+          sourceKey: profileKey,
+        });
+      }
+    }
   }
   return result;
 }
 
-function metadataInstances(micro: Record<string, any>, primitives: Primitive[]): Instance[] {
-  const rows = Array.isArray(micro.motif_instances) ? micro.motif_instances : [];
+function motifRows(request: Record<string, any>): any[] {
+  const observed = Array.isArray(request.observed_motif_instances) ? request.observed_motif_instances : [];
+  if (observed.length) return observed;
+  const micro = request.args && typeof request.args === 'object' && !Array.isArray(request.args)
+    ? request.args as Record<string, any>
+    : {};
+  return Array.isArray(micro.motif_instances) ? micro.motif_instances : [];
+}
+
+function metadataInstances(request: Record<string, any>, primitives: Primitive[]): Instance[] {
+  const rows = motifRows(request);
   const instances: Instance[] = [];
   for (let index = 0; index < rows.length; index++) {
     const row = rows[index];
@@ -201,7 +311,7 @@ function samplePoints(lines: Point[][], limit = 48): Point[] {
 function descriptor(instance: Instance): GeometryDescriptor | null {
   const primitives = [...instance.primitives].sort((a, b) => a.order - b.order);
   const topology = primitives.map(primitive =>
-    `${primitive.kind}:${primitive.lines.map(line => line.length).join('.')}`
+    `${primitive.kind}${primitive.sourceKey ? `:${primitive.sourceKey}` : ''}:${primitive.lines.map(line => line.length).join('.')}`
   ).join('|');
   const points = samplePoints(primitives.flatMap(primitive => primitive.lines));
   if (points.length < 2) return null;
@@ -291,8 +401,9 @@ function semanticClassification(request: Record<string, any>): 'organic_instance
   if (explicit === 'intentional_regular') return 'intentional_regular';
   if (explicit === 'organic_instances') return 'organic_instances';
 
-  const motifCategories = Array.isArray(micro.motif_instances)
-    ? micro.motif_instances
+  const rows = motifRows(request);
+  const motifCategories = rows.length
+    ? rows
         .map((row: any) => text(row?.category))
         .filter(Boolean)
         .join(' ')
@@ -314,6 +425,7 @@ function semanticClassification(request: Record<string, any>): 'organic_instance
 
 export function analyzeMechanicalPatterning(request: Record<string, any>): MechanicalPatterningAnalysis {
   const classification = semanticClassification(request);
+  const declaredDistribution = distributionIntent(request);
   const base: MechanicalPatterningAnalysis = {
     protocol: 'photoshop.guard.mechanical_patterning.v1',
     triggered: false,
@@ -321,6 +433,7 @@ export function analyzeMechanicalPatterning(request: Record<string, any>): Mecha
     reason: '',
     instance_count: 0,
     repeated_cluster_size: 0,
+    ...(declaredDistribution ? { distribution_intent: declaredDistribution } : {}),
     representative_instance_ids: [],
     representative_regions: [],
     findings: [],
@@ -329,6 +442,19 @@ export function analyzeMechanicalPatterning(request: Record<string, any>): Mecha
   if (request.tool !== 'photoshop_execute_visual_microplan') {
     return { ...base, reason: 'not a compact visual micro-plan' };
   }
+  const spatialFailure = distributionFailure(request);
+  if (spatialFailure) {
+    return {
+      ...base,
+      triggered: true,
+      distribution_failure: spatialFailure.kind,
+      instance_count: motifRows(request).length,
+      reason: spatialFailure.reason,
+      representative_regions: spatialFailure.regions,
+      representative_instance_ids: motifRows(request).slice(0, spatialFailure.regions.length).map((row: any, index: number) => text(row?.id) ?? `motif-${index}`),
+      findings: spatialFailure.regions.map(region_bounds => ({ kind: 'mechanical_patterning' as const, severity: 'should-fix' as const, region_bounds })),
+    };
+  }
   if (classification === 'intentional_regular') {
     return { ...base, reason: 'explicit/derived intentional regular rhythm is exempt from organic-copy review' };
   }
@@ -336,11 +462,8 @@ export function analyzeMechanicalPatterning(request: Record<string, any>): Mecha
     return { ...base, reason: 'no repeated organic/character/creature motif class was admitted or derived' };
   }
 
-  const micro = request.args && typeof request.args === 'object' && !Array.isArray(request.args)
-    ? request.args as Record<string, any>
-    : {};
   const primitives = extractPrimitives(request);
-  const explicit = metadataInstances(micro, primitives);
+  const explicit = metadataInstances(request, primitives);
   const instances = explicit.length >= 2 ? explicit : automaticInstances(primitives);
   base.instance_count = instances.length;
   if (instances.length < 3) {

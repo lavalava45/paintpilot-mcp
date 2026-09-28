@@ -283,4 +283,34 @@ describe('production artistic recovery policy', () => {
     expect(after).toEqual(before);
     expect(after?.decision).toBe('block_dependent_problem');
   });
+
+  it('clears strategy debt after a successful resolution without erasing unrelated history', () => {
+    const { store } = fixture();
+    store.write(failedRecord(microplan('failed-before-success'), 1));
+    store.write({
+      ...failedRecord(microplan('successful-resolution'), 2),
+      verdict: {
+        verdict: 'improvement',
+        disposition: 'accept',
+        target_resolved: 'yes',
+        significance: {
+          execution_effect: 'material',
+          global: { mean_abs_rgb_delta: 0.03 },
+        },
+        at: new Date(2002).toISOString(),
+      },
+    });
+    store.write(failedRecord({
+      ...microplan('unrelated-history'),
+      problem_id: 'unrelated-problem',
+      args: { ...microplan('unrelated-history').args, problem_id: 'unrelated-problem' },
+    }, 3));
+
+    expect(store.artisticRecoveryForProblem(42, 'cheek-edge', microplan('next'))).toBeNull();
+    expect(store.artisticRecoveryForProblem(42, 'unrelated-problem', {
+      ...microplan('next-unrelated'),
+      problem_id: 'unrelated-problem',
+      args: { ...microplan('next-unrelated').args, problem_id: 'unrelated-problem' },
+    })?.decision).toBe('require_distinct_strategy');
+  });
 });

@@ -1,61 +1,26 @@
 import type { PromptRegistry } from '../core/prompt-registry.js';
-import { toPromptDefinition } from './_shared.js';
-import { enhancePortraitTemplate } from './templates/enhance-portrait.js';
-import { removeBackgroundTemplate } from './templates/remove-background.js';
-import { prepareForWebTemplate } from './templates/prepare-for-web.js';
-import { exportSocialVariantsTemplate } from './templates/export-social-variants.js';
-import { applyColorGradeTemplate } from './templates/apply-color-grade.js';
-import { frequencySeparationTemplate } from './templates/frequency-separation.js';
-import { batchMockupReplaceTemplate } from './templates/batch-mockup-replace.js';
-import { organizeLayersTemplate } from './templates/organize-layers.js';
-import { gradientFadeTemplate } from './templates/gradient-fade.js';
-import { skyBlendTemplate } from './templates/sky-blend.js';
-import { dodgeBurnTemplate } from './templates/dodge-burn.js';
-import { removeDistractionTemplate } from './templates/remove-distraction.js';
-import { gradientBlendTemplate } from './templates/gradient-blend.js';
+import { toPromptDefinition } from './guide-contract.js';
 import { colorCorrectTemplate } from './templates/color-correct.js';
-import { dodgeBurnGuideTemplate } from './templates/dodge-burn-guide.js';
 import { compositeBlendTemplate } from './templates/composite-blend.js';
-import { splitCarouselTemplate } from './templates/split-carousel.js';
-import { batchWatermarkTemplate } from './templates/batch-watermark.js';
-import { passportPhotoTemplate } from './templates/passport-photo.js';
-import { csvToCardsTemplate } from './templates/csv-to-cards.js';
 import { digitalPaintingControlTemplate } from './templates/digital-painting-control.js';
+import { dodgeBurnGuideTemplate } from './templates/dodge-burn-guide.js';
+import { gradientBlendTemplate } from './templates/gradient-blend.js';
 
-export const PHOTOSHOP_GUIDE_PROMPT_NAMES = [
-  'ps.gradient_blend',
-  'ps.color_correct',
-  'ps.dodge_burn_guide',
-  'ps.composite_blend',
-  'ps.digital_painting_control',
-] as const;
-
-export const PHOTOSHOP_PROMPT_TEMPLATES = [
-  enhancePortraitTemplate,
-  removeBackgroundTemplate,
-  prepareForWebTemplate,
-  exportSocialVariantsTemplate,
-  applyColorGradeTemplate,
-  frequencySeparationTemplate,
-  batchMockupReplaceTemplate,
-  organizeLayersTemplate,
-  gradientFadeTemplate,
-  skyBlendTemplate,
-  dodgeBurnTemplate,
-  removeDistractionTemplate,
+const GUIDE_CATALOG = Object.freeze([
   gradientBlendTemplate,
   colorCorrectTemplate,
-  compositeBlendTemplate,
   dodgeBurnGuideTemplate,
-  splitCarouselTemplate,
-  batchWatermarkTemplate,
-  passportPhotoTemplate,
-  csvToCardsTemplate,
+  compositeBlendTemplate,
   digitalPaintingControlTemplate,
-] as const;
+]);
+
+export const PHOTOSHOP_PROMPT_TEMPLATES = GUIDE_CATALOG;
+export const PHOTOSHOP_GUIDE_PROMPT_NAMES = Object.freeze(
+  GUIDE_CATALOG.map(({ name }) => name)
+);
 
 export function registerPhotoshopPrompts(registry: PromptRegistry): void {
-  for (const template of PHOTOSHOP_PROMPT_TEMPLATES) {
+  GUIDE_CATALOG.forEach((template) => {
     registry.register(template.name, toPromptDefinition(template));
-  }
+  });
 }

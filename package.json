@@ -1,57 +1,45 @@
 {
-  "name": "photoshop-mcp-digital-painting-fork",
+  "name": "photoshop-mcp-digital-painting",
   "version": "1.7.6",
-  "description": "Independent community fork of Photoshop MCP for AI-driven digital painting — 148 tools with painting, two-level Art Director/Painter orchestration, embedded Guard orchestration, VisualMicroPlan execution, color sampling, grayscale value analysis, landmarks/guides, previews, recipes, method selection, and hardened document targeting. Based on alisaitteke/photoshop-mcp; not an official upstream release.",
+  "description": "Independent Windows-first MCP system for AI-driven digital painting and evidence-bound Photoshop automation.",
   "main": "dist/index.js",
   "type": "module",
   "bin": {
-    "photoshop-mcp": "dist/index.js",
-    "photoshop-mcp-ui": "dist/ui/cli.js"
+    "photoshop-mcp": "dist/index.js"
   },
   "files": [
     "dist",
-    "web/dist",
     "uxp-plugin",
     "examples",
     "scripts/prepare.mjs",
     "README.md",
     "LICENSE",
+    "NOTICE",
     "llms.txt",
     "AGENTS.md"
   ],
   "scripts": {
     "dev": "tsc --watch",
-    "dev:ui": "concurrently -n server,web -c blue,green \"npm:dev:ui:server\" \"npm:dev:ui:web\"",
-    "dev:ui:server": "tsx watch src/ui/cli.ts --port 5174 --no-open",
-    "dev:ui:web": "npm --prefix web run dev",
-    "build": "npm run build:server && npm run build:web",
+    "build": "npm run build:server",
     "build:server": "node scripts/clean-dist.mjs && tsc",
-    "build:web": "npm --prefix web install --no-audit --no-fund && npm --prefix web run build",
     "start": "node dist/index.js",
-    "start:ui": "node dist/ui/cli.js",
     "lint": "eslint src --ext .ts",
     "format": "prettier --write \"src/**/*.ts\"",
     "format:check": "prettier --check \"src/**/*.ts\"",
-    "spike:photoshop-actions": "tsx scripts/spike-photoshop-actions.ts",
-    "spike:2026": "tsx scripts/spike-2026-features.ts",
-    "spike:issue-2": "tsx scripts/spike-issue-2.ts",
     "verify:photoshop-prompts": "tsx scripts/verify-photoshop-prompt-coverage.ts",
+    "generate:tool-backend-inventory": "node scripts/dev/generate-tool-backend-inventory.mjs",
     "verify:painting-policy": "node scripts/verify-digital-painting-policy.mjs",
     "verify:pack": "node scripts/verify-pack.mjs",
     "test:mcp-local": "tsx scripts/test-mcp-local.ts",
-    "test:ui-auth": "tsx scripts/test-ui-auth.ts",
-    "test:mcp-all": "tsx scripts/test-all-mcp-tools.ts",
     "test:measurement-tools": "node scripts/test-measurement-tools.mjs",
     "test:landmark-ergonomics": "node scripts/test-landmark-ergonomics.mjs",
-    "test:painting-batching": "node scripts/test-painting-batching.mjs",
     "test:painting-batching-live": "node scripts/test-painting-batching-live.mjs",
     "test:embedded-guard-mcp": "node scripts/test-embedded-guard-mcp.mjs",
-    "test:acceptance": "npm run verify:acceptance-matrix && vitest run",
+    "test:acceptance": "npm run verify:acceptance-matrix && vitest run --maxWorkers=1 --testTimeout=15000",
     "test:document-targeting": "node scripts/test-document-targeting.mjs",
     "test:document-targeting-live": "node scripts/test-document-targeting-live.mjs",
     "test:color-sampling": "node scripts/test-color-sampling.mjs",
     "test:color-sampling-live": "node scripts/test-color-sampling-live.mjs",
-    "test:intent-expansion": "tsx scripts/test-intent-expansion-local.ts",
     "prepare": "node scripts/prepare.mjs",
     "sync:server-version": "tsx scripts/sync-server-version.ts",
     "build:mcpb": "tsx scripts/build-mcpb.ts",
@@ -61,7 +49,11 @@
     "verify:acceptance-matrix": "node scripts/verify-acceptance-matrix.mjs",
     "verify:compact-v2-contract": "node scripts/verify-compact-v2-contract-audit.mjs",
     "verify:live-evidence-ledger": "node scripts/verify-live-evidence-ledger.mjs",
-    "verify:canonical": "npm run build:server && npm run verify:pack && npm run lint && npm run test:acceptance && npm run verify:compact-v2-contract && npm run verify:painting-policy && npm run verify:photoshop-prompts && npm run verify:tool-counts && npm run verify:live-evidence-ledger"
+    "verify:source-independence": "node scripts/verify-source-independence.mjs",
+    "verify:product-identity": "node scripts/verify-product-identity.mjs",
+    "verify:provenance": "node scripts/verify-provenance.mjs",
+    "verify:external-intake": "node scripts/verify-external-intake.mjs",
+    "verify:canonical": "npm run build:server && npm run verify:pack && npm run lint && npm run test:acceptance && npm run verify:compact-v2-contract && npm run verify:painting-policy && npm run verify:photoshop-prompts && npm run verify:source-independence && npm run verify:product-identity && npm run verify:provenance && npm run verify:external-intake && npm run verify:tool-counts && npm run verify:live-evidence-ledger"
   },
   "keywords": [
     "mcp",
@@ -75,12 +67,10 @@
     "claude",
     "image-editing",
     "typescript",
-    "extendscript",
-    "developer-tools",
-    "vue",
-    "hono"
+    "windows",
+    "developer-tools"
   ],
-  "author": "lavalava45 (fork maintainer; based on the original project by Ali Sait Teke)",
+  "author": "lavalava45",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -94,29 +84,14 @@
     "node": ">=18.0.0"
   },
   "dependencies": {
-    "@ai-sdk/anthropic": "^3.0.75",
-    "@ai-sdk/google": "^3.0.67",
-    "@ai-sdk/mcp": "^1.0.40",
-    "@ai-sdk/openai": "^3.0.61",
-    "@anthropic-ai/claude-agent-sdk": "^0.3.173",
-    "@hono/node-server": "^1.13.7",
     "@modelcontextprotocol/sdk": "^1.0.4",
-    "@openrouter/ai-sdk-provider": "^2.9.0",
-    "ai": "^6.0.175",
-    "better-sqlite3": "^12.9.0",
-    "get-port": "^7.1.0",
-    "hono": "^4.6.14",
-    "jpeg-js": "^0.4.4",
-    "open": "^10.1.0",
-    "zod": "^4.4.3"
+    "jpeg-js": "^0.4.4"
   },
   "devDependencies": {
     "@eslint/js": "^9.18.0",
-    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.10.5",
     "@typescript-eslint/eslint-plugin": "^8.20.0",
     "@typescript-eslint/parser": "^8.20.0",
-    "concurrently": "^9.1.2",
     "eslint": "^9.18.0",
     "globals": "^17.9.0",
     "prettier": "^3.4.2",
@@ -127,6 +102,6 @@
   "packageManager": "pnpm@10.33.0+sha512.10568bb4a6afb58c9eb3630da90cc9516417abebd3fabbe6739f0ae795728da1491e9db5a544c76ad8eb7570f5c4bb3d6c637b2cb41bfdcdb47fa823c8649319",
   "private": true,
   "contributors": [
-    "lavalava45 (digital-painting fork maintainer)"
+    "lavalava45 (maintainer)"
   ]
 }

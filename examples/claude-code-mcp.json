@@ -1,11 +1,11 @@
 {
   "mcpServers": {
-    "photoshop": {
+    "photoshop-digital-painting": {
       "command": "node",
-      "args": ["/absolute/path/to/photoshop-mcp-digital-painting/dist/index.js"],
+      "args": ["C:\\Tools\\photoshop-mcp-digital-painting\\dist\\index.js"],
       "env": {
         "LOG_LEVEL": "1",
-        "PHOTOSHOP_PATH": ""
+        "PHOTOSHOP_PATH": "C:\\Program Files\\Adobe\\Adobe Photoshop 2026\\Photoshop.exe"
       }
     }
   }

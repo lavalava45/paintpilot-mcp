@@ -1,0 +1,67 @@
+Photoshop MCP — Digital Painting Edition
+Independent project notice and upstream provenance
+
+This repository is independently maintained at:
+https://github.com/lavalava45/photoshop-mcp-digital-painting
+
+The project is not affiliated with or endorsed by Adobe Inc. Adobe Photoshop is a product of
+Adobe Inc.; references to Photoshop describe interoperability with the locally installed product.
+
+Historical origin
+-----------------
+
+This codebase originated as a derivative of the open-source project "Photoshop MCP" by
+Ali Sait Teke:
+https://github.com/alisaitteke/photoshop-mcp
+
+The source-independence program in this repository uses upstream/fork-base commit
+7b635963f87b5b8ff5380c3156841f5253ec8063 as its reproducible historical comparison baseline.
+That baseline is provenance evidence; it is not a runtime, build, packaging, or distribution
+dependency.
+
+Licensing
+---------
+
+The upstream MIT copyright and permission notice are retained in LICENSE and apply as required
+to upstream-derived portions of the repository. Independently authored additions and rewrites are
+distributed under the same repository MIT license unless a file states otherwise.
+
+Project-authored work
+---------------------
+
+Independently authored additions, rewrites, tests, documentation and release engineering are
+maintained under this project's own repository identity. Project ownership metadata must supplement,
+not replace, the retained upstream MIT notice. Git history and project release notes remain the
+authoritative record of authorship for new work.
+
+Major architectural divergence
+------------------------------
+
+The maintained system no longer follows the historical upstream architecture as a synchronization
+target. Major project-owned divergence includes:
+
+- Windows-only production support with semantic Photoshop execution routed through the UXP companion;
+- an embedded durable Photoshop Guard in the same MCP server process, with required-mode mutation
+  control and evidence-bound recovery instead of an external controller/daemon route;
+- retirement of ExtendScript/COM/VBS production fallbacks and fail-closed UXP routing for maintained
+  semantic mutations;
+- a project-owned digital-painting control layer, visual review pipeline, method/stage policy,
+  document pinning and source/product identity verification gates.
+
+Selective ports and attribution policy
+--------------------------------------
+
+Future code or documentation selectively ported from the historical upstream project or another
+external source must be reviewed change-by-change rather than merged wholesale. For every non-trivial
+port, record enough provenance to identify the source repository and source revision (commit, tag or
+pull request), the affected project paths, and any licensing/notice obligations. Prefer adaptation or
+independent reimplementation when the external change assumes architecture retired here. When source
+text is copied or substantially adapted, preserve all license/copyright notices required by that
+source and do not replace the upstream MIT notice retained in LICENSE.
+
+Upstream distribution identifiers
+---------------------------------
+
+The upstream website, npm scope/package, MCP Registry identity, release channels, and author
+branding belong to the original project. They are not distribution channels or ownership claims
+for Photoshop MCP — Digital Painting Edition.

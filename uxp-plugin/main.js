@@ -736,6 +736,53 @@ function selectPaintbrushToolDescriptor() {
   };
 }
 
+const STROKE_TOOL_REFS = Object.freeze({
+  BRUSH: 'paintbrushTool',
+  PENCIL: 'pencilTool',
+  SMUDGE: 'smudgeTool',
+  ERASER: 'eraserTool',
+});
+
+function selectStrokeToolDescriptor(toolName) {
+  const ref = STROKE_TOOL_REFS[String(toolName ?? '').toUpperCase()];
+  if (!ref) throw new Error(`paint_tool_not_ready:${String(toolName)}: unsupported stroke mechanism`);
+  return {
+    _obj: 'select',
+    _target: [{ _ref: ref }],
+    _options: { dialogOptions: 'silent' },
+  };
+}
+
+async function preflightStrokeToolsModal(strokes) {
+  const names = [...new Set(
+    strokes.map((stroke) => String(stroke?.tool ?? 'BRUSH').toUpperCase())
+  )];
+  const readiness = [];
+  for (const name of names) {
+    await action.batchPlay(
+      [selectStrokeToolDescriptor(name)],
+      { synchronousExecution: true }
+    );
+    const [descriptor] = await action.batchPlay(
+      [currentToolOptionsDescriptor()],
+      { synchronousExecution: true }
+    );
+    const options = descriptor?.currentToolOptions;
+    if (!options || typeof options !== 'object') {
+      throw new Error(`paint_tool_not_ready:${name}: currentToolOptions unavailable after explicit tool activation`);
+    }
+    if (name === 'BRUSH' && (!options.brush || typeof options.brush !== 'object')) {
+      throw new Error(`paint_tool_not_ready:BRUSH: brush descriptor unavailable after explicit tool activation`);
+    }
+    readiness.push({
+      tool: name,
+      current_tool_options: true,
+      brush_descriptor: Boolean(options.brush && typeof options.brush === 'object'),
+    });
+  }
+  return readiness;
+}
+
 async function applyBrushSettingsModal(settings = {}) {
   await action.batchPlay([selectPaintbrushToolDescriptor()], { synchronousExecution: true });
   const [descriptor] = await action.batchPlay(
@@ -1947,6 +1994,11 @@ async function paintStrokesBatch(params = {}) {
   const { doc, targetLayerId, targetDescriptor, originalLayerId, resolution } = target;
   return core.executeAsModal(
     async (executionContext) => {
+      // Validate every requested Photoshop stroke mechanism before history is
+      // suspended and before stroke #1 can alter pixels. This prevents a mixed
+      // batch from discovering that a later mechanism is not ready only after
+      // earlier strokes have already rendered.
+      const strokeToolReadiness = await preflightStrokeToolsModal(strokes);
       const suspensionId = await executionContext.hostControl.suspendHistory({
         documentID: doc.id,
         name: 'MCP Digital Painting',
@@ -1959,22 +2011,39 @@ async function paintStrokesBatch(params = {}) {
             { synchronousExecution: true }
           );
         }
-        const initialBrush = await snapshotBrushSettings({ synchronousExecution: true });
-        let brushState = { ...initialBrush.settings };
+        const hasBrushStroke = strokes.some(
+          (stroke) => String(stroke?.tool ?? 'BRUSH').toUpperCase() === 'BRUSH'
+        );
+        let brushState = null;
+        if (hasBrushStroke) {
+          // currentToolOptions describes the active Photoshop tool. Region/fill
+          // work or user interaction may leave another tool active between
+          // passes, so BRUSH rendering must establish the Brush Tool before
+          // reading/updating brush settings instead of assuming prior tool state.
+          await action.batchPlay(
+            [selectPaintbrushToolDescriptor()],
+            { synchronousExecution: true }
+          );
+          const initialBrush = await snapshotBrushSettings({ synchronousExecution: true });
+          brushState = { ...initialBrush.settings };
+        }
         let cachedColor = currentForegroundRgb();
+        let brushStateDirty = false;
 
         for (let index = 0; index < strokes.length; index++) {
           const stroke = strokes[index];
+          const strokeToolName = String(stroke.tool ?? 'BRUSH').toUpperCase();
+          const usesBrushSettings = strokeToolName === 'BRUSH';
           let brushChanged = false;
-          if (stroke.size !== undefined && Number(stroke.size) !== Number(brushState.size)) {
+          if (usesBrushSettings && stroke.size !== undefined && Number(stroke.size) !== Number(brushState.size)) {
             brushState.size = Number(stroke.size);
             brushChanged = true;
           }
-          if (stroke.opacity !== undefined && Number(stroke.opacity) !== Number(brushState.opacity)) {
+          if (usesBrushSettings && stroke.opacity !== undefined && Number(stroke.opacity) !== Number(brushState.opacity)) {
             brushState.opacity = Number(stroke.opacity);
             brushChanged = true;
           }
-          if (stroke.flow !== undefined && Number(stroke.flow) !== Number(brushState.flow)) {
+          if (usesBrushSettings && stroke.flow !== undefined && Number(stroke.flow) !== Number(brushState.flow)) {
             brushState.flow = Number(stroke.flow);
             brushChanged = true;
           }
@@ -1986,24 +2055,26 @@ async function paintStrokesBatch(params = {}) {
               green: Number(stroke.color.green),
               blue: Number(stroke.color.blue),
             };
+            if (hasBrushStroke) brushStateDirty = true;
           }
           // In this UXP host, assigning app.foregroundColor inside the same
           // painting modal can restore the pre-assignment brush opacity/flow.
           // Re-apply the desired core brush state after a color write so
           // per-stroke style semantics match the legacy PathItem route.
-          if (brushChanged || colorChanged) {
+          if (usesBrushSettings && (brushChanged || brushStateDirty)) {
             const updated = await applyBrushSettingsModal({
               size: Number(brushState.size),
               opacity: Number(brushState.opacity),
               flow: Number(brushState.flow),
             });
             brushState = { ...updated.settings };
+            brushStateDirty = false;
           }
 
           const pathName = `__MCP_PAINT_${Date.now()}_${index}`;
           await doc.pathItems.add(pathName, [makeUxpStrokeSubPath(stroke)]);
           try {
-            const tool = constants.ToolType[String(stroke.tool ?? 'BRUSH').toUpperCase()];
+            const tool = constants.ToolType[strokeToolName];
             if (!tool) throw new Error(`unsupported UXP stroke tool: ${String(stroke.tool)}`);
             await strokeNamedPathModal(doc, pathName, tool, stroke.simulatePressure);
           } finally {
@@ -2026,6 +2097,7 @@ async function paintStrokesBatch(params = {}) {
           coordinate_space: 'canvas_pixels',
           document_resolution_dpi: resolution,
           path_coordinate_scale: 1,
+          stroke_tool_readiness: strokeToolReadiness,
         };
       } catch (error) {
         if (!committed) {
@@ -2875,6 +2947,186 @@ async function openImageMutation(params = {}) {
   });
 }
 
+async function paintColorGradient(params = {}) {
+  const requestedLayerId = Number(params.layer_id);
+  const from = params.from || {}, to = params.to || {};
+  const stops = Array.isArray(params.stops) ? params.stops : [];
+  if (!Number.isInteger(requestedLayerId) || requestedLayerId <= 0) throw new Error('color_gradient requires layer_id');
+  if (![from.x, from.y, to.x, to.y].every(Number.isFinite) || (from.x === to.x && from.y === to.y)) throw new Error('color_gradient requires distinct finite from/to points');
+  if (stops.length < 2 || stops.length > 4) throw new Error('color_gradient requires 2-4 stops');
+  const normalizedStops = stops.map((stop, index) => {
+    const position = Number(stop?.position), red = Number(stop?.red), green = Number(stop?.green), blue = Number(stop?.blue);
+    if (![position, red, green, blue].every(Number.isFinite) || position < 0 || position > 1 || [red, green, blue].some(v => v < 0 || v > 255)) throw new Error(`Invalid color_gradient stop ${index}`);
+    return { position, red, green, blue };
+  });
+  if (normalizedStops[0].position !== 0 || normalizedStops[normalizedStops.length - 1].position !== 1 || normalizedStops.some((s, i) => i > 0 && s.position <= normalizedStops[i - 1].position)) throw new Error('color_gradient stops must be strictly ordered from 0 to 1');
+  return core.executeAsModal(async () => {
+    const prepared = await prepareLayerMutation(params, 'color_gradient');
+    const targetLayerId = requestedLayerId;
+    const [targetDescriptor] = await action.batchPlay([layerByIdDescriptor(targetLayerId)], { synchronousExecution: true });
+    if (!targetDescriptor || targetDescriptor._obj === 'error') throw new Error(`Color gradient target layer not found: ${targetLayerId}`);
+    if (layerSectionValue(targetDescriptor) === 'layerSectionStart') throw new Error('Cannot paint a color gradient on a LayerSet');
+    if (fillLayerLockState(targetDescriptor)) throw new Error('Cannot paint a color gradient on a fully locked layer');
+    if (legacyLayerKind(targetDescriptor) === 'LayerKind.TEXT') throw new Error('Cannot paint a color gradient on a text layer. Rasterize it first.');
+    const originalLayerId = prepared.originalActiveLayerId;
+    if (originalLayerId !== targetLayerId) await action.batchPlay([selectLayerByIdDescriptor(targetLayerId)], { synchronousExecution: true });
+    await action.batchPlay([{
+      _obj: 'gradientClassEvent',
+      from: { _obj: 'paint', horizontal: { _unit: 'pixelsUnit', _value: from.x }, vertical: { _unit: 'pixelsUnit', _value: from.y } },
+      to: { _obj: 'paint', horizontal: { _unit: 'pixelsUnit', _value: to.x }, vertical: { _unit: 'pixelsUnit', _value: to.y } },
+      type: { _enum: 'gradientType', _value: 'linear' }, dither: true, useMask: false, reverse: false,
+      gradient: { _obj: 'gradientClassEvent', name: 'MCP Continuous Color Field', gradientForm: { _enum: 'gradientForm', _value: 'customStops' }, interfaceIconFrameDimmed: 4096,
+        colors: normalizedStops.map(s => ({ _obj: 'colorStop', color: { _obj: 'RGBColor', red: s.red, green: s.green, blue: s.blue }, type: { _enum: 'colorStopType', _value: 'userStop' }, location: Math.round(s.position * 4096), midpoint: 50 })),
+        transparency: [{ _obj: 'transferSpec', opacity: { _unit: 'percentUnit', _value: 100 }, location: 0, midpoint: 50 }, { _obj: 'transferSpec', opacity: { _unit: 'percentUnit', _value: 100 }, location: 4096, midpoint: 50 }] },
+      _options: { dialogOptions: 'silent' },
+    }], { synchronousExecution: true });
+    if (originalLayerId != null && originalLayerId !== targetLayerId) await action.batchPlay([selectLayerByIdDescriptor(originalLayerId)], { synchronousExecution: true });
+    return { applied: true, layer_id: targetLayerId, from: { x: from.x, y: from.y }, to: { x: to.x, y: to.y }, stops: normalizedStops, gradient_kind: 'raster-color-linear' };
+  }, { commandName: 'MCP Continuous Color Field' });
+}
+
+function stampPlacementBounds(instance) {
+  const size = Math.max(1, Number(instance.size) || 1);
+  const half = size / 2;
+  return {
+    left: Number(instance.x) - half,
+    top: Number(instance.y) - half,
+    right: Number(instance.x) + half,
+    bottom: Number(instance.y) + half,
+  };
+}
+
+async function paintStampInstancesBatch(params = {}) {
+  const instances = Array.isArray(params.instances) ? params.instances : [];
+  if (instances.length < 1) throw new Error('instances must be a non-empty array');
+  if (instances.length > 64) throw new Error('instances may contain at most 64 entries per semantic placement pass');
+  const target = await preparePaintTarget(params, 'paint_stamp_instances');
+  const { doc, targetLayerId, targetDescriptor, originalLayerId, resolution } = target;
+  return core.executeAsModal(
+    async (executionContext) => {
+      const suspensionId = await executionContext.hostControl.suspendHistory({
+        documentID: doc.id,
+        name: 'MCP Stamp Placement',
+      });
+      const initialBrush = await snapshotBrushSettings({ synchronousExecution: true });
+      let brushState = { ...initialBrush.settings };
+      const initialColor = currentForegroundRgb();
+      let cachedColor = { ...initialColor };
+      const completed = [];
+      let failed = null;
+      let historyResumed = false;
+      try {
+        if (targetLayerId !== originalLayerId) {
+          await action.batchPlay([selectLayerByIdDescriptor(targetLayerId)], { synchronousExecution: true });
+        }
+        for (let index = 0; index < instances.length; index++) {
+          const instance = instances[index] ?? {};
+          const instanceId = String(instance.instance_id ?? '').trim();
+          try {
+            let brushChanged = false;
+            const desired = {
+              size: Number(instance.size),
+              opacity: instance.opacity === undefined ? Number(brushState.opacity) : Number(instance.opacity),
+              flow: Number(brushState.flow),
+              angle: instance.angle === undefined ? 0 : Number(instance.angle),
+              flip_x: Boolean(instance.flip_x),
+              flip_y: Boolean(instance.flip_y),
+            };
+            for (const [key, value] of Object.entries(desired)) {
+              if (brushState[key] !== value) {
+                brushState[key] = value;
+                brushChanged = true;
+              }
+            }
+            const colorChanged = Boolean(instance.color && !samePaintColor(cachedColor, instance.color));
+            if (colorChanged) {
+              setForegroundColorModal(instance.color);
+              cachedColor = {
+                red: Number(instance.color.red),
+                green: Number(instance.color.green),
+                blue: Number(instance.color.blue),
+              };
+            }
+            if (brushChanged || colorChanged) {
+              const updated = await applyBrushSettingsModal(desired);
+              brushState = { ...updated.settings };
+            }
+            const pathName = `__MCP_STAMP_${Date.now()}_${index}`;
+            await doc.pathItems.add(pathName, [makeUxpDabSubPath({ x: Number(instance.x), y: Number(instance.y) })]);
+            try {
+              await strokeNamedPathModal(doc, pathName, constants.ToolType.BRUSH, false);
+            } finally {
+              await deleteNamedPathModal(pathName);
+            }
+            completed.push({
+              instance_id: instanceId,
+              instance_index: index,
+              source_bounds: stampPlacementBounds(instance),
+              x: Number(instance.x),
+              y: Number(instance.y),
+              size: Number(instance.size),
+              angle: desired.angle,
+              flip_x: desired.flip_x,
+              flip_y: desired.flip_y,
+            });
+          } catch (error) {
+            failed = {
+              instance_id: instanceId,
+              instance_index: index,
+              state: 'failed-or-uncertain',
+              error: error?.message ?? String(error),
+            };
+            break;
+          }
+        }
+
+        // Once any instance has been dispatched, commit the history suspension even
+        // when a later instance fails. The durable stable-command receipt prevents
+        // replay; the caller reconciles from fresh preview evidence.
+        await executionContext.hostControl.resumeHistory(suspensionId, true);
+        historyResumed = true;
+        return {
+          placement_status: failed ? 'partial' : 'complete',
+          layer_id: targetLayerId,
+          layer_name: String(targetDescriptor.name ?? ''),
+          coordinate_space: 'canvas_pixels',
+          document_resolution_dpi: resolution,
+          completed_instances: completed,
+          failed_or_uncertain_instance: failed,
+          not_started_instances: failed
+            ? instances.slice(Number(failed.instance_index) + 1).map((instance, offset) => ({
+                instance_id: String(instance?.instance_id ?? '').trim(),
+                instance_index: Number(failed.instance_index) + 1 + offset,
+              }))
+            : [],
+        };
+      } finally {
+        if (!historyResumed) {
+          try {
+            await executionContext.hostControl.resumeHistory(suspensionId, completed.length > 0 || Boolean(failed));
+          } catch (resumeError) {
+            void resumeError;
+          }
+        }
+        try {
+          if (!samePaintColor(cachedColor, initialColor)) setForegroundColorModal(initialColor);
+          await applyBrushSettingsModal(initialBrush.settings);
+        } catch (restoreBrushError) {
+          void restoreBrushError;
+        }
+        if (originalLayerId != null && originalLayerId !== targetLayerId) {
+          try {
+            await action.batchPlay([selectLayerByIdDescriptor(originalLayerId)], { synchronousExecution: true });
+          } catch (restoreLayerError) {
+            void restoreLayerError;
+          }
+        }
+      }
+    },
+    { commandName: 'MCP Stamp Placement' }
+  );
+}
+
 async function importBrushPackAsset(params = {}) {
   const filePath = typeof params.filePath === 'string' ? params.filePath.trim() : '';
   if (!filePath) throw new Error('brush_pack_import_unavailable: missing filePath');
@@ -2956,14 +3208,7 @@ async function probeMediaBrush(params = {}) {
       preset_name: presetName,
       effective_settings: selected?.settings ?? {},
       probe_document: { width: 960, height: 820 },
-      layout: {
-        isolated_dabs: { left: 40, top: 40, right: 650, bottom: 220 },
-        buildup: { left: 675, top: 40, right: 900, bottom: 220 },
-        short_stroke: { left: 40, top: 240, right: 350, bottom: 360 },
-        long_stroke: { left: 40, top: 370, right: 920, bottom: 500 },
-        directional: { left: 40, top: 520, right: 480, bottom: 770 },
-        pressure_response: { left: 500, top: 520, right: 920, bottom: 770 },
-      },
+      layout: mediaBrushProbeLayout(),
       preview,
     };
   } finally {
@@ -2983,44 +3228,67 @@ async function probeMediaBrush(params = {}) {
   }
 }
 
-function snapshotPersistenceState(targetDocument) {
-  const activeDocument = app.activeDocument;
-  let selectionBounds = null;
-  let selectionObserved = false;
-  try {
-    selectionBounds = normalizedBounds(targetDocument.selection?.bounds ?? null);
-    selectionObserved = true;
-  } catch {}
+function probeRect(left, top, right, bottom) {
+  return { left, top, right, bottom };
+}
 
+function mediaBrushProbeLayout() {
   return {
-    active_document_id: activeDocument?.id ?? null,
-    target_document_id: targetDocument.id,
-    target_document_path: targetDocument.path ?? '',
-    target_document_saved: Boolean(targetDocument.saved),
-    active_layer_ids: Array.from(targetDocument.activeLayers ?? []).map((layer) => layer.id),
-    active_tool_id: app.currentTool?.id ?? null,
-    selection_observed: selectionObserved,
-    selection_bounds: selectionBounds,
+    isolated_dabs: probeRect(40, 40, 650, 220),
+    buildup: probeRect(675, 40, 900, 220),
+    short_stroke: probeRect(40, 240, 350, 360),
+    long_stroke: probeRect(40, 370, 920, 500),
+    directional: probeRect(40, 520, 480, 770),
+    pressure_response: probeRect(500, 520, 920, 770),
   };
 }
 
-function sameJson(a, b) {
-  return JSON.stringify(a) === JSON.stringify(b);
+function readSelectionFingerprint(targetDocument) {
+  try {
+    return {
+      observed: true,
+      bounds: normalizedBounds(targetDocument.selection?.bounds ?? null),
+    };
+  } catch {
+    return { observed: false, bounds: null };
+  }
+}
+
+function snapshotPersistenceState(targetDocument) {
+  const selection = readSelectionFingerprint(targetDocument);
+  const activeLayerIds = Array.from(targetDocument.activeLayers ?? [], (layer) => layer.id);
+  return {
+    target_document_id: targetDocument.id,
+    active_document_id: app.activeDocument?.id ?? null,
+    target_document_path: targetDocument.path ?? '',
+    target_document_saved: Boolean(targetDocument.saved),
+    active_layer_ids: activeLayerIds,
+    active_tool_id: app.currentTool?.id ?? null,
+    selection_observed: selection.observed,
+    selection_bounds: selection.bounds,
+  };
+}
+
+function sameSerializedValue(left, right) {
+  return JSON.stringify(left) === JSON.stringify(right);
 }
 
 function persistenceInvariants(before, after) {
-  const invariants = {
-    active_document_unchanged: before.active_document_id === after.active_document_id,
-    working_path_unchanged: before.target_document_path === after.target_document_path,
-    active_layers_unchanged: sameJson(before.active_layer_ids, after.active_layer_ids),
-    active_tool_unchanged: before.active_tool_id === after.active_tool_id,
-    selection_unchanged:
-      before.selection_observed && after.selection_observed
-        ? sameJson(before.selection_bounds, after.selection_bounds)
-        : undefined,
+  const selectionStable = before.selection_observed && after.selection_observed
+    ? sameSerializedValue(before.selection_bounds, after.selection_bounds)
+    : undefined;
+  const checks = [
+    ['active_document_unchanged', before.active_document_id === after.active_document_id],
+    ['working_path_unchanged', before.target_document_path === after.target_document_path],
+    ['active_layers_unchanged', sameSerializedValue(before.active_layer_ids, after.active_layer_ids)],
+    ['active_tool_unchanged', before.active_tool_id === after.active_tool_id],
+    ['selection_unchanged', selectionStable],
+  ];
+  const invariants = Object.fromEntries(checks);
+  return {
+    invariants,
+    invariants_ok: checks.every(([, value]) => value === undefined || value === true),
   };
-  const observed = Object.values(invariants).filter((value) => value !== undefined);
-  return { invariants, invariants_ok: observed.every(Boolean) };
 }
 
 async function saveDocumentCopy(params) {
@@ -3149,61 +3417,50 @@ async function claimCommandForExecution(commandId) {
   }
 }
 
-function neuralDescriptors(filter, params) {
-  const smoothness = params.smoothness ?? 50;
-  const blur = params.blur ?? 50;
+const NEURAL_FILTER_OBJECTS = Object.freeze({
+  harmonize: 'harmonization',
+  depth_blur: 'depthBlur',
+  super_zoom: 'superZoom',
+  colorize: 'colorize',
+});
 
-  switch (filter) {
-    case 'skin_smoothing':
-      return [
-        {
-          _obj: 'neuralGalleryFilters',
-          neuralGalleryFilters: {
-            _obj: 'skinSmoothing',
-            smoothness,
-            blur,
-          },
-        },
-      ];
-    case 'harmonize':
-      return [
-        {
-          _obj: 'neuralGalleryFilters',
-          neuralGalleryFilters: {
-            _obj: 'harmonization',
-          },
-        },
-      ];
-    case 'depth_blur':
-      return [
-        {
-          _obj: 'neuralGalleryFilters',
-          neuralGalleryFilters: {
-            _obj: 'depthBlur',
-          },
-        },
-      ];
-    case 'super_zoom':
-      return [
-        {
-          _obj: 'neuralGalleryFilters',
-          neuralGalleryFilters: {
-            _obj: 'superZoom',
-          },
-        },
-      ];
-    case 'colorize':
-      return [
-        {
-          _obj: 'neuralGalleryFilters',
-          neuralGalleryFilters: {
-            _obj: 'colorize',
-          },
-        },
-      ];
-    default:
-      throw new Error(`Unknown neural filter: ${filter}`);
+function neuralDescriptors(filter, params = {}) {
+  if (filter === 'skin_smoothing') {
+    return [{
+      _obj: 'neuralGalleryFilters',
+      neuralGalleryFilters: {
+        _obj: 'skinSmoothing',
+        smoothness: params.smoothness ?? 50,
+        blur: params.blur ?? 50,
+      },
+    }];
   }
+  const neuralObject = NEURAL_FILTER_OBJECTS[filter];
+  if (!neuralObject) throw new Error(`Unknown neural filter: ${filter}`);
+  return [{
+    _obj: 'neuralGalleryFilters',
+    neuralGalleryFilters: { _obj: neuralObject },
+  }];
+}
+
+function pinnedDocumentSelectDescriptor(documentId) {
+  return {
+    _obj: 'select',
+    _target: [{ _ref: 'document', _id: documentId }],
+    _options: { dialogOptions: 'dontDisplay' },
+  };
+}
+
+async function runNeuralFilter(params = {}) {
+  const descriptors = neuralDescriptors(params.filter, params);
+  const documentId = Number(params.document_id);
+  if (Number.isInteger(documentId) && documentId > 0) {
+    descriptors.unshift(pinnedDocumentSelectDescriptor(documentId));
+  }
+  return action.batchPlay(descriptors, {
+    synchronousExecution: true,
+    modalBehavior: 'execute',
+  });
 }
 
 async function assertPinnedActiveDocument(actionName, params = {}) {
@@ -3231,6 +3488,36 @@ async function assertPinnedActiveDocument(actionName, params = {}) {
   throw new Error(
     `document_not_active: pinned document ${requestedDocumentId} is open but not active; active document was not changed`
   );
+}
+
+function constructorMethodNames(value) {
+  return typeof value === 'function' ? Object.getOwnPropertyNames(value.prototype) : [];
+}
+
+function objectPrototypeMethodNames(value) {
+  return value ? Object.getOwnPropertyNames(Object.getPrototypeOf(value)) : [];
+}
+
+function inspectPathApi(activeDocument) {
+  const pathItems = activeDocument?.pathItems;
+  return {
+    appPathPointInfo: typeof app.PathPointInfo,
+    modulePathPointInfo: typeof photoshop.PathPointInfo,
+    appSubPathInfo: typeof app.SubPathInfo,
+    moduleSubPathInfo: typeof photoshop.SubPathInfo,
+    appPathItem: typeof app.PathItem,
+    appPathItems: typeof app.PathItems,
+    pathItemMethods: constructorMethodNames(app.PathItem),
+    pathItemsMethods: constructorMethodNames(app.PathItems),
+    activePathItemsObjectMethods: objectPrototypeMethodNames(pathItems),
+    activePathItemsDynamic: pathItems
+      ? { add: typeof pathItems.add, getByName: typeof pathItems.getByName }
+      : null,
+    pointKind: typeof photoshop.constants?.PointKind,
+    shapeOperation: typeof photoshop.constants?.ShapeOperation,
+    toolType: typeof photoshop.constants?.ToolType,
+    colorBlendMode: typeof photoshop.constants?.ColorBlendMode,
+  };
 }
 
 async function handleCommand(cmd) {
@@ -3317,35 +3604,7 @@ async function handleCommand(cmd) {
           activeDocument: activeDocument
             ? { id: activeDocument.id, name: activeDocument.name }
             : null,
-          pathApi: {
-            appPathPointInfo: typeof app.PathPointInfo,
-            modulePathPointInfo: typeof photoshop.PathPointInfo,
-            appSubPathInfo: typeof app.SubPathInfo,
-            moduleSubPathInfo: typeof photoshop.SubPathInfo,
-            appPathItem: typeof app.PathItem,
-            appPathItems: typeof app.PathItems,
-            pathItemMethods:
-              typeof app.PathItem === 'function'
-                ? Object.getOwnPropertyNames(app.PathItem.prototype)
-                : [],
-            pathItemsMethods:
-              typeof app.PathItems === 'function'
-                ? Object.getOwnPropertyNames(app.PathItems.prototype)
-                : [],
-            activePathItemsObjectMethods: activeDocument?.pathItems
-              ? Object.getOwnPropertyNames(Object.getPrototypeOf(activeDocument.pathItems))
-              : [],
-            activePathItemsDynamic: activeDocument?.pathItems
-              ? {
-                  add: typeof activeDocument.pathItems.add,
-                  getByName: typeof activeDocument.pathItems.getByName,
-                }
-              : null,
-            pointKind: typeof photoshop.constants?.PointKind,
-            shapeOperation: typeof photoshop.constants?.ShapeOperation,
-            toolType: typeof photoshop.constants?.ToolType,
-            colorBlendMode: typeof photoshop.constants?.ColorBlendMode,
-          },
+          pathApi: inspectPathApi(activeDocument),
           pluginTimestampMs: Date.now(),
         },
       });
@@ -3532,6 +3791,14 @@ async function handleCommand(cmd) {
       await postResult({ id, ok: true, data: await paintDabsBatch(params) });
       return;
     }
+    if (cmdAction === 'color_gradient') {
+      await postResult({ id, ok: true, data: await paintColorGradient(params) });
+      return;
+    }
+    if (cmdAction === 'paint_stamp_instances') {
+      await postResult({ id, ok: true, data: await paintStampInstancesBatch(params) });
+      return;
+    }
 
     if (cmdAction === 'capture_preview') {
       await postResult({ id, ok: true, data: await capturePreview(params) });
@@ -3560,30 +3827,19 @@ async function handleCommand(cmd) {
     }
 
     if (cmdAction === 'neural_filter') {
-      const descriptors = neuralDescriptors(params.filter, params);
-      if (Number.isInteger(params.document_id) && params.document_id > 0) {
-        descriptors.unshift({
-          _obj: 'select',
-          _target: [{ _ref: 'document', _id: params.document_id }],
-          _options: { dialogOptions: 'dontDisplay' },
-        });
-      }
-      const result = await action.batchPlay(descriptors, {
-        synchronousExecution: true,
-        modalBehavior: 'execute',
-      });
-      await postResult({ id, ok: true, data: result });
+      await postResult({ id, ok: true, data: await runNeuralFilter(params) });
       return;
     }
 
-    await postResult({ id, ok: false, error: `unknown_action:${cmdAction}` });
+    await postResult(commandErrorResult(id, `unknown_action:${cmdAction}`));
   } catch (error) {
-    await postResult({
-      id,
-      ok: false,
-      error: error?.message || String(error),
-    });
+    await postResult(commandErrorResult(id, error));
   }
+}
+
+function commandErrorResult(id, error) {
+  const message = typeof error === 'string' ? error : (error?.message ?? String(error));
+  return { id, ok: false, error: message };
 }
 
 async function pollOnce() {

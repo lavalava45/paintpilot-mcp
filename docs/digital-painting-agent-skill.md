@@ -16,10 +16,11 @@ Consult linked detail only when applicable; its rules remain mandatory.
 3. Bind one immutable `processes/<subject>-process/<run>/` through
    `photoshop_guard_set_art_run`; keep frames, same-stem commentary sidecars,
    checkpoints, final exports and painting-state there.
-4. In non-trivial painting, persist bounded brush preflight before the first Brush/dab.
-   Region/fill and unrelated preparation do not inherit that dependency.
-   Do not use `simple_graphic` to bypass painting rules.
-   Establish the brief/style, recognition cues and required Art Director directive.
+4. In non-trivial painting, persist bounded brush preflight before Brush/dab;
+   region/fill and unrelated preparation are exempt. Never use `simple_graphic` as a
+   bypass. Establish brief/style, recognition cues and the Art Director directive;
+   run `prompt_conflict_preflight` and resolve any pipeline-changing ambiguity before
+   Painter mutation.
 5. Build one compact `next_pass`: unique attempt `request_key`, stable `problem_id`
    for one problem, pinned `document_id`, root `goal`, optional region/protection,
    ordered `actions`. Step `description` is explanatory only;
@@ -62,30 +63,15 @@ setting + action + spatial problem. [Details](painting-policy/foundations.md#ope
 
 ### Close and continue in one call
 
-After inspection, the next `photoshop_guard_cycle_auto` carries
-`previous_operation_id`, one compact `previous_observation`, and the next
-`next_pass`. Guard derives the technical report from durable execution and
-acknowledges the exact stored operation receipt internally. The observation is the
-model's actual visual classification; Guard must not fabricate it.
-
-Use `{"observed":"…","target":"resolved|unresolved|uncertain"}`. `target` judges
-the operation goal, not the whole `planner_task_id`; a resolved pass may leave the
-Planner task active.
-
-Complete/block the Planner task only after task-level assessment. Then add
-`"planner_task_assessment":{"status":"completed|blocked|continue","evidence_scope":"task","evidence":["task-level visible evidence"]}`.
-Otherwise omit it; omission keeps the task active.
-
-Add `regression` only when visible and `action=rollback|correct|accept` only to
-override the derived disposition. Do not use expanded legacy verdict fields.
-
-For the LAST pass, send `previous_operation_id + previous_observation` and omit
-`next_pass`. This is compact finalization: no dummy mutation, copied receipt, or
-separate report → ack → verdict chain.
-
-Do not insert standalone report/ack/verdict, status, state, or schema calls between
-healthy compact passes. Public standalone closure providers have been retired; closure
-remains behind the compact facade.
+After inspection, call `photoshop_guard_cycle_auto` with `previous_operation_id`,
+compact `previous_observation`, and optional next `next_pass`. Guard derives the
+technical closure and acknowledges the exact stored receipt internally; the visual
+observation remains the model's actual inspection. Use
+`{"observed":"…","target":"resolved|unresolved|uncertain"}`; `target` judges this
+operation, not the whole Planner task. Add `planner_task_assessment` only from
+task-level evidence. Add `regression` only for a visible regression; otherwise omit/null.
+Use a disposition override only when needed. For the last pass omit `next_pass`: compact finalization requires no
+dummy mutation or standalone report/ack/verdict/status/schema choreography.
 
 Minimal shape: `next_pass={request_key,problem_id?,document_id,goal,region,stage,scale,action_class?,actions}`.
 
@@ -129,9 +115,20 @@ mutation; determine whether the already-started action is still running.
 - Art Director owns global structure and delegates bounded Painter tasks.
   Painter binds directive/task/scope/change domains, verifies each local pass and
   returns at the review horizon or serious regression; no global replan per stroke.
+- Validate the chosen rendering strategy early, after 1–2 **meaningful** Painter
+  previews. Ask whether the dominant objective itself is becoming more visible, not
+  merely whether secondary traits or detail are accumulating. If not, replan the
+  rendering strategy before adding more marks; a no-op restatement of the same first
+  passes is not a replan.
 - Regions are early block-in scaffolding, not the final photorealistic rendering.
   Match mark/edge/material mechanism to form. Correct vector/collage, stamp,
   scallop, ribbon or mechanical-grid artifacts when the style does not license them.
+- Stamps are source vocabulary, not finished copy/paste. Transform/scale/flip/color
+  jitter does not defeat organic anti-copy review; `intentional_regular` is only for
+  genuinely regular systems.
+- Supplied packs are **scene-first**: structure precedes assets. `brush_pack_scene_plan`
+  binds pack roles/profiles to Painter tasks. `brush_pack_policy.mode=exclusive` permits
+  only evidence-bound pack marks; non-brush operations remain available.
 - Check support/contact, cast shadows, occlusion/depth, tangencies and proportions.
   Local improvement does not excuse an equal-or-worse structural regression.
 - For local/small/subtle work use matching BEFORE/AFTER focus and >=800px local
@@ -181,8 +178,8 @@ Do not interpret an advisory stall as permission to bypass a gate.
 | Local repair, recovery anchor or execution-change evidence | [Inspection](painting-policy/inspection.md#visual-checkpoints-and-execution-sanity) |
 | Reference, portrait, manufactured geometry or optional helpers | [Conditional modules](painting-policy/inspection.md#conditional-modules) |
 | Async/reconnect, stall, reporting/focus, capture, completion or evaluation details | [Operations](painting-policy/operations.md) |
-| Development reload/transport migration | [Migration inventory](uxp-migration-inventory.md), repository AGENTS.md |
-| Audit of moved rules and measured latency | [Preservation map and smoke audit](painting-policy/optimization-audit.md) |
+| Transport status | [Tool inventory](available-tools.md#generated-backend-and-access-inventory), AGENTS.md |
+| Performance evidence | [Latency audit](performance-and-latency.md) |
 
 Consult the relevant section before the operation that depends on it; do not
 reread unchanged instructions between healthy passes. The live schema defines

@@ -10,6 +10,12 @@ import {
   VISUAL_MICROPLAN_METHOD_CLASSES,
   VISUAL_MICROPLAN_LOGICAL_LAYER_DECISIONS,
   VISUAL_MICROPLAN_LAYER_CHANGE_KINDS,
+  VISUAL_MICROPLAN_PHYSICAL_ROLES,
+  VISUAL_MICROPLAN_OPACITY_ROLES,
+  VISUAL_MICROPLAN_CONSTRUCTION_TIERS,
+  VISUAL_MICROPLAN_NEGATIVE_SPACE_RELATIONS,
+  VISUAL_MICROPLAN_CAUSAL_EFFECT_RELATIONS,
+  VISUAL_MICROPLAN_DEPTH_RELATIONS,
   VISUAL_MICROPLAN_CHANGE_DOMAINS,
   VISUAL_MICROPLAN_PAINTER_SCOPES,
   VISUAL_MICROPLAN_PRESSURE_POLICIES,
@@ -27,10 +33,20 @@ import {
 } from '../core/visual-microplan.js';
 import type { ToolDefinition, ToolRegistry, ToolResult } from '../core/tool-registry.js';
 import { EDGE_CLASSES, selectEdgeMethod } from '../core/edge-control.js';
-import { PAINTING_VISUAL_INTENTS, paintingMethodCapabilities } from '../core/painting-method-palette.js';
+import { PAINTING_CONSTRUCTION_ROLES, PAINTING_VISUAL_INTENTS, paintingMethodCapabilities } from '../core/painting-method-palette.js';
+import {
+  MATERIAL_RESPONSE_COMPONENTS,
+  MATERIAL_RESPONSE_MICROTEXTURE_POLICIES,
+  MATERIAL_RESPONSE_PLAN_APPLICABILITY,
+  MATERIAL_RESPONSE_ROLES,
+  MATERIAL_RESPONSE_STYLE_BASIS_FIELDS,
+} from '../core/material-response.js';
 
 import { PreviewBarriers, type PendingPreviewBarrier } from '../core/preview-barriers.js';
-import { currentToolExecutionContext } from '../core/execution-context.js';
+import {
+  currentToolExecutionContext,
+  withToolExecutionStepContext,
+} from '../core/execution-context.js';
 import {
   compileVisualMicroPlan,
   VISUAL_MICROPLAN_STAGES,
@@ -41,6 +57,59 @@ interface StepStatus {
   id: string;
   tool: string;
   ok: boolean;
+}
+
+function normalizedFailureCode(value: unknown): string | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const code = (value as Record<string, unknown>).code;
+  return typeof code === 'string' && code.trim() ? code.trim() : undefined;
+}
+
+type PassActionExecutionState = 'completed' | 'failed-or-uncertain' | 'not-started';
+
+interface PassActionOutcome {
+  step_id: string;
+  tool: string;
+  kind: 'preparation' | 'visual-mutation';
+  state: PassActionExecutionState;
+}
+
+function passActionOutcomes(
+  plan: VisualMicroPlan,
+  statuses: StepStatus[],
+  failedOrUncertainStep?: string
+): PassActionOutcome[] {
+  const statusById = new Map(statuses.map(status => [status.id, status]));
+  const mutationIndexes = new Set(plan.mutationIndexes);
+  return plan.steps.flatMap((step, index) => {
+    // BEFORE/AFTER previews are evidence boundaries, not artistic sub-actions.
+    if (index === plan.captureIndex || index === plan.beforeCaptureIndex) return [];
+    const status = statusById.get(step.id);
+    const state: PassActionExecutionState = status?.ok
+      ? 'completed'
+      : status?.ok === false || step.id === failedOrUncertainStep
+        ? 'failed-or-uncertain'
+        : 'not-started';
+    return [{
+      step_id: step.id,
+      tool: step.tool,
+      kind: mutationIndexes.has(index) ? 'visual-mutation' : 'preparation',
+      state,
+    }];
+  });
+}
+
+function passExecutionProjection(
+  plan: VisualMicroPlan,
+  statuses: StepStatus[],
+  state: PassActionExecutionState,
+  failedOrUncertainStep?: string
+) {
+  return {
+    pass_id: plan.planId,
+    state,
+    actions: passActionOutcomes(plan, statuses, failedOrUncertainStep),
+  };
 }
 
 interface PreparedVisualPass {
@@ -597,6 +666,12 @@ function collectMethodExecutionErrorsFromInput(
         );
       }
     }
+    if (capability.preparationAnyOf?.length
+      && !preparationSteps.some(preparation => capability.preparationAnyOf!.includes(String(preparation?.tool)))) {
+      errors.push(
+        `step "${id}" method_id=${methodId} requires one explicit preparation step from: ${capability.preparationAnyOf.join(', ')}`
+      );
+    }
     const brushHints = capability.executionHints?.brush;
     if (brushHints && typeof brushHints === 'object' && !Array.isArray(brushHints)) {
       const setBrush = [...preparationSteps].reverse().find(preparation => preparation?.tool === 'photoshop_set_brush');
@@ -953,7 +1028,9 @@ function protectedMutationError(
   } else if (
     mutationStep.tool === 'photoshop_paint_strokes' ||
     mutationStep.tool === 'photoshop_paint_dabs' ||
-    mutationStep.tool === 'photoshop_fill_layer'
+    mutationStep.tool === 'photoshop_paint_stamp_instances' ||
+    mutationStep.tool === 'photoshop_fill_layer' ||
+    mutationStep.tool === 'photoshop_paint_color_gradient'
   ) {
     const layerId = positiveLayerId(mutationArgs.layer_id);
     if (!layerId) {
@@ -990,6 +1067,10 @@ function methodExecutionError(plan: VisualMicroPlan, registry: ToolRegistry): st
     }
     if (!capability.primaryTool || step.tool !== capability.primaryTool) {
       return `step "${step.id}" method_id=${step.methodId} requires primary tool ${capability.primaryTool ?? 'none'}, got ${step.tool}`;
+    }
+    if (capability.preparationAnyOf?.length
+      && !preparationSteps.some(preparation => capability.preparationAnyOf!.includes(preparation.tool))) {
+      return `step "${step.id}" method_id=${step.methodId} requires one explicit preparation step from: ${capability.preparationAnyOf.join(', ')}`;
     }
 
     if (capability.methodClass === 'preset-brush' && plan.paintStrategy?.presetName) {
@@ -1076,6 +1157,15 @@ function visualMicroPlanToolSchema(): Tool {
           additionalProperties: false,
           description: 'Optional document-space bounds for the one semantic region affected by this transaction.',
         },
+        object_context_region_bounds: {
+          type: 'object',
+          properties: {
+            left: { type: 'number' }, top: { type: 'number' }, right: { type: 'number' }, bottom: { type: 'number' },
+          },
+          required: ['left', 'top', 'right', 'bottom'],
+          additionalProperties: false,
+          description: 'Optional broader exact semantic/object bounds retained as context when region_bounds is a tight MICRO target.',
+        },
         intent: {
           type: 'string',
           description: 'One artistic intent shared by every mutation in the transaction.',
@@ -1152,15 +1242,68 @@ function visualMicroPlanToolSchema(): Tool {
         paint_strategy: {
           type: 'object',
           description:
-            'Material-aware brush execution contract: material/region role -> visual intent -> preflight brush role -> concrete installed preset -> pressure policy.',
+            'Construction-first execution contract. construction_role is mandatory for broad/global softness-dominant or environmental work. continuous-field defaults to continuous-color-field. optical-veil may use a generic soft dab-chain only as an explicit justified fallback.',
           properties: {
+            construction_role: { type: 'string', enum: [...PAINTING_CONSTRUCTION_ROLES] },
             material_role: { type: 'string' },
             visual_intent: { type: 'string', enum: [...PAINTING_VISUAL_INTENTS] },
+            fallback_from_method_id: {
+              type: 'string',
+              description: 'Preferred method that could not be used when execution intentionally falls back to another mechanism.',
+            },
+            fallback_reason: {
+              type: 'string',
+              description: 'Concrete capability/fit reason for the fallback. Required together with fallback_from_method_id.',
+            },
             brush_role: { type: 'string' },
             preset_name: { type: 'string' },
+            brush_pack_id: { type: 'string' },
+            stamp_profile_id: { type: 'string' },
             pressure_policy: { type: 'string', enum: [...VISUAL_MICROPLAN_PRESSURE_POLICIES] },
           },
-          required: ['material_role', 'visual_intent', 'brush_role', 'pressure_policy'],
+          required: ['material_role', 'visual_intent', 'pressure_policy'],
+          additionalProperties: false,
+        },
+        material_response: {
+          type: 'object',
+          description: 'Qualitative causal material-response plan required at MATERIAL before texture/brush execution. Material is not inferred from texture density or noise.',
+          properties: {
+            response_role: { type: 'string', enum: [...MATERIAL_RESPONSE_ROLES] },
+            components: {
+              type: 'object',
+              properties: Object.fromEntries(MATERIAL_RESPONSE_COMPONENTS.map(key => [key, {
+                type: 'object',
+                properties: {
+                  applicability: { type: 'string', enum: [...MATERIAL_RESPONSE_PLAN_APPLICABILITY] },
+                  intent: { type: 'string', minLength: 8 },
+                },
+                required: ['applicability', 'intent'],
+                additionalProperties: false,
+              }])),
+              required: [...MATERIAL_RESPONSE_COMPONENTS],
+              additionalProperties: false,
+            },
+            microtexture: {
+              type: 'object',
+              properties: {
+                policy: { type: 'string', enum: [...MATERIAL_RESPONSE_MICROTEXTURE_POLICIES] },
+                intent: { type: 'string', minLength: 8 },
+              },
+              required: ['policy', 'intent'],
+              additionalProperties: false,
+            },
+            style_contract_basis: {
+              type: 'object',
+              description: 'Exact durable style-contract escape for intentionally simplified/flat material treatment; never an implicit realism override.',
+              properties: {
+                field: { type: 'string', enum: [...MATERIAL_RESPONSE_STYLE_BASIS_FIELDS] },
+                criterion: { type: 'string', minLength: 8 },
+              },
+              required: ['field', 'criterion'],
+              additionalProperties: false,
+            },
+          },
+          required: ['response_role', 'components', 'microtexture'],
           additionalProperties: false,
         },
         edges: {
@@ -1236,6 +1379,115 @@ function visualMicroPlanToolSchema(): Tool {
             layer_id: { type: 'number', minimum: 1 },
             layer_name: { type: 'string' },
             merge_target_layer_id: { type: 'number', minimum: 1 },
+            physical_role: {
+              type: 'string',
+              enum: [...VISUAL_MICROPLAN_PHYSICAL_ROLES],
+              description: 'Physical scene role. Opaque/support masses establish occlusion; transmissive/optical/atmospheric roles are intentionally non-opaque overlays or media.',
+            },
+            opacity_role: {
+              type: 'string',
+              enum: [...VISUAL_MICROPLAN_OPACITY_ROLES],
+              description: 'Physical opacity contract for this semantic owner; do not use transparency merely to soften an otherwise opaque scene mass.',
+            },
+            construction_tier: {
+              type: 'string', enum: [...VISUAL_MICROPLAN_CONSTRUCTION_TIERS],
+              description: 'Subject-agnostic construction hierarchy: primary -> secondary -> tertiary -> surface.',
+            },
+            parent_hypothesis_id: {
+              type: 'string',
+              description: 'Stable semantic owner that must already establish the structure this owner depends on. Required for non-primary tiers.',
+            },
+            parent_construction_revision: {
+              type: 'string',
+              description: 'Guard-owned durable revision of the parent structure. Compact Guard injects this; callers should not invent it.',
+            },
+            construction_change: {
+              type: 'boolean',
+              description: 'True only when this pass structurally revises the owner so dependent construction must be reconsidered; ordinary tone/texture continuation leaves the construction revision stable.',
+            },
+            negative_space: {
+              type: 'object',
+              description: 'Durable structural opening/gap relation. Evidence must describe topology/attachment, not merely sampled background color.',
+              properties: {
+                relation: { type: 'string', enum: [...VISUAL_MICROPLAN_NEGATIVE_SPACE_RELATIONS] },
+                parent_hypothesis_id: { type: 'string' },
+                parent_construction_revision: { type: 'string', description: 'Guard-owned parent revision; callers should not invent it.' },
+                topology: { type: 'string', minLength: 4 },
+                evidence: { type: 'array', minItems: 1, items: { type: 'string', minLength: 4 } },
+              },
+              required: ['relation', 'parent_hypothesis_id', 'topology', 'evidence'],
+              additionalProperties: false,
+            },
+            causal_effect: {
+              type: 'object',
+              description: 'Durable causal effect binding to an established source and, for reflection/shadow, an established receiving surface/medium.',
+              properties: {
+                relation: { type: 'string', enum: [...VISUAL_MICROPLAN_CAUSAL_EFFECT_RELATIONS] },
+                source_hypothesis_id: { type: 'string' },
+                source_construction_revision: { type: 'string', description: 'Guard-owned source revision; callers should not invent it.' },
+                receiver_hypothesis_id: { type: 'string' },
+                receiver_construction_revision: { type: 'string', description: 'Guard-owned receiver revision; callers should not invent it.' },
+                causal_statement: { type: 'string', minLength: 4 },
+                evidence: { type: 'array', minItems: 1, items: { type: 'string', minLength: 4 } },
+              },
+              required: ['relation', 'source_hypothesis_id', 'causal_statement', 'evidence'],
+              additionalProperties: false,
+            },
+            preserve_negative_space_ids: {
+              type: 'array', items: { type: 'string' },
+              description: 'Durable aperture/negative-space owners explicitly reviewed and preserved while repainting or texturing their parent.',
+            },
+            surface_frame: {
+              type: 'object',
+              properties: {
+                axes: {
+                  type: 'array', minItems: 1, maxItems: 3,
+                  items: {
+                    type: 'object',
+                    properties: {
+                      id: { type: 'string' },
+                      angle_degrees: { type: 'number', minimum: -180, maximum: 180 },
+                      weight: { type: 'number', exclusiveMinimum: 0, maximum: 1 },
+                    },
+                    required: ['id', 'angle_degrees'],
+                    additionalProperties: false,
+                  },
+                },
+                convergence_anchor: {
+                  type: 'object',
+                  properties: { x: { type: 'number' }, y: { type: 'number' } },
+                  required: ['x', 'y'], additionalProperties: false,
+                },
+                depth_progression: {
+                  type: 'object',
+                  properties: {
+                    near_scale: { type: 'number', exclusiveMinimum: 0 },
+                    far_scale: { type: 'number', exclusiveMinimum: 0 },
+                    direction: { type: 'string', enum: ['toward-anchor', 'away-from-anchor'] },
+                  },
+                  required: ['near_scale', 'far_scale', 'direction'], additionalProperties: false,
+                },
+                distribution: { type: 'string', enum: ['free', 'directional', 'perspective-regular'] },
+                local_exceptions: { type: 'array', items: { type: 'string' } },
+              },
+              required: ['axes'],
+              additionalProperties: false,
+              description: 'Optional semantic surface orientation frame. Binds directional/repeated marks to depicted form without requiring a dense vector field.',
+            },
+            depth_relations: {
+              type: 'array',
+              maxItems: 1,
+              items: {
+                type: 'object',
+                properties: {
+                  relation: { type: 'string', enum: [...VISUAL_MICROPLAN_DEPTH_RELATIONS] },
+                  target_hypothesis_id: { type: 'string' },
+                },
+                required: ['relation', 'target_hypothesis_id'],
+                additionalProperties: false,
+              },
+              description: 'At most one direct semantic stack anchor. Chain owners to express larger depth order; in-front-of/behind must agree with explicit Photoshop layer placement.',
+            },
           },
           required: [
             'decision',
@@ -1301,6 +1553,11 @@ function visualMicroPlanToolSchema(): Tool {
           type: 'string',
           enum: ['organic_instances', 'intentional_regular'],
           description: 'Optional repeated-motif intent. intentional_regular is only for deliberate uniform systems; transformed/color-jittered organic instances still require structural variation review.',
+        },
+        distribution_intent: {
+          type: 'string',
+          enum: ['organic-clustered', 'directional-broken', 'perspective-regular', 'intentional-uniform'],
+          description: 'Optional spatial distribution semantics for repeated marks, separate from motif identity/similarity.',
         },
         motif_instances: {
           type: 'array',
@@ -1563,7 +1820,7 @@ export function createVisualMicroPlanTools(registry: ToolRegistry, barrierDirect
             false
           );
           if (validationError) throw new Error(validationError);
-          return registry.execute(step.tool, pinnedArgs);
+          return withToolExecutionStepContext(step.id, () => registry.execute(step.tool, pinnedArgs));
         };
 
         for (let index = 0; index < plan.mutationIndex; index++) {
@@ -1615,15 +1872,18 @@ export function createVisualMicroPlanTools(registry: ToolRegistry, barrierDirect
             }
             if (index === plan.beforeCaptureIndex) beforeCaptureResult = result;
             if (!ok) {
+              const failureCategory = normalizedFailureCode(results[step.id]);
               return jsonResult(
                 {
                   ok: false,
                   code: 'microplan_prepare_failed',
+                  ...(failureCategory ? { failure_category: failureCategory } : {}),
                   message: `preparation step "${step.id}" failed before any visual mutation`,
                   plan_id: plan.planId,
                   document_id: plan.documentId,
                   failed_step: step.id,
                   steps: statuses,
+                  pass_execution: passExecutionProjection(plan, statuses, 'not-started', step.id),
                   completed_results: results,
                   repair_scope: 'remaining_only',
                   visual_mutation_started: false,
@@ -1641,6 +1901,7 @@ export function createVisualMicroPlanTools(registry: ToolRegistry, barrierDirect
                 document_id: plan.documentId,
                 failed_step: step.id,
                 steps: statuses,
+                pass_execution: passExecutionProjection(plan, statuses, 'not-started', step.id),
                 completed_results: results,
                 repair_scope: 'remaining_only',
                 visual_mutation_started: false,
@@ -1699,6 +1960,7 @@ export function createVisualMicroPlanTools(registry: ToolRegistry, barrierDirect
               message: error instanceof Error ? error.message : String(error),
               plan_id: plan.planId,
               document_id: plan.documentId,
+              pass_execution: passExecutionProjection(plan, statuses, 'not-started'),
               visual_mutation_started: false,
             }, true);
           }
@@ -1739,6 +2001,7 @@ export function createVisualMicroPlanTools(registry: ToolRegistry, barrierDirect
                 failed_step: mutationStep.id,
                 protected_layer_ids: plan.protectedLayerIds,
                 replace_protected_layer_ids: plan.replaceProtectedLayerIds,
+                pass_execution: passExecutionProjection(plan, statuses, 'not-started'),
                 visual_mutation_started: false,
               },
               true
@@ -1759,7 +2022,10 @@ export function createVisualMicroPlanTools(registry: ToolRegistry, barrierDirect
           try {
             const definition = registry.get(mutationStep.tool);
             if (!definition) throw new Error(`tool not found: ${mutationStep.tool}`);
-            mutationResult = await registry.execute(mutationStep.tool, resolvedMutationArgs);
+            mutationResult = await withToolExecutionStepContext(
+              mutationStep.id,
+              () => registry.execute(mutationStep.tool, resolvedMutationArgs)
+            );
           } catch (error) {
             mutationResult = jsonResult(
               {
@@ -1824,6 +2090,15 @@ export function createVisualMicroPlanTools(registry: ToolRegistry, barrierDirect
                   .map(id => [id, results[id]])
               ),
               ...(mutationFailureStep ? { failed_mutation_step: mutationFailureStep } : {}),
+              ...(mutationFailureStep && normalizedFailureCode(results[mutationFailureStep])
+                ? { failure_category: normalizedFailureCode(results[mutationFailureStep]) }
+                : {}),
+              pass_execution: passExecutionProjection(
+                plan,
+                statuses,
+                mutationOk ? 'completed' : 'failed-or-uncertain',
+                mutationFailureStep
+              ),
               steps: statuses,
               barrier: {
                 status: 'blocked_until_external_preview_and_verdict',
@@ -1851,6 +2126,12 @@ export function createVisualMicroPlanTools(registry: ToolRegistry, barrierDirect
               plan_id: plan.planId,
               document_id: plan.documentId,
               mutation_ok: mutationOk,
+              pass_execution: passExecutionProjection(
+                plan,
+                statuses,
+                mutationOk ? 'completed' : 'failed-or-uncertain',
+                mutationFailureStep
+              ),
               steps: statuses,
             },
             true
@@ -1883,6 +2164,110 @@ export function createVisualMicroPlanTools(registry: ToolRegistry, barrierDirect
           })
           .filter((value): value is { step_id: string; layer_id: number; layer_name?: string } => value !== null);
 
+        const semanticContinuationLayers = continuationLayers.map(layer => ({
+          ...layer,
+          ...(plan.logicalLayer?.createStepId === layer.step_id ? {
+            hypothesis_id: plan.logicalLayer.hypothesisId,
+            hypothesis: plan.logicalLayer.hypothesis,
+            rollback_value: plan.logicalLayer.rollbackValue,
+            temporary: plan.logicalLayer.decision === 'temporary-hypothesis',
+            decision: plan.logicalLayer.decision,
+            ...(plan.logicalLayer.physicalRole ? { physical_role: plan.logicalLayer.physicalRole } : {}),
+            ...(plan.logicalLayer.opacityRole ? { opacity_role: plan.logicalLayer.opacityRole } : {}),
+            ...(plan.logicalLayer.constructionTier ? { construction_tier: plan.logicalLayer.constructionTier } : {}),
+            ...(plan.logicalLayer.parentHypothesisId ? { parent_hypothesis_id: plan.logicalLayer.parentHypothesisId } : {}),
+            ...(plan.logicalLayer.parentConstructionRevision ? { parent_construction_revision: plan.logicalLayer.parentConstructionRevision } : {}),
+            ...(plan.logicalLayer.constructionChange ? { construction_change: true } : {}),
+            ...(plan.logicalLayer.negativeSpace ? { negative_space: {
+              relation: plan.logicalLayer.negativeSpace.relation,
+              parent_hypothesis_id: plan.logicalLayer.negativeSpace.parentHypothesisId,
+              ...(plan.logicalLayer.negativeSpace.parentConstructionRevision ? { parent_construction_revision: plan.logicalLayer.negativeSpace.parentConstructionRevision } : {}),
+              topology: plan.logicalLayer.negativeSpace.topology,
+              evidence: plan.logicalLayer.negativeSpace.evidence,
+            } } : {}),
+            ...(plan.logicalLayer.causalEffect ? { causal_effect: {
+              relation: plan.logicalLayer.causalEffect.relation,
+              source_hypothesis_id: plan.logicalLayer.causalEffect.sourceHypothesisId,
+              ...(plan.logicalLayer.causalEffect.sourceConstructionRevision ? { source_construction_revision: plan.logicalLayer.causalEffect.sourceConstructionRevision } : {}),
+              ...(plan.logicalLayer.causalEffect.receiverHypothesisId ? { receiver_hypothesis_id: plan.logicalLayer.causalEffect.receiverHypothesisId } : {}),
+              ...(plan.logicalLayer.causalEffect.receiverConstructionRevision ? { receiver_construction_revision: plan.logicalLayer.causalEffect.receiverConstructionRevision } : {}),
+              causal_statement: plan.logicalLayer.causalEffect.causalStatement,
+              evidence: plan.logicalLayer.causalEffect.evidence,
+            } } : {}),
+            ...(plan.logicalLayer.surfaceFrame ? { surface_frame: {
+              axes: plan.logicalLayer.surfaceFrame.axes.map(axis => ({ id: axis.id, angle_degrees: axis.angleDegrees, weight: axis.weight })),
+              ...(plan.logicalLayer.surfaceFrame.convergenceAnchor ? { convergence_anchor: plan.logicalLayer.surfaceFrame.convergenceAnchor } : {}),
+              ...(plan.logicalLayer.surfaceFrame.depthProgression ? { depth_progression: {
+                near_scale: plan.logicalLayer.surfaceFrame.depthProgression.nearScale,
+                far_scale: plan.logicalLayer.surfaceFrame.depthProgression.farScale,
+                direction: plan.logicalLayer.surfaceFrame.depthProgression.direction,
+              } } : {}),
+              distribution: plan.logicalLayer.surfaceFrame.distribution,
+              local_exceptions: plan.logicalLayer.surfaceFrame.localExceptions,
+            } } : {}),
+            ...(plan.logicalLayer.depthRelations.length ? {
+              depth_relations: plan.logicalLayer.depthRelations.map(relation => ({
+                relation: relation.relation,
+                target_hypothesis_id: relation.targetHypothesisId,
+              })),
+            } : {}),
+          } : {}),
+        }));
+        if (
+          plan.logicalLayer
+          && ['continue-logical-layer', 'adjust'].includes(plan.logicalLayer.decision)
+          && plan.logicalLayer.layerId !== undefined
+        ) {
+          semanticContinuationLayers.push({
+            step_id: 'logical-layer-continuation',
+            layer_id: plan.logicalLayer.layerId,
+            ...(plan.logicalLayer.layerName ? { layer_name: plan.logicalLayer.layerName } : {}),
+            hypothesis_id: plan.logicalLayer.hypothesisId,
+            hypothesis: plan.logicalLayer.hypothesis,
+            rollback_value: plan.logicalLayer.rollbackValue,
+            decision: plan.logicalLayer.decision,
+            ...(plan.logicalLayer.physicalRole ? { physical_role: plan.logicalLayer.physicalRole } : {}),
+            ...(plan.logicalLayer.opacityRole ? { opacity_role: plan.logicalLayer.opacityRole } : {}),
+            ...(plan.logicalLayer.constructionTier ? { construction_tier: plan.logicalLayer.constructionTier } : {}),
+            ...(plan.logicalLayer.parentHypothesisId ? { parent_hypothesis_id: plan.logicalLayer.parentHypothesisId } : {}),
+            ...(plan.logicalLayer.parentConstructionRevision ? { parent_construction_revision: plan.logicalLayer.parentConstructionRevision } : {}),
+            ...(plan.logicalLayer.constructionChange ? { construction_change: true } : {}),
+            ...(plan.logicalLayer.negativeSpace ? { negative_space: {
+              relation: plan.logicalLayer.negativeSpace.relation,
+              parent_hypothesis_id: plan.logicalLayer.negativeSpace.parentHypothesisId,
+              ...(plan.logicalLayer.negativeSpace.parentConstructionRevision ? { parent_construction_revision: plan.logicalLayer.negativeSpace.parentConstructionRevision } : {}),
+              topology: plan.logicalLayer.negativeSpace.topology,
+              evidence: plan.logicalLayer.negativeSpace.evidence,
+            } } : {}),
+            ...(plan.logicalLayer.causalEffect ? { causal_effect: {
+              relation: plan.logicalLayer.causalEffect.relation,
+              source_hypothesis_id: plan.logicalLayer.causalEffect.sourceHypothesisId,
+              ...(plan.logicalLayer.causalEffect.sourceConstructionRevision ? { source_construction_revision: plan.logicalLayer.causalEffect.sourceConstructionRevision } : {}),
+              ...(plan.logicalLayer.causalEffect.receiverHypothesisId ? { receiver_hypothesis_id: plan.logicalLayer.causalEffect.receiverHypothesisId } : {}),
+              ...(plan.logicalLayer.causalEffect.receiverConstructionRevision ? { receiver_construction_revision: plan.logicalLayer.causalEffect.receiverConstructionRevision } : {}),
+              causal_statement: plan.logicalLayer.causalEffect.causalStatement,
+              evidence: plan.logicalLayer.causalEffect.evidence,
+            } } : {}),
+            ...(plan.logicalLayer.surfaceFrame ? { surface_frame: {
+              axes: plan.logicalLayer.surfaceFrame.axes.map(axis => ({ id: axis.id, angle_degrees: axis.angleDegrees, weight: axis.weight })),
+              ...(plan.logicalLayer.surfaceFrame.convergenceAnchor ? { convergence_anchor: plan.logicalLayer.surfaceFrame.convergenceAnchor } : {}),
+              ...(plan.logicalLayer.surfaceFrame.depthProgression ? { depth_progression: {
+                near_scale: plan.logicalLayer.surfaceFrame.depthProgression.nearScale,
+                far_scale: plan.logicalLayer.surfaceFrame.depthProgression.farScale,
+                direction: plan.logicalLayer.surfaceFrame.depthProgression.direction,
+              } } : {}),
+              distribution: plan.logicalLayer.surfaceFrame.distribution,
+              local_exceptions: plan.logicalLayer.surfaceFrame.localExceptions,
+            } } : {}),
+            ...(plan.logicalLayer.depthRelations.length ? {
+              depth_relations: plan.logicalLayer.depthRelations.map(relation => ({
+                relation: relation.relation,
+                target_hypothesis_id: relation.targetHypothesisId,
+              })),
+            } : {}),
+          });
+        }
+
         const body: Record<string, unknown> = {
           ok: mutationOk,
           ...(mutationOk ? {} : { code: 'visual_mutation_failed_or_partial' }),
@@ -1894,8 +2279,15 @@ export function createVisualMicroPlanTools(registry: ToolRegistry, barrierDirect
           region: plan.region,
           ...(plan.regionBounds ? { region_bounds: plan.regionBounds } : {}),
           intent: plan.intent,
+          ...(plan.changeDomains.length ? { change_domains: plan.changeDomains } : {}),
           method_class: plan.methodClass,
           risk: plan.risk,
+          semantic_action_budget: {
+            requested_mutations: plan.mutationIndexes.length,
+            allowed_mutations: plan.mutationBudget.allowedMutations,
+            hard_cap: plan.mutationBudget.hardCap,
+            reason: plan.mutationBudget.reason,
+          },
           expected_visual_delta: plan.expectedVisualDelta,
           verification_envelope: {
             mode: plan.verificationEnvelope.mode,
@@ -1922,6 +2314,46 @@ export function createVisualMicroPlanTools(registry: ToolRegistry, barrierDirect
               ...(plan.logicalLayer.layerId === undefined ? {} : { layer_id: plan.logicalLayer.layerId }),
               ...(plan.logicalLayer.layerName ? { layer_name: plan.logicalLayer.layerName } : {}),
               ...(plan.logicalLayer.mergeTargetLayerId === undefined ? {} : { merge_target_layer_id: plan.logicalLayer.mergeTargetLayerId }),
+              ...(plan.logicalLayer.physicalRole ? { physical_role: plan.logicalLayer.physicalRole } : {}),
+              ...(plan.logicalLayer.opacityRole ? { opacity_role: plan.logicalLayer.opacityRole } : {}),
+              ...(plan.logicalLayer.constructionTier ? { construction_tier: plan.logicalLayer.constructionTier } : {}),
+              ...(plan.logicalLayer.parentHypothesisId ? { parent_hypothesis_id: plan.logicalLayer.parentHypothesisId } : {}),
+              ...(plan.logicalLayer.parentConstructionRevision ? { parent_construction_revision: plan.logicalLayer.parentConstructionRevision } : {}),
+              ...(plan.logicalLayer.constructionChange ? { construction_change: true } : {}),
+              ...(plan.logicalLayer.negativeSpace ? { negative_space: {
+                relation: plan.logicalLayer.negativeSpace.relation,
+                parent_hypothesis_id: plan.logicalLayer.negativeSpace.parentHypothesisId,
+                ...(plan.logicalLayer.negativeSpace.parentConstructionRevision ? { parent_construction_revision: plan.logicalLayer.negativeSpace.parentConstructionRevision } : {}),
+                topology: plan.logicalLayer.negativeSpace.topology,
+                evidence: plan.logicalLayer.negativeSpace.evidence,
+              } } : {}),
+              ...(plan.logicalLayer.causalEffect ? { causal_effect: {
+                relation: plan.logicalLayer.causalEffect.relation,
+                source_hypothesis_id: plan.logicalLayer.causalEffect.sourceHypothesisId,
+                ...(plan.logicalLayer.causalEffect.sourceConstructionRevision ? { source_construction_revision: plan.logicalLayer.causalEffect.sourceConstructionRevision } : {}),
+                ...(plan.logicalLayer.causalEffect.receiverHypothesisId ? { receiver_hypothesis_id: plan.logicalLayer.causalEffect.receiverHypothesisId } : {}),
+                ...(plan.logicalLayer.causalEffect.receiverConstructionRevision ? { receiver_construction_revision: plan.logicalLayer.causalEffect.receiverConstructionRevision } : {}),
+                causal_statement: plan.logicalLayer.causalEffect.causalStatement,
+                evidence: plan.logicalLayer.causalEffect.evidence,
+              } } : {}),
+              ...(plan.logicalLayer.preserveNegativeSpaceIds.length ? { preserve_negative_space_ids: plan.logicalLayer.preserveNegativeSpaceIds } : {}),
+              ...(plan.logicalLayer.surfaceFrame ? { surface_frame: {
+                axes: plan.logicalLayer.surfaceFrame.axes.map(axis => ({ id: axis.id, angle_degrees: axis.angleDegrees, weight: axis.weight })),
+                ...(plan.logicalLayer.surfaceFrame.convergenceAnchor ? { convergence_anchor: plan.logicalLayer.surfaceFrame.convergenceAnchor } : {}),
+                ...(plan.logicalLayer.surfaceFrame.depthProgression ? { depth_progression: {
+                  near_scale: plan.logicalLayer.surfaceFrame.depthProgression.nearScale,
+                  far_scale: plan.logicalLayer.surfaceFrame.depthProgression.farScale,
+                  direction: plan.logicalLayer.surfaceFrame.depthProgression.direction,
+                } } : {}),
+                distribution: plan.logicalLayer.surfaceFrame.distribution,
+                local_exceptions: plan.logicalLayer.surfaceFrame.localExceptions,
+              } } : {}),
+              ...(plan.logicalLayer.depthRelations.length ? {
+                depth_relations: plan.logicalLayer.depthRelations.map(relation => ({
+                  relation: relation.relation,
+                  target_hypothesis_id: relation.targetHypothesisId,
+                })),
+              } : {}),
             },
           } : {}),
           ...(plan.edges.length ? { edge_control: edgeStrategies } : {}),
@@ -1947,17 +2379,17 @@ export function createVisualMicroPlanTools(registry: ToolRegistry, barrierDirect
           ),
           mutation_count: plan.mutationIndexes.length,
           ...(mutationFailureStep ? { failed_mutation_step: mutationFailureStep } : {}),
-          ...(continuationLayers.length ? {
-            continuation_layers: continuationLayers.map(layer => ({
-              ...layer,
-              ...(plan.logicalLayer?.createStepId === layer.step_id ? {
-                hypothesis_id: plan.logicalLayer.hypothesisId,
-                hypothesis: plan.logicalLayer.hypothesis,
-                rollback_value: plan.logicalLayer.rollbackValue,
-                temporary: plan.logicalLayer.decision === 'temporary-hypothesis',
-                decision: plan.logicalLayer.decision,
-              } : {}),
-            })),
+          ...(mutationFailureStep && normalizedFailureCode(results[mutationFailureStep])
+            ? { failure_category: normalizedFailureCode(results[mutationFailureStep]) }
+            : {}),
+          pass_execution: passExecutionProjection(
+            plan,
+            statuses,
+            mutationOk ? 'completed' : 'failed-or-uncertain',
+            mutationFailureStep
+          ),
+          ...(semanticContinuationLayers.length ? {
+            continuation_layers: semanticContinuationLayers,
           } : {}),
           preparation_cache: {
             advisory: true,

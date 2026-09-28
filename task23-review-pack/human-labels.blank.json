@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "status": "pending",
+  "instructions": "Complete only by independent blinded human adjudication from exact BEFORE/AFTER frames and target/style contract.",
+  "questions": ["major form more modelled?","secondary forms more informative?","edge hierarchy improved?","material/light response more specific?","residual block-in reduced?","extra detail structurally useful rather than noise?","important structure preserved?","requested realism/detail target materially closer?"],
+  "allowed_answers": ["YES","NO","UNCERTAIN","N-A"],
+  "cases": {"positive-modelled-form":null,"negative-texture-only":null,"negative-residual-geometry":null,"negative-overdetail":null,"stylized-flat-control":null}
+}

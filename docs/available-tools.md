@@ -1,6 +1,6 @@
 # Available Tools
 
-**148 tools total** — 132 atomic/non-recipe `photoshop_*` tools plus 16 recipe `photoshop_recipe_*` workflows (single undo step each). The atomic/non-recipe count includes 13 public `photoshop_guard_*` tools for durable native-MCP orchestration.
+**130 tools total** — semantic `photoshop_*` surface, including 14 public `photoshop_guard_*` tools for durable native-MCP orchestration. The legacy `photoshop_recipe_*` layer is removed.
 
 The Guard surface includes `photoshop_guard_art_director`, which manages the high-level
 Planner directive independently from Painter mutations. `action=review` records global
@@ -107,6 +107,11 @@ photoshop_list_documents()
 #### `photoshop_set_active_document`
 Switch the active document tab. Provide exactly one identifier.
 
+**UI effect:** this is explicit UI-activating navigation and may foreground Photoshop in the accepted
+UXP runtime. It is therefore excluded from no-focus acceptance traces. Do not use it merely to satisfy
+a document target; ordinary document-bound operations should use pinned `document_id` and fail closed
+instead of switching tabs implicitly.
+
 **Parameters:**
 - `document_id` (number, optional): Unique id from `photoshop_list_documents` (preferred)
 - `index` (number, optional): Zero-based tab order (leftmost is 0)
@@ -120,7 +125,7 @@ photoshop_set_active_document({ document_id: 42 })
 photoshop_set_active_document({ index: 0 })
 ```
 
-Document-bound mutating tools (and most document-scoped reads) accept optional `document_id`. Pass the positive integer id from `photoshop_get_state` / `photoshop_list_documents` so a Photoshop UI tab switch cannot retarget the operation. When supplied, ExtendScript tools resolve and activate that exact id inside the same script invocation immediately before the operation. The UXP Neural Filter lane is pre-activated by the server and also selects the exact document id inside the same `batchPlay` request before the filter descriptor. Unknown ids fail closed with `document_not_found`; malformed/non-positive ids fail with `invalid_arguments`. Successful pinned calls add `document_target: { id, pinned: true }` to their result metadata. Omitted = current active document (legacy behavior).
+Document-bound mutating tools (and most document-scoped reads) accept optional `document_id`. Pass the positive integer id from `photoshop_get_state` / `photoshop_list_documents` so a Photoshop UI tab switch cannot retarget the operation. Production UXP handlers validate the pinned document before semantic dispatch; document-bound mutations do not silently switch tabs to satisfy a stale target. Unknown ids fail closed with `document_not_found`; malformed/non-positive ids fail with `invalid_arguments`. Successful pinned calls add `document_target: { id, pinned: true }` to their result metadata. Omitted = current active document.
 
 Global/pure tools that do not operate on an existing document (for example brush-setting helpers, `photoshop_create_document`, `photoshop_open_image`, and pure landmark transforms/comparisons) intentionally do not expose the injected `document_id` parameter.
 
@@ -256,7 +261,7 @@ photoshop_set_layer_blend_mode({ blendMode: "MULTIPLY" })
 
 Available blend modes: NORMAL, DISSOLVE, DARKEN, MULTIPLY, COLORBURN, LINEARBURN, DARKERCOLOR, LIGHTEN, SCREEN, COLORDODGE, LINEARDODGE, LIGHTERCOLOR, OVERLAY, SOFTLIGHT, HARDLIGHT, VIVIDLIGHT, LINEARLIGHT, PINLIGHT, HARDMIX, DIFFERENCE, EXCLUSION, SUBTRACT, DIVIDE, HUE, SATURATION, COLOR, LUMINOSITY
 
-`COLOR` is the UI name for Color blend (colorize). The server maps it to ExtendScript `BlendMode.COLORBLEND`. `LUMINOSITY` is already the DOM name. `DARKERCOLOR` / `LIGHTERCOLOR` use Action Manager when the classic `BlendMode` enum does not expose them.
+`COLOR` is the UI name for Color blend (colorize). The UXP implementation normalizes the public blend-mode names to the corresponding Photoshop descriptors; `DARKERCOLOR` / `LIGHTERCOLOR` use Action Manager descriptors where the DOM enum is insufficient.
 
 #### `photoshop_set_layer_visibility`
 Show or hide the active layer.
@@ -923,36 +928,6 @@ Get the history states of the active document.
 photoshop_get_history()
 ```
 
-### Actions & Automation
-
-#### `photoshop_play_action`
-Play a recorded action from the Actions palette.
-
-**Parameters:**
-- `actionName` (string, required): Action name
-- `actionSetName` (string, required): Action set name
-
-```javascript
-// Example: Play action
-photoshop_play_action({
-  actionName: "My Action",
-  actionSetName: "Default Actions"
-})
-```
-
-#### `photoshop_execute_script`
-**Retired from the canonical production lane.** This raw ExtendScript escape hatch remains
-registered only for non-canonical legacy/debug compatibility. The required Guard / compact-v2
-execution policy rejects it before Photoshop dispatch; registration does not grant Guard execution
-permission. Use maintained semantic `photoshop_*` tools instead.
-
-**Parameters:**
-- `code` (string, required): ExtendScript code
-
-The retained handler still uses the historical wrapping IIFE when invoked outside the canonical
-required-mode lane, but it is not a supported production workflow and must not be used as a fallback
-for missing semantic coverage.
-
 ### Image Manipulation
 
 #### `photoshop_resize_image`
@@ -1081,30 +1056,6 @@ Photo Filter adjustment layer (warming/cooling/tint). **Parameters:** `red`, `gr
 #### `photoshop_apply_gradient_map`
 Gradient Map adjustment layer (black→white). **Parameters:** `reverse` (boolean, default false)
 
-### Data-Driven Graphics
-
-Photoshop's hidden "mail merge for images": template PSD with variable-bound layers (Image > Variables > Define) + data sets → one image per row.
-
-#### `photoshop_list_datasets`
-List data sets on the active document. **Returns:** `{ datasets, active, count }`
-
-#### `photoshop_import_datasets`
-Import a variables/data-sets XML file. **Parameters:** `xml_path` (required)
-
-#### `photoshop_generate_from_datasets`
-Batch-export the document once per data set.
-
-**Parameters:**
-- `output_dir` (string, required)
-- `format` (string, optional): `JPEG` | `PNG` | `PSD` (default JPEG)
-- `dataset_names` (string[], optional): subset to export (default all)
-
-```javascript
-photoshop_generate_from_datasets({ output_dir: "/Users/me/cards", format: "PNG" })
-```
-
-**One-shot alternative:** `photoshop_recipe_csv_to_cards` converts a CSV straight into data sets and exports every row (prompt template `ps.csv_to_cards`).
-
 ### Smart Objects
 
 #### `photoshop_convert_to_smart_object`
@@ -1173,7 +1124,7 @@ photoshop_image_stack({
 
 ### Digital Painting
 
-These tools are added by the digital-painting fork. See
+These tools form the Digital Painting Edition surface. See
 [`digital-painting.md`](digital-painting.md) and
 [`digital-painting-agent-skill.md`](digital-painting-agent-skill.md) for the
 painting workflow and visual-control rules.
@@ -1225,7 +1176,7 @@ dabs/stamps, automatic batching, and interpolated dynamics on open strokes.
 
 **Batching:**
 - `batch_mode: "AUTO"` (default) estimates the cost of rendered strokes and proactively splits expensive heterogeneous passes into short Photoshop scripts. Results include `batch_count`, `history_steps`, and `auto_chunked`.
-- `batch_mode: "SINGLE_HISTORY"` preserves the legacy one-history-step behavior, but a sufficiently expensive mixed batch can still hit the Photoshop/ExtendScript timeout.
+- `batch_mode: "SINGLE_HISTORY"` requests one Photoshop history step; sufficiently expensive mixed work can still exceed the host/UXP command budget, so `AUTO` is preferred for large heterogeneous passes.
 
 **Dynamics:** each open stroke may include a `dynamics` object with optional
 `size`, `opacity`, and/or `flow` ranges written as `[start, end]`, optional
@@ -1281,8 +1232,10 @@ against the same live capability map. An unavailable preferred method is reporte
 #### `photoshop_analyze_value_structure`
 Read-only grayscale/value evidence for Art Director review. It captures the pinned
 document through the existing preview pipeline, converts the JPEG to grayscale in Node,
-and returns the grayscale image plus descriptive luminance summaries (`p10/p50/p90`,
-dark/midtone/light proportions, center/border means). It does **not** modify the PSD and
+and returns the full grayscale image, a low-frequency downsampled grayscale thumbnail,
+plus descriptive luminance summaries (`p10/p50/p90`, dark/midtone/light proportions,
+center/border means). The low-frequency thumbnail suppresses small texture/noise so
+major-form modelling can be judged independently of surface activity. It does **not** modify the PSD and
 does **not** declare artistic PASS automatically. The caller must inspect the grayscale
 image and record a machine-readable Art Director `value_check`.
 
@@ -1297,7 +1250,7 @@ Execute one **atomic visual bundle** as a single MCP round-trip:
 → STOP for visual verdict
 ```
 
-The tool is intentionally narrower than the standalone UI Action Plan. It cannot
+The tool is intentionally a single atomic visual bundle rather than a multi-pass planner. It cannot
 queue multiple semantic passes. All bundled mutations must share one `intent`, one
 semantic `region`/optional `region_bounds`, one `method_class`, one plan-level `risk`,
 one `expected_visual_delta` and one `verification_envelope`. Step metadata cannot change
@@ -1440,3 +1393,181 @@ Export a copy as PNG/JPEG (Save for Web) or WebP/AVIF (native, PS 23.2+). Return
 - `path` (string, required): Absolute output path
 - `format` (string, optional): `PNG` | `JPEG` | `WEBP` | `AVIF` (default PNG)
 - `quality` (number, optional): 0-100 (default 80)
+
+<!-- BEGIN GENERATED TOOL BACKEND INVENTORY -->
+## Generated backend and access inventory
+
+> Generated by `npm run generate:tool-backend-inventory` from the current registered tool sources.
+> Do not hand-edit this section; edit the generator/classification inputs and regenerate it.
+> Current bridge revision: `compact-v2-20260926-brush-profile`. Production Photoshop semantic dispatch is UXP-only and fail-closed.
+
+Classification:
+
+- **A** — Node / Guard / planning / pure geometry; no Photoshop backend migration required.
+- **B** — orchestration over registered primitives; does not directly own a Photoshop transport.
+- **C** — semantic Photoshop primitive implemented through the production UXP lane.
+- **D** — explicit retired/unavailable legacy capability.
+
+Current totals: **A=21, B=3, C=106, D=0** across **130 registered tools**.
+
+| tool | source/category | access | primitive | transport | readiness | class | status | notes |
+|---|---|---|---|---|---|---:|---|---|
+| `photoshop_add_guides` | `src/tools/measurement-tools.ts` / measurement | Guard-required mutation | guides | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_adjust_brightness_contrast` | `src/tools/adjustment-tools.ts` / adjustment | Guard-required mutation | adjustments | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_adjust_curves` | `src/tools/adjustment-tools.ts` / adjustment | Guard-required mutation | adjustments | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_adjust_exposure` | `src/tools/color-adjustment-tools.ts` / color-adjustment | Guard-required mutation | adjustments | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_adjust_hue_saturation` | `src/tools/adjustment-tools.ts` / adjustment | Guard-required mutation | adjustments | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_adjust_vibrance` | `src/tools/color-adjustment-tools.ts` / color-adjustment | Guard-required mutation | adjustments | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_analyze_value_structure` | `src/tools/value-check-tools.ts` / value-check | direct read/planning | preview + Node luminance | Node orchestration → registered primitives | underlying primitive readiness | B | inherit | Node analysis; automatically benefits when preview migrates. |
+| `photoshop_apply_gaussian_blur` | `src/tools/filter-tools.ts` / filter | Guard-required mutation | filters | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_apply_gradient_map` | `src/tools/color-adjustment-tools.ts` / color-adjustment | Guard-required mutation | adjustments | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_apply_gradient_mask` | `src/tools/mask-tools.ts` / mask | Guard-required mutation | selections/masks | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_apply_high_pass` | `src/tools/filter-tools.ts` / filter | Guard-required mutation | filters | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_apply_layer_mask` | `src/tools/selection-tools.ts` / selection | Guard-required mutation | selections/masks | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_apply_layer_style` | `src/tools/style-tools.ts` / style | Guard-required mutation | layer styles | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_apply_lut` | `src/tools/color-adjustment-tools.ts` / color-adjustment | Guard-required mutation | adjustments | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_apply_motion_blur` | `src/tools/filter-tools.ts` / filter | Guard-required mutation | filters | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_apply_noise` | `src/tools/filter-tools.ts` / filter | Guard-required mutation | filters | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_apply_photo_filter` | `src/tools/color-adjustment-tools.ts` / color-adjustment | Guard-required mutation | adjustments | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_apply_sharpen` | `src/tools/filter-tools.ts` / filter | Guard-required mutation | filters | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_apply_smart_blur` | `src/tools/filter-tools.ts` / filter | Guard-required mutation | filters | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_auto_contrast` | `src/tools/adjustment-tools.ts` / adjustment | Guard-required mutation | adjustments | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_auto_levels` | `src/tools/adjustment-tools.ts` / adjustment | Guard-required mutation | adjustments | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_clear_guides` | `src/tools/measurement-tools.ts` / measurement | Guard-required mutation | guides | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_close_document` | `src/tools/document-tools.ts` / document | Guard-required mutation | documents | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_compare_landmarks` | `src/tools/measurement-tools.ts` / measurement | direct read/planning | Node/session | Node / Guard | Node/session only | A | keep |  |
+| `photoshop_content_aware_fill` | `src/tools/selection-tools.ts` / selection | Guard-required mutation | selections/masks | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_contract_selection` | `src/tools/selection-tools.ts` / selection | Guard-required mutation | selections/masks | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_convert_to_smart_object` | `src/tools/smart-object-tools.ts` / smart-object | Guard-required mutation | smart objects | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_create_clipping_mask` | `src/tools/mask-tools.ts` / mask | Guard-required mutation | selections/masks | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_create_document` | `src/tools/document-tools.ts` / document | Guard-required mutation | documents | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_create_layer` | `src/tools/layer-tools.ts` / layer | Guard-required mutation | layers | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_create_layer_mask` | `src/tools/selection-tools.ts` / selection | Guard-required mutation | selections/masks | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_create_smart_object_via_copy` | `src/tools/smart-object-tools.ts` / smart-object | Guard-required mutation | smart objects | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_create_text_layer` | `src/tools/layer-tools.ts` / layer | Guard-required mutation | layers | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_crop_document` | `src/tools/image-tools.ts` / image | Guard-required mutation | document geometry | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_delete_layer` | `src/tools/layer-tools.ts` / layer | Guard-required mutation | layers | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_delete_layer_mask` | `src/tools/selection-tools.ts` / selection | Guard-required mutation | selections/masks | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_desaturate` | `src/tools/adjustment-tools.ts` / adjustment | Guard-required mutation | adjustments | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_deselect` | `src/tools/selection-tools.ts` / selection | Guard-required mutation | selections/masks | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_duplicate_layer` | `src/tools/layer-properties-tools.ts` / layer-properties | Guard-required mutation | layers | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_edit_smart_object_contents` | `src/tools/smart-object-tools.ts` / smart-object | Guard-required mutation | smart objects | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_execute_visual_microplan` | `src/tools/visual-microplan-tools.ts` / visual-microplan | Guard-required mutation | visual orchestration | Node orchestration → registered primitives | underlying primitive readiness | B | inherit | Node-side orchestration; benefits from migrated underlying primitives/bundles. |
+| `photoshop_expand_selection` | `src/tools/selection-tools.ts` / selection | Guard-required mutation | selections/masks | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_export_as` | `src/tools/export-tools.ts` / export | Guard-required mutation | export | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_feather_selection` | `src/tools/selection-tools.ts` / selection | Guard-required mutation | selections/masks | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_fill_layer` | `src/tools/layer-tools.ts` / layer | Guard-required mutation | layers | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP fill mutation with accepted pixel, targeting, selection and history semantics. |
+| `photoshop_fit_layer_to_document` | `src/tools/layer-transform-tools.ts` / layer-transform | Guard-required mutation | layer transforms | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_flatten_image` | `src/tools/layer-properties-tools.ts` / layer-properties | Guard-required mutation | layers | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_get_brush_settings` | `src/tools/painting-tools.ts` / painting | direct read/planning | brush/config | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP currentToolOptions brush-settings read; no-focus behavior accepted. |
+| `photoshop_get_capabilities` | `src/tools/state-tools.ts` / state | direct read/planning | Node/session | Node / Guard | Node/session only | A | keep |  |
+| `photoshop_get_document_info` | `src/tools/document-tools.ts` / document | direct read/planning | documents | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP document/layer/selection read cluster with public schema unchanged. |
+| `photoshop_get_history` | `src/tools/history-tools.ts` / history | direct read/planning | history | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP historyState read with accepted normalized semantics and no-focus behavior. |
+| `photoshop_get_layers` | `src/tools/layer-tools.ts` / layer | direct read/planning | layers | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP document/layer/selection read cluster with public schema unchanged. |
+| `photoshop_get_painting_method_capabilities` | `src/tools/method-palette-tools.ts` / method-palette | direct read/planning | Node/session | Node / Guard | Node/session only | A | keep |  |
+| `photoshop_get_preview` | `src/tools/state-tools.ts` / state | direct read/planning | preview.read | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP Imaging API preview read with accepted pixel/no-focus behavior. |
+| `photoshop_get_selection_bounds` | `src/tools/selection-tools.ts` / selection | direct read/planning | selections/masks | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP document/layer/selection read cluster with public schema unchanged. |
+| `photoshop_get_state` | `src/tools/state-tools.ts` / state | direct read/planning | state.read | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP state read via read-only batchPlay; public schema unchanged. |
+| `photoshop_get_version` | `src/core/server-tool-catalog.ts` / server-tool-catalog.ts | direct read/planning | Node/session | Node / Guard | Node/session only | A | keep |  |
+| `photoshop_guard_art_director` | `src/tools/guard-tools.ts` / guard | Guard façade | guard/orchestration | Node / Guard | embedded Guard/runtime state | A | keep | Guard remains transport-agnostic above backend routing. |
+| `photoshop_guard_brush_pack_ingest` | `src/tools/guard-tools.ts` / guard | Guard façade | guard/orchestration | Node / Guard | embedded Guard/runtime state | A | keep | Guard remains transport-agnostic above backend routing. |
+| `photoshop_guard_brush_pack_profile` | `src/tools/guard-tools.ts` / guard | Guard façade | guard/orchestration | Node / Guard | embedded Guard/runtime state | A | keep | Guard remains transport-agnostic above backend routing. |
+| `photoshop_guard_capabilities` | `src/tools/guard-tools.ts` / guard | Guard façade | guard/orchestration | Node / Guard | embedded Guard/runtime state | A | keep | Guard remains transport-agnostic above backend routing. |
+| `photoshop_guard_cycle` | `src/tools/guard-tools.ts` / guard | Guard façade | guard/orchestration | Node / Guard | embedded Guard/runtime state | A | keep | Guard remains transport-agnostic above backend routing. |
+| `photoshop_guard_cycle_auto` | `src/tools/guard-tools.ts` / guard | Guard façade | guard/orchestration | Node / Guard | embedded Guard/runtime state | A | keep | Guard remains transport-agnostic above backend routing. |
+| `photoshop_guard_job_poll` | `src/tools/guard-tools.ts` / guard | Guard façade | guard/orchestration | Node / Guard | embedded Guard/runtime state | A | keep | Guard remains transport-agnostic above backend routing. |
+| `photoshop_guard_keep_logical_layer` | `src/tools/guard-tools.ts` / guard | Guard façade | guard/orchestration | Node / Guard | embedded Guard/runtime state | A | keep | Guard remains transport-agnostic above backend routing. |
+| `photoshop_guard_reconcile` | `src/tools/guard-tools.ts` / guard | Guard façade | guard/orchestration | Node / Guard | embedded Guard/runtime state | A | keep | Guard remains transport-agnostic above backend routing. |
+| `photoshop_guard_recover_lock` | `src/tools/guard-tools.ts` / guard | Guard façade | guard/orchestration | Node / Guard | embedded Guard/runtime state | A | keep | Guard remains transport-agnostic above backend routing. |
+| `photoshop_guard_resume` | `src/tools/guard-tools.ts` / guard | Guard façade | guard/orchestration | Node / Guard | embedded Guard/runtime state | A | keep | Guard remains transport-agnostic above backend routing. |
+| `photoshop_guard_set_art_run` | `src/tools/guard-tools.ts` / guard | Guard façade | guard/orchestration | Node / Guard | embedded Guard/runtime state | A | keep | Guard remains transport-agnostic above backend routing. |
+| `photoshop_guard_set_priorities` | `src/tools/guard-tools.ts` / guard | Guard façade | guard/orchestration | Node / Guard | embedded Guard/runtime state | A | keep | Guard remains transport-agnostic above backend routing. |
+| `photoshop_guard_status` | `src/tools/guard-tools.ts` / guard | Guard façade | guard/orchestration | Node / Guard | embedded Guard/runtime state | A | keep | Guard remains transport-agnostic above backend routing. |
+| `photoshop_image_stack` | `src/tools/stack-tools.ts` / stack | Guard-required mutation | image stack | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_ingest_brush_pack` | `src/tools/brush-pack-tools.ts` / brush-pack | Guard-required mutation | brush-pack | UXP only — fail closed | compatible UXP companion | C | done/retain | P0-E.1 Guard-routed ABR ingestion; UXP-only with durable command receipts and fail-closed capability reporting. |
+| `photoshop_invert` | `src/tools/adjustment-tools.ts` / adjustment | Guard-required mutation | adjustments | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_invert_selection` | `src/tools/selection-tools.ts` / selection | Guard-required mutation | selections/masks | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_list_brush_presets` | `src/tools/painting-tools.ts` / painting | direct read/planning | brush/config | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP presetManager brush-preset read; no-focus behavior accepted. |
+| `photoshop_list_documents` | `src/tools/document-tools.ts` / document | direct read/planning | documents | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP document/layer/selection read cluster with public schema unchanged. |
+| `photoshop_list_fonts` | `src/tools/text-tools.ts` / text | direct read/planning | text | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_list_guides` | `src/tools/measurement-tools.ts` / measurement | direct read/planning | guides | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_measure_points` | `src/tools/measurement-tools.ts` / measurement | direct read/planning | document.info + Node geometry | Node orchestration → registered primitives | underlying primitive readiness | B | inherit | Node geometry over document.info; no dedicated Photoshop measurement mutation is required. |
+| `photoshop_merge_layer_down` | `src/tools/layer-tools.ts` / layer | Guard-required mutation | layers | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_merge_visible_layers` | `src/tools/layer-properties-tools.ts` / layer-properties | Guard-required mutation | layers | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_move_layer` | `src/tools/layer-transform-tools.ts` / layer-transform | Guard-required mutation | layer transforms | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_move_layer_down` | `src/tools/layer-ordering-tools.ts` / layer-ordering | Guard-required mutation | layers | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_move_layer_to_bottom` | `src/tools/layer-ordering-tools.ts` / layer-ordering | Guard-required mutation | layers | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_move_layer_to_position` | `src/tools/layer-ordering-tools.ts` / layer-ordering | Guard-required mutation | layers | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_move_layer_to_top` | `src/tools/layer-ordering-tools.ts` / layer-ordering | Guard-required mutation | layers | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_move_layer_up` | `src/tools/layer-ordering-tools.ts` / layer-ordering | Guard-required mutation | layers | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_neural_filter` | `src/tools/neural-tools.ts` / neural | Guard-required mutation | neural-filter | UXP only — fail closed | compatible UXP companion | C | done/retain | Already UXP bridge; separate feature, not migration driver. |
+| `photoshop_open_image` | `src/tools/image-placement-tools.ts` / image-placement | Guard-required mutation | document open/place | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_paint_color_gradient` | `src/tools/layer-tools.ts` / layer | Guard-required mutation | layers | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP linear raster-color gradient mutation with exact layer targeting and bounded color stops; distinct from mask gradients. |
+| `photoshop_paint_dabs` | `src/tools/painting-tools.ts` / painting | Guard-required mutation | painting | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP dab mutation preserving ordered adjacent style runs and one-step history semantics. |
+| `photoshop_paint_regions` | `src/tools/painting-tools.ts` / painting | Guard-required mutation | painting | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP compound-region mutation with accepted ADD/SUBTRACT geometry, cleanup and one-step history semantics. |
+| `photoshop_paint_stamp_instances` | `src/tools/painting-tools.ts` / painting | Guard-required mutation | painting | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_paint_strokes` | `src/tools/painting-tools.ts` / painting | Guard-required mutation | painting | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP stroke mutation with accepted caller style/color, targeting and one-step history semantics. |
+| `photoshop_ping` | `src/core/server-tool-catalog.ts` / server-tool-catalog.ts | direct read/planning | Node/session | Node / Guard | Node/session only | A | keep |  |
+| `photoshop_place_image` | `src/tools/image-placement-tools.ts` / image-placement | Guard-required mutation | document open/place | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_rasterize_layer` | `src/tools/layer-properties-tools.ts` / layer-properties | Guard-required mutation | layers | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_redo` | `src/tools/history-tools.ts` / history | Guard-required mutation | history | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_release_clipping_mask` | `src/tools/mask-tools.ts` / mask | Guard-required mutation | selections/masks | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_rename_layer` | `src/tools/layer-properties-tools.ts` / layer-properties | Guard-required mutation | layers | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_replace_smart_object_contents` | `src/tools/smart-object-tools.ts` / smart-object | Guard-required mutation | smart objects | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_resize_image` | `src/tools/image-tools.ts` / image | Guard-required mutation | document geometry | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_rotate_layer` | `src/tools/layer-transform-tools.ts` / layer-transform | Guard-required mutation | layer transforms | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_sample_color` | `src/tools/color-sampling-tools.ts` / color-sampling | direct read/planning | color sampling | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP Imaging API color sampling with accepted semantic/no-focus behavior. |
+| `photoshop_sample_colors` | `src/tools/color-sampling-tools.ts` / color-sampling | direct read/planning | color sampling | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP Imaging API color sampling with accepted semantic/no-focus behavior. |
+| `photoshop_save_document` | `src/tools/document-tools.ts` / document | Guard-required mutation | document.save-copy | UXP only — fail closed | compatible UXP companion | C | done/retain | Already intentionally UXP-only; preserve fail-closed persistence invariants. |
+| `photoshop_save_selection` | `src/tools/selection-tools.ts` / selection | Guard-required mutation | selections/masks | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_scale_layer` | `src/tools/layer-transform-tools.ts` / layer-transform | Guard-required mutation | layer transforms | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_select_all` | `src/tools/selection-tools.ts` / selection | Guard-required mutation | selections/masks | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_select_brush_preset` | `src/tools/painting-tools.ts` / painting | Guard-required mutation | brush/config | UXP only — fail closed | compatible UXP companion | C | done/retain | Brush/config mutation; production dispatch is UXP-only and fail-closed; no legacy replay path exists. |
+| `photoshop_select_ellipse` | `src/tools/selection-tools.ts` / selection | Guard-required mutation | selections/masks | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_select_layer_by_name` | `src/tools/layer-tools.ts` / layer | Guard-required mutation | layers | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_select_painting_method` | `src/tools/method-palette-tools.ts` / method-palette | direct read/planning | Node/session | Node / Guard | Node/session only | A | keep |  |
+| `photoshop_select_rectangle` | `src/tools/selection-tools.ts` / selection | Guard-required mutation | selections/masks | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_select_subject` | `src/tools/selection-tools.ts` / selection | Guard-required mutation | selections/masks | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_set_active_document` | `src/tools/document-tools.ts` / document | Guard-required mutation | documents | UXP only — fail closed | compatible UXP companion | C | done/retain | Explicit UI-activating document navigation; may foreground Photoshop and is excluded from no-focus acceptance traces. Never use implicit switching to satisfy document_id. |
+| `photoshop_set_brush` | `src/tools/painting-tools.ts` / painting | Guard-required mutation | brush/config | UXP only — fail closed | compatible UXP companion | C | done/retain | Brush/config mutation; production dispatch is UXP-only and fail-closed; no legacy replay path exists. |
+| `photoshop_set_foreground_color` | `src/tools/painting-tools.ts` / painting | Guard-required mutation | brush/config | UXP only — fail closed | compatible UXP companion | C | done/retain | Brush/config mutation; production dispatch is UXP-only and fail-closed; no legacy replay path exists. |
+| `photoshop_set_layer_blend_mode` | `src/tools/layer-properties-tools.ts` / layer-properties | Guard-required mutation | layers | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_set_layer_locked` | `src/tools/layer-properties-tools.ts` / layer-properties | Guard-required mutation | layers | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_set_layer_opacity` | `src/tools/layer-properties-tools.ts` / layer-properties | Guard-required mutation | layers | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_set_layer_visibility` | `src/tools/layer-properties-tools.ts` / layer-properties | Guard-required mutation | layers | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_set_text_alignment` | `src/tools/text-tools.ts` / text | Guard-required mutation | text | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_set_text_color` | `src/tools/text-tools.ts` / text | Guard-required mutation | text | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_set_text_font` | `src/tools/text-tools.ts` / text | Guard-required mutation | text | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_sky_replacement` | `src/tools/sky-replacement-tools.ts` / sky-replacement | Guard-required mutation | sky replacement | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_transform_landmarks` | `src/tools/measurement-tools.ts` / measurement | direct read/planning | Node/session | Node / Guard | Node/session only | A | keep |  |
+| `photoshop_undo` | `src/tools/history-tools.ts` / history | Guard-required mutation | history | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+| `photoshop_update_text_content` | `src/tools/text-tools.ts` / text | Guard-required mutation | text | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
+
+### Remaining non-UXP P1 catalog tools
+
+- None.
+
+### Remaining non-UXP P2 catalog tools
+
+- None.
+
+### Remaining non-UXP P3 catalog tools
+
+- None.
+
+### Migration completion invariant
+
+- Production semantic Photoshop dispatch is UXP-only and fail-closed.
+- P1/P2/P3 contain no registered class-C tool pending UXP migration.
+- Missing/stale companion readiness is a capability failure, not permission to route through COM/ExtendScript.
+- Node/Guard/orchestration tools remain backend-independent only to the extent shown in the table above.
+
+### Intentionally disabled / out of scope
+
+These names are not registered in the current runtime:
+
+- `photoshop_generative_fill`
+- `photoshop_generative_expand`
+- `photoshop_generative_remove`
+
+<!-- END GENERATED TOOL BACKEND INVENTORY -->

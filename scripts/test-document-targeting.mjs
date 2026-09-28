@@ -1,6 +1,5 @@
 import {
   DOCUMENT_ID_SCHEMA_EXCLUDES,
-  documentGuardScript,
   getTargetDocumentId,
   withOptionalDocumentId,
   wrapDocumentIdHandler,
@@ -62,8 +61,8 @@ assert(structuredJson.document_target?.id === 42, 'structured result should incl
 assert(structuredJson.document_target?.pinned === true, 'structured result should mark target as pinned');
 
 const plainHandler = wrapDocumentIdHandler(
-  'photoshop_play_action',
-  async () => ({ content: [{ type: 'text', text: 'Action played' }] })
+  'photoshop_apply_layer_style',
+  async () => ({ content: [{ type: 'text', text: 'Style applied' }] })
 );
 const plain = await plainHandler({ document_id: 17 });
 assert(
@@ -84,38 +83,22 @@ for (const invalidId of [0, -1, 2.5, '12', null]) {
 }
 assert(invalidHandlerRan === false, 'invalid document_id must fail before executing the handler');
 
-const guard = documentGuardScript(99);
-assert(guard.includes('app.documents[__mcp_di].id === __mcp_targetDocId'), 'guard should resolve by exact id');
-assert(guard.includes('document_not_found'), 'guard should fail closed when id is missing');
-assert(guard.includes('document_not_active'), 'guard should fail closed when another document is active');
-assert(!guard.includes('app.activeDocument = app.documents[__mcp_di]'), 'guard must not switch active documents');
-
-const scripts = [];
-const fakeConnection = {
-  async executeScript(script) {
-    scripts.push(script);
-    return '99';
-  },
-};
 let neuralObserved;
 const neuralHandler = wrapDocumentIdHandler(
   'photoshop_neural_filter',
   async () => {
     neuralObserved = getTargetDocumentId();
     return { content: [{ type: 'text', text: JSON.stringify({ ok: true }) }] };
-  },
-  fakeConnection
+  }
 );
 const neural = await neuralHandler({ document_id: 99, filter: 'skin_smoothing' });
-assert(scripts.length === 1, 'UXP lane should verify the pinned document');
-assert(scripts[0].includes('var __targetId = 99'), 'UXP active-document verification should use requested id');
-assert(scripts[0].includes('document_not_active'), 'UXP lane should fail closed instead of switching tabs');
-assert(!scripts[0].includes('app.activeDocument = app.documents[i]'), 'UXP lane must not switch active documents');
 assert(neuralObserved === 99, 'UXP handler should retain AsyncLocal target');
 assert(parseJsonText(neural).document_target?.id === 99, 'UXP result should report pinned document id');
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const uxpMain = await readFile(path.resolve(here, '..', 'uxp-plugin', 'main.js'), 'utf8');
+assert(uxpMain.includes('await assertPinnedActiveDocument(cmdAction, params);'), 'UXP lane should verify the pinned document before command dispatch');
+assert(uxpMain.includes('document_not_active: pinned document'), 'UXP lane should fail closed instead of switching tabs');
 assert(uxpMain.includes("_target: [{ _ref: 'document', _id: params.document_id }]"), 'UXP plugin should select pinned document id in the same batchPlay command');
 
 console.log('DOCUMENT_TARGETING_TEST_OK');

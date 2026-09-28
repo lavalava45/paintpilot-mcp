@@ -1,15 +1,15 @@
 # Photoshop MCP — Digital Painting Edition
 
-Community-maintained fork of [alisaitteke/photoshop-mcp](https://github.com/alisaitteke/photoshop-mcp), focused on native digital-painting workflows in Photoshop.
+Independently maintained MCP system for AI-driven digital painting and evidence-bound Photoshop automation on Windows.
 
-**Original project / upstream:** [alisaitteke/photoshop-mcp](https://github.com/alisaitteke/photoshop-mcp)<br>
-**This fork:** [lavalava45/photoshop-mcp-digital-painting](https://github.com/lavalava45/photoshop-mcp-digital-painting)
+**Project:** [lavalava45/photoshop-mcp-digital-painting](https://github.com/lavalava45/photoshop-mcp-digital-painting)<br>
+**Historical provenance:** [`NOTICE`](NOTICE)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.7-blue.svg)](https://www.typescriptlang.org/)
-[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS-lightgrey.svg)]()
+[![Platform](https://img.shields.io/badge/Platform-Windows-lightgrey.svg)]()
 
-> This is an independent fork. It is not an official release of the upstream project and is not affiliated with or endorsed by Adobe Inc.
+> Independently maintained project. Not affiliated with or endorsed by Adobe Inc.
 
 ## GuardBot — project mascot
 
@@ -17,15 +17,15 @@ Community-maintained fork of [alisaitteke/photoshop-mcp](https://github.com/alis
   <img src="assets/mascot/guardbot.jpg" alt="GuardBot, the Photoshop MCP Digital Painting Edition mascot" width="360">
 </p>
 
-**GuardBot** is the mascot of this fork: a wind-up screenprint robot produced by the painting pipeline itself during a fresh holdout validation run. It represents the fork's core ideas — recognition-first construction, stable layer targeting, protected achieved features, and mandatory visual review after each semantic mutation.
+**GuardBot** is the project mascot: a wind-up screenprint robot produced by the painting pipeline itself during a fresh holdout validation run. It represents the project's core ideas — recognition-first construction, stable layer targeting, protected achieved features, and mandatory visual review after each semantic mutation.
 
 The mascot image is not an upstream Photoshop MCP asset and does not represent Adobe branding.
 
 See [`docs/mascot.md`](docs/mascot.md) for the story of the holdout run that produced him.
 
-## What this fork adds
+## What the project provides
 
-The upstream project already provides a broad Photoshop automation MCP. This edition keeps that toolset and adds a focused painting and visual-control layer for brush-driven work:
+Digital Painting Edition combines broad Photoshop automation with a focused painting and visual-control layer for brush-driven work:
 
 - installed brush-preset discovery and exact preset selection;
 - brush size, hardness, opacity, flow, spacing, angle, roundness, flip, pressure, airbrush, and smoothing controls;
@@ -41,7 +41,7 @@ The upstream project already provides a broad Photoshop automation MCP. This edi
 - explicit measurement, landmark, and guide tools for reference/proportion work;
 - reusable landmark-frame transforms and normalized landmark-set comparison;
 - a materialized preview pipeline for direct stdio/COS workflows without a second Photoshop export;
-- background-safe Windows execution: when Photoshop is already running, the fork attaches to the existing COM application with `GetObject` instead of recreating it with `CreateObject`, avoiding repeated foreground/focus stealing during MCP calls;
+- Windows-only host support with UXP-only / fail-closed production semantic execution; legacy COM/AppleScript execution transports have been removed rather than retained as fallback;
 - more reliable nested-layer targeting and ordering with recursive lookup and stable layer IDs;
 - strict optional `document_id` pinning for document-bound tools, with fail-closed validation, no automatic active-tab switching, and returned target metadata;
 - `photoshop_execute_visual_microplan` to collapse setup/read calls + one atomic visual mutation + its mandatory preview into one MCP round-trip without crossing the preview barrier;
@@ -49,9 +49,9 @@ The upstream project already provides a broad Photoshop automation MCP. This edi
 - a Photoshop-side UXP companion on localhost long-poll for Neural Filters, foreground-safe `asCopy` PSD/JPEG/PNG persistence, and low-latency fast-lane development/diagnostics;
 - an agent visual-control workflow with semantic passes, previews, measurement checkpoints, occlusion reasoning, cleanup, sticky Photoshop routing, and a state-based Definition of Done.
 
-The current build exposes **148 tools** (**132 atomic/non-recipe + 16 recipes**) and **21 prompts**.
+The current build exposes **130 tools** (**130 atomic/non-recipe**) and **5 prompts**.
 
-The dedicated Chat On Steroids entry point is `dist/cos-plugin.js`. It starts the same MCP server with `PHOTOSHOP_GUARD_MODE=required`, so read-only tools remain directly callable while raw mutating tools fail closed and must be dispatched through `photoshop_guard_cycle_auto`. This native Plugins route has passed dedicated live acceptance and is the canonical Chat On Steroids path. The older `scripts/photoshop-session.mjs` route remains available for dev/debug/recovery compatibility and regression coverage.
+The dedicated Chat On Steroids entry point is `dist/cos-plugin.js`. It starts the same MCP server with `PHOTOSHOP_GUARD_MODE=required`, so read-only tools remain directly callable while raw mutating tools fail closed and must be dispatched through `photoshop_guard_cycle_auto`. This native Plugins route has passed dedicated live acceptance and is the canonical Chat On Steroids path. The retired external Core/controller/daemon provider chain has been removed from the repository.
 
 ## Research directions
 
@@ -74,8 +74,8 @@ first view is insufficient, the same artistic operation can acquire additional c
 replaying the mutation. Review evidence is bound to exact document/frame identity so stale local
 evidence cannot silently satisfy a later verdict.
 
-The working theory, formalization, open hypotheses, and proposed experiments are documented in
-[`docs/adaptive-multiscale-visual-verification.md`](docs/adaptive-multiscale-visual-verification.md).
+The working theory, multiscale evidence model, experiments and practical painting evaluation suite are
+documented in [`docs/visual-evaluation.md`](docs/visual-evaluation.md).
 
 ### Bounded Artistic Autonomy
 
@@ -90,9 +90,10 @@ protected-quality loss, global/composition changes, or the autonomy horizon imme
 control to the stricter review path.
 
 The research question is not "how many commands can the agent run by itself?" but rather **how much
-locally coherent artistic work can be delegated without weakening perceptual control**. Current and
-planned semantics are tracked under
-[`P0-C — Painter/Guard semantic-pass throughput and bounded autonomy`](docs/PAINTING-ROADMAP.md#p0-c--painterguard-semantic-pass-throughput-and-bounded-autonomy).
+locally coherent artistic work can be delegated without weakening perceptual control**. The P0-C
+implementation is complete; its implementation history is recorded in `CHANGELOG.md` and its current
+acceptance status is recorded in `docs/roadmap-final-acceptance-matrix.md` rather than remaining in
+the forward-looking roadmap.
 
 ### Evidence-Bound Recovery
 
@@ -109,7 +110,7 @@ state rather than inferred from tool success alone.
 
 This makes recovery part of the visual control theory: a system should preserve causal identity across
 failures and prove what state it is in before continuing. The current implementation is described in
-[`docs/photoshop-guard-architecture.md`](docs/photoshop-guard-architecture.md).
+[`docs/architecture.md`](docs/architecture.md).
 
 ## Digital-painting tools
 
@@ -147,15 +148,15 @@ recognition block-in → preview → shape/value → preview → form → previe
 → edge/material → preview → detail → preview → cleanup → final preview
 ```
 
-## Install this fork
+## Install from source
 
-If you want the painting extensions, install **this repository from GitHub**. The upstream npm package does not contain the fork-specific painting tools.
+Install **this repository from GitHub**. Historical upstream packages and registry identities are separate projects and do not distribute Digital Painting Edition; see [`NOTICE`](NOTICE).
 
 Requirements:
 
 - Adobe Photoshop;
 - Node.js 18 or newer;
-- Windows or macOS;
+- Windows 10/11;
 - Git, or a downloaded GitHub source archive.
 
 Clone and build:
@@ -163,7 +164,7 @@ Clone and build:
 ```bash
 git clone https://github.com/lavalava45/photoshop-mcp-digital-painting.git
 cd photoshop-mcp-digital-painting
-npm install
+pnpm install --frozen-lockfile
 npm run build:server
 ```
 
@@ -193,9 +194,14 @@ Point your MCP host directly at that file over stdio. Example:
 
 ### Windows: background-safe Photoshop control
 
-On Windows, this fork is intentionally **background-safe by default**. When Photoshop is already running, MCP script execution attaches to the existing `Photoshop.Application` COM object instead of creating a new one for every request. In addition, each background-safe `DoJavaScript` call is wrapped by a short-lived foreground guard because Photoshop itself can still raise its window from inside COM execution even after a safe `GetObject` attach. If that happens without an explicit user window-switch gesture, the guard immediately restores the user's most recent non-Photoshop foreground window. `PHOTOSHOP_MCP_ALLOW_UI_ACTIVATION=1` opts out of both protections when foreground activation is intentionally allowed.
+Production semantic Photoshop operations use the UXP companion and fail closed when required UXP
+readiness is unavailable. Retained Windows COM/legacy executor code is bounded to
+detection/versioning, diagnostics and historical fixtures; it is not a selectable production
+semantic backend.
 
-By default, the server also will **not** launch Photoshop automatically if it is closed. If an integration explicitly wants to allow UI activation / automatic Photoshop launch, opt in with:
+The retained Windows platform helper attaches to an already-running Photoshop instance with
+`GetObject` and refuses foreground-prone `CreateObject` launch by default. If a bounded diagnostic
+integration explicitly needs to permit UI activation / automatic Photoshop launch, opt in with:
 
 ```text
 PHOTOSHOP_MCP_ALLOW_UI_ACTIVATION=1
@@ -205,10 +211,10 @@ Leave that variable unset for normal background workflows.
 
 This transport behavior is separate from document targeting. `document_id` is now a fail-closed guard, not an automatic tab switch: a pinned call proceeds only when that document is already active; if another Photoshop document is active, the call stops instead of changing the user's tab.
 
-For Chat On Steroids, the canonical production path is **Plugins → `dist/cos-plugin.js` → embedded Guard → Photoshop**. It has passed the dedicated live acceptance sequence. The older **Core → `photoshop-session.mjs` → persistent daemon → `dist/index.js`** route is retained only for dev/debug/recovery compatibility and regression/live-test coverage.
+For Chat On Steroids, the canonical production path is **Plugins → `dist/cos-plugin.js` → embedded Guard → Photoshop**. It has passed the dedicated live acceptance sequence. The former Core/controller/daemon route has been physically removed; recovery stays on Guard status/resume/reconcile surfaces.
 
 For local development after `npm run build:server`, restart only the custom MCP child with
-**Chat On Steroids app → Plugins → Photoshop MCP Digital Painting Fork → … → Restart**.
+**Chat On Steroids app → Plugins → this Digital Painting Edition entry → … → Restart**.
 ChatGPT-side Plugins **Refresh** updates the schema/connector view but does not guarantee
 that a running `cos-plugin.js` process has reloaded new code. Do not restart the entire CoS
 application or use legacy restart-helper scripts. The UXP companion is reloaded separately
@@ -236,7 +242,6 @@ With Photoshop running, execute the live painting smoke test:
 node scripts/test-painting-tools.mjs
 node scripts/test-measurement-tools.mjs
 node scripts/test-landmark-ergonomics.mjs
-npm run test:painting-batching
 npm run test:painting-batching-live
 npm run test:document-targeting
 npm run test:document-targeting-live
@@ -245,55 +250,47 @@ npm run test:document-targeting-live
 The current verified tool-count result is:
 
 ```text
-tool counts consistent: 148 = 132 atomic + 16 recipes
+catalog counts consistent: 130 = 130 atomic + 0 recipes; 14 Guard tools; 5 MCP prompt templates
 ```
 
-The fork has been live-tested primarily on **Photoshop 2026 for Windows**. During the current validation, 123 installed brush presets were enumerated and the painting smoke test completed with `PAINTING_TEST_OK`.
+The project has been live-tested primarily on **Photoshop 2026 for Windows**. During the current validation, 123 installed brush presets were enumerated and the painting smoke test completed with `PAINTING_TEST_OK`.
 
 ## Documentation
 
 - [`INSTALL.md`](INSTALL.md) — installation and MCP host configuration
-- [`docs/adaptive-multiscale-visual-verification.md`](docs/adaptive-multiscale-visual-verification.md) — research concept for adaptive, provenance-bound COMPOSITION / OBJECT / MICRO visual evidence
-- [`docs/photoshop-guard-architecture.md`](docs/photoshop-guard-architecture.md) — current Guard/gateway architecture, host boundary, upstream COS requests, and proxy fallback
+- [`docs/visual-evaluation.md`](docs/visual-evaluation.md) — adaptive multiscale visual verification, controlled painting exercises and human evaluation protocols
 - [`docs/digital-painting.md`](docs/digital-painting.md) — painting API and design notes
 - [`docs/digital-painting-agent-skill.md`](docs/digital-painting-agent-skill.md) — visual-control workflow, checkpoints, cleanup, and Definition of Done
 - [`docs/available-tools.md`](docs/available-tools.md) — complete tool reference
-- [`docs/architecture.md`](docs/architecture.md) — architecture inherited from upstream plus fork integration points
-- [`docs/development.md`](docs/development.md) — build and development workflow
+- [`docs/architecture.md`](docs/architecture.md) — canonical architecture: MCP server, embedded Guard, UXP transport, preview/evidence pipeline, prompt layer and host boundary
 - [`RELEASE_CHECKLIST.md`](RELEASE_CHECKLIST.md) — validation before publishing a release
-- [`docs/troubleshooting.md`](docs/troubleshooting.md) — common connection and Photoshop issues
+- [`docs/development.md`](docs/development.md) — build, operations and troubleshooting
 
-The repository also retains upstream documentation for the broader Photoshop MCP feature set. Those inherited documents may describe upstream features that are not specific to Digital Painting Edition.
+Historical origin and upstream attribution are centralized in [`NOTICE`](NOTICE); current documentation describes the maintained Digital Painting Edition surface.
 
 ## Layer API consistency
 
-The fork also tightens several inherited layer-operation contracts that matter in multi-layer painting workflows:
+The project also tightens several layer-operation contracts that matter in multi-layer painting workflows:
 
 - `photoshop_get_layers` now exposes recursive layer `id`, `path`, and `depth` metadata;
 - layer ordering resolves targets recursively, so layers returned by `photoshop_get_layers` can also be targeted when they live inside groups;
 - `photoshop_move_layer_to_position` accepts `targetLayerId` (preferred over a possibly duplicated name);
 - `photoshop_move_layer_up`, `photoshop_move_layer_down`, `photoshop_move_layer_to_top`, and `photoshop_move_layer_to_bottom` keep nested layers inside their current parent stack;
-- core layer tools now return structured JSON envelopes instead of a mixture of plain-text confirmations and JSON.
+- structural layer tools use stable atomic JSON envelopes; property/transform tools retain their existing public confirmation text for compatibility.
 
 Regression coverage is provided by:
 
 ```bash
-node scripts/test-layer-api-contracts.mjs
-node scripts/test-layer-api-live.mjs
+npx vitest run tests/layer-domain-contract.test.ts src/tools/layer-uxp-routing.test.ts tests/blend-mode.test.ts tests/document-target.test.ts
 ```
+These tests exercise the UXP-only production route and central pinned-document contract; the retired
+ExtendScript-only layer fixture is no longer part of verification. Real-Photoshop behavior remains
+covered by the current UXP/live acceptance ledger.
 
-The live test creates its own temporary Photoshop document, exercises grouped/nested layers and id-based ordering, and closes that temporary document without saving.
+## Provenance
 
-## Upstream and attribution
-
-This fork is based on [Photoshop MCP](https://github.com/alisaitteke/photoshop-mcp), originally created by Ali Sait Teke. The upstream project, its website (`photoshop-mcp.com`), npm package (`@alisaitteke/photoshop-mcp`), and MCP Registry identity are separate from this fork.
-
-The upstream source, documentation, and assets retain their original copyright and license notices. This fork is maintained independently; references to the upstream project do not imply that its original author maintains or endorses this fork.
-
-## Analytics
-
-The upstream anonymous usage-analytics subsystem remains in this fork. Aggregated analytics are enabled by default and can be disabled; see [`docs/anonymous-usage-analytics.md`](docs/anonymous-usage-analytics.md).
+Historical origin, the reproducible source-independence baseline, upstream distribution separation, and retained copyright/licensing attribution are documented in [`NOTICE`](NOTICE).
 
 ## License
 
-MIT. See [`LICENSE`](LICENSE). The original upstream copyright notice is retained there.
+MIT. See [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE).

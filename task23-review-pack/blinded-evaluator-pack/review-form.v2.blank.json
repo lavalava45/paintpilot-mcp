@@ -1,0 +1,34 @@
+{
+  "schema_version": 2,
+  "status": "awaiting-independent-review",
+  "aggregation_rule_version": 2,
+  "evaluator_id": "",
+  "review_date": "",
+  "independence_attestation": "I did not receive producer verdicts, expected answers, technical logs, case/control identities, or the private case mapping.",
+  "allowed_answers": ["YES", "NO", "UNCERTAIN", "N-A"],
+  "n_a_rule": "Use N-A only when the supplied target/style contract genuinely makes that question inapplicable. Do not use N-A merely because the evidence is weak; use UNCERTAIN for weak/ambiguous evidence.",
+  "questions": [
+    "Major form more modelled?",
+    "Secondary forms more informative?",
+    "Edge hierarchy improved?",
+    "Material/light response more specific?",
+    "Residual block-in reduced?",
+    "Extra detail structurally useful rather than noise?",
+    "Important structure preserved?",
+    "Requested realism/detail target materially closer?"
+  ],
+  "case_answer_schema": {
+    "answers": ["YES|NO|UNCERTAIN|N-A", "YES|NO|UNCERTAIN|N-A", "YES|NO|UNCERTAIN|N-A", "YES|NO|UNCERTAIN|N-A", "YES|NO|UNCERTAIN|N-A", "YES|NO|UNCERTAIN|N-A", "YES|NO|UNCERTAIN|N-A", "YES|NO|UNCERTAIN|N-A"],
+    "n_a_reasons": {
+      "question_number_if_n_a": "Why the supplied target/style contract makes this criterion inapplicable"
+    },
+    "observation": ""
+  },
+  "cases": {
+    "case-01": null,
+    "case-02": null,
+    "case-03": null,
+    "case-04": null,
+    "case-05": null
+  }
+}

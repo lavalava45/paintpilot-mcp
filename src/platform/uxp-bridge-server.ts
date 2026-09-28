@@ -399,6 +399,30 @@ function dispatchCommand(command: UxpBridgeCommand): boolean {
   return false;
 }
 
+function listenOnLoopback(
+  candidate: ReturnType<typeof createServer>,
+  resolve: (port: number) => void,
+  reject: (error: unknown) => void
+): void {
+  const host = '127.0.0.1';
+  candidate.once('listening', () => {
+    server = candidate;
+    const address = candidate.address();
+    if (address && typeof address === 'object') listenPort = address.port;
+    logger.info(`UXP bridge listening on ${host}:${listenPort}`);
+    resolve(listenPort);
+  });
+  candidate.on('error', (error: NodeJS.ErrnoException) => {
+    if (error.code !== 'EADDRINUSE') {
+      reject(error);
+      return;
+    }
+    listenPort += 1;
+    candidate.listen(listenPort, host);
+  });
+  candidate.listen(listenPort, host);
+}
+
 export async function ensureUxpBridgeServer(): Promise<number> {
   if (server) return listenPort;
   if (commandRecords.size === 0) loadDurableCommandRecords();
@@ -730,24 +754,7 @@ export async function ensureUxpBridgeServer(): Promise<number> {
       json(res, 404, { ok: false, error: 'not_found' });
     });
 
-    s.listen(listenPort, '127.0.0.1', () => {
-      server = s;
-      const addr = s.address();
-      if (addr && typeof addr === 'object') {
-        listenPort = addr.port;
-      }
-      logger.info(`UXP bridge listening on 127.0.0.1:${listenPort}`);
-      resolve(listenPort);
-    });
-
-    s.on('error', (err: NodeJS.ErrnoException) => {
-      if (err.code === 'EADDRINUSE') {
-        listenPort += 1;
-        s.listen(listenPort, '127.0.0.1');
-        return;
-      }
-      reject(err);
-    });
+    listenOnLoopback(s, resolve, reject);
   });
 }
 

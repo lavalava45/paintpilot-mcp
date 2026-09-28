@@ -64,6 +64,35 @@ type GuardExecutionRun = {
   };
 };
 
+function semanticActionsFromRecord(record: Record<string, unknown> | undefined): number {
+  if (!record || record.execution === 'not-executed') return 0;
+  if (record.tool === 'photoshop_execute_visual_microplan') {
+    for (const body of parseTexts(record.result as ToolResult | undefined)) {
+      const passExecution = body?.pass_execution;
+      const actions = Array.isArray(passExecution?.actions) ? passExecution.actions : [];
+      const dispatched = actions.filter((action: any) =>
+        action?.kind === 'visual-mutation' && action?.state !== 'not-started'
+      ).length;
+      if (dispatched > 0) return dispatched;
+      const count = Number(body?.mutation_count);
+      if (Number.isSafeInteger(count) && count > 0) return count;
+    }
+  }
+  return record.visual ? 1 : 0;
+}
+
+function cycleInputDocumentId(store: SessionStore, input: Record<string, unknown>): number | undefined {
+  const nextPass = input.next_pass && typeof input.next_pass === 'object' && !Array.isArray(input.next_pass)
+    ? input.next_pass as Record<string, unknown>
+    : undefined;
+  const nextDocumentId = Number(nextPass?.document_id);
+  if (Number.isSafeInteger(nextDocumentId) && nextDocumentId > 0) return nextDocumentId;
+  const previousOperationId = typeof input.previous_operation_id === 'string' ? input.previous_operation_id : undefined;
+  const previousRecord = previousOperationId ? store.read(previousOperationId) : undefined;
+  const previousDocumentId = Number(previousRecord?.args?.document_id);
+  return Number.isSafeInteger(previousDocumentId) && previousDocumentId > 0 ? previousDocumentId : undefined;
+}
+
 const buildPreflightRejectionEnvelope = preflightRejectionEnvelope as unknown as (
   input: Record<string, unknown>,
   result: ToolResult,
@@ -125,6 +154,23 @@ export function guardRuntimeErrorCode(error: unknown, fallback: string): string 
 
 export function shouldBlockRawTool(toolName: string, mode = EMBEDDED_GUARD_MODE): boolean {
   return mode === 'required' && !toolName.startsWith('photoshop_guard_') && !isGuardReadTool(toolName);
+}
+
+export function describeToolForGuardMode(
+  toolName: string,
+  description: string | undefined,
+  mode = EMBEDDED_GUARD_MODE
+): string | undefined {
+  if (!shouldBlockRawTool(toolName, mode)) return description;
+
+  const guardNotice =
+    'GUARD-REQUIRED MUTATION: this raw Photoshop tool is exposed for planning/internal Guard execution only. ' +
+    'Do not call it directly in PHOTOSHOP_GUARD_MODE=required: a direct MCP call is guaranteed to fail with code=guard_required. ' +
+    'Submit the intended mutation through photoshop_guard_cycle_auto instead (normally as a next_pass action).';
+
+  return description?.trim()
+    ? `${guardNotice}\n\n${description}`
+    : guardNotice;
 }
 
 export interface EmbeddedGuardRuntimeOptions {
@@ -391,6 +437,35 @@ export class EmbeddedGuardRuntime {
         photoshop_paint_dabs: 'required',
         photoshop_paint_strokes: 'required_when_stroke_mechanism_is_BRUSH',
         non_brush_stroke_mechanisms: ['PENCIL', 'SMUDGE', 'ERASER'],
+        stroke_mechanism_contract: {
+          BRUSH: {
+            settings_source: 'brush_preflight_or_explicit_brush_settings',
+            per_stroke_size_opacity_flow: true,
+            per_stroke_dynamics: true,
+            color_override: true,
+          },
+          PENCIL: {
+            settings_source: 'current_photoshop_tool_settings',
+            per_stroke_size_opacity_flow: false,
+            per_stroke_dynamics: false,
+            color_override: true,
+            live_acceptance: 'pending',
+          },
+          SMUDGE: {
+            settings_source: 'current_photoshop_tool_settings',
+            per_stroke_size_opacity_flow: false,
+            per_stroke_dynamics: false,
+            color_override: false,
+            live_acceptance: 'pending',
+          },
+          ERASER: {
+            settings_source: 'current_photoshop_tool_settings',
+            per_stroke_size_opacity_flow: false,
+            per_stroke_dynamics: false,
+            color_override: false,
+            live_acceptance: 'pending',
+          },
+        },
       },
       next_required_action: nextRequiredAction,
     };
@@ -495,6 +570,7 @@ export class EmbeddedGuardRuntime {
       active_layer_name: typeof stateLayer.name === 'string' ? stateLayer.name : null,
       painting_profile: profile,
       brush_preflight: brushPreflight ?? null,
+      brush_pack_policy: artRun.brush_pack_policy ?? null,
       profile_transition: artRun.profile_transition ?? null,
     };
     const dependencyKey = this.capabilitySnapshotDependencyKey(dependencyFacts);
@@ -531,6 +607,7 @@ export class EmbeddedGuardRuntime {
       supported_semantic_methods: supportedMethods,
       unavailable_methods: unavailableMethods,
       brush_roles: brushRoles,
+      brush_pack_policy: artRun.brush_pack_policy ?? null,
       preparation_facts: {
         art_run_bound: typeof artRun.process_dir === 'string' && artRun.process_dir.length > 0,
         brush_preflight_completed: brushPreflight?.completed === true,
@@ -584,11 +661,19 @@ export class EmbeddedGuardRuntime {
   }
 
   resume(documentId?: number): Record<string, unknown> {
-    return {
+    const result = {
       ...this.store.resume(documentId),
       guard_capabilities: this.capabilities(),
       canonical_next_tool: 'photoshop_guard_cycle_auto',
     };
+    if (Number.isSafeInteger(documentId) && Number(documentId) > 0) {
+      this.store.recordArtisticThroughputEvent(Number(documentId), {
+        kind: 'recovery',
+        model_visible: true,
+        semantic_actions: 0,
+      });
+    }
+    return result;
   }
 
   priorities(input: Record<string, unknown>): Record<string, unknown> {
@@ -753,12 +838,24 @@ export class EmbeddedGuardRuntime {
     const startedAt = Date.now();
     const id = typeof input.id === 'string' ? input.id : undefined;
     const finish = (result: Record<string, unknown>) => {
-      if (id) this.store.recordLatency(id, {
-        recovery_reconciliation_ms: Date.now() - startedAt,
-        unknown_components: [
-          'recovery_reconciliation_ms includes durable UXP receipt inspection/reconstruction but excludes prior external host/model time',
-        ],
-      });
+      if (id) {
+        this.store.recordLatency(id, {
+          recovery_reconciliation_ms: Date.now() - startedAt,
+          unknown_components: [
+            'recovery_reconciliation_ms includes durable UXP receipt inspection/reconstruction but excludes prior external host/model time',
+          ],
+        });
+        const recoveryRecord = this.store.read(id);
+        const documentId = Number(recoveryRecord?.args?.document_id);
+        if (Number.isSafeInteger(documentId) && documentId > 0) {
+          this.store.recordArtisticThroughputEvent(documentId, {
+            kind: 'recovery',
+            model_visible: true,
+            semantic_actions: 0,
+            operation_id: id,
+          });
+        }
+      }
       return result;
     };
 
@@ -999,7 +1096,7 @@ export class EmbeddedGuardRuntime {
       throw new Error(`${executionPolicyError.code}: ${executionPolicyError.message}`);
     }
     const definition = this.registry.get(name);
-    if (!definition) throw new Error(`Tool ${name} missing from this fork catalog`);
+    if (!definition) throw new Error(`Tool ${name} missing from the project catalog`);
     if (name !== 'photoshop_get_state' && toolAcceptsDocumentId(this.registry, name) && !positiveDocumentId(args.document_id)) {
       throw new Error(`Pass a positive pinned document_id for ${name}; obtain it from photoshop_get_state/photoshop_list_documents first`);
     }
@@ -1029,6 +1126,64 @@ export class EmbeddedGuardRuntime {
       : {};
     const documentId = Number(args.document_id);
     if (!positiveDocumentId(documentId)) return [];
+
+    if (tool === 'photoshop_execute_visual_microplan') {
+      const problemId = typeof operation.problem_id === 'string'
+        ? operation.problem_id
+        : typeof args.problem_id === 'string' ? args.problem_id : undefined;
+      if (problemId) {
+        const recovery = this.store.artisticRecoveryForProblem(
+          documentId,
+          problemId,
+          operation,
+          undefined,
+          undefined
+        ) as Record<string, unknown> | null;
+        const exhaustedMethodClasses = Array.isArray(recovery?.exhausted_method_classes)
+          ? recovery!.exhausted_method_classes.map(String)
+          : [];
+        const currentMethodClass = typeof args.method_class === 'string' ? args.method_class : undefined;
+        if (currentMethodClass && exhaustedMethodClasses.includes(currentMethodClass)) {
+          const alternatives = paintingMethodCapabilities(this.registry)
+            .filter(capability => capability.availability !== 'unavailable')
+            .filter(capability => !exhaustedMethodClasses.includes(capability.methodClass))
+            .map(capability => ({
+              method_id: capability.id,
+              method_class: capability.methodClass,
+              primary_tool: capability.primaryTool ?? null,
+              execution_tools: capability.executionTools ?? [],
+              visual_intents: capability.visualIntents,
+              impact_classes: capability.impactClasses,
+            }));
+          const distinctClasses = [...new Set(alternatives.map(item => item.method_class))];
+          if (alternatives.length) {
+            return [{
+              scope: 'next_operation' as const,
+              code: 'artistic_strategy_change_required',
+              message: `Problem ${problemId} has exhausted method_class=${currentMethodClass}; choose one currently available causally distinct method class: ${distinctClasses.join('|')}. No Photoshop mutation was dispatched.`,
+              details: {
+                problem_id: problemId,
+                exhausted_method_classes: exhaustedMethodClasses,
+                available_causal_alternatives: alternatives,
+                dispatch_performed: false,
+              },
+            }];
+          }
+          return [{
+            scope: 'next_operation' as const,
+            code: 'artistic_strategy_exhausted_no_alternative',
+            message: `Problem ${problemId} has exhausted its currently available causal method classes; return to Art Director/human review. No Photoshop mutation was dispatched.`,
+            details: {
+              problem_id: problemId,
+              exhausted_method_classes: exhaustedMethodClasses,
+              available_causal_alternatives: [],
+              next_owner: 'art-director-or-human',
+              dispatch_performed: false,
+            },
+          }];
+        }
+      }
+    }
 
     // The host-instance proof is available only on the matching UXP bridge.
     // Preserve the existing bounded COM fallback when UXP is not the selected
@@ -1195,19 +1350,53 @@ export class EmbeddedGuardRuntime {
         const previousRecordBeforeClosure = previousOperationId
           ? this.store.read(previousOperationId)
           : undefined;
+        const deliveryDebt = previousRecordBeforeClosure?.visual
+          && !previousRecordBeforeClosure?.verdict
+          ? this.store.visualDeliveryDebt(previousRecordBeforeClosure)
+          : null;
+        if (deliveryDebt && previousOperationId) {
+          const envelope = buildCycleEnvelope(this.store, previousRecordBeforeClosure, {
+            replay: false,
+            closed_previous: { closed: false },
+          });
+          return {
+            ...envelope,
+            delivery_recovery: {
+              ...deliveryDebt,
+              read_only: true,
+              mutation_replayed: false,
+              next_mutation_dispatched: false,
+              action: 'redeliver_same_review_artifacts',
+            },
+            guard_transport: 'embedded_mcp',
+          };
+        }
         const reviewFindings: unknown[] = cycleInput.previous_visual_verdict
           && typeof cycleInput.previous_visual_verdict === 'object'
           && !Array.isArray(cycleInput.previous_visual_verdict)
           && Array.isArray((cycleInput.previous_visual_verdict as Record<string, unknown>).review_findings)
           ? (cycleInput.previous_visual_verdict as Record<string, unknown>).review_findings as unknown[]
           : [];
+        const previousVisualVerdict = cycleInput.previous_visual_verdict
+          && typeof cycleInput.previous_visual_verdict === 'object'
+          && !Array.isArray(cycleInput.previous_visual_verdict)
+          ? cycleInput.previous_visual_verdict as Record<string, unknown>
+          : undefined;
+        const escalationOptions = {
+          persist: false,
+          uncertainty_review: previousVisualVerdict?.uncertainty_review,
+          target_resolved: previousVisualVerdict?.target_resolved,
+        };
         const reviewEscalation: any = previousOperationId
           && previousRecordBeforeClosure?.visual
           && !previousRecordBeforeClosure?.verdict
-          ? (this.store.planReviewEscalation as any)(previousOperationId, reviewFindings, { persist: false })
+          ? (this.store.planReviewEscalation as any)(previousOperationId, reviewFindings, escalationOptions)
           : null;
         if (reviewEscalation?.required && previousOperationId) {
-          const persistedPlan: any = (this.store.planReviewEscalation as any)(previousOperationId, reviewFindings, { persist: true });
+          const persistedPlan: any = (this.store.planReviewEscalation as any)(previousOperationId, reviewFindings, {
+            ...escalationOptions,
+            persist: true,
+          });
           const wholeLongEdge = Math.max(
             Number(previousRecordBeforeClosure?.preview?.width) || 0,
             Number(previousRecordBeforeClosure?.preview?.height) || 0
@@ -1428,8 +1617,65 @@ export class EmbeddedGuardRuntime {
           model_call_count: null,
           unknown_components: previewTimingUnknown,
         });
+        if (owningJobId) {
+          const asyncRecord = this.store.read(run.record.id);
+          const asyncDocumentId = Number(asyncRecord?.args?.document_id);
+          if (Number.isSafeInteger(asyncDocumentId) && asyncDocumentId > 0) {
+            this.store.recordArtisticThroughputEvent(asyncDocumentId, {
+              kind: 'async-execution',
+              model_visible: false,
+              semantic_actions: semanticActionsFromRecord(asyncRecord),
+              operation_id: run.record.id,
+              job_id: owningJobId,
+            });
+          }
+        }
       }
       let refreshedRecord = run.record?.id ? this.store.read(run.record.id) : run.record;
+      if (
+        refreshedRecord?.id
+        && refreshedRecord.visual
+        && refreshedRecord.preview
+        && refreshedRecord.execution !== 'not-executed'
+        && refreshedRecord.failed !== true
+        && refreshedRecord.visual_review_profile?.level === 'micro'
+        && refreshedRecord.args?.object_context_region_bounds
+      ) {
+        const contextPlan: any = (this.store.planReviewEscalation as any)(refreshedRecord.id, [], {
+          persist: true,
+          context_only: true,
+          context_review_region: refreshedRecord.args.object_context_region_bounds,
+        });
+        if (contextPlan.required) {
+          const wholeLongEdge = Math.max(
+            Number(refreshedRecord.preview.width) || 0,
+            Number(refreshedRecord.preview.height) || 0
+          ) || Number(refreshedRecord.visual_review_profile?.whole_max_dimension_px) || 1600;
+          for (const capture of contextPlan.captures) {
+            const previewArgs = this.materializeArguments(
+              'photoshop_get_preview',
+              {
+                document_id: contextPlan.document_id,
+                max_dimension_px: wholeLongEdge,
+                quality: 8,
+                focus_region: capture.effective_region,
+                focus_max_dimension_px: capture.focus_max_dimension_px,
+              },
+              `${refreshedRecord.id}-context-${capture.capture_id}`
+            );
+            const result = await this.invoke('photoshop_get_preview', previewArgs, 60_000, {
+              guardOperationId: refreshedRecord.id,
+            });
+            const rawPreview = previewOf(result);
+            if (!rawPreview) throw new Error('Direct MICRO object-context capture did not return materialized preview evidence');
+            this.store.attachReviewEvidence(refreshedRecord.id, capture, {
+              ...rawPreview,
+              document_id: contextPlan.document_id,
+            });
+          }
+          refreshedRecord = this.store.read(refreshedRecord.id);
+        }
+      }
       let acceptedAnchorRestoreResult: Record<string, unknown> | undefined;
       if (
         refreshedRecord?.id
@@ -1486,7 +1732,40 @@ export class EmbeddedGuardRuntime {
   }
 
   async cycleAuto(input: Record<string, unknown>): Promise<Record<string, unknown>> {
-    return this.cycle(input, undefined, { dispatchMode: 'auto' });
+    const documentId = cycleInputDocumentId(this.store, input);
+    const hasNextPass = !!(input.next_pass && typeof input.next_pass === 'object' && !Array.isArray(input.next_pass));
+    try {
+      const result = await this.cycle(input, undefined, { dispatchMode: 'auto' });
+      if (documentId) {
+        const execution = result.execution && typeof result.execution === 'object' && !Array.isArray(result.execution)
+          ? result.execution as Record<string, unknown>
+          : undefined;
+        const operationId = typeof execution?.operation_id === 'string'
+          ? execution.operation_id
+          : typeof result.operation_id === 'string' ? result.operation_id : undefined;
+        const record = operationId ? this.store.read(operationId) : undefined;
+        const rejected = !!result.preflight_rejection || execution?.execution === 'not-executed';
+        const asyncStarting = result.mode === 'photoshop-guard-async'
+          && (result.state === 'starting' || result.state === 'running');
+        this.store.recordArtisticThroughputEvent(documentId, {
+          kind: rejected ? 'rejected' : hasNextPass ? 'semantic-dispatch' : 'bookkeeping',
+          model_visible: true,
+          semantic_actions: asyncStarting ? 0 : semanticActionsFromRecord(record),
+          ...(operationId ? { operation_id: operationId } : {}),
+          ...(typeof result.job_id === 'string' ? { job_id: result.job_id } : {}),
+        });
+      }
+      return result;
+    } catch (error) {
+      if (documentId) {
+        this.store.recordArtisticThroughputEvent(documentId, {
+          kind: 'rejected',
+          model_visible: true,
+          semantic_actions: 0,
+        });
+      }
+      throw error;
+    }
   }
 
   private reservePreparedJob(
@@ -1609,6 +1888,20 @@ export class EmbeddedGuardRuntime {
   pollJob(jobId: string): Record<string, unknown> {
     const job = readJob(this.runtimeDirectory, jobId);
     const result = job.result as Record<string, unknown> | undefined;
+    try {
+      const input = JSON.parse(fs.readFileSync(job.files.input, 'utf8')) as Record<string, unknown>;
+      const documentId = cycleInputDocumentId(this.store, input);
+      if (documentId) {
+        this.store.recordArtisticThroughputEvent(documentId, {
+          kind: 'bookkeeping',
+          model_visible: true,
+          semantic_actions: 0,
+          job_id: jobId,
+        });
+      }
+    } catch {
+      // Telemetry must never make a valid durable job unreadable.
+    }
     return {
       ok: job.state !== 'failed' && job.state !== 'stalled',
       mode: 'photoshop-guard-async',

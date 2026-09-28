@@ -29,8 +29,8 @@ try {
   const guardTools = tools.filter((tool) => tool.name.startsWith('photoshop_guard_'));
   const exposureBytes = tools.reduce((total, tool) => total + Buffer.byteLength(JSON.stringify(tool)), 0);
 
-  assert.equal(tools.length, 148, 'runtime catalog must expose the complete 148-tool surface');
-  assert.equal(guardTools.length, 17, 'runtime catalog must expose all 17 embedded Guard tools');
+  assert.equal(tools.length, 129, 'runtime catalog must expose the complete 129-tool surface');
+  assert.equal(guardTools.length, 14, 'runtime catalog must expose all 14 embedded Guard tools');
   assert.ok(exposureBytes <= 250_000, `CoS schema budget exceeded: ${exposureBytes} > 250000`);
 
   const capabilities = textBody(await client.callTool({

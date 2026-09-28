@@ -288,6 +288,10 @@ async function invokeUxpStableCommand<T extends Record<string, unknown>>(
     | 'select_brush_preset'
     | 'import_brush_pack_asset'
     | 'probe_media_brush'
+    | 'paint_stamp_instances'
+    | 'paint_regions'
+    | 'paint_strokes'
+    | 'paint_dabs'
     | 'set_foreground_color',
   params: Record<string, unknown>,
   commandId: string,
@@ -624,6 +628,22 @@ export async function invokeUxpProbeMediaBrush(
   );
 }
 
+export async function invokeUxpPaintStampInstances(
+  params: {
+    document_id?: number;
+    layer_id: number;
+    instances: Array<Record<string, unknown>>;
+  },
+  commandId: string
+): Promise<UxpStableCommandResult<Record<string, unknown>>> {
+  return invokeUxpStableCommand<Record<string, unknown>>(
+    'paint_stamp_instances',
+    params,
+    commandId,
+    90_000
+  );
+}
+
 export async function invokeUxpGetBrushSettings(): Promise<{
   ok: boolean;
   data?: Record<string, unknown>;
@@ -869,11 +889,43 @@ export async function invokeUxpFillLayer(params: {
   };
 }
 
+export async function invokeUxpColorGradient(params: {
+  document_id?: number;
+  layer_id: number;
+  from: { x: number; y: number };
+  to: { x: number; y: number };
+  stops: Array<{ position: number; red: number; green: number; blue: number }>;
+}): Promise<{ ok: boolean; data?: Record<string, unknown>; error?: string }> {
+  const result = await invokeUxpBridge('color_gradient', params, 15_000);
+  if (!result.ok) return { ok: false, error: result.error ?? 'uxp_color_gradient_failed' };
+  return {
+    ok: true,
+    data: result.data && typeof result.data === 'object' && !Array.isArray(result.data)
+      ? (result.data as Record<string, unknown>)
+      : undefined,
+  };
+}
+
 export async function invokeUxpPaintRegions(params: {
   document_id?: number;
   regions: unknown[];
   clip_bounds?: { left: number; top: number; right: number; bottom: number };
-}): Promise<{ ok: boolean; data?: Record<string, unknown>; error?: string }> {
+}, commandId?: string): Promise<{
+  ok: boolean;
+  data?: Record<string, unknown>;
+  error?: string;
+  command_id?: string;
+  receipt?: UxpBridgeCommandReceipt | null;
+  pre_dispatch_rejected?: boolean;
+}> {
+  if (commandId?.trim()) {
+    return invokeUxpStableCommand<Record<string, unknown>>(
+      'paint_regions',
+      params,
+      commandId,
+      30_000
+    );
+  }
   const result = await invokeUxpBridge('paint_regions', params, 30_000);
   if (!result.ok) return { ok: false, error: result.error ?? 'uxp_paint_regions_failed' };
   return {
@@ -889,7 +941,22 @@ export async function invokeUxpPaintStrokes(params: {
   document_id?: number;
   layer_id?: number;
   strokes: unknown[];
-}): Promise<{ ok: boolean; data?: Record<string, unknown>; error?: string }> {
+}, commandId?: string): Promise<{
+  ok: boolean;
+  data?: Record<string, unknown>;
+  error?: string;
+  command_id?: string;
+  receipt?: UxpBridgeCommandReceipt | null;
+  pre_dispatch_rejected?: boolean;
+}> {
+  if (commandId?.trim()) {
+    return invokeUxpStableCommand<Record<string, unknown>>(
+      'paint_strokes',
+      params,
+      commandId,
+      60_000
+    );
+  }
   const result = await invokeUxpBridge('paint_strokes', params, 60_000);
   if (!result.ok) return { ok: false, error: result.error ?? 'uxp_paint_strokes_failed' };
   return {
@@ -905,7 +972,22 @@ export async function invokeUxpPaintDabs(params: {
   document_id?: number;
   layer_id?: number;
   groups: unknown[];
-}): Promise<{ ok: boolean; data?: Record<string, unknown>; error?: string }> {
+}, commandId?: string): Promise<{
+  ok: boolean;
+  data?: Record<string, unknown>;
+  error?: string;
+  command_id?: string;
+  receipt?: UxpBridgeCommandReceipt | null;
+  pre_dispatch_rejected?: boolean;
+}> {
+  if (commandId?.trim()) {
+    return invokeUxpStableCommand<Record<string, unknown>>(
+      'paint_dabs',
+      params,
+      commandId,
+      60_000
+    );
+  }
   const result = await invokeUxpBridge('paint_dabs', params, 60_000);
   if (!result.ok) return { ok: false, error: result.error ?? 'uxp_paint_dabs_failed' };
   return {

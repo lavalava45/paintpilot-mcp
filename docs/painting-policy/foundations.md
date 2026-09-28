@@ -1,6 +1,6 @@
 # Digital Painting Visual Control Skill
 
-This skill defines the visual-control policy for AI painting through the Photoshop MCP fork. The low-level API answers **how to make a mark**; this skill answers **when, where, with what visual intent, and whether the result should be kept**.
+This skill defines the visual-control policy for AI painting through Photoshop MCP — Digital Painting Edition. The low-level API answers **how to make a mark**; this skill answers **when, where, with what visual intent, and whether the result should be kept**.
 
 Executable guide prompt:
 
@@ -17,13 +17,13 @@ Use it for drawings, paintings, brush-based illustration, line art, studies and 
 Once a task enters Photoshop/COS/MCP mode, that execution mode is sticky until the user explicitly exits it.
 
 - Short continuations such as `да`, `давай`, `продолжай`, `рисуй`, `дальше`, `ок` inherit the current Photoshop path.
-- In Chat On Steroids, the canonical route is `Chat_On_Steroids_Plugins → dist/cos-plugin.js → embedded Guard → internal ToolRegistry → Photoshop`. The older `Chat_On_Steroids_Core → photoshop-session.mjs → persistent daemon → dist/index.js` route is pending audited removal under `PAINTING-ROADMAP.md` tasks 13a–13c. Do not select it for new work. Use Desktop only for read-only UI inspection when needed.
+- In Chat On Steroids, the canonical route is `Chat_On_Steroids_Plugins → dist/cos-plugin.js → embedded Guard → internal ToolRegistry → Photoshop`. The former external Core/controller/daemon provider chain is removed. Use Desktop only for read-only UI inspection when needed.
 - `dist/cos-plugin.js` enables `PHOTOSHOP_GUARD_MODE=required`: known read-only tools remain directly callable; public raw mutating tools fail closed with `guard_required` and normal visual mutations must be submitted as compact `next_pass` requests through `photoshop_guard_cycle_auto`. Removed legacy full-operation/closure payloads are not public authoring options.
-- A previous native-route live acceptance passed for the pre-v2 surface. Do not interpret a stale legacy Plugins snapshot as a server limitation; the current compact-only source surface is 148 tools / 13 public Guard tools, and its own v2 live acceptance is required before final completion.
+- A previous native-route live acceptance passed for the pre-v2 surface. Do not interpret a stale legacy Plugins snapshot as a server limitation; the current compact-only source surface is 130 tools / 14 public Guard tools, and its own v2 live acceptance is required before final completion.
 - The current controller also uses a real two-level Art Director / Painter contract. Art Director owns whole-image assessment and directive/review cadence; Painter owns bounded local/medium VisualMicroPlans and keeps the ordinary local preview/verdict barrier.
-- From the repository root (`<repo-root>`), after `npm run build:server` the canonical CoS route targets `<repo-root>/dist/cos-plugin.js`. The legacy Core route still targets `<repo-root>/dist/index.js` until its audited removal, but must not receive new workflow dependencies. Keep machine-specific checkout paths out of this canonical skill.
-- The `uxp-plugin/` bridge is a separate Photoshop-side runtime and must not be confused with the Chat On Steroids Plugins UI. Production Photoshop dispatch is UXP-first. Ordinary migrated primitives may select retained ExtendScript/COM only when UXP unavailability is resolved before dispatch; once UXP may have dispatched, cross-backend replay is forbidden. `photoshop_save_document` and `photoshop_neural_filter` remain UXP-only/fail-closed, and the raw-script mutation bypass remains retired. See `docs/uxp-migration-inventory.md` for current per-tool status.
-- After rebuilding `dist/cos-plugin.js` in the current CoS development setup, restart only the custom Photoshop MCP plugin from **Chat On Steroids app → Plugins → Photoshop MCP Digital Painting Fork → … → Restart**. ChatGPT-side Plugins **Refresh** updates schema/connection metadata but does not guarantee process replacement. Do not restart all of CoS or use obsolete restart-helper scripts. After editing `uxp-plugin/main.js`, use **Reload** in Adobe UXP Developer Tool; for `manifest.json` changes use **Unload → Load**.
+- From the repository root (`<repo-root>`), after `npm run build:server` the canonical CoS route targets `<repo-root>/dist/cos-plugin.js`. Keep machine-specific checkout paths out of this canonical skill.
+- The `uxp-plugin/` bridge is a separate Photoshop-side runtime and must not be confused with the Chat On Steroids Plugins UI. Production semantic Photoshop dispatch is UXP-only and fail-closed for all migrated primitives. The production ExtendScript/COM fallback and raw-script mutation bypass are removed. See the generated backend/access inventory in `docs/available-tools.md` for current per-tool status.
+- After rebuilding `dist/cos-plugin.js` in the current CoS development setup, restart only this custom Photoshop MCP entry from **Chat On Steroids app → Plugins → Digital Painting Edition → … → Restart**. ChatGPT-side Plugins **Refresh** updates schema/connection metadata but does not guarantee process replacement. Do not restart all of CoS or use obsolete restart-helper scripts. After editing `uxp-plugin/main.js`, use **Reload** in Adobe UXP Developer Tool; for `manifest.json` changes use **Unload → Load**.
 - Do not switch to `image_gen` or another image-generation path merely because a follow-up says draw/paint/render/edit.
 - Switch execution family only on an explicit user instruction such as “используй ImageGen” or “не в Photoshop”.
 
@@ -124,10 +124,44 @@ COMPOSITION → SHAPE → VALUE → FORM → EDGE → MATERIAL → DETAIL
 - **Value** — major light/shadow families and value grouping.
 - **Form** — plane turns and transitions that make masses read as volume.
 - **Edge** — deliberate hard/firm/soft/lost hierarchy.
-- **Material** — surface response to light, roughness/gloss, reflection, translucency and texture.
+- **Material** — qualitative causal surface response: base color/value family, form-driven light,
+  specular/reflection/transmission where applicable, surface condition, variation scale and contacts;
+  texture is subordinate evidence rather than the definition of material.
 - **Detail** — selected small information after larger problems are solved.
 
 Advance only when the current level visually reads. If a later checkpoint exposes an earlier failure, return to that level.
+
+#### Physical Stack / Occlusion Gate
+
+`SHAPE` / broad block-in establishes not only silhouettes but the **physical stack**
+that later value/form/material rendering depends on. For fresh non-trivial paintings,
+the transition into `VALUE` or any later stage is fail-closed until the exact current
+whole-frame has an observed Physical Stack / Occlusion Gate pass.
+
+The gate is subject-agnostic. It checks:
+
+- depth order is coherent for the established semantic owners;
+- opaque/support masses actually occlude what is physically behind them instead of
+  using partial alpha as a generic softening device;
+- transmissive surfaces and transparent/optical/atmospheric overlays are intentional
+  and remain distinct from opaque structure;
+- the Photoshop layer stack agrees with declared direct `in-front-of` / `behind`
+  relationships;
+- support/contact and visible overlap do not contradict the intended physical scene.
+
+Each new semantic logical layer in a non-trivial painting therefore declares
+`physical_role` and `opacity_role`, plus at most one direct `depth_relations` anchor.
+Direct depth anchors form a chain rather than an all-pairs scene graph. `in-front-of`
+and `behind` require explicit `photoshop_create_layer` placement against the stable
+target layer id; current active-layer position is not sufficient evidence.
+
+A pass is bound to both the exact current preview and a stable signature of the
+occlusion-relevant semantic owners. Creating/deleting/merging/changing an
+opaque/support/transmissive owner makes the old pass stale. A genuinely new
+structural owner after `SHAPE` requires an explicit structural stage reset back to
+`SHAPE`, reconstruction of the affected occlusion relationship, and a fresh pass.
+Optical effects, atmosphere, cast shadows, surface conditions and camera/post layers
+do not masquerade as opaque masses merely because they are independently editable.
 
 For representational/high-detail targets, stage advancement is a change in representation,
 not merely a change of tool. The intended progression is:
@@ -145,6 +179,11 @@ Texture, noise or a larger mark count applied to an otherwise unchanged flat mas
 progression. Before DETAIL the durable refinement gate in
 [`methods.md`](methods.md) must either pass on the exact current frame or be explicitly
 inapplicable because the declared style contract intentionally retains a flat/graphic representation.
+
+Before the MATERIAL stage chooses texture/brush execution, use the shared qualitative
+`material_response` decomposition from [`methods.md`](methods.md). Keep base material, surface
+condition and optical effects causally distinct. Optional microtexture comes after the larger response
+components; a noisy surface with incoherent form/light response is still unresolved material.
 
 ### Operating modes
 

@@ -15,19 +15,10 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 const REQUIRED_FILES = [
   'dist/index.js',
-  'dist/ui/cli.js',
-  'dist/analytics/index.js',
   'scripts/prepare.mjs',
 ];
 
-/** Modules that must not ship — deleted providers or the #38 crash file. */
-const FORBIDDEN_FILES = [
-  'dist/analytics/pageview.js',
-  'dist/analytics/ga4-node.js',
-  'dist/analytics/ga4-shared.js',
-  'dist/analytics/mixpanel-node.js',
-  'dist/analytics/posthog-node.js',
-];
+const FORBIDDEN_PREFIXES = ['dist/analytics/', 'dist/ui/'];
 
 const RELATIVE_SPECIFIER =
   /(?:import|export)\s+(?:type\s+)?(?:[^'"\n;]*?\sfrom\s+)?['"](\.\.?\/[^'"]+)['"]|import\s*\(\s*['"](\.\.?\/[^'"]+)['"]\s*\)/g;
@@ -84,7 +75,7 @@ function collectPublishedFiles() {
         published.add(toPosix(entry));
       }
     } catch {
-      // Missing allowlist path is fine (e.g. web/dist before a UI build).
+      // Missing allowlist path is fine for optional generated surfaces.
     }
   }
 
@@ -112,9 +103,9 @@ async function main() {
     }
   }
 
-  for (const file of FORBIDDEN_FILES) {
-    if (exists(file) || published.has(file)) {
-      problems.push(`must not ship ${file} — run a clean npm run build:server`);
+  for (const file of published) {
+    if (FORBIDDEN_PREFIXES.some((prefix) => file.startsWith(prefix))) {
+      problems.push(`retired product surface must not ship: ${file}`);
     }
   }
 
@@ -144,11 +135,10 @@ async function main() {
     throw new Error(`Pack integrity failed:\n${problems.map((p) => `  - ${p}`).join('\n')}`);
   }
 
-  // Same import chain that crashed npx in issue #38.
-  await import(pathToFileURL(join(ROOT, 'dist/analytics/index.js')).href);
+  await import(pathToFileURL(join(ROOT, 'dist/core/app-version.js')).href);
 
   console.log(
-    `verify:pack ok — ${jsFiles.length} packed dist JS files, imports resolve, leftover analytics modules absent.`
+    `verify:pack ok — ${jsFiles.length} packed dist JS files, imports resolve, retired UI/analytics surfaces absent.`
   );
 }
 

@@ -1,11 +1,13 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { SessionStore } from '../src/core/guard/session-store.js';
 import {
   normalizeRefinementCheck,
   REFINEMENT_CRITERIA,
+  resolveVisualDevelopmentGate,
 } from '../src/core/refinement-check.js';
 
 const dirs: string[] = [];
@@ -32,6 +34,30 @@ function criteria(overrides: Record<string, string> = {}) {
   ]));
 }
 
+function resolvedMaterialResponse(overrides: Record<string, string> = {}) {
+  const component = (key: string) => ({
+    status: overrides[key] ?? 'resolved',
+    note: `${key} is qualitatively coherent with the visible form and material role.`,
+  });
+  return {
+    response_role: 'base-material',
+    components: {
+      base_response: component('base_response'),
+      form_light_response: component('form_light_response'),
+      specular_reflection: component('specular_reflection'),
+      transmission: { status: 'not-applicable', note: 'The represented base material is opaque in this fixture.' },
+      surface_condition: { status: 'not-applicable', note: 'No distinct surface-condition layer is required in this fixture.' },
+      variation_scale: component('variation_scale'),
+      edge_contact: component('edge_contact'),
+    },
+    microtexture: {
+      status: 'deferred',
+      note: 'Microtexture remains subordinate until the larger material response is established.',
+    },
+    texture_only_treatment: false,
+  };
+}
+
 function passingRefinement(operationId = 'form-frame', sha = 'a'.repeat(64)) {
   return {
     status: 'pass',
@@ -39,10 +65,57 @@ function passingRefinement(operationId = 'form-frame', sha = 'a'.repeat(64)) {
     preview_sha256: sha,
     evidence_operation_id: operationId,
     representation_change: 'meaningful',
+    low_frequency_evidence: {
+      status: 'resolved',
+      observed: true,
+      source_preview_sha256: sha,
+      evidence_operation_id: operationId + '-low-frequency',
+      note: 'Major form remains readable after low-frequency/thumbnail suppression of small texture.',
+    },
     criteria: criteria(),
+    material_response: resolvedMaterialResponse(),
     confidence: 0.85,
     limitations: [],
   };
+}
+
+function seedLowFrequencyEvidence(
+  s: SessionStore,
+  sourceOperationId = 'form-frame',
+  sourceSha = 'a'.repeat(64)
+) {
+  const root = path.dirname((s as any).directory);
+  const lowPath = path.join(root, sourceOperationId + '.low-frequency.jpg');
+  const bytes = Buffer.from('low-frequency-evidence-' + sourceOperationId);
+  writeFileSync(lowPath, bytes);
+  const lowSha = createHash('sha256').update(bytes).digest('hex');
+  s.write({
+    id: sourceOperationId + '-low-frequency',
+    tool: 'photoshop_analyze_value_structure',
+    args: { document_id: 42, materialize_path: path.join(root, sourceOperationId + '.grayscale.jpg') },
+    summary: 'Low-frequency structure evidence',
+    purpose: 'Verify that major-form modelling survives suppression of small texture/noise',
+    hash: 'hash-' + sourceOperationId + '-low-frequency',
+    sequence: 2,
+    created_at: new Date(1003).toISOString(),
+    completed_at: new Date(1004).toISOString(),
+    phase: 'completed',
+    visual: false,
+    failed: false,
+    result: {
+      content: [{
+        type: 'text',
+        text: JSON.stringify({
+          ok: true,
+          observed: true,
+          source_preview_sha256: sourceSha,
+          grayscale_sha256: 'd'.repeat(64),
+          low_frequency_sha256: lowSha,
+          low_frequency_materialized_path: lowPath,
+        }),
+      }],
+    },
+  });
 }
 
 function directive(refinementCheck: Record<string, unknown>) {
@@ -67,6 +140,17 @@ function directive(refinementCheck: Record<string, unknown>) {
       detail_density: 'selective focal detail only after lower-frequency structure is resolved',
       primitive_footprint_tolerance: 'temporary block-in primitives should not dominate the finished representation',
     },
+    prompt_conflict_preflight: {
+      dominant_objective: 'Materially modelled representational form before selective detail.',
+      secondary_traits: ['intentional edge hierarchy', 'selective focal detail'],
+      conflicts: [],
+      resolution_mode: 'none',
+      chosen_rendering_strategy: 'Resolve lower-frequency form and material response before any selective detail pass.',
+      resolution_rationale: 'The refinement fixture has no conflicting pipeline interpretation.',
+      first_pass_strategy: ['resolve form debt', 'model secondary forms'],
+    },
+    strategy_validation_after_microplans: 2,
+    strategy_validation: { status: 'pending' },
     composition_exploration: { hypotheses: [] },
     assessment: {
       composition: 'Stable.',
@@ -152,6 +236,7 @@ function seedCurrentVisualFrame(s: SessionStore, id = 'form-frame', sha = 'a'.re
       goal_confirmation: 'unresolved',
     },
   }));
+  seedLowFrequencyEvidence(s, id, sha);
 }
 
 describe('Task 23 progressive refinement contract', () => {
@@ -167,6 +252,68 @@ describe('Task 23 progressive refinement contract', () => {
       ...passingRefinement(),
       representation_change: 'texture-only',
     })).toThrow(/representation_change=meaningful/);
+  });
+
+  it('rejects noisy texture as resolved material when form/light response remains debt', () => {
+    expect(() => normalizeRefinementCheck({
+      ...passingRefinement(),
+      material_response: {
+        ...resolvedMaterialResponse({ form_light_response: 'debt' }),
+        texture_only_treatment: true,
+      },
+    })).toThrow(/texture-only material treatment|material_response/i);
+  });
+
+  it('permits an intentionally flat material decomposition only through an exact style-contract basis', () => {
+    const stylizedResponse = {
+      ...resolvedMaterialResponse(),
+      components: {
+        ...resolvedMaterialResponse().components,
+        form_light_response: {
+          status: 'not-applicable',
+          note: 'The exact flat graphic material treatment intentionally omits volumetric light modelling.',
+        },
+      },
+      style_contract_basis: {
+        field: 'material_treatment',
+        criterion: 'flat graphic color families with no simulated photoreal surface response',
+      },
+    };
+    const candidate = passingRefinement();
+    candidate.material_response = stylizedResponse;
+
+    const s = store();
+    seedCurrentVisualFrame(s);
+    const stylized = directive(candidate);
+    stylized.style_contract = {
+      ...stylized.style_contract,
+      material_treatment: 'flat graphic color families with no simulated photoreal surface response',
+    };
+    expect(() => s.setArtDirectorState({ document_id: 42, action: 'review', directive: stylized })).not.toThrow();
+
+    const mismatch = directive(candidate);
+    mismatch.style_contract = {
+      ...mismatch.style_contract,
+      material_treatment: 'different flat treatment',
+    };
+    expect(() => s.setArtDirectorState({ document_id: 42, action: 'review', directive: mismatch }))
+      .toThrow(/material_response style_contract_basis.*exactly match/i);
+  });
+
+  it('rejects a claimed PASS without explicit low-frequency evidence', () => {
+    const candidate = { ...passingRefinement() } as Record<string, unknown>;
+    delete candidate.low_frequency_evidence;
+    expect(() => normalizeRefinementCheck(candidate)).toThrow(/requires low_frequency_evidence/i);
+  });
+
+  it('rejects a claimed PASS when low-frequency inspection finds debt', () => {
+    expect(() => normalizeRefinementCheck({
+      ...passingRefinement(),
+      low_frequency_evidence: {
+        ...passingRefinement().low_frequency_evidence,
+        status: 'debt',
+      },
+    })).toThrow(/low_frequency_evidence.status=resolved/i);
   });
 
   it('rejects a pass while major or secondary form debt remains', () => {
@@ -284,6 +431,18 @@ describe('Task 23 progressive refinement contract', () => {
     })).toThrow(/stale|current document frame/);
   });
 
+  it('rejects low-frequency evidence from a different current preview', () => {
+    const s = store();
+    seedCurrentVisualFrame(s);
+    const candidate = passingRefinement();
+    candidate.low_frequency_evidence.source_preview_sha256 = 'b'.repeat(64);
+    expect(() => s.setArtDirectorState({
+      document_id: 42,
+      action: 'review',
+      directive: directive(candidate),
+    })).toThrow(/low_frequency_evidence.*SHA mismatch|same preview/i);
+  });
+
   it('persists the same refinement gate state across a SessionStore restart', () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'refinement-restart-'));
     dirs.push(dir);
@@ -311,5 +470,136 @@ describe('Task 23 progressive refinement contract', () => {
     for (const forbidden of ['horse', 'face', 'hand', 'car', 'house']) {
       expect(source.toLowerCase()).not.toMatch(new RegExp(`\\b${forbidden}\\b`));
     }
+  });
+
+  it('blocks a nontrivial final frame whose provenance remains region-dominant with no post-block-in mark-making', () => {
+    const result = resolveVisualDevelopmentGate({
+      paintingProfile: 'nontrivial_painting',
+      refinementCheck: normalizeRefinementCheck(passingRefinement()),
+      provenance: {
+        region_construction_operations: 4,
+        post_blockin_markmaking_operations: 0,
+        post_blockin_markmaking_tools: [],
+        blockin_primitive_dominance: true,
+      },
+    });
+    expect(result.ok).toBe(false);
+    expect(result.bands).toEqual({
+      primary_structure: 'resolved',
+      secondary_form: 'resolved',
+      tertiary_material: 'resolved',
+    });
+    expect(result.errors.join('\n')).toMatch(/blockin_primitive_dominance/);
+  });
+
+  it('admits exact-frame multiscale development when later material mark-making is present', () => {
+    const result = resolveVisualDevelopmentGate({
+      paintingProfile: 'nontrivial_painting',
+      refinementCheck: normalizeRefinementCheck(passingRefinement()),
+      provenance: {
+        region_construction_operations: 4,
+        post_blockin_markmaking_operations: 2,
+        post_blockin_markmaking_tools: ['photoshop_paint_strokes'],
+        blockin_primitive_dominance: false,
+      },
+    });
+    expect(result).toMatchObject({
+      ok: true,
+      bands: {
+        primary_structure: 'resolved',
+        secondary_form: 'resolved',
+        tertiary_material: 'resolved',
+      },
+      primitive_style_exception: false,
+    });
+  });
+
+  it('allows primitive-dominant provenance only through an explicit representation-style exemption', () => {
+    const result = resolveVisualDevelopmentGate({
+      paintingProfile: 'nontrivial_painting',
+      refinementCheck: normalizeRefinementCheck({
+        status: 'style-not-applicable',
+        observed: false,
+        applicability_reason: 'The declared flat graphic treatment intentionally uses planar primitives as final representation.',
+        style_contract_basis: {
+          field: 'primitive_footprint_tolerance',
+          criterion: 'intentional flat primitives are part of the final graphic language',
+        },
+      }),
+      provenance: {
+        region_construction_operations: 8,
+        post_blockin_markmaking_operations: 0,
+        post_blockin_markmaking_tools: [],
+        blockin_primitive_dominance: true,
+      },
+    });
+    expect(result).toMatchObject({ ok: true, primitive_style_exception: true });
+  });
+
+  it('blocks Art Director completion when a nontrivial current frame is still objectively region-dominant', () => {
+    const s = store();
+    s.setArtRunState({
+      document_id: 42,
+      process_dir: 'processes/visual-development-finalization-process/run-01',
+      painting_profile: 'nontrivial_painting',
+      commentary_mode: 'technical',
+    });
+    const sha = 'a'.repeat(64);
+    s.write({
+      id: 'region-frame-1',
+      tool: 'photoshop_execute_visual_microplan',
+      args: { document_id: 42, stage: 'GLOBAL_BLOCK_IN', steps: [{ tool: 'photoshop_paint_regions' }] },
+      summary: 'First region scaffold', purpose: 'visual-development fixture', hash: 'r1', sequence: 1,
+      created_at: new Date(1000).toISOString(), completed_at: new Date(1001).toISOString(),
+      phase: 'completed', visual: true, failed: false,
+      preview: { sha256: 'b'.repeat(64), document_id: 42 },
+      verdict: {
+        disposition: 'accept', verdict: 'improvement', at: new Date(1002).toISOString(),
+        artistic_value: { execution_changed: true },
+      },
+    });
+    seedCurrentVisualFrame(s, 'region-frame-2', sha);
+    const currentRecord = s.read('region-frame-2')!;
+    currentRecord.args = {
+      ...currentRecord.args,
+      stage: 'SHAPE',
+      steps: [{ tool: 'photoshop_paint_regions' }],
+    };
+    currentRecord.verdict = {
+      ...currentRecord.verdict,
+      artistic_value: { execution_changed: true },
+    };
+    s.write(currentRecord);
+
+    s.setArtDirectorState({
+      document_id: 42,
+      action: 'review',
+      directive: directive(passingRefinement('region-frame-2', sha)),
+    });
+    s.updatePaintingState(42, current => ({
+      ...current,
+      art_director: {
+        ...current.art_director,
+        tasks: current.art_director.tasks.map(task => ({ ...task, status: 'completed' })),
+        current_task_id: null,
+      },
+    }));
+
+    expect(() => s.setArtDirectorState({
+      document_id: 42,
+      action: 'complete',
+      final_comparison: {
+        scope: 'no_previous',
+        preferred: 'current',
+        reason: 'The current exact frame is the only available candidate for this finalization-control fixture.',
+        criteria: {
+          coherence: 'Synthetic fixture coherence.',
+          expressiveness: 'Synthetic fixture expressiveness.',
+          color: 'Synthetic fixture color.',
+          rhythm: 'Synthetic fixture rhythm.',
+          detail_selectivity: 'Synthetic fixture detail selectivity.',
+        },
+      },
+    })).toThrow(/blockin_primitive_dominance/);
   });
 });

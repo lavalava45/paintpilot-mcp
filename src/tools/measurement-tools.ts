@@ -2,12 +2,7 @@ import { ToolDefinition, ToolResult } from '../core/tool-registry.js';
 import { PhotoshopBackendRouter } from '../platform/photoshop-backend.js';
 import { PhotoshopConnection } from '../platform/connection.js';
 import { invokeUxpOperation } from '../platform/uxp-bridge-client.js';
-import {
-  atomicFailureFromError,
-  atomicSuccess,
-  parseSnippetResult,
-  runSnippet,
-} from './atomic-shared.js';
+import { atomicFailureFromError, atomicSuccess } from './atomic-shared.js';
 
 type GuideOrientation = 'HORIZONTAL' | 'VERTICAL';
 
@@ -349,103 +344,6 @@ function calculatePointMeasurements(
   };
 }
 
-function addGuidesScript(guides: GuideRequest[]): string {
-  return `
-if (app.documents.length === 0) throw new Error('No active document');
-var doc = app.activeDocument;
-var width = Number(doc.width.as('px'));
-var height = Number(doc.height.as('px'));
-var guides = ${JSON.stringify(guides)};
-var added = [];
-for (var v = 0; v < guides.length; v++) {
-  var candidate = guides[v];
-  var candidateMax = candidate.orientation === 'VERTICAL' ? width : height;
-  if (candidate.position < 0 || candidate.position > candidateMax) {
-    throw new Error('guide position out of bounds at index ' + v + ': ' + candidate.position + ' (max ' + candidateMax + ')');
-  }
-}
-for (var i = 0; i < guides.length; i++) {
-  var g = guides[i];
-  var maxPosition = g.orientation === 'VERTICAL' ? width : height;
-  var direction = g.orientation === 'VERTICAL' ? Direction.VERTICAL : Direction.HORIZONTAL;
-  doc.guides.add(direction, UnitValue(g.position, 'px'));
-  added.push({
-    orientation: g.orientation,
-    position: g.position,
-    position_norm: maxPosition ? g.position / maxPosition : null
-  });
-}
-return {
-  ok: true,
-  added: added,
-  guide_count: doc.guides.length,
-  document: { id: doc.id, name: doc.name, width: width, height: height }
-};
-`;
-}
-
-function listGuidesScript(): string {
-  return `
-if (app.documents.length === 0) throw new Error('No active document');
-var doc = app.activeDocument;
-var width = Number(doc.width.as('px'));
-var height = Number(doc.height.as('px'));
-var guides = [];
-for (var i = 0; i < doc.guides.length; i++) {
-  var g = doc.guides[i];
-  var orientation = g.direction === Direction.VERTICAL ? 'VERTICAL' : 'HORIZONTAL';
-  var position = Number(g.coordinate.as('px'));
-  var axisSize = orientation === 'VERTICAL' ? width : height;
-  guides.push({
-    index: i,
-    orientation: orientation,
-    position: position,
-    position_norm: axisSize ? position / axisSize : null
-  });
-}
-return {
-  ok: true,
-  guides: guides,
-  guide_count: guides.length,
-  document: { id: doc.id, name: doc.name, width: width, height: height }
-};
-`;
-}
-
-function clearGuidesScript(indices: number[] | undefined): string {
-  return `
-if (app.documents.length === 0) throw new Error('No active document');
-var doc = app.activeDocument;
-var requested = ${indices === undefined ? 'null' : JSON.stringify(indices)};
-var removed = [];
-if (requested === null) {
-  for (var i = doc.guides.length - 1; i >= 0; i--) {
-    var g = doc.guides[i];
-    removed.push({
-      index: i,
-      orientation: g.direction === Direction.VERTICAL ? 'VERTICAL' : 'HORIZONTAL',
-      position: Number(g.coordinate.as('px'))
-    });
-    g.remove();
-  }
-} else {
-  requested.sort(function(a, b) { return b - a; });
-  for (var j = 0; j < requested.length; j++) {
-    var idx = requested[j];
-    if (idx < 0 || idx >= doc.guides.length) throw new Error('guide index out of range: ' + idx);
-    var gg = doc.guides[idx];
-    removed.push({
-      index: idx,
-      orientation: gg.direction === Direction.VERTICAL ? 'VERTICAL' : 'HORIZONTAL',
-      position: Number(gg.coordinate.as('px'))
-    });
-    gg.remove();
-  }
-}
-return { ok: true, removed: removed, removed_count: removed.length, guide_count: doc.guides.length };
-`;
-}
-
 export function createMeasurementTools(connection: PhotoshopConnection): ToolDefinition[] {
   const backendRouter = new PhotoshopBackendRouter(connection);
   return [
@@ -531,7 +429,7 @@ export function createMeasurementTools(connection: PhotoshopConnection): ToolDef
           required: ['guides'],
         },
       },
-      handler: async (args) => addGuides(connection, backendRouter, args),
+      handler: async (args) => addGuides(backendRouter, args),
     },
     {
       tool: {
@@ -540,7 +438,7 @@ export function createMeasurementTools(connection: PhotoshopConnection): ToolDef
           'List Photoshop guides with index, orientation, pixel position, and normalized position for the active document.',
         inputSchema: { type: 'object', properties: {} },
       },
-      handler: async (args) => listGuides(connection, backendRouter, args),
+      handler: async (args) => listGuides(backendRouter, args),
     },
     {
       tool: {
@@ -560,7 +458,7 @@ export function createMeasurementTools(connection: PhotoshopConnection): ToolDef
           },
         },
       },
-      handler: async (args) => clearGuides(connection, backendRouter, args),
+      handler: async (args) => clearGuides(backendRouter, args),
     },
     {
       tool: {
@@ -725,42 +623,31 @@ async function measurePoints(
 }
 
 async function addGuides(
-  connection: PhotoshopConnection,
   backendRouter: PhotoshopBackendRouter,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
   try {
     const guides = parseGuides(args.guides);
-    const backend = await backendRouter.backendFor(
+    await backendRouter.backendFor(
       'guides.add' as Parameters<PhotoshopBackendRouter['backendFor']>[0]
     );
-    if (backend.kind === 'uxp') {
-      const documentId =
-        typeof args.document_id === 'number' && Number.isSafeInteger(args.document_id) && args.document_id > 0
-          ? args.document_id
-          : undefined;
-      const result = await invokeUxpOperation(
-        'add_guides',
-        {
-          guides,
-          ...(documentId !== undefined ? { document_id: documentId } : {}),
-        },
-        'uxp_add_guides_failed'
-      );
-      if (!result.ok || !result.data) throw new Error(result.error ?? 'uxp_add_guides_failed');
-      return atomicSuccess(`Added ${guides.length} guide${guides.length === 1 ? '' : 's'}`, {
-        added: result.data.added,
-        guide_count: result.data.guide_count,
-        document: result.data.document,
-      }, 'photoshop_list_guides');
-    }
-    const raw = await runSnippet(connection, addGuidesScript(guides));
-    const parsed = parseSnippetResult(raw);
-    if (!parsed) throw new Error(`Unparseable add-guides result: ${String(raw)}`);
+    const documentId =
+      typeof args.document_id === 'number' && Number.isSafeInteger(args.document_id) && args.document_id > 0
+        ? args.document_id
+        : undefined;
+    const result = await invokeUxpOperation(
+      'add_guides',
+      {
+        guides,
+        ...(documentId !== undefined ? { document_id: documentId } : {}),
+      },
+      'uxp_add_guides_failed'
+    );
+    if (!result.ok || !result.data) throw new Error(result.error ?? 'uxp_add_guides_failed');
     return atomicSuccess(`Added ${guides.length} guide${guides.length === 1 ? '' : 's'}`, {
-      added: parsed.added,
-      guide_count: parsed.guide_count,
-      document: parsed.document,
+      added: result.data.added,
+      guide_count: result.data.guide_count,
+      document: result.data.document,
     }, 'photoshop_list_guides');
   } catch (error) {
     return atomicFailureFromError(error);
@@ -768,40 +655,28 @@ async function addGuides(
 }
 
 async function listGuides(
-  connection: PhotoshopConnection,
   backendRouter: PhotoshopBackendRouter,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
   try {
-    const backend = await backendRouter.backendFor(
+    await backendRouter.backendFor(
       'guides.list' as Parameters<PhotoshopBackendRouter['backendFor']>[0]
     );
-    if (backend.kind === 'uxp') {
-      const documentId =
-        typeof args.document_id === 'number' && Number.isSafeInteger(args.document_id) && args.document_id > 0
-          ? args.document_id
-          : undefined;
-      const result = await invokeUxpOperation(
-        'list_guides',
-        documentId !== undefined ? { document_id: documentId } : {},
-        'uxp_list_guides_failed'
-      );
-      if (!result.ok || !result.data) throw new Error(result.error ?? 'uxp_list_guides_failed');
-      const count = typeof result.data.guide_count === 'number' ? result.data.guide_count : 0;
-      return atomicSuccess(`${count} guide${count === 1 ? '' : 's'} listed`, {
-        guides: result.data.guides,
-        guide_count: count,
-        document: result.data.document,
-      }, 'photoshop_measure_points');
-    }
-    const raw = await runSnippet(connection, listGuidesScript());
-    const parsed = parseSnippetResult(raw);
-    if (!parsed) throw new Error(`Unparseable guide list: ${String(raw)}`);
-    const count = typeof parsed.guide_count === 'number' ? parsed.guide_count : 0;
+    const documentId =
+      typeof args.document_id === 'number' && Number.isSafeInteger(args.document_id) && args.document_id > 0
+        ? args.document_id
+        : undefined;
+    const result = await invokeUxpOperation(
+      'list_guides',
+      documentId !== undefined ? { document_id: documentId } : {},
+      'uxp_list_guides_failed'
+    );
+    if (!result.ok || !result.data) throw new Error(result.error ?? 'uxp_list_guides_failed');
+    const count = typeof result.data.guide_count === 'number' ? result.data.guide_count : 0;
     return atomicSuccess(`${count} guide${count === 1 ? '' : 's'} listed`, {
-      guides: parsed.guides,
+      guides: result.data.guides,
       guide_count: count,
-      document: parsed.document,
+      document: result.data.document,
     }, 'photoshop_measure_points');
   } catch (error) {
     return atomicFailureFromError(error);
@@ -809,7 +684,6 @@ async function listGuides(
 }
 
 async function clearGuides(
-  connection: PhotoshopConnection,
   backendRouter: PhotoshopBackendRouter,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
@@ -827,38 +701,27 @@ async function clearGuides(
         return n;
       });
     }
-    const backend = await backendRouter.backendFor(
+    await backendRouter.backendFor(
       'guides.clear' as Parameters<PhotoshopBackendRouter['backendFor']>[0]
     );
-    if (backend.kind === 'uxp') {
-      const documentId =
-        typeof args.document_id === 'number' && Number.isSafeInteger(args.document_id) && args.document_id > 0
-          ? args.document_id
-          : undefined;
-      const result = await invokeUxpOperation(
-        'clear_guides',
-        {
-          ...(indices !== undefined ? { indices } : {}),
-          ...(documentId !== undefined ? { document_id: documentId } : {}),
-        },
-        'uxp_clear_guides_failed'
-      );
-      if (!result.ok || !result.data) throw new Error(result.error ?? 'uxp_clear_guides_failed');
-      const removedCount = typeof result.data.removed_count === 'number' ? result.data.removed_count : 0;
-      return atomicSuccess(`Removed ${removedCount} guide${removedCount === 1 ? '' : 's'}`, {
-        removed: result.data.removed,
-        removed_count: removedCount,
-        guide_count: result.data.guide_count,
-      }, 'photoshop_list_guides');
-    }
-    const raw = await runSnippet(connection, clearGuidesScript(indices));
-    const parsed = parseSnippetResult(raw);
-    if (!parsed) throw new Error(`Unparseable clear-guides result: ${String(raw)}`);
-    const removedCount = typeof parsed.removed_count === 'number' ? parsed.removed_count : 0;
+    const documentId =
+      typeof args.document_id === 'number' && Number.isSafeInteger(args.document_id) && args.document_id > 0
+        ? args.document_id
+        : undefined;
+    const result = await invokeUxpOperation(
+      'clear_guides',
+      {
+        ...(indices !== undefined ? { indices } : {}),
+        ...(documentId !== undefined ? { document_id: documentId } : {}),
+      },
+      'uxp_clear_guides_failed'
+    );
+    if (!result.ok || !result.data) throw new Error(result.error ?? 'uxp_clear_guides_failed');
+    const removedCount = typeof result.data.removed_count === 'number' ? result.data.removed_count : 0;
     return atomicSuccess(`Removed ${removedCount} guide${removedCount === 1 ? '' : 's'}`, {
-      removed: parsed.removed,
+      removed: result.data.removed,
       removed_count: removedCount,
-      guide_count: parsed.guide_count,
+      guide_count: result.data.guide_count,
     }, 'photoshop_list_guides');
   } catch (error) {
     return atomicFailureFromError(error);

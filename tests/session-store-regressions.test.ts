@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { SessionStore } from '../src/core/guard/session-store.js';
+import { paintingDevelopmentProvenance, SessionStore } from '../src/core/guard/session-store.js';
 import { createJob, writeJobCompleted } from '../src/core/guard/async-job.js';
 import { RUNTIME_STATE_VERSION } from '../src/core/guard/protocol-version.js';
 
@@ -184,7 +184,186 @@ function brushPreflight() {
   };
 }
 
+function exclusivePackBrushPreflight() {
+  const preflight = brushPreflight() as any;
+  preflight.brush_pack_id = 'brush-pack-sha256:test-pack';
+  preflight.roles[0].profile_id = 'media-profile-sha256:water-flow';
+  return preflight;
+}
+
 describe('Guard session-store regressions', () => {
+  it('recovers semantic layer ownership from journal evidence after restart and preserves temporary debt across ordinary continuation', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'semantic-layer-owner-restart-'));
+    dirs.push(dir);
+    const controller = path.join(dir, 'controller');
+    const options = { visualBarrierDirectory: path.join(dir, 'barriers'), workspaceRoot: dir };
+    const first = new SessionStore(controller, options);
+    first.write({
+      id: 'temp-owner-create',
+      tool: 'photoshop_execute_visual_microplan',
+      args: { document_id: 42 },
+      sequence: 1,
+      created_at: new Date(1000).toISOString(),
+      completed_at: new Date(1001).toISOString(),
+      phase: 'uncertain',
+      failed: true,
+      result: {
+        isError: true,
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            ok: false,
+            continuation_layers: [{
+              step_id: 'temp-layer',
+              layer_id: 12,
+              layer_name: 'Cat Temp',
+              hypothesis_id: 'cat-temp',
+              hypothesis: 'Temporary cat structure',
+              rollback_value: 'moderate',
+              temporary: true,
+              decision: 'temporary-hypothesis',
+            }],
+          }),
+        }],
+      },
+    });
+    first.write({
+      id: 'temp-owner-continue',
+      tool: 'photoshop_execute_visual_microplan',
+      args: { document_id: 42 },
+      sequence: 2,
+      created_at: new Date(2000).toISOString(),
+      completed_at: new Date(2001).toISOString(),
+      phase: 'completed',
+      failed: false,
+      result: {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            ok: true,
+            continuation_layers: [{
+              step_id: 'logical-layer-continuation',
+              layer_id: 12,
+              layer_name: 'Cat Temp',
+              hypothesis_id: 'cat-temp',
+              hypothesis: 'Temporary cat structure',
+              rollback_value: 'moderate',
+              decision: 'continue-logical-layer',
+            }],
+          }),
+        }],
+      },
+    });
+
+    const restarted = new SessionStore(controller, options);
+    expect(restarted.semanticLayerOwners(42)).toEqual([
+      expect.objectContaining({
+        hypothesis_id: 'cat-temp',
+        layer_id: 12,
+        temporary: true,
+        source_operation_id: 'temp-owner-continue',
+      }),
+    ]);
+    expect(restarted.statusCompact().documents['42'].logical_layer_owners).toEqual([
+      expect.objectContaining({ hypothesis_id: 'cat-temp', layer_id: 12, temporary: true }),
+    ]);
+    expect(restarted.resume(42).document.logical_layer_owners).toEqual([
+      expect.objectContaining({ hypothesis_id: 'cat-temp', layer_id: 12, temporary: true }),
+    ]);
+
+    const kept = restarted.keepSemanticLayerOwner({
+      request_key: 'keep-cat-temp',
+      document_id: 42,
+      hypothesis_id: 'cat-temp',
+      layer_id: 12,
+      rationale: 'The temporary cat structure is visually accepted and should remain independently editable.',
+    });
+    expect(kept.semantic_layer_lifecycle).toMatchObject({
+      action: 'keep',
+      hypothesis_id: 'cat-temp',
+      layer_id: 12,
+    });
+    expect(restarted.semanticLayerOwners(42)).toEqual([
+      expect.objectContaining({ hypothesis_id: 'cat-temp', layer_id: 12, temporary: false, decision: 'keep' }),
+    ]);
+    expect(restarted.statusCompact().pending_reports).not.toContain('keep-cat-temp');
+
+    restarted.write({
+      id: 'discard-temp-owner',
+      tool: 'photoshop_delete_layer',
+      args: { document_id: 42, layer_id: 12 },
+      sequence: 4,
+      created_at: new Date(3000).toISOString(),
+      completed_at: new Date(3001).toISOString(),
+      phase: 'completed',
+      failed: false,
+      result: { content: [{ type: 'text', text: '{"ok":true}' }] },
+    });
+    expect(restarted.semanticLayerOwners(42)).toEqual([]);
+  });
+
+  it('derives primitive-dominance provenance from successful visual history up to the exact current frame', () => {
+    const records = [
+      {
+        id: 'block-1', sequence: 1, phase: 'completed', failed: false, visual: true,
+        tool: 'photoshop_execute_visual_microplan',
+        args: { document_id: 42, stage: 'GLOBAL_BLOCK_IN', steps: [{ tool: 'photoshop_paint_regions' }] },
+        verdict: { disposition: 'accept', artistic_value: { execution_changed: true } },
+      },
+      {
+        id: 'block-2', sequence: 2, phase: 'completed', failed: false, visual: true,
+        tool: 'photoshop_execute_visual_microplan',
+        args: { document_id: 42, stage: 'SHAPE', steps: [{ tool: 'photoshop_paint_regions' }] },
+        verdict: { disposition: 'accept', artistic_value: { execution_changed: true } },
+      },
+      {
+        id: 'late-replace', sequence: 3, phase: 'completed', failed: false, visual: true,
+        tool: 'photoshop_execute_visual_microplan',
+        args: {
+          document_id: 42, stage: 'FORM', action_class: 'REPLACE',
+          steps: [{ tool: 'photoshop_paint_regions' }],
+        },
+        verdict: { disposition: 'accept', artistic_value: { execution_changed: true } },
+      },
+      {
+        id: 'noop-brush', sequence: 4, phase: 'completed', failed: false, visual: true,
+        tool: 'photoshop_execute_visual_microplan',
+        args: { document_id: 42, stage: 'FORM_AND_LIGHT', steps: [{ tool: 'photoshop_paint_strokes' }] },
+        verdict: { disposition: 'accept', artistic_value: { execution_changed: false } },
+      },
+      {
+        id: 'form-brush', sequence: 5, phase: 'completed', failed: false, visual: true,
+        tool: 'photoshop_execute_visual_microplan',
+        args: { document_id: 42, stage: 'FORM_AND_LIGHT', steps: [{ tool: 'photoshop_paint_strokes' }] },
+        verdict: { disposition: 'accept', artistic_value: { execution_changed: true } },
+      },
+      {
+        id: 'future', sequence: 6, phase: 'completed', failed: false, visual: true,
+        tool: 'photoshop_execute_visual_microplan',
+        args: { document_id: 42, stage: 'DETAIL', steps: [{ tool: 'photoshop_paint_dabs' }] },
+        verdict: { disposition: 'accept', artistic_value: { execution_changed: true } },
+      },
+    ];
+
+    expect(paintingDevelopmentProvenance(records, 42, 'block-2')).toEqual({
+      region_construction_operations: 2,
+      post_blockin_markmaking_operations: 0,
+      post_blockin_markmaking_tools: [],
+      blockin_primitive_dominance: true,
+    });
+    expect(paintingDevelopmentProvenance(records, 42, 'noop-brush')).toEqual({
+      region_construction_operations: 2,
+      post_blockin_markmaking_operations: 0,
+      post_blockin_markmaking_tools: [],
+      blockin_primitive_dominance: true,
+    });
+    expect(paintingDevelopmentProvenance(records, 42, 'form-brush')).toEqual({
+      region_construction_operations: 2,
+      post_blockin_markmaking_operations: 1,
+      post_blockin_markmaking_tools: ['photoshop_paint_strokes'],
+      blockin_primitive_dominance: false,
+    });
+  });
   it('uses mutation-risk checkpoint debt instead of wall-clock age or a fixed visual-pass count', () => {
     const s = store();
     for (let sequence = 1; sequence <= 7; sequence++) {
@@ -692,6 +871,71 @@ describe('Guard session-store regressions', () => {
     expect(admitted.phase).toBe('started');
   });
 
+  it('enforces an exclusive supplied brush pack for brush marks while leaving pack identity explicit for stamps', () => {
+    const s = store();
+    s.setArtRunState({
+      document_id: 42,
+      process_dir: 'processes/exclusive-pack-process/run-01',
+      painting_profile: 'nontrivial_painting',
+      commentary_mode: 'technical',
+      brush_preflight: exclusivePackBrushPreflight(),
+      brush_pack_policy: { mode: 'exclusive', brush_pack_id: 'brush-pack-sha256:test-pack' },
+    });
+
+    expect(() => s.begin({
+      ...request('exclusive-generic-current-brush', 'photoshop_execute_visual_microplan', {
+        document_id: 42,
+        method_class: 'paint',
+        paint_strategy: {
+          material_role: 'water', visual_intent: 'surface-flow', brush_role: 'water-flow',
+          pressure_policy: 'simulated-size-opacity',
+        },
+        steps: [{ id: 'paint', tool: 'photoshop_paint_strokes', args: { strokes: [{ tool: 'BRUSH', points: [{ x: 1, y: 1 }, { x: 4, y: 4 }] }] } }],
+      }),
+      problem_id: 'exclusive-pack-water', stage: 'FORM', scale: 'medium',
+    })).toThrow(/exclusive_brush_pack_preset_required/);
+
+    const admitted = s.begin({
+      ...request('exclusive-pack-media', 'photoshop_execute_visual_microplan', {
+        document_id: 42,
+        method_class: 'preset-brush',
+        paint_strategy: {
+          material_role: 'water', visual_intent: 'surface-flow', brush_role: 'water-flow',
+          preset_name: 'Water Brush', pressure_policy: 'simulated-size-opacity',
+        },
+        steps: [
+          { id: 'preset', tool: 'photoshop_select_brush_preset', args: { name: 'Water Brush' } },
+          { id: 'paint', tool: 'photoshop_paint_strokes', args: { strokes: [{ tool: 'BRUSH', points: [{ x: 1, y: 1 }, { x: 4, y: 4 }] }] } },
+        ],
+      }),
+      problem_id: 'exclusive-pack-water', stage: 'FORM', scale: 'medium',
+    }).record;
+    expect(admitted.phase).toBe('started');
+
+    expect(() => s.begin({
+      ...request('exclusive-pack-wrong-stamp', 'photoshop_execute_visual_microplan', {
+        document_id: 42,
+        method_class: 'preset-brush',
+        paint_strategy: {
+          material_role: 'foliage', visual_intent: 'texture', preset_name: 'Leaf Stamp',
+          brush_pack_id: 'brush-pack-sha256:other-pack', stamp_profile_id: 'stamp-profile-sha256:leaf',
+          pressure_policy: 'native-preset',
+        },
+        steps: [{
+          id: 'stamp', tool: 'photoshop_paint_stamp_instances', args: {
+            brush_pack_id: 'brush-pack-sha256:other-pack', stamp_profile_id: 'stamp-profile-sha256:leaf',
+            preset_name: 'Leaf Stamp', instances: [{ instance_id: 'leaf-1', x: 20, y: 20, size: 30 }],
+          },
+        }],
+      }),
+      problem_id: 'exclusive-pack-foliage', stage: 'FORM', scale: 'medium',
+    })).toThrow(/exclusive_brush_pack_violation/);
+
+    expect(s.artRunState(42)?.brush_pack_policy).toEqual({
+      mode: 'exclusive', brush_pack_id: 'brush-pack-sha256:test-pack', applies_to: 'brush_marks_only',
+    });
+  });
+
   it('validates brush-preflight intents and restores the durable role map in a fresh SessionStore', () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'session-store-brush-preflight-reload-'));
     dirs.push(dir);
@@ -837,6 +1081,67 @@ describe('Guard session-store regressions', () => {
     const status = s.status();
     expect(status.pending_visual_verdicts).toContain('successful-plan');
     expect(s.visualBarrier(42)?.operationId).toBe('successful-plan');
+  });
+
+  it('persists execution-derived stamp instance bounds as Guard review metadata', () => {
+    const s = store();
+    s.setArtRunState({
+      document_id: 42,
+      process_dir: 'processes/session-regression-process/stamp-instance-metadata',
+      commentary_mode: 'technical',
+      painting_profile: 'simple_graphic',
+    });
+    const record = s.begin({
+      ...request('stamp-plan', 'photoshop_execute_visual_microplan', {
+        document_id: 42,
+        plan_id: 'stamp-plan',
+      }),
+      problem_id: 'stamp-instance-review-metadata',
+    }).record;
+    s.markDispatched(record);
+    s.complete(record, {
+      content: [{ type: 'text', text: JSON.stringify({
+        ok: true,
+        mutation_ok: true,
+        mutation_count: 1,
+        mutation_results: {
+          stamps: {
+            ok: true,
+            details: {
+              motif_instances: [
+                {
+                  id: 'bird-a',
+                  category: 'bird',
+                  stamp_profile_id: 'stamp-profile-a',
+                  region_bounds: { left: 75, top: 80, right: 125, bottom: 120 },
+                },
+                {
+                  id: 'bird-b',
+                  category: 'bird',
+                  stamp_profile_id: 'stamp-profile-a',
+                  region_bounds: { left: 250, top: 190, right: 350, bottom: 290 },
+                },
+              ],
+            },
+          },
+        },
+      }) }],
+    });
+
+    expect(s.read('stamp-plan')?.observed_motif_instances).toEqual([
+      {
+        id: 'bird-a',
+        category: 'bird',
+        stamp_profile_id: 'stamp-profile-a',
+        region_bounds: { left: 75, top: 80, right: 125, bottom: 120 },
+      },
+      {
+        id: 'bird-b',
+        category: 'bird',
+        stamp_profile_id: 'stamp-profile-a',
+        region_bounds: { left: 250, top: 190, right: 350, bottom: 290 },
+      },
+    ]);
   });
 
   it('does not treat matching post-state and preview as proof of not-executed after a generic uncertain failure', () => {
@@ -1481,6 +1786,131 @@ describe('Guard session-store regressions', () => {
       expect(compact.documents[String(documentId)]?.latency_summary).toEqual(legacyDocuments[String(documentId)].latency_summary);
     }
     expect(compact.next_required_action).toBe(legacyActiveJobs.at(-1)?.poll_command);
+  });
+
+  it('aggregates artistic throughput without letting the ratio hide recovery or regression outcomes', () => {
+    const s = store();
+    s.setArtRunState({
+      document_id: 42,
+      process_dir: 'processes/throughput-metrics-process/run-01',
+      painting_profile: 'simple_graphic',
+      commentary_mode: 'technical',
+    });
+    s.recordArtisticThroughputEvent(42, {
+      kind: 'semantic-dispatch', model_visible: true, semantic_actions: 6, operation_id: 'pass-a',
+    });
+    s.recordArtisticThroughputEvent(42, {
+      kind: 'bookkeeping', model_visible: true, semantic_actions: 0, operation_id: 'pass-a',
+    });
+
+    s.write({
+      id: 'pass-a', tool: 'photoshop_execute_visual_microplan', args: { document_id: 42 },
+      summary: 'Throughput fixture', purpose: 'Keep quality controls adjacent to the ratio',
+      hash: 'throughput-pass-a', sequence: 1, created_at: new Date().toISOString(), completed_at: new Date().toISOString(),
+      phase: 'completed', visual: true, execution: 'completed', failed: false,
+      verdict: {
+        verdict: 'regression', disposition: 'rollback', target_resolved: 'no',
+        significance: { execution_effect: 'meaningful', detected_change: true },
+      },
+      latency: {
+        guard_preflight_ms: 4, report_ack_closure_ms: 2, recovery_reconciliation_ms: 1,
+        photoshop_dispatch_wall_ms: 14, visual_evaluation_verdict_gap_ms: 7,
+      },
+    });
+
+    const metrics = s.artisticThroughputMetrics(42) as any;
+    expect(metrics).toMatchObject({
+      model_visible_guard_round_trips: 2,
+      semantic_dispatch_round_trips: 1,
+      bookkeeping_only_round_trips: 1,
+      semantic_artistic_actions_dispatched: 6,
+      artistic_actions_per_model_visible_guard_round_trip: 3,
+      outcomes: {
+        regression_passes: 1,
+        recovery_or_uncertain_records: 0,
+        evidence_integrity_failures: 0,
+      },
+      diagnostic_only: true,
+    });
+    expect(metrics.timing).toMatchObject({
+      guard_bookkeeping_ms_observed: 7,
+      photoshop_dispatch_ms_observed: 14,
+      visual_evaluation_gap_ms_observed: 7,
+      guard_bookkeeping_share_of_measured_time: 0.25,
+    });
+  });
+
+  it('compares the same six-action representative task before/after semantic-pass batching without using throughput as quality proof', () => {
+    const s = store();
+    for (const documentId of [41, 42]) {
+      s.setArtRunState({
+        document_id: documentId,
+        process_dir: `processes/p0-c-throughput-process/run-${documentId}`,
+        painting_profile: 'simple_graphic',
+        commentary_mode: 'technical',
+      });
+    }
+
+    const writeAcceptedVisual = (documentId: number, id: string, sequence: number, latency: Record<string, number>) => {
+      s.write({
+        id, tool: 'photoshop_execute_visual_microplan', args: { document_id: documentId },
+        summary: 'Same six-action representative artistic task', purpose: 'P0-C before/after throughput fixture',
+        hash: `hash-${id}`, sequence, created_at: new Date().toISOString(), completed_at: new Date().toISOString(),
+        phase: 'completed', visual: true, execution: 'completed', failed: false,
+        verdict: {
+          verdict: 'improvement', disposition: 'accept', target_resolved: 'yes',
+          significance: { execution_effect: 'meaningful', detected_change: true },
+        },
+        latency,
+      });
+    };
+
+    // Baseline: six one-action semantic calls, each followed by one bookkeeping-only closure call.
+    for (let index = 0; index < 6; index++) {
+      s.recordArtisticThroughputEvent(41, { kind: 'semantic-dispatch', model_visible: true, semantic_actions: 1 });
+      s.recordArtisticThroughputEvent(41, { kind: 'bookkeeping', model_visible: true, semantic_actions: 0 });
+      writeAcceptedVisual(41, `baseline-${index + 1}`, index + 1, {
+        guard_preflight_ms: 5,
+        report_ack_closure_ms: 5,
+        recovery_reconciliation_ms: 0,
+        photoshop_dispatch_wall_ms: 20,
+        visual_evaluation_verdict_gap_ms: 10,
+        semantic_cycle_wall_ms: 40,
+      });
+    }
+
+    // P0-C: the same six semantic actions in one bounded pass plus one compact close-only call.
+    s.recordArtisticThroughputEvent(42, { kind: 'semantic-dispatch', model_visible: true, semantic_actions: 6 });
+    s.recordArtisticThroughputEvent(42, { kind: 'bookkeeping', model_visible: true, semantic_actions: 0 });
+    writeAcceptedVisual(42, 'semantic-pass', 7, {
+      guard_preflight_ms: 8,
+      report_ack_closure_ms: 7,
+      recovery_reconciliation_ms: 0,
+      photoshop_dispatch_wall_ms: 45,
+      visual_evaluation_verdict_gap_ms: 15,
+      semantic_cycle_wall_ms: 75,
+    });
+
+    const baseline = s.artisticThroughputMetrics(41) as any;
+    const semantic = s.artisticThroughputMetrics(42) as any;
+    const baselineWall = s.currentDocumentRecords(41).reduce((sum: number, record: any) => sum + Number(record.latency?.semantic_cycle_wall_ms ?? 0), 0);
+    const semanticWall = s.currentDocumentRecords(42).reduce((sum: number, record: any) => sum + Number(record.latency?.semantic_cycle_wall_ms ?? 0), 0);
+
+    expect(baseline).toMatchObject({
+      model_visible_guard_round_trips: 12,
+      semantic_artistic_actions_dispatched: 6,
+      artistic_actions_per_model_visible_guard_round_trip: 0.5,
+      outcomes: { regression_passes: 0, recovery_or_uncertain_records: 0, evidence_integrity_failures: 0 },
+    });
+    expect(semantic).toMatchObject({
+      model_visible_guard_round_trips: 2,
+      semantic_artistic_actions_dispatched: 6,
+      artistic_actions_per_model_visible_guard_round_trip: 3,
+      outcomes: { regression_passes: 0, recovery_or_uncertain_records: 0, evidence_integrity_failures: 0 },
+    });
+    expect(semanticWall).toBe(75);
+    expect(baselineWall).toBe(240);
+    expect(semanticWall).toBeLessThan(baselineWall);
   });
 
   it('reads a closed legacy visual verdict without creating new closure debt and does not keep a run active from current_stage alone', () => {

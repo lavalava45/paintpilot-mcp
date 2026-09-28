@@ -1,0 +1,25 @@
+{
+  "schema_version": 2,
+  "status": "predeclared-for-future-rounds",
+  "non_retroactive": true,
+  "effective_for": "Task 23 human rounds started after this rule was recorded",
+  "answer_values": ["YES", "NO", "UNCERTAIN", "N-A"],
+  "positive_case": {
+    "rule": "all-applicable-core-must-pass",
+    "core_questions": [1, 2, 3, 4, 5, 7, 8],
+    "question_6": "YES when extra detail was introduced and is structurally useful; N-A is allowed only when the candidate introduced no extra detail relevant to the target.",
+    "n_a_policy": "N-A is allowed only when the target/style contract makes that criterion genuinely inapplicable. A criterion explicitly required by the target contract cannot be converted to N-A.",
+    "pass_condition": "Every applicable core question is YES, with no NO or UNCERTAIN on a required criterion. Question 6 follows its separate applicability rule.",
+    "no_vote_counting": true
+  },
+  "negative_controls": {
+    "rule": "must-not-qualify-as-sufficient-refinement",
+    "condition": "A negative control is correctly rejected when it does not satisfy the positive-case pass condition and the manipulated failure remains visible in at least one corresponding required criterion.",
+    "texture_only_note": "A YES on question 1 by itself is not sufficient evidence of major-form refinement; low-frequency evidence must independently show that large-form modelling survives suppression of small texture/noise.",
+    "no_vote_counting": true
+  },
+  "stylized_flat_control": {
+    "rule": "style-preservation-not-realism-forcing",
+    "condition": "Do not apply representational-realism criteria that the explicit flat/graphic style contract makes inapplicable. N-A is valid for those criteria and must not be treated as failure or as a demand for photoreal refinement."
+  }
+}

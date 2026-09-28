@@ -2,12 +2,12 @@
   "$schema": "https://raw.githubusercontent.com/anthropics/mcpb/main/schemas/mcpb-manifest-v0.4.schema.json",
   "manifest_version": "0.4",
   "name": "photoshop-mcp-digital-painting",
-  "display_name": "Photoshop MCP — Digital Painting Fork",
+  "display_name": "Photoshop MCP — Digital Painting Edition",
   "version": "0.0.0",
-  "description": "Independent digital-painting fork of Photoshop MCP with painting, color sampling, landmarks, previews, and recipes.",
-  "long_description": "Independent community fork of alisaitteke/photoshop-mcp focused on AI-driven digital painting. Requires Photoshop on macOS or Windows. This is not an official upstream release, is not distributed by photoshop-mcp.com or @alisaitteke/photoshop-mcp, and is not affiliated with Adobe Inc.",
+  "description": "Independent Photoshop MCP system for digital painting, visual verification, and guarded automation.",
+  "long_description": "Photoshop MCP — Digital Painting Edition is an independently maintained Windows-first MCP system for AI-driven digital painting and evidence-bound Photoshop automation. It includes a durable embedded Guard, semantic painting/editing tools, visual verification, and a Photoshop UXP companion. It is not affiliated with or endorsed by Adobe Inc. Historical upstream provenance and licensing are documented in NOTICE and LICENSE.",
   "author": {
-    "name": "lavalava45 (fork maintainer)",
+    "name": "lavalava45",
     "url": "https://github.com/lavalava45/photoshop-mcp-digital-painting"
   },
   "homepage": "https://github.com/lavalava45/photoshop-mcp-digital-painting",
@@ -61,10 +61,7 @@
   },
   "compatibility": {
     "claude_desktop": ">=1.0.0",
-    "platforms": [
-      "darwin",
-      "win32"
-    ],
+    "platforms": ["win32"],
     "runtimes": {
       "node": ">=18.0.0"
     }

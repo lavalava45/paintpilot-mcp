@@ -1,93 +1,29 @@
-import { platform } from 'os';
+import { platform } from 'node:os';
 import { Logger } from '../utils/logger.js';
-import { PhotoshopInfo } from './connection.js';
+import type { PhotoshopInfo } from './connection.js';
 import { WindowsDetector } from './windows-detector.js';
-import { MacOSDetector } from './macos-detector.js';
 
+/** Windows is the only supported host platform for this project. */
 export class PhotoshopDetector {
-  private logger: Logger;
-  private platformType: NodeJS.Platform;
-  private windowsDetector?: WindowsDetector;
-  private macosDetector?: MacOSDetector;
+  private readonly logger = new Logger('PhotoshopDetector');
+  private readonly windows = new WindowsDetector();
   private cachedInfo?: PhotoshopInfo;
 
   constructor() {
-    this.logger = new Logger('PhotoshopDetector');
-    this.platformType = platform();
-
-    // Initialize platform-specific detector
-    if (this.platformType === 'win32') {
-      this.windowsDetector = new WindowsDetector();
-    } else if (this.platformType === 'darwin') {
-      this.macosDetector = new MacOSDetector();
+    const host = platform();
+    if (host !== 'win32') {
+      throw new Error(`Unsupported platform: ${host}. This Photoshop MCP build supports Windows only.`);
     }
   }
 
   async detect(forceRefresh = false): Promise<PhotoshopInfo> {
     if (!forceRefresh && this.cachedInfo) return { ...this.cachedInfo };
-    this.logger.info(`Detecting Photoshop on ${this.platformType}...`);
-
-    if (this.platformType === 'win32' && this.windowsDetector) {
-      this.cachedInfo = await this.windowsDetector.detect();
-      return { ...this.cachedInfo };
-    } else if (this.platformType === 'darwin' && this.macosDetector) {
-      this.cachedInfo = await this.macosDetector.detect();
-      return { ...this.cachedInfo };
-    } else {
-      throw new Error(`Unsupported platform: ${this.platformType}`);
-    }
+    this.logger.info('Detecting Photoshop on Windows...');
+    this.cachedInfo = await this.windows.detect();
+    return { ...this.cachedInfo };
   }
 
   invalidateCache(): void {
     this.cachedInfo = undefined;
-  }
-
-  /**
-   * Determine if detected Photoshop version supports UXP
-   * UXP is supported in Photoshop 23.5+ (roughly 2022+)
-   */
-  supportsUXP(version: string): boolean {
-    // Try to extract numeric version
-    const versionMatch = version.match(/(\d+)\.?(\d*)/);
-    if (versionMatch) {
-      const major = parseInt(versionMatch[1], 10);
-      const minor = versionMatch[2] ? parseInt(versionMatch[2], 10) : 0;
-
-      // Photoshop 23.5 or higher supports UXP
-      return major > 23 || (major === 23 && minor >= 5);
-    }
-
-    // Try to extract year from version
-    const yearMatch = version.match(/20(\d{2})/);
-    if (yearMatch) {
-      const year = parseInt(`20${yearMatch[1]}`, 10);
-      // 2022 and later support UXP
-      return year >= 2022;
-    }
-
-    // Default to false for unknown versions
-    return false;
-  }
-
-  /**
-   * Get recommended API type based on version
-   */
-  getRecommendedAPI(version: string): 'UXP' | 'ExtendScript' {
-    return this.supportsUXP(version) ? 'UXP' : 'ExtendScript';
-  }
-
-  /** Select Subject v2 ("autoCutout") shipped with PS 23.0 (2022). */
-  supportsSelectSubjectV2(version: string): boolean {
-    const versionMatch = version.match(/(\d+)\.?(\d*)/);
-    if (versionMatch) {
-      const major = parseInt(versionMatch[1], 10);
-      const minor = versionMatch[2] ? parseInt(versionMatch[2], 10) : 0;
-      return major > 23 || (major === 23 && minor >= 0);
-    }
-    const yearMatch = version.match(/20(\d{2})/);
-    if (yearMatch) {
-      return parseInt(`20${yearMatch[1]}`, 10) >= 2022;
-    }
-    return false;
   }
 }

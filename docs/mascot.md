@@ -46,8 +46,8 @@ The repository copy is:
 
 `assets/mascot/guardbot.jpg`
 
-The image is original output from this fork's own Photoshop painting pipeline. It is not an upstream Photoshop MCP asset and is not Adobe branding.
+The image is original output from this project's own Photoshop painting pipeline. It is not an upstream Photoshop MCP asset and is not Adobe branding.
 
 ## Status
 
-GuardBot is the informal visual mascot of this community-maintained fork. He may be reused in repository documentation, release notes, social preview artwork, or other project-owned presentation material, provided the independent-fork and Adobe non-affiliation notices remain clear where relevant.
+GuardBot is the informal visual mascot of Photoshop MCP — Digital Painting Edition. He may be reused in repository documentation, release notes, social preview artwork, or other project-owned presentation material, provided Adobe non-affiliation and project provenance remain clear where relevant.

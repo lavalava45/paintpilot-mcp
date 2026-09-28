@@ -1,13 +1,13 @@
-# Installation — Digital Painting Fork
+# Installation — Photoshop MCP Digital Painting Edition
 
-This repository is a digital-painting-focused fork of Photoshop MCP. It keeps
-the upstream editing/automation toolset and adds brush presets, brush dynamics,
-raster stroke painting, dabs/stamps, per-stroke overrides, explicit
-measurement/guide tools, and the `ps.digital_painting_control` guide prompt.
+This repository contains the independently maintained Photoshop MCP — Digital Painting Edition:
+brush presets, brush dynamics, raster stroke painting, dabs/stamps, per-stroke overrides,
+explicit measurement/guide tools, an embedded Guard, and the
+`ps.digital_painting_control` guide prompt.
 
 This document describes a clean installation from a GitHub checkout. Do not
-install the upstream npm package if you want the painting extensions from this
-fork.
+install a historical upstream npm package if you want the maintained Digital Painting Edition
+surface from this repository. Provenance and distribution separation are documented in `NOTICE`.
 
 ## Requirements
 
@@ -15,8 +15,8 @@ fork.
 - Photoshop should be running before the first smoke test.
 - Node.js 18 or newer.
 - Git, if cloning the repository. A GitHub source ZIP also works.
-- Windows or macOS for the upstream Photoshop MCP. The painting fork is
-  currently live-tested primarily on Windows with Photoshop 2026.
+- Windows 10/11. This project intentionally supports Windows only; macOS and Linux are not supported
+  targets because the maintained runtime and live acceptance are Windows-specific.
 
 ## 1. Download the repository
 
@@ -53,11 +53,10 @@ Git is recommended if you want easy updates later.
 From the repository root:
 
 ```bash
-npm install
+pnpm install --frozen-lockfile
 ```
 
-This fork currently does not commit a root npm lockfile, so use `npm install`
-for a clean checkout.
+This project commits `pnpm-lock.yaml`; `pnpm install --frozen-lockfile` is the reproducible clean-checkout path.
 
 ## 3. Build the MCP server
 
@@ -111,15 +110,15 @@ Pass `PHOTOSHOP_PATH` in the stdio transport environment when automatic detectio
 }
 ```
 
-After rebuilding/updating the fork, refresh the Chat On Steroids Plugins schema through
-the normal host UI. The accepted native catalog is **148 tools total / 13 Guard tools**.
+After rebuilding/updating the project, refresh the Chat On Steroids Plugins schema through
+the normal host UI. The accepted native catalog is **130 tools total / 14 Guard tools**.
 A stale legacy 64-tool snapshot is not a limitation of this server.
 
 For local development, distinguish **schema refresh** from **process restart**:
 
 - ChatGPT **Settings → Plugins → Refresh** refreshes the connector/schema view.
 - To make a rebuilt `dist/cos-plugin.js` take effect, in the **Chat On Steroids app** use
-  **Plugins → Photoshop MCP Digital Painting Fork → … → Restart**. This restarts only the
+  **Plugins → this Digital Painting Edition entry → … → Restart**. This restarts only the
   custom MCP child process; restarting the whole Chat On Steroids application is unnecessary.
 - Do not use old restart-helper scripts for this workflow.
 - If `uxp-plugin/main.js` changed, use **Reload** for Photoshop MCP UXP Bridge in Adobe UXP
@@ -152,13 +151,11 @@ can be narrowed without changing the bridge protocol.
 `photoshop_save_document` is intentionally UXP-only and fails closed when this companion
 is unavailable; it does not fall back to foreground-prone COM/ExtendScript saving.
 
-The older **Core → `photoshop-session.mjs` → persistent daemon → `dist/index.js`**
-route remains in the repository for development, diagnostics, recovery experiments and
-legacy regression/live-test coverage. It is not the normal production transport.
+The former **Core → external controller → persistent daemon → `dist/index.js`** provider chain has
+been removed. Development and recovery use the embedded Guard/status/resume surfaces instead.
 
-If the native Plugins route is genuinely absent or stale, Core may be used to diagnose
-the repository/server independently. Do not interpret a stale Plugins schema as proof
-that Photoshop or the fork itself is unavailable.
+If the native Plugins route is genuinely absent or stale, diagnose connector/server readiness directly.
+Do not interpret a stale Plugins schema as proof that Photoshop or the project itself is unavailable.
 
 ## 6. Generic MCP client configuration
 
@@ -199,7 +196,7 @@ npm run test:measurement-tools
 npm run test:landmark-ergonomics
 ```
 
-The MCP server should expose the digital-painting tools including:
+The MCP server should expose the **130-tool / 14-Guard-tool** Digital Painting Edition catalog, including:
 
 ```text
 photoshop_list_brush_presets
@@ -223,7 +220,7 @@ ps.digital_painting_control
 ```
 
 If those entries are missing, the MCP host is almost certainly launching the
-upstream package or an old build instead of this fork.
+another package or an old build instead of this project.
 
 ## Updating an existing checkout
 
@@ -239,7 +236,7 @@ Then restart the direct stdio MCP process in your client so it reloads the rebui
 
 ## Developer setup
 
-For development, upstream syncing, linting, test suites, and branch workflow,
+For development, selective external-source comparison/intake, linting, test suites, and branch workflow,
 see [`docs/development.md`](docs/development.md).
 
 For the painting API, see [`docs/digital-painting.md`](docs/digital-painting.md).
@@ -249,7 +246,7 @@ For the agent visual-control workflow, see
 
 ## Troubleshooting
 
-See [`docs/troubleshooting.md`](docs/troubleshooting.md). In particular:
+See [`docs/development.md`](docs/development.md#8-troubleshooting). In particular:
 
 - confirm Photoshop is running;
 - confirm `PHOTOSHOP_PATH` points to the correct executable when needed;

@@ -5,12 +5,14 @@ import { compileVisualMicroPlan } from '../visual-microplan-compiler.js';
 import { preflightVisualMicroPlanForExecution } from '../../tools/visual-microplan-tools.js';
 import { isVisual, parseTexts } from './session-store.js';
 import { compileArtisticOperation } from '../artistic-operation-contract.js';
+import { paintingMethodCapabilities } from '../painting-method-palette.js';
 import { UXP_BRIDGE_REVISION } from './protocol-version.js';
 import {
   VISUAL_MICROPLAN_ACTION_CLASSES,
   VISUAL_MICROPLAN_MAX_LAYER_CREATIONS,
   VISUAL_MICROPLAN_MAX_MUTATIONS,
   VISUAL_MICROPLAN_MUTATION_TOOLS,
+  resolveVisualMicroPlanMutationBudget,
   visualMicroPlanMethodClassForStep,
   visualMicroPlanRequiresLocalInspection,
   type VisualMicroPlanSignificanceMode,
@@ -21,6 +23,13 @@ import {
   type GuardOperationContractViolation,
 } from './operation-contract.js';
 import { resolveVisualReviewProfile } from './visual-review-profile.js';
+import {
+  PAINTING_STAGE_RESET_REASONS,
+  canonicalPaintingStage,
+  isBackwardPaintingStageTransition,
+  paintingStageRank,
+} from '../painting-stage-policy.js';
+import { normalizeMaterialResponsePlan } from '../material-response.js';
 
 export interface GuardCycleCompilerStore {
   read?(id: string): Record<string, unknown> | undefined;
@@ -32,9 +41,12 @@ export interface GuardCycleCompilerStore {
   compactPassContext?(documentId: number): {
     stage?: string;
     scale?: string;
+    painting_profile?: string;
     active_problem_id?: string;
     active_problem_scale?: string;
     brush_roles?: Array<Record<string, unknown>>;
+    brush_inventory_scope?: string | null;
+    logical_layer_owners?: Array<Record<string, unknown>>;
     art_director?: Record<string, unknown> | null;
   };
   planAcceptedAnchorRestore?(
@@ -58,6 +70,7 @@ export interface GuardCycleCompileViolation {
   scope: 'cycle' | 'finalization' | 'next_operation';
   code: string;
   message: string;
+  details?: Record<string, unknown>;
 }
 
 export interface GuardCycleCompileResult {
@@ -185,7 +198,7 @@ function rejectionBody(result: ToolResult | undefined): Record<string, unknown> 
 function operationSchemaErrors(operation: Record<string, unknown>, registry: ToolRegistry): string[] {
   const tool = typeof operation.tool === 'string' ? operation.tool : '';
   const definition = registry.get(tool);
-  if (!definition) return tool ? [`Tool ${tool} missing from this fork catalog`] : [];
+  if (!definition) return tool ? [`Tool ${tool} missing from the project catalog`] : [];
   const args = operation.args ?? {};
   const errors = collectSchemaErrors(args, definition.tool.inputSchema, 'args');
   const schema = definition.tool.inputSchema as { properties?: Record<string, unknown> } | undefined;
@@ -223,13 +236,40 @@ function text(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
 }
 
-function compactObservationToVerdict(value: unknown): Record<string, unknown> | undefined {
+const NEGATIVE_REGRESSION_SENTINELS = new Set([
+  'none',
+  'none observed',
+  'no regression',
+  'no regressions',
+  'no regression observed',
+  'no regressions observed',
+]);
+
+function normalizeCompactRegression(value: unknown): { regression?: string; normalizedNegative: boolean } {
+  const raw = text(value);
+  if (!raw) return { normalizedNegative: false };
+  const canonical = raw.toLowerCase().replace(/[.!]+$/g, '').replace(/\s+/g, ' ').trim();
+  if (NEGATIVE_REGRESSION_SENTINELS.has(canonical)) return { normalizedNegative: true };
+  return { regression: raw, normalizedNegative: false };
+}
+
+function compactObservationToVerdict(
+  value: unknown,
+  normalizations?: Array<{ code: string; message: string }>
+): Record<string, unknown> | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
   const observation = structuredClone(value) as Record<string, unknown>;
   const compactObserved = text(observation.observed);
   const compactTarget = text(observation.target)?.toLowerCase();
   if (compactObserved && compactTarget && ['resolved', 'unresolved', 'uncertain'].includes(compactTarget)) {
-    const regression = text(observation.regression);
+    const normalizedRegression = normalizeCompactRegression(observation.regression);
+    const regression = normalizedRegression.regression;
+    if (normalizedRegression.normalizedNegative) {
+      normalizations?.push({
+        code: 'negative_regression_sentinel_normalized',
+        message: 'Normalized previous_observation.regression negative sentinel to no regression evidence.',
+      });
+    }
     const action = text(observation.action)?.toLowerCase();
     const targetResolved = compactTarget === 'resolved' ? 'yes'
       : compactTarget === 'unresolved' ? 'no'
@@ -249,6 +289,9 @@ function compactObservationToVerdict(value: unknown): Record<string, unknown> | 
       regressions: regression ? [regression] : [],
       uncertainty: text(observation.uncertainty)
         ?? (compactTarget === 'uncertain' ? 'The delivered frame remains visually uncertain.' : 'none observed'),
+      ...(observation.uncertainty_review !== undefined
+        ? { uncertainty_review: observation.uncertainty_review }
+        : {}),
       observations: Array.isArray(observation.observations)
         ? observation.observations
         : [{ region: 'delivered review frame', visible: compactObserved }],
@@ -259,6 +302,7 @@ function compactObservationToVerdict(value: unknown): Record<string, unknown> | 
       global_readability: text(observation.global_readability) ?? 'unknown',
       primitive_footprint: text(observation.primitive_footprint) ?? 'unknown',
       trend_signals: Array.isArray(observation.trend_signals) ? observation.trend_signals : [],
+      ...(observation.softness_review !== undefined ? { softness_review: observation.softness_review } : {}),
       ...(Array.isArray(observation.review_findings) ? { review_findings: observation.review_findings } : {}),
       ...(observation.recognition !== undefined ? { recognition: observation.recognition } : {}),
       ...(observation.planner_task_assessment !== undefined
@@ -288,6 +332,7 @@ function compactObservationToVerdict(value: unknown): Record<string, unknown> | 
     global_readability: text(observation.global_readability) ?? 'unknown',
     primitive_footprint: text(observation.primitive_footprint) ?? 'unknown',
     trend_signals: Array.isArray(observation.trend_signals) ? observation.trend_signals : [],
+    ...(observation.softness_review !== undefined ? { softness_review: observation.softness_review } : {}),
   };
 }
 
@@ -385,22 +430,140 @@ function compactStepMethodClass(step: Record<string, unknown>): string | undefin
 
 function compactRiskForMethod(method: string | undefined): 'low' | 'moderate' | 'high' {
   if (method === 'rollback' || method === 'erase') return 'high';
-  if (method === 'smudge' || method === 'fill') return 'moderate';
+  if (method === 'smudge' || method === 'fill' || method === 'mask') return 'moderate';
   return 'low';
 }
 
 function compactChangeDomain(method: string | undefined): string {
   if (method === 'region') return 'local-shape';
-  if (method === 'erase' || method === 'line') return 'local-edge';
+  if (method === 'erase' || method === 'line' || method === 'mask') return 'local-edge';
   return 'local-tone';
+}
+
+function inferUniqueClassification(input: {
+  registry: ToolRegistry;
+  goal: string;
+  actionClass?: string;
+  executionTools: string[];
+}): { visualIntent: string; impactClass: string; reason: string } | null {
+  const actionClass = (input.actionClass ?? '').trim().toUpperCase();
+  if (['REPLACE', 'ERASE', 'ROLLBACK'].includes(actionClass)) return null;
+  const goal = input.goal.toLowerCase();
+  let visualIntent: string | undefined;
+  let impactClass: string | undefined;
+
+  if (/\b(line|stroke|outline|contour)\b/.test(goal)) visualIntent = 'line';
+  else if (/\b(soften|soft transition|blend transition|lost edge)\b/.test(goal)) visualIntent = 'soft-transition';
+  else if (/\b(texture|textural|grain)\b/.test(goal)) visualIntent = 'texture';
+  else if (/\b(tonal|tone|value contrast|contrast)\b/.test(goal)) visualIntent = 'tonal-contrast';
+  else if (/\b(mass|silhouette|shape block|block in)\b/.test(goal)) visualIntent = 'mass';
+
+  if (/\b(edge|boundary|contour|outline)\b/.test(goal)) impactClass = 'edge';
+  else if (/\b(structur|construct|build|shape|silhouette|mass)\w*\b/.test(goal)) impactClass = 'construct';
+  else if (/\b(tonal|tone|value|light)\b/.test(goal)) impactClass = 'tone';
+  else if (/\b(texture|textural|grain)\b/.test(goal)) impactClass = 'texture';
+  else if (/\b(soften|transition|blend)\b/.test(goal)) impactClass = 'transition';
+
+  if (!visualIntent || !impactClass) return null;
+  const available = paintingMethodCapabilities(input.registry).filter(method => {
+    if (method.availability === 'unavailable') return false;
+    const tools = method.executionTools?.length ? method.executionTools : method.primaryTool ? [method.primaryTool] : [];
+    return method.visualIntents.includes(visualIntent as never)
+      && method.impactClasses.includes(impactClass as never)
+      && input.executionTools.every(tool => tools.includes(tool));
+  });
+  if (!available.length) return null;
+  return {
+    visualIntent,
+    impactClass,
+    reason: `goal/tool classification is unique: ${visualIntent}+${impactClass} for ${input.executionTools.join('|')}`,
+  };
+}
+
+function resolveCompactStageTransition(
+  raw: Record<string, unknown>,
+  context: Record<string, unknown>,
+  violations: GuardCycleCompileViolation[],
+  fallbackStage?: string
+): { stage?: string; stageReset?: Record<string, unknown> } {
+  const durableStage = canonicalPaintingStage(text(context.stage));
+  const requestedStage = canonicalPaintingStage(text(raw.stage));
+  const stage = requestedStage ?? durableStage ?? canonicalPaintingStage(fallbackStage);
+
+  if (requestedStage && paintingStageRank(requestedStage) === undefined) {
+    violations.push(violation(
+      'next_operation',
+      'painting_stage_unknown',
+      `next_pass.stage=${requestedStage} is not a recognized painting stage and cannot replace durable stage ${durableStage ?? 'none'}`
+    ));
+    return { stage: durableStage ?? stage };
+  }
+
+  const rawStageReset = raw.stage_reset;
+  const backward = durableStage && stage
+    ? isBackwardPaintingStageTransition(durableStage, stage)
+    : false;
+
+  if (!backward) {
+    if (rawStageReset !== undefined) {
+      violations.push(violation(
+        'next_operation',
+        'painting_stage_reset_not_applicable',
+        `next_pass.stage_reset is allowed only for a genuine backward structural transition; durable=${durableStage ?? 'none'} requested=${stage ?? 'none'}`
+      ));
+    }
+    return { stage };
+  }
+
+  if (!rawStageReset || typeof rawStageReset !== 'object' || Array.isArray(rawStageReset)) {
+    violations.push(violation(
+      'next_operation',
+      'painting_stage_regression_requires_reset',
+      `painting_stage_regression_requires_reset: durable stage ${durableStage} cannot move backward to ${stage} from an ordinary Painter pass; supply explicit next_pass.stage_reset only for genuine structural rework`
+    ));
+    return { stage };
+  }
+
+  const reset = rawStageReset as Record<string, unknown>;
+  const reason = text(reset.reason)?.toLowerCase();
+  const detail = text(reset.detail);
+  if (!reason || !PAINTING_STAGE_RESET_REASONS.includes(reason as never)) {
+    violations.push(violation(
+      'next_operation',
+      'painting_stage_reset_reason_invalid',
+      `next_pass.stage_reset.reason must be one of ${PAINTING_STAGE_RESET_REASONS.join('|')}`
+    ));
+  }
+  if (!detail || detail.length < 12) {
+    violations.push(violation(
+      'next_operation',
+      'painting_stage_reset_detail_required',
+      'next_pass.stage_reset.detail must give a concrete structural reason of at least 12 characters'
+    ));
+  }
+  if (!reason || !PAINTING_STAGE_RESET_REASONS.includes(reason as never) || !detail || detail.length < 12) {
+    return { stage };
+  }
+
+  return {
+    stage,
+    stageReset: {
+      protocol: 'photoshop.guard.painting_stage_reset.v1',
+      from_stage: durableStage,
+      to_stage: stage,
+      reason,
+      detail,
+    },
+  };
 }
 
 function compileCompactPass(
   raw: Record<string, unknown>,
   store: GuardCycleCompilerStore,
   registry: ToolRegistry
-): { operation?: Record<string, unknown>; violations: GuardCycleCompileViolation[] } {
+): { operation?: Record<string, unknown>; violations: GuardCycleCompileViolation[]; normalizations?: Array<{ code: string; message: string }> } {
   const violations: GuardCycleCompileViolation[] = [];
+  const normalizations: Array<{ code: string; message: string }> = [];
   const requestKey = text(raw.request_key);
   const goal = text(raw.goal);
   const documentId = raw.document_id;
@@ -500,6 +663,18 @@ function compileCompactPass(
     ));
   }
 
+  const visualMicroplanMutationCount = actions.filter(step =>
+    VISUAL_MICROPLAN_MUTATION_TOOLS.has(text(step.tool) ?? '')
+  ).length;
+  if (actions.length > 1 && visualMicroplanMutationCount === 0) {
+    violations.push(violation(
+      'next_operation',
+      'compact_pass_multiple_direct_operations',
+      'next_pass cannot bundle multiple direct Photoshop operations into one durable Guard operation; submit each direct operation as its own guarded pass (for example, save PSD and PNG in two sequential passes)'
+    ));
+    return { violations };
+  }
+
   // A compact semantic pass is not synonymous with VisualMicroPlan. Bootstrap,
   // Curves/masks/blend/transform/property mutations and other single registered
   // Photoshop operations keep their native semantics and are guarded directly.
@@ -518,7 +693,9 @@ function compileCompactPass(
     const plannerDirectiveId = text(art?.directive_id);
     const plannerTaskId = text(art?.current_task_id);
     const scale = text(raw.scale) ?? text(context.scale);
-    const stage = text(raw.stage) ?? text(context.stage);
+    const { stage, stageReset } = bootstrap
+      ? { stage: undefined, stageReset: undefined }
+      : resolveCompactStageTransition(raw, context, violations);
     const region = text(raw.region) ?? (bootstrap ? 'document-bootstrap' : 'whole-canvas');
     const significanceMode = text(raw.significance_mode) ?? 'normal';
     const regionBounds = raw.region_bounds && typeof raw.region_bounds === 'object' && !Array.isArray(raw.region_bounds)
@@ -536,6 +713,7 @@ function compileCompactPass(
       purpose: 'Execute one bounded compact Photoshop operation.',
       region,
       ...(stage ? { stage } : {}),
+      ...(stageReset ? { stage_reset: stageReset } : {}),
       ...(scale ? { scale } : {}),
       ...(text(raw.significance_mode) ? { significance_mode: significanceMode } : {}),
       ...(!bootstrap ? { artistic_commentary: goal } : {}),
@@ -555,6 +733,25 @@ function compileCompactPass(
 
     const visualIntent = text(raw.visual_intent);
     const impactClass = text(raw.impact_class);
+    if (!bootstrap && isVisual(onlyTool) && canonicalPaintingStage(stage) === 'MATERIAL') {
+      if (raw.material_response === undefined) {
+        violations.push(violation(
+          'next_operation',
+          'material_response_plan_required',
+          'MATERIAL work requires next_pass.material_response decomposition before visual execution'
+        ));
+      } else {
+        try {
+          directOperation.material_response = normalizeMaterialResponsePlan(raw.material_response);
+        } catch (error) {
+          violations.push(violation(
+            'next_operation',
+            'material_response_plan_invalid',
+            error instanceof Error ? error.message : String(error)
+          ));
+        }
+      }
+    }
     if (!bootstrap && isVisual(onlyTool)) {
       const visualReviewProfile = existingReviewProfile ?? resolveVisualReviewProfile({
         scale,
@@ -678,13 +875,39 @@ function compileCompactPass(
     ?? (methodClass === 'rollback' ? 'ROLLBACK' : methodClass === 'erase' ? 'ERASE' : 'ADD');
 
   const context = store.compactPassContext?.(Number(documentId)) ?? {};
-  const stage = text(raw.stage) ?? text(context.stage) ?? (methodClass === 'region' ? 'GLOBAL_BLOCK_IN' : undefined);
+  const { stage, stageReset } = resolveCompactStageTransition(
+    raw,
+    context,
+    violations,
+    methodClass === 'region' ? 'GLOBAL_BLOCK_IN' : undefined
+  );
   const scale = text(raw.scale) ?? text(context.scale) ?? (methodClass === 'region' ? 'global' : undefined);
   const region = text(raw.region) ?? 'whole-canvas';
   const significanceMode = text(raw.significance_mode) ?? 'normal';
   const regionBounds = raw.region_bounds && typeof raw.region_bounds === 'object' && !Array.isArray(raw.region_bounds)
     ? structuredClone(raw.region_bounds) as Record<string, unknown>
     : undefined;
+  const objectContextRegionBounds = raw.object_context_region_bounds
+    && typeof raw.object_context_region_bounds === 'object'
+    && !Array.isArray(raw.object_context_region_bounds)
+    ? structuredClone(raw.object_context_region_bounds) as Record<string, unknown>
+    : undefined;
+  const adaptiveMutationBudget = resolveVisualMicroPlanMutationBudget({
+    risk: risk as 'low' | 'moderate' | 'high',
+    stage,
+    scale,
+    actionClass,
+    protectedLayerCount: Array.isArray(raw.protected_layer_ids) ? raw.protected_layer_ids.length : 0,
+    affectedRelationCount: Array.isArray(raw.affected_relations) ? raw.affected_relations.length : 0,
+    affectedQualityCount: Array.isArray(raw.affected_qualities) ? raw.affected_qualities.length : 0,
+  });
+  if (mutationSteps.length > adaptiveMutationBudget.allowedMutations) {
+    violations.push(violation(
+      'next_operation',
+      'compact_pass_adaptive_mutation_budget_exceeded',
+      `next_pass requests ${mutationSteps.length} visual mutations but adaptive budget allows ${adaptiveMutationBudget.allowedMutations} (${adaptiveMutationBudget.reason}); split/defer the remaining actions before dispatch`
+    ));
+  }
   const createSteps = actions.filter(step => text(step.tool) === 'photoshop_create_layer');
   if (createSteps.length > VISUAL_MICROPLAN_MAX_LAYER_CREATIONS) {
     violations.push(violation(
@@ -699,28 +922,433 @@ function compileCompactPass(
     ? createStep.args as Record<string, unknown>
     : {};
   const layerName = text(createArgs.name) ?? `Pass ${requestKey}`;
-  const layerSeparationCheck = createStep ? {
+  const rawLayerSeparation = raw.layer_separation_check
+    && typeof raw.layer_separation_check === 'object'
+    && !Array.isArray(raw.layer_separation_check)
+    ? structuredClone(raw.layer_separation_check) as Record<string, unknown>
+    : undefined;
+  const rawLogicalLayer = raw.logical_layer
+    && typeof raw.logical_layer === 'object'
+    && !Array.isArray(raw.logical_layer)
+    ? structuredClone(raw.logical_layer) as Record<string, unknown>
+    : undefined;
+  const declaredChangeKind = text(rawLayerSeparation?.change_kind)?.toLowerCase();
+  const declaredRollbackValue = text(rawLayerSeparation?.rollback_value)?.toLowerCase();
+  const declaredRequiresIsolation = rawLayerSeparation?.substantial === true
+    && ['new-object', 'new-material', 'new-light', 'new-plane'].includes(declaredChangeKind ?? '')
+    && (declaredRollbackValue !== 'low' || rawLayerSeparation?.independent_adjustment_expected === true);
+  const semanticCreateMetadataRequired = context.painting_profile === 'nontrivial_painting' && !!createStep;
+
+  if (semanticCreateMetadataRequired && !rawLayerSeparation) {
+    violations.push(violation(
+      'next_operation',
+      'semantic_layer_owner_missing',
+      `semantic_layer_owner_missing: nontrivial painting layer creation must declare next_pass.layer_separation_check instead of letting pass structure invent semantic ownership`
+    ));
+  }
+  if ((semanticCreateMetadataRequired || declaredRequiresIsolation) && !rawLogicalLayer) {
+    violations.push(violation(
+      'next_operation',
+      'semantic_layer_owner_missing',
+      `semantic_layer_owner_missing: independently editable nontrivial painting work must declare one stable next_pass.logical_layer semantic owner`
+    ));
+  }
+  if (rawLogicalLayer && !rawLayerSeparation) {
+    violations.push(violation(
+      'next_operation',
+      'semantic_layer_owner_missing',
+      'semantic_layer_owner_missing: next_pass.logical_layer requires an explicit next_pass.layer_separation_check'
+    ));
+  }
+
+  const layerSeparationCheck = rawLayerSeparation ?? (createStep ? {
     change_kind: 'other',
     substantial: true,
     rollback_value: 'moderate',
     independent_adjustment_expected: true,
-    reasons: ['The compact pass explicitly creates one independently addressable Photoshop layer.'],
+    reasons: ['Legacy/simple compact pass explicitly creates one independently addressable Photoshop layer.'],
   } : {
     change_kind: 'continuation',
     substantial: true,
     rollback_value: 'low',
     independent_adjustment_expected: false,
-    reasons: ['The compact pass continues the current logical layer without creating a new rollback unit.'],
+    reasons: ['Legacy/simple compact pass continues the current logical layer without creating a new rollback unit.'],
+  });
+  const logicalLayer = rawLogicalLayer;
+
+  if (rawLogicalLayer && createStep && rawLogicalLayer.layer_name === undefined) {
+    rawLogicalLayer.layer_name = layerName;
+  }
+
+  const owners = Array.isArray(context.logical_layer_owners) ? context.logical_layer_owners : [];
+  const ownerByHypothesis = new Map(
+    owners.map(owner => [text(owner.hypothesis_id), owner]).filter(([key]) => !!key) as Array<[string, Record<string, unknown>]>
+  );
+  const ownerByLayerId = new Map(
+    owners
+      .filter(owner => Number.isSafeInteger(owner.layer_id) && Number(owner.layer_id) > 0)
+      .map(owner => [Number(owner.layer_id), owner] as [number, Record<string, unknown>])
+  );
+  const logicalDecision = text(logicalLayer?.decision)?.toLowerCase();
+  const logicalHypothesisId = text(logicalLayer?.hypothesis_id);
+  const logicalLayerId = Number(logicalLayer?.layer_id);
+  const physicalSignatureRoles = new Set(['opaque-mass', 'support-surface', 'transmissive-surface']);
+  const constructionTierRank = new Map([
+    ['primary', 0], ['secondary', 1], ['tertiary', 2], ['surface', 3],
+  ]);
+  const ownerConstructionStale = (owner: Record<string, unknown>, seen = new Set<string>()): boolean => {
+    const ownerId = text(owner.hypothesis_id);
+    if (!ownerId || seen.has(ownerId)) return false;
+    seen.add(ownerId);
+    const parentId = text(owner.parent_hypothesis_id);
+    if (!parentId) return false;
+    const parent = ownerByHypothesis.get(parentId);
+    if (!parent || parent.temporary === true) return true;
+    if (text(owner.parent_construction_revision) !== text(parent.construction_revision)) return true;
+    return ownerConstructionStale(parent, seen);
   };
-  const logicalLayer = createStep ? {
-    decision: 'create-new',
-    hypothesis_id: `${requestKey}-layer`,
-    hypothesis: goal,
-    rollback_value: 'moderate',
-    expected_independent_rollback: true,
-    separation_reasons: ['The pass explicitly creates a dedicated layer.'],
-    layer_name: layerName,
-  } : undefined;
+
+  if (declaredRequiresIsolation && !['create-new', 'temporary-hypothesis'].includes(logicalDecision ?? '')) {
+    violations.push(violation(
+      'next_operation',
+      'semantic_layer_isolation_required',
+      `semantic_layer_isolation_required: substantial independently adjustable ${declaredChangeKind} work requires logical_layer.decision=create-new|temporary-hypothesis before Photoshop dispatch`
+    ));
+  }
+
+  if (logicalLayer && logicalHypothesisId) {
+    const existingOwner = ownerByHypothesis.get(logicalHypothesisId);
+    if (['continue-logical-layer', 'adjust'].includes(logicalDecision ?? '')) {
+      if (!existingOwner) {
+        violations.push(violation(
+          'next_operation',
+          'semantic_layer_owner_missing',
+          `semantic_layer_owner_missing: logical owner ${logicalHypothesisId} has no durable journal binding for continuation`
+        ));
+      } else if (!Number.isSafeInteger(logicalLayerId) || logicalLayerId !== Number(existingOwner.layer_id)) {
+        violations.push(violation(
+          'next_operation',
+          'semantic_layer_pollution',
+          `semantic_layer_pollution: logical owner ${logicalHypothesisId} is bound to layer ${existingOwner.layer_id}, not ${Number.isSafeInteger(logicalLayerId) ? logicalLayerId : 'missing'}`
+        ));
+      }
+      const layerOwner = Number.isSafeInteger(logicalLayerId) ? ownerByLayerId.get(logicalLayerId) : undefined;
+      if (layerOwner && text(layerOwner.hypothesis_id) !== logicalHypothesisId) {
+        violations.push(violation(
+          'next_operation',
+          'semantic_layer_pollution',
+          `semantic_layer_pollution: layer ${logicalLayerId} belongs to ${text(layerOwner.hypothesis_id)}, not ${logicalHypothesisId}`
+        ));
+      }
+      if (existingOwner) {
+        for (const field of ['construction_tier', 'parent_hypothesis_id', 'parent_construction_revision'] as const) {
+          const declared = text(logicalLayer[field]);
+          const durable = text(existingOwner[field]);
+          if (!declared && durable) logicalLayer[field] = durable;
+          else if (declared && durable && declared !== durable) {
+            violations.push(violation(
+              'next_operation',
+              'construction_graph_owner_conflict',
+              `construction_graph_owner_conflict: logical owner ${logicalHypothesisId} is durably ${field}=${durable}, not ${declared}; replan the semantic owner instead of changing its construction dependency in-place`
+            ));
+          }
+        }
+        const declaredSurfaceFrame = logicalLayer.surface_frame;
+        const durableSurfaceFrame = existingOwner.surface_frame;
+        if (declaredSurfaceFrame === undefined && durableSurfaceFrame && typeof durableSurfaceFrame === 'object') {
+          logicalLayer.surface_frame = structuredClone(durableSurfaceFrame);
+        } else if (declaredSurfaceFrame !== undefined && durableSurfaceFrame !== undefined) {
+          const canonicalFrame = (value: unknown) => {
+            if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+            const frame = value as Record<string, unknown>;
+            const axes = Array.isArray(frame.axes) ? frame.axes.map(entry => {
+              if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return entry;
+              const axis = entry as Record<string, unknown>;
+              return { id: text(axis.id), angle_degrees: Number(axis.angle_degrees), weight: axis.weight === undefined ? 1 : Number(axis.weight) };
+            }).sort((a: any, b: any) => String(a?.id ?? '').localeCompare(String(b?.id ?? ''))) : [];
+            const exceptions = Array.isArray(frame.local_exceptions)
+              ? frame.local_exceptions.map(entry => text(entry)).filter(Boolean).sort()
+              : [];
+            return {
+              axes,
+              ...(frame.convergence_anchor !== undefined ? { convergence_anchor: frame.convergence_anchor } : {}),
+              ...(frame.depth_progression !== undefined ? { depth_progression: frame.depth_progression } : {}),
+              distribution: text(frame.distribution) ?? 'directional',
+              local_exceptions: exceptions,
+            };
+          };
+          if (stableJson(canonicalFrame(declaredSurfaceFrame)) !== stableJson(canonicalFrame(durableSurfaceFrame))) {
+          violations.push(violation(
+            'next_operation',
+            'surface_frame_owner_conflict',
+            `surface_frame_owner_conflict: logical owner ${logicalHypothesisId} has a durable surface frame; replan/create a structural owner rather than silently changing its orientation frame during continuation`
+          ));
+          }
+        }
+        const declaredNegativeSpace = logicalLayer.negative_space;
+        const durableNegativeSpace = existingOwner.negative_space;
+        if (declaredNegativeSpace === undefined && durableNegativeSpace && typeof durableNegativeSpace === 'object') {
+          logicalLayer.negative_space = structuredClone(durableNegativeSpace);
+        } else if (declaredNegativeSpace !== undefined && durableNegativeSpace !== undefined
+          && stableJson(declaredNegativeSpace) !== stableJson(durableNegativeSpace)) {
+          violations.push(violation(
+            'next_operation',
+            'negative_space_owner_conflict',
+            `negative_space_owner_conflict: logical owner ${logicalHypothesisId} has durable aperture/negative-space topology; create/replan the structural owner rather than changing that relation in-place`
+          ));
+        }
+        const declaredCausalEffect = logicalLayer.causal_effect;
+        const durableCausalEffect = existingOwner.causal_effect;
+        if (declaredCausalEffect === undefined && durableCausalEffect && typeof durableCausalEffect === 'object') {
+          logicalLayer.causal_effect = structuredClone(durableCausalEffect);
+        } else if (declaredCausalEffect !== undefined && durableCausalEffect !== undefined
+          && stableJson(declaredCausalEffect) !== stableJson(durableCausalEffect)) {
+          violations.push(violation(
+            'next_operation',
+            'causal_effect_owner_conflict',
+            `causal_effect_owner_conflict: logical owner ${logicalHypothesisId} has a durable causal-effect relation; replan/create the effect owner rather than changing its cause in-place`
+          ));
+        }
+        for (const field of ['physical_role', 'opacity_role'] as const) {
+          const declared = text(logicalLayer[field])?.toLowerCase();
+          const durable = text(existingOwner[field])?.toLowerCase();
+          if (!declared && durable) {
+            logicalLayer[field] = durable;
+          } else if (declared && durable && declared !== durable) {
+            violations.push(violation(
+              'next_operation',
+              'physical_stack_owner_conflict',
+              `physical_stack_owner_conflict: logical owner ${logicalHypothesisId} is durably ${field}=${durable}, not ${declared}; create a new structural owner instead of mutating physical identity in-place`
+            ));
+          }
+        }
+        const declaredRelations = Array.isArray(logicalLayer.depth_relations) ? logicalLayer.depth_relations : undefined;
+        const durableRelations = Array.isArray(existingOwner.depth_relations) ? existingOwner.depth_relations : [];
+        if (declaredRelations === undefined && durableRelations.length) {
+          logicalLayer.depth_relations = structuredClone(durableRelations);
+        } else if (declaredRelations !== undefined && stableJson(declaredRelations) !== stableJson(durableRelations)) {
+          violations.push(violation(
+            'next_operation',
+            'physical_stack_owner_conflict',
+            `physical_stack_owner_conflict: logical owner ${logicalHypothesisId} cannot change durable depth_relations during continuation; create/replan the structural owner explicitly`
+          ));
+        }
+      }
+    }
+    if (['create-new', 'temporary-hypothesis'].includes(logicalDecision ?? '') && existingOwner) {
+      violations.push(violation(
+        'next_operation',
+        'semantic_layer_pollution',
+        `semantic_layer_pollution: logical owner ${logicalHypothesisId} already owns layer ${existingOwner.layer_id}; explicitly discard/delete that owner before creating a replacement, or continue the existing owner`
+      ));
+    }
+  }
+
+  const constructionTier = text(logicalLayer?.construction_tier)?.toLowerCase();
+  const parentHypothesisId = text(logicalLayer?.parent_hypothesis_id);
+  if (constructionTier) {
+    const tierRank = constructionTierRank.get(constructionTier);
+    if (tierRank === undefined) {
+      violations.push(violation('next_operation', 'construction_graph_invalid_tier', `construction_graph_invalid_tier: ${constructionTier} is not primary|secondary|tertiary|surface`));
+    } else if (tierRank === 0) {
+      if (parentHypothesisId) {
+        violations.push(violation('next_operation', 'construction_graph_invalid_parent', 'construction_graph_invalid_parent: primary construction owners must not declare a parent'));
+      }
+    } else {
+      const parentOwner = parentHypothesisId ? ownerByHypothesis.get(parentHypothesisId) : undefined;
+      if (!parentHypothesisId || !parentOwner) {
+        violations.push(violation(
+          'next_operation',
+          'construction_graph_parent_missing',
+          `construction_graph_parent_missing: ${constructionTier} owner ${logicalHypothesisId ?? 'unknown'} requires an established parent_hypothesis_id; ${parentHypothesisId ?? 'none'} is not durably established`
+        ));
+      } else if (parentOwner.temporary === true) {
+        violations.push(violation(
+          'next_operation',
+          'construction_graph_parent_unresolved',
+          `construction_graph_parent_unresolved: ${constructionTier} owner ${logicalHypothesisId ?? 'unknown'} cannot depend on temporary/unresolved parent ${parentHypothesisId}`
+        ));
+      } else if (ownerConstructionStale(parentOwner)) {
+        violations.push(violation(
+          'next_operation',
+          'construction_graph_parent_stale',
+          `construction_graph_parent_stale: ${constructionTier} owner ${logicalHypothesisId ?? 'unknown'} depends on ${parentHypothesisId}, whose own construction prerequisites are stale; replan the dependent branch before refinement`
+        ));
+      } else {
+        const parentTier = text(parentOwner.construction_tier)?.toLowerCase();
+        const parentRank = parentTier ? constructionTierRank.get(parentTier) : undefined;
+        if (parentRank === undefined || parentRank >= tierRank) {
+          violations.push(violation(
+            'next_operation',
+            'construction_graph_parent_order',
+            `construction_graph_parent_order: ${constructionTier} owner ${logicalHypothesisId ?? 'unknown'} requires a structurally earlier parent; ${parentHypothesisId} is ${parentTier ?? 'unclassified'}`
+          ));
+        }
+        const currentParentRevision = text(parentOwner.construction_revision);
+        const boundParentRevision = text(logicalLayer?.parent_construction_revision);
+        if (['create-new', 'temporary-hypothesis'].includes(logicalDecision ?? '') && currentParentRevision) {
+          logicalLayer!.parent_construction_revision = currentParentRevision;
+        } else if (currentParentRevision && boundParentRevision !== currentParentRevision) {
+          violations.push(violation(
+            'next_operation',
+            'construction_graph_parent_stale',
+            `construction_graph_parent_stale: ${logicalHypothesisId ?? 'unknown'} was bound to parent revision ${boundParentRevision ?? 'missing'}, but ${parentHypothesisId} is now ${currentParentRevision}; replan dependent construction before further refinement`
+          ));
+        }
+      }
+    }
+  }
+
+  const negativeSpace = logicalLayer?.negative_space && typeof logicalLayer.negative_space === 'object' && !Array.isArray(logicalLayer.negative_space)
+    ? logicalLayer.negative_space as Record<string, unknown>
+    : undefined;
+  if (negativeSpace) {
+    const negativeParentId = text(negativeSpace.parent_hypothesis_id);
+    const negativeParent = negativeParentId ? ownerByHypothesis.get(negativeParentId) : undefined;
+    if (!negativeParentId || !negativeParent) {
+      violations.push(violation('next_operation', 'negative_space_parent_missing', `negative_space_parent_missing: ${logicalHypothesisId ?? 'unknown'} requires an established aperture/negative-space parent owner`));
+    } else if (negativeParent.temporary === true) {
+      violations.push(violation('next_operation', 'negative_space_parent_unresolved', `negative_space_parent_unresolved: ${logicalHypothesisId ?? 'unknown'} cannot bind aperture topology to temporary parent ${negativeParentId}`));
+    } else {
+      const currentRevision = text(negativeParent.construction_revision);
+      const boundRevision = text(negativeSpace.parent_construction_revision);
+      if (['create-new', 'temporary-hypothesis'].includes(logicalDecision ?? '') && currentRevision) {
+        negativeSpace.parent_construction_revision = currentRevision;
+      } else if (currentRevision && boundRevision !== currentRevision) {
+        violations.push(violation('next_operation', 'negative_space_parent_stale', `negative_space_parent_stale: ${logicalHypothesisId ?? 'unknown'} aperture topology was bound to parent revision ${boundRevision ?? 'missing'}, but ${negativeParentId} is now ${currentRevision}; review/replan the opening before further paint`));
+      }
+    }
+  }
+  if (logicalHypothesisId && ['continue-logical-layer', 'adjust'].includes(logicalDecision ?? '')) {
+    const requiredOpenings = owners.filter(owner => {
+      const relation = owner.negative_space;
+      return relation && typeof relation === 'object' && !Array.isArray(relation)
+        && text((relation as Record<string, unknown>).parent_hypothesis_id) === logicalHypothesisId;
+    });
+    if (requiredOpenings.length) {
+      const preserved = new Set(Array.isArray(logicalLayer?.preserve_negative_space_ids)
+        ? logicalLayer!.preserve_negative_space_ids.map(value => text(value)).filter(Boolean) as string[]
+        : []);
+      const missing = requiredOpenings.map(owner => text(owner.hypothesis_id)).filter((id): id is string => !!id && !preserved.has(id));
+      if (missing.length) {
+        violations.push(violation(
+          'next_operation',
+          'negative_space_preservation_required',
+          `negative_space_preservation_required: repainting/texturing parent ${logicalHypothesisId} requires explicit review/preservation of durable opening owner(s): ${missing.join(', ')}`
+        ));
+      }
+    }
+  }
+
+  const causalEffect = logicalLayer?.causal_effect && typeof logicalLayer.causal_effect === 'object' && !Array.isArray(logicalLayer.causal_effect)
+    ? logicalLayer.causal_effect as Record<string, unknown>
+    : undefined;
+  if (causalEffect) {
+    const relation = text(causalEffect.relation);
+    const sourceId = text(causalEffect.source_hypothesis_id);
+    const receiverId = text(causalEffect.receiver_hypothesis_id);
+    const source = sourceId ? ownerByHypothesis.get(sourceId) : undefined;
+    const receiver = receiverId ? ownerByHypothesis.get(receiverId) : undefined;
+    if (!sourceId || !source) {
+      violations.push(violation('next_operation', 'causal_effect_source_missing', `causal_effect_source_missing: ${logicalHypothesisId ?? 'unknown'} requires established causal source ${sourceId ?? 'none'}`));
+    } else if (source.temporary === true) {
+      violations.push(violation('next_operation', 'causal_effect_source_unresolved', `causal_effect_source_unresolved: ${logicalHypothesisId ?? 'unknown'} cannot depend on temporary source ${sourceId}`));
+    } else {
+      const currentRevision = text(source.construction_revision);
+      const boundRevision = text(causalEffect.source_construction_revision);
+      if (['create-new', 'temporary-hypothesis'].includes(logicalDecision ?? '') && currentRevision) causalEffect.source_construction_revision = currentRevision;
+      else if (currentRevision && boundRevision !== currentRevision) {
+        violations.push(violation('next_operation', 'causal_effect_source_stale', `causal_effect_source_stale: ${logicalHypothesisId ?? 'unknown'} was caused by source revision ${boundRevision ?? 'missing'}, but ${sourceId} is now ${currentRevision}; review/replan the effect`));
+      }
+    }
+    if (relation !== 'emission_from' && !receiverId) {
+      violations.push(violation('next_operation', 'causal_effect_receiver_missing', `causal_effect_receiver_missing: ${relation ?? 'effect'} requires a receiving surface/medium`));
+    } else if (receiverId && !receiver) {
+      violations.push(violation('next_operation', 'causal_effect_receiver_missing', `causal_effect_receiver_missing: receiving owner ${receiverId} is not durably established`));
+    } else if (receiver?.temporary === true) {
+      violations.push(violation('next_operation', 'causal_effect_receiver_unresolved', `causal_effect_receiver_unresolved: effect cannot bind to temporary receiver ${receiverId}`));
+    } else if (receiver) {
+      const currentRevision = text(receiver.construction_revision);
+      const boundRevision = text(causalEffect.receiver_construction_revision);
+      if (['create-new', 'temporary-hypothesis'].includes(logicalDecision ?? '') && currentRevision) causalEffect.receiver_construction_revision = currentRevision;
+      else if (currentRevision && boundRevision !== currentRevision) {
+        violations.push(violation('next_operation', 'causal_effect_receiver_stale', `causal_effect_receiver_stale: receiving owner ${receiverId} changed structurally; review/replan ${logicalHypothesisId ?? 'effect'}`));
+      }
+    }
+  }
+
+  const physicalRole = text(logicalLayer?.physical_role)?.toLowerCase();
+  const opacityRole = text(logicalLayer?.opacity_role)?.toLowerCase();
+  const depthRelations = Array.isArray(logicalLayer?.depth_relations)
+    ? logicalLayer.depth_relations.filter(entry => entry && typeof entry === 'object' && !Array.isArray(entry)) as Array<Record<string, unknown>>
+    : [];
+  const physicalMetadataRequired = context.painting_profile === 'nontrivial_painting'
+    && !!createStep
+    && !!logicalLayer;
+  if (physicalMetadataRequired && (!physicalRole || !opacityRole)) {
+    violations.push(violation(
+      'next_operation',
+      'physical_stack_metadata_required',
+      'physical_stack_metadata_required: every new semantic layer in a nontrivial painting must declare logical_layer.physical_role and opacity_role so opaque structure cannot silently become a transparent/effect layer'
+    ));
+  }
+  if (
+    context.painting_profile === 'nontrivial_painting'
+    && ['create-new', 'temporary-hypothesis'].includes(logicalDecision ?? '')
+    && physicalRole
+    && physicalSignatureRoles.has(physicalRole)
+    && (paintingStageRank(stage) ?? -1) >= 3
+  ) {
+    violations.push(violation(
+      'next_operation',
+      'physical_stack_structural_change_requires_shape',
+      `physical_stack_structural_change_requires_shape: new ${physicalRole} owner ${logicalHypothesisId ?? 'unknown'} cannot be introduced at ${stage}; return to SHAPE with an explicit structural stage_reset, rebuild occlusion, then re-pass the physical stack gate`
+    ));
+  }
+  for (const relation of depthRelations) {
+    const relationKind = text(relation.relation)?.toLowerCase();
+    const targetHypothesisId = text(relation.target_hypothesis_id);
+    const targetOwner = targetHypothesisId ? ownerByHypothesis.get(targetHypothesisId) : undefined;
+    if (!targetHypothesisId || !targetOwner) {
+      violations.push(violation(
+        'next_operation',
+        'physical_stack_target_missing',
+        `physical_stack_target_missing: depth relation for ${logicalHypothesisId ?? 'unknown'} references semantic owner ${targetHypothesisId ?? 'missing'} which is not durably established`
+      ));
+      continue;
+    }
+    if (['create-new', 'temporary-hypothesis'].includes(logicalDecision ?? '') && createStep) {
+      const targetLayerId = Number(targetOwner.layer_id);
+      const aboveLayerId = Number(createArgs.above_layer_id);
+      const belowLayerId = Number(createArgs.below_layer_id);
+      if (relationKind === 'in-front-of' && aboveLayerId !== targetLayerId) {
+        violations.push(violation(
+          'next_operation',
+          'physical_stack_layer_order_mismatch',
+          `physical_stack_layer_order_mismatch: ${logicalHypothesisId} is declared in-front-of ${targetHypothesisId}; photoshop_create_layer must use above_layer_id=${targetLayerId}`
+        ));
+      } else if (relationKind === 'behind' && belowLayerId !== targetLayerId) {
+        violations.push(violation(
+          'next_operation',
+          'physical_stack_layer_order_mismatch',
+          `physical_stack_layer_order_mismatch: ${logicalHypothesisId} is declared behind ${targetHypothesisId}; photoshop_create_layer must use below_layer_id=${targetLayerId}`
+        ));
+      }
+    }
+  }
+
+  if (context.painting_profile === 'nontrivial_painting' && (paintingStageRank(stage) ?? -1) >= 4) {
+    const unresolvedTemporaryOwners = owners.filter(owner =>
+      owner.temporary === true && text(owner.rollback_value)?.toLowerCase() !== 'low'
+    );
+    if (unresolvedTemporaryOwners.length) {
+      violations.push(violation(
+        'next_operation',
+        'semantic_layer_stage_gate',
+        `semantic_layer_stage_gate: committed ${stage} refinement is blocked while temporary semantic owners remain unresolved: ${unresolvedTemporaryOwners.map(owner => text(owner.hypothesis_id)).filter(Boolean).join(', ')}`
+      ));
+    }
+  }
 
   let selectedPreset = actions
     .filter(step => text(step.tool) === 'photoshop_select_brush_preset')
@@ -731,41 +1359,9 @@ function compileCompactPass(
     .at(-1);
   const roles = Array.isArray(context.brush_roles) ? context.brush_roles : [];
   const explicitBrushRole = text(raw.brush_role);
-  let brushRole = selectedPreset ? roles.find(role => {
-    const accepted = new Set([
-      text(role.preferred_preset),
-      ...(Array.isArray(role.alternative_presets) ? role.alternative_presets.map(text) : []),
-    ].filter(Boolean));
-    return accepted.has(selectedPreset);
-  }) : undefined;
-  if (!brushRole && explicitBrushRole) {
-    brushRole = roles.find(role => text(role.role_id) === explicitBrushRole);
-  }
-  if (!brushRole && methodClass === 'paint') {
-    brushRole = roles.find(role => text(role.working_scale)?.toLowerCase() === text(scale)?.toLowerCase())
-      ?? roles[0];
-  }
-  if (methodClass === 'paint' && brushRole && !selectedPreset) {
-    selectedPreset = text(brushRole.preferred_preset);
-    if (selectedPreset) {
-      const ids = new Set(actions.map(step => text(step.id)).filter(Boolean));
-      let selectId = 'guard_select_brush';
-      while (ids.has(selectId)) selectId += '_';
-      actions.unshift({
-        id: selectId,
-        tool: 'photoshop_select_brush_preset',
-        args: { name: selectedPreset },
-        description: 'Guard-selected preflighted brush role for this compact pass.',
-      });
-    }
-  }
-  const paintStrategy = methodClass === 'paint' && brushRole ? {
-    material_role: Array.isArray(brushRole.material_roles) ? text(brushRole.material_roles[0]) : undefined,
-    visual_intent: Array.isArray(brushRole.visual_intents) ? text(brushRole.visual_intents[0]) : undefined,
-    brush_role: text(brushRole.role_id),
-    ...(selectedPreset ? { preset_name: selectedPreset } : {}),
-    pressure_policy: text(brushRole.pressure_policy),
-  } : undefined;
+  const constructionRole = text(raw.construction_role);
+  let brushRole: Record<string, unknown> | undefined;
+  let paintStrategy: Record<string, unknown> | undefined;
 
   const art = context.art_director && typeof context.art_director === 'object'
     ? context.art_director as Record<string, unknown>
@@ -774,8 +1370,8 @@ function compileCompactPass(
   const plannerDirectiveId = text(art?.directive_id);
   const plannerTaskId = text(art?.current_task_id);
   const painterScope = scale === 'medium' ? 'medium' : 'local';
-  const visualIntent = text(raw.visual_intent);
-  const impactClass = text(raw.impact_class);
+  let visualIntent = text(raw.visual_intent);
+  let impactClass = text(raw.impact_class);
   if (visualIntent || impactClass || text(raw.preferred_method_id)) {
     if (!visualIntent || !impactClass) {
       violations.push(violation(
@@ -784,8 +1380,9 @@ function compileCompactPass(
         'visual_intent and impact_class must be supplied together when declaring a compact artistic method contract'
       ));
     } else {
+      let plan;
       try {
-        const plan = compileArtisticOperation(registry, {
+        plan = compileArtisticOperation(registry, {
           visualIntent: visualIntent as never,
           impactClass: impactClass as never,
           stage,
@@ -794,6 +1391,44 @@ function compileCompactPass(
           documentId: Number(documentId),
           runtimeRevision: UXP_BRIDGE_REVISION,
         });
+      } catch (error) {
+        const executedMutationTools = [...new Set(mutationSteps.map(step => text(step.tool)).filter(Boolean))] as string[];
+        const inferred = inferUniqueClassification({
+          registry,
+          goal,
+          actionClass,
+          executionTools: executedMutationTools,
+        });
+        if (inferred) {
+          visualIntent = inferred.visualIntent;
+          impactClass = inferred.impactClass;
+          normalizations.push({
+            code: 'artistic_classification_normalized',
+            message: `Normalized classification metadata only to visual_intent=${visualIntent}, impact_class=${impactClass}; ${inferred.reason}.`,
+          });
+          try {
+            plan = compileArtisticOperation(registry, {
+              visualIntent: visualIntent as never,
+              impactClass: impactClass as never,
+              stage,
+              preferredMethodId: text(raw.preferred_method_id),
+              avoidMethodIds: Array.isArray(raw.avoid_method_ids) ? raw.avoid_method_ids.map(text).filter(Boolean) as string[] : [],
+              documentId: Number(documentId),
+              runtimeRevision: UXP_BRIDGE_REVISION,
+            });
+          } catch {
+            plan = undefined;
+          }
+        }
+        if (!plan) {
+          violations.push(violation(
+            'next_operation',
+            'artistic_method_unavailable',
+            error instanceof Error ? error.message : String(error)
+          ));
+        }
+      }
+      if (plan) {
         const executedMutationTools = [...new Set(mutationSteps.map(step => text(step.tool)).filter(Boolean))] as string[];
         const drift = executedMutationTools.filter(tool => !plan.allowedExecutionTools.includes(tool));
         if (drift.length) {
@@ -807,14 +1442,117 @@ function compileCompactPass(
         // as an `artistic_operation` field. VisualMicroPlan's public schema carries
         // the executable contract through method_class / paint_strategy / step
         // method_id and rejects unknown root fields fail-closed.
-      } catch (error) {
+      }
+    }
+  }
+
+  if (methodClass === 'paint') {
+    const requestedMaterialRole = text(raw.material_role);
+    const rankedStage = paintingStageRank(stage);
+    const materialFitnessRequired = rankedStage !== undefined && rankedStage >= 4 && roles.length > 0;
+    if (materialFitnessRequired && !requestedMaterialRole) {
+      violations.push(violation(
+        'next_operation',
+        'brush_material_role_required',
+        `substantial ${stage} brush work requires next_pass.material_role so Guard can match the installed/preflighted brush inventory to the requested material instead of choosing a generic first role`
+      ));
+    }
+    if (materialFitnessRequired && context.brush_inventory_scope === 'filtered') {
+      violations.push(violation(
+        'next_operation',
+        'brush_inventory_scope_insufficient',
+        'substantial form/material/detail brush work requires a full installed-inventory or evidence-bound brush-pack preflight; a filtered familiar-preset lookup is insufficient'
+      ));
+    }
+
+    const candidates = roles.filter(role => {
+      const materials = Array.isArray(role.material_roles) ? role.material_roles.map(text).filter(Boolean) : [];
+      const intents = Array.isArray(role.visual_intents) ? role.visual_intents.map(value => text(value)?.toLowerCase()).filter(Boolean) : [];
+      return (!requestedMaterialRole || materials.includes(requestedMaterialRole))
+        && (!visualIntent || intents.includes(visualIntent.toLowerCase()));
+    });
+    if (explicitBrushRole) {
+      brushRole = candidates.find(role => text(role.role_id) === explicitBrushRole);
+      if (!brushRole) {
         violations.push(violation(
           'next_operation',
-          'artistic_method_unavailable',
-          error instanceof Error ? error.message : String(error)
+          'brush_role_material_fitness_mismatch',
+          `brush_role=${explicitBrushRole} does not match material_role=${requestedMaterialRole ?? 'unspecified'} and visual_intent=${visualIntent ?? 'unspecified'} in the durable brush_preflight`
+        ));
+      }
+    } else if (candidates.length === 1) {
+      brushRole = candidates[0];
+    } else if (materialFitnessRequired && candidates.length > 1) {
+      violations.push(violation(
+        'next_operation',
+        'brush_role_ambiguous',
+        `multiple preflighted brush roles fit material_role=${requestedMaterialRole} and visual_intent=${visualIntent ?? 'unspecified'}; specify next_pass.brush_role explicitly`
+      ));
+    } else if (materialFitnessRequired && candidates.length === 0) {
+      violations.push(violation(
+        'next_operation',
+        'brush_role_no_material_fit',
+        `no preflighted brush role fits material_role=${requestedMaterialRole ?? 'missing'} and visual_intent=${visualIntent ?? 'missing'}`
+      ));
+    } else {
+      brushRole = candidates[0] ?? roles[0];
+    }
+
+    if (brushRole && materialFitnessRequired && ['MATERIAL', 'DETAIL', 'MICRO_DETAIL'].includes(String(stage))) {
+      const probeStatus = text(brushRole.probe_status)?.toLowerCase();
+      if (!['pass', 'cached'].includes(probeStatus ?? '')) {
+        violations.push(violation(
+          'next_operation',
+          'brush_role_probe_required',
+          `brush_role=${text(brushRole.role_id)} must have probe_status=pass|cached for substantial ${stage} material/finish work`
         ));
       }
     }
+
+    if (brushRole) {
+      const acceptedPresets = new Set([
+        text(brushRole.preferred_preset),
+        ...(Array.isArray(brushRole.alternative_presets) ? brushRole.alternative_presets.map(text) : []),
+      ].filter(Boolean));
+      if (selectedPreset && !acceptedPresets.has(selectedPreset)) {
+        violations.push(violation(
+          'next_operation',
+          'brush_preset_not_fit_for_role',
+          `selected preset ${selectedPreset} is not bound to brush_role=${text(brushRole.role_id)}`
+        ));
+      }
+      selectedPreset ??= text(brushRole.preferred_preset);
+      if (selectedPreset && !actions.some(step => text(step.tool) === 'photoshop_select_brush_preset')) {
+        const ids = new Set(actions.map(step => text(step.id)).filter(Boolean));
+        let selectId = 'guard_select_brush';
+        while (ids.has(selectId)) selectId += '_';
+        actions.unshift({
+          id: selectId,
+          tool: 'photoshop_select_brush_preset',
+          args: { name: selectedPreset },
+          description: 'Guard-selected material-fit preflighted brush role for this compact pass.',
+        });
+      }
+      paintStrategy = {
+        ...(constructionRole ? { construction_role: constructionRole } : {}),
+        material_role: requestedMaterialRole
+          ?? (Array.isArray(brushRole.material_roles) ? text(brushRole.material_roles[0]) : undefined),
+        visual_intent: visualIntent
+          ?? (Array.isArray(brushRole.visual_intents) ? text(brushRole.visual_intents[0]) : undefined),
+        brush_role: text(brushRole.role_id),
+        ...(selectedPreset ? { preset_name: selectedPreset } : {}),
+        pressure_policy: text(brushRole.pressure_policy),
+      };
+    }
+  }
+
+  if (methodClass === 'gradient' && visualIntent === 'continuous-field' && constructionRole) {
+    paintStrategy = {
+      construction_role: constructionRole,
+      material_role: text(raw.material_role),
+      visual_intent: visualIntent,
+      pressure_policy: 'none',
+    };
   }
 
   const requiresLocalInspection = visualMicroPlanRequiresLocalInspection(
@@ -879,6 +1617,7 @@ function compileCompactPass(
     scale,
     region,
     ...(regionBounds ? { region_bounds: regionBounds } : {}),
+    ...(objectContextRegionBounds ? { object_context_region_bounds: objectContextRegionBounds } : {}),
     method_class: methodClass,
     risk,
     expected_visual_delta: goal,
@@ -893,11 +1632,13 @@ function compileCompactPass(
     failure_signals: [],
     significance_mode: significanceMode,
     ...(text(raw.pattern_intent) ? { pattern_intent: text(raw.pattern_intent) } : {}),
+    ...(text(raw.distribution_intent) ? { distribution_intent: text(raw.distribution_intent) } : {}),
     ...(Array.isArray(raw.motif_instances) ? { motif_instances: structuredClone(raw.motif_instances) } : {}),
     ...(Array.isArray(raw.protected_regions) ? { protected_regions: raw.protected_regions } : {}),
     ...(Array.isArray(raw.protected_layer_ids) ? { protected_layer_ids: raw.protected_layer_ids } : {}),
     ...(Array.isArray(raw.replace_protected_layer_ids) ? { replace_protected_layer_ids: raw.replace_protected_layer_ids } : {}),
     ...(paintStrategy ? { paint_strategy: paintStrategy } : {}),
+    ...(raw.material_response !== undefined ? { material_response: structuredClone(raw.material_response) } : {}),
     ...(plannerDirectiveId && plannerTaskId ? {
       planner_directive_id: plannerDirectiveId,
       planner_task_id: plannerTaskId,
@@ -913,6 +1654,30 @@ function compileCompactPass(
     steps: actions,
   };
 
+  if (canonicalPaintingStage(stage) === 'MATERIAL' && actionClass !== 'ROLLBACK') {
+    if (raw.material_response === undefined) {
+      violations.push(violation(
+        'next_operation',
+        'material_response_plan_required',
+        'MATERIAL work requires next_pass.material_response decomposition before brush/texture execution'
+      ));
+    } else {
+      try {
+        normalizeMaterialResponsePlan(raw.material_response, {
+          physicalRole: text(logicalLayer?.physical_role),
+          opacityRole: text(logicalLayer?.opacity_role),
+          constructionRole: text(paintStrategy?.construction_role),
+        });
+      } catch (error: unknown) {
+        violations.push(violation(
+          'next_operation',
+          'material_response_plan_invalid',
+          error instanceof Error ? error.message : String(error)
+        ));
+      }
+    }
+  }
+
   return {
     operation: {
       request_key: requestKey,
@@ -920,6 +1685,7 @@ function compileCompactPass(
       problem_id: problemId,
       tool: 'photoshop_execute_visual_microplan',
       args,
+      ...(stageReset ? { stage_reset: stageReset } : {}),
       significance_mode: significanceMode,
       visual_review_profile: visualReviewProfile,
       preview_args: {
@@ -941,6 +1707,7 @@ function compileCompactPass(
       } : {}),
     },
     violations,
+    normalizations,
   };
 }
 
@@ -1123,7 +1890,7 @@ export async function compileGuardCycle(
   }
   if (compiledInput.previous_observation !== undefined) {
     const previousOperationId = text(compiledInput.previous_operation_id);
-    const expanded = compactObservationToVerdict(compiledInput.previous_observation);
+    const expanded = compactObservationToVerdict(compiledInput.previous_observation, normalizations);
     if (expanded) compiledInput.previous_visual_verdict ??= expanded;
     delete compiledInput.previous_observation;
     if (previousOperationId && store.compactClosureDefaults) {
@@ -1150,6 +1917,7 @@ export async function compileGuardCycle(
     } else {
       const compact = compileCompactPass(rawNextPass as Record<string, unknown>, store, registry);
       violations.push(...compact.violations);
+      if (compact.normalizations?.length) normalizations.push(...compact.normalizations);
       if (compact.operation) compiledInput.next_operation = compact.operation;
     }
     delete compiledInput.next_pass;

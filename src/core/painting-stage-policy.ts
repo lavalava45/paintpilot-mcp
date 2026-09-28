@@ -29,6 +29,60 @@ export interface PaintingStagePolicyProjection {
   };
 }
 
+export const PAINTING_STAGE_RESET_REASONS = [
+  'composition_invalidated',
+  'silhouette_reconstruction',
+  'user_requested_structural_redesign',
+  'accepted_anchor_rollback_changed_stage_basis',
+  'structural_regression_recovery',
+] as const;
+
+export type PaintingStageResetReason = (typeof PAINTING_STAGE_RESET_REASONS)[number];
+
+const STAGE_RANKS: Record<string, number> = {
+  RECOGNITION_BLOCK_IN: 0,
+  GLOBAL_BLOCK_IN: 0,
+  BLOCK_IN: 0,
+  BLOCKIN: 0,
+  COMPOSITION: 1,
+  SHAPE: 2,
+  VALUE: 3,
+  FORM: 4,
+  MEDIUM_FORM: 4,
+  FORM_AND_LIGHT: 4,
+  EDGE: 5,
+  EDGE_CONTROL: 5,
+  MATERIAL: 6,
+  DETAIL: 7,
+  MICRO_DETAIL: 8,
+  FINAL: 9,
+  FINISH: 9,
+  FINAL_SELECTION: 9,
+  ACCEPTANCE: 9,
+};
+
+export function canonicalPaintingStage(stage: unknown): string | undefined {
+  if (typeof stage !== 'string' || !stage.trim()) return undefined;
+  const normalized = stage.trim().toUpperCase().replace(/[\s-]+/g, '_');
+  if (normalized === 'MASS_BLOCK_IN') return 'GLOBAL_BLOCK_IN';
+  if (normalized === 'EDGE_CONTROL') return 'EDGE';
+  if (normalized === 'ACCEPTANCE') return 'FINAL_SELECTION';
+  return normalized === 'BLOCKIN' || normalized === 'BLOCK_IN'
+    ? 'GLOBAL_BLOCK_IN'
+    : normalized;
+}
+
+export function paintingStageRank(stage: unknown): number | undefined {
+  const canonical = canonicalPaintingStage(stage);
+  return canonical === undefined ? undefined : STAGE_RANKS[canonical];
+}
+
+export function isBackwardPaintingStageTransition(fromStage: unknown, toStage: unknown): boolean {
+  const fromRank = paintingStageRank(fromStage);
+  const toRank = paintingStageRank(toStage);
+  return fromRank !== undefined && toRank !== undefined && toRank < fromRank;
+}
+
 const INVARIANT_RULES = [
   'Use the established Photoshop execution route; do not substitute external image generation.',
   'Preserve document identity and provenance; fail closed when the target cannot be proven.',
@@ -69,12 +123,8 @@ const RECOVERY_RULES = [
   'Resume from durable state and fresh evidence; do not repaint solely to reconstruct context.',
 ] as const;
 
-function canonicalStage(stage: string): string {
-  return stage.trim().toUpperCase().replace(/[\s-]+/g, '_');
-}
-
 function stageModules(stage: string): PaintingPolicyModule[] | undefined {
-  switch (canonicalStage(stage)) {
+  switch (canonicalPaintingStage(stage)) {
     case 'RECOGNITION_BLOCK_IN':
     case 'GLOBAL_BLOCK_IN':
     case 'BLOCK_IN':
@@ -125,7 +175,7 @@ function policyRulesFor(modules: PaintingPolicyModule[]): string[] {
  * Pure deterministic projection from compact durable facts. No source/schema/runtime reads.
  */
 export function projectPaintingStagePolicy(facts: PaintingStagePolicyFacts): PaintingStagePolicyProjection {
-  const stage = canonicalStage(facts.stage);
+  const stage = canonicalPaintingStage(facts.stage) ?? '';
   const scoped = stageModules(stage);
   const unknownStage = scoped === undefined;
   const activeModules: PaintingPolicyModule[] = ['invariants'];

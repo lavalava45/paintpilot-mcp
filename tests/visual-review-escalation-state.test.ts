@@ -85,6 +85,45 @@ function capturedPreview(dir: string, capture: any, patch: Record<string, unknow
 }
 
 describe('durable multiscale review escalation state', () => {
+  it('persists structured overview uncertainty as OBJECT review debt across restart without parsing free text', () => {
+    const { dir, controller, store } = fixture();
+    const region = { left: 80, top: 60, right: 220, bottom: 190 };
+    const plan = store.planReviewEscalation('review-op', [], {
+      persist: true,
+      target_resolved: 'uncertain',
+      uncertainty_review: { after_level: 'composition', region_bounds: region },
+    }) as any;
+    expect(plan.required).toBe(true);
+    expect(plan.required_review_level).toBe('object');
+    expect(plan.captures[0]).toMatchObject({
+      kind: 'runtime_uncertainty',
+      level: 'object',
+      requested_region: region,
+    });
+    expect(store.read('review-op')?.pending_review).toMatchObject({
+      trigger: 'runtime_uncertainty',
+      uncertainty_after_level: 'composition',
+      required_review_level: 'object',
+    });
+
+    const restarted = new SessionStore(controller, dir);
+    expect((restarted.read('review-op') as any).pending_review).toMatchObject({
+      trigger: 'runtime_uncertainty',
+      required_review_level: 'object',
+    });
+    expect((restarted.planReviewEscalation as any)('review-op', [], { persist: false }).required).toBe(true);
+  });
+
+  it('requires explicit structured coordinates for uncertainty escalation and never derives them from prose', () => {
+    const { store } = fixture();
+    expect(() => store.planReviewEscalation('review-op', [], {
+      persist: false,
+      target_resolved: 'uncertain',
+      uncertainty_review: { after_level: 'composition' },
+    })).toThrow(/requires exact uncertainty_review\.region_bounds/);
+    expect(store.planReviewEscalation('review-op', [], { persist: false })).toMatchObject({ required: false });
+  });
+
   it('bounds each round to two captures, prioritizes blocking findings and deduplicates overlapping regions', () => {
     const { store } = fixture();
     const plan = store.planReviewEscalation('review-op', [
@@ -165,11 +204,81 @@ describe('durable multiscale review escalation state', () => {
     expect(pending.review_evidence[0]).toMatchObject({
       requested_region: requested,
       effective_region: { left: 88, top: 68, right: 172, bottom: 152 },
+      canvas_width: 400,
+      canvas_height: 300,
       bound_whole_sha256: 'a'.repeat(64),
       review_level: 'micro',
+      scale: { x: 1, y: 1 },
+      resolution_policy: 'native-or-downsampled-no-new-detail-by-upscaling',
     });
     expect((restarted.planReviewEscalation as any)('review-op', [], { persist: false }).required).toBe(false);
     expect((restarted.resume(42) as any).pending_visual_verdict.review_state.state).toBe('awaiting_observation');
+    expect((restarted.resume(42) as any).pending_visual_verdict.review_evidence[0]).toMatchObject({
+      canvas_width: 400,
+      canvas_height: 300,
+      requested_region: requested,
+      effective_region: { left: 88, top: 68, right: 172, bottom: 152 },
+      scale: { x: 1, y: 1 },
+    });
+  });
+
+  it('keeps source-document crop coordinates invariant when the whole-frame overview resolution changes', () => {
+    const high = fixture();
+    const low = fixture();
+    const highRecord = high.store.read('review-op')!;
+    highRecord.visual_review_profile.whole_max_dimension_px = 1600;
+    highRecord.preview.width = 400;
+    highRecord.preview.height = 300;
+    highRecord.preview.scale_x = 1;
+    highRecord.preview.scale_y = 1;
+    high.store.write(highRecord);
+    const lowRecord = low.store.read('review-op')!;
+    lowRecord.visual_review_profile.whole_max_dimension_px = 800;
+    lowRecord.preview.width = 200;
+    lowRecord.preview.height = 150;
+    lowRecord.preview.scale_x = 0.5;
+    lowRecord.preview.scale_y = 0.5;
+    low.store.write(lowRecord);
+
+    const finding = {
+      kind: 'edge_transition',
+      severity: 'must-fix',
+      region_bounds: { left: 2.4, top: 3.6, right: 52.1, bottom: 43.2 },
+    };
+    const highPlan = high.store.planReviewEscalation('review-op', [finding], { persist: true }) as any;
+    const lowPlan = low.store.planReviewEscalation('review-op', [finding], { persist: true }) as any;
+    expect(highPlan.captures[0].requested_region).toEqual({ left: 2, top: 3, right: 53, bottom: 44 });
+    expect(highPlan.captures[0].effective_region).toEqual({ left: 0, top: 0, right: 65, bottom: 56 });
+    expect(lowPlan.captures[0].requested_region).toEqual(highPlan.captures[0].requested_region);
+    expect(lowPlan.captures[0].effective_region).toEqual(highPlan.captures[0].effective_region);
+
+    const highPreview = capturedPreview(high.dir, highPlan.captures[0]);
+    const lowPreview = capturedPreview(low.dir, lowPlan.captures[0]);
+    lowPreview.width = 200;
+    lowPreview.height = 150;
+    lowPreview.scale_x = 0.5;
+    lowPreview.scale_y = 0.5;
+    lowPreview.focus.width = Math.ceil(lowPreview.focus.width / 2);
+    lowPreview.focus.height = Math.ceil(lowPreview.focus.height / 2);
+    lowPreview.focus.scale_x = 0.5;
+    lowPreview.focus.scale_y = 0.5;
+    const highEvidence = high.store.attachReviewEvidence('review-op', highPlan.captures[0], highPreview) as any;
+    const lowEvidence = low.store.attachReviewEvidence('review-op', lowPlan.captures[0], lowPreview) as any;
+
+    expect(lowEvidence.requested_region).toEqual(highEvidence.requested_region);
+    expect(lowEvidence.effective_region).toEqual(highEvidence.effective_region);
+    expect(highEvidence).toMatchObject({ canvas_width: 400, canvas_height: 300, scale: { x: 1, y: 1 } });
+    expect(lowEvidence).toMatchObject({ canvas_width: 400, canvas_height: 300, scale: { x: 0.5, y: 0.5 } });
+    expect(lowEvidence.resolution_policy).toBe('native-or-downsampled-no-new-detail-by-upscaling');
+
+    const restartedLow = new SessionStore(low.controller, {
+      visualBarrierDirectory: path.join(low.dir, 'barriers'),
+      workspaceRoot: low.dir,
+    });
+    const durable = (restartedLow.read('review-op') as any).review_evidence[0];
+    expect(durable.requested_region).toEqual(highEvidence.requested_region);
+    expect(durable.effective_region).toEqual(highEvidence.effective_region);
+    expect(durable).toMatchObject({ canvas_width: 400, canvas_height: 300, scale: { x: 0.5, y: 0.5 } });
   });
 
   it('invalidates persisted crop evidence after deletion or byte replacement and accepts only the unchanged file', () => {
@@ -312,6 +421,7 @@ describe('durable multiscale review escalation state', () => {
     const caps = guardCapabilities() as any;
     const compact = caps.cycle_compiler.compact_model_contract;
     expect(compact.optional_previous_observation).toContain('review_findings');
+    expect(compact.optional_previous_observation).toContain('softness_review');
     expect(compact.multiscale_visual_review).toMatchObject({
       levels: ['composition', 'object', 'micro'],
       whole_frame_always_required: true,
@@ -319,6 +429,13 @@ describe('durable multiscale review escalation state', () => {
       read_only_crop_escalation_same_operation: true,
       review_findings_additive_to_compact_v2: true,
       max_new_escalation_crops_per_round: 2,
+    });
+    expect(compact.soft_dominance_review).toMatchObject({
+      exact_current_frame: true,
+      contextual_not_sharpness_score: true,
+      broad_soft_nontrivial_required: true,
+      visual_problem_integration: true,
+      primitive_footprint_integration: true,
     });
   });
 });

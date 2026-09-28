@@ -1,11 +1,11 @@
-# Release Checklist — Digital Painting Fork
+# Release Checklist — Photoshop MCP Digital Painting Edition
 
 Use this checklist before publishing a tagged GitHub release.
 
 ## Repository
 
-- [ ] Public fork/repository remote is configured as `origin`.
-- [ ] Official Photoshop MCP repository remains configured as `upstream`.
+- [ ] Project repository remote is configured as `origin`.
+- [ ] Any historical comparison remote is optional and does not participate in build/runtime/package steps.
 - [ ] Working tree is clean.
 - [ ] Release branch contains the intended painting API and visual-control skill changes.
 - [ ] `README.md`, `INSTALL.md`, `CHANGELOG.md`, and painting docs describe the same feature set.
@@ -17,6 +17,8 @@ Use this checklist before publishing a tagged GitHub release.
 - [ ] `npm run build:server`
 - [ ] `npm run lint`
 - [ ] `npm run verify:photoshop-prompts`
+- [ ] `npm run verify:provenance`
+- [ ] `npm run verify:external-intake`
 - [ ] `npm run verify:tool-counts`
 - [ ] `npm run test:embedded-guard-mcp`
 - [ ] `npx vitest run src/platform/uxp-bridge-server.test.ts`
@@ -34,16 +36,20 @@ Use this checklist before publishing a tagged GitHub release.
 - [ ] Chat On Steroids instructions use the canonical Plugins → `dist/cos-plugin.js` → embedded Guard route; Core/controller is described only as dev/debug/recovery compatibility.
 - [ ] Local-development docs distinguish ChatGPT Plugins **Refresh** from CoS plugin-process **Restart**, document that only the custom Photoshop MCP plugin should be restarted after a server rebuild, and do not recommend whole-CoS restarts or obsolete restart-helper scripts.
 - [ ] UXP docs describe localhost long-poll, `Reload` for `main.js`, `Unload → Load` for manifest changes, and health verification via `plugin_connected` / `transport: "long-poll"`.
-- [ ] Native catalog/required-mode documentation matches the tested 148 tools / 13 Guard tools and raw mutations fail closed with `guard_required`.
+- [ ] Native catalog/required-mode documentation matches the tested **130 tools / 14 Guard tools** and raw mutations fail closed with `guard_required`.
 - [ ] `PHOTOSHOP_PATH` guidance covers current Photoshop versions.
-- [ ] Upstream-vs-fork distinction is explicit so users do not accidentally install the upstream npm package.
+- [ ] `NOTICE` is included and current; it records historical origin, major architectural divergence,
+      selective-port attribution policy, and the retained upstream MIT notice path.
+- [ ] Built/package artifacts include both `LICENSE` and `NOTICE`; `npm run verify:provenance` is green.
 - [ ] Known limitations are listed (for example Mixer Brush status, `SINGLE_HISTORY` timeout tradeoffs, and segmented-dynamics rendering).
 
 ## Version / release notes
 
 - [ ] Choose a release version/tag.
 - [ ] Move relevant entries from `CHANGELOG.md` Unreleased into the release section.
-- [ ] Summarize upstream base version/commit in the release notes.
+- [ ] No upstream baseline/version is required. If this release contains a non-trivial selective
+      external port, record its exact source revision/PR, intake mode, affected paths and applicable
+      attribution/license obligations in the release evidence/notes.
 - [ ] Call out painting-specific additions and known limitations.
 - [ ] Tag the tested commit only after the validation steps above pass.
 

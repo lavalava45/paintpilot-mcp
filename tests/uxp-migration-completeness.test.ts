@@ -6,7 +6,15 @@ const ROOT = process.cwd();
 
 describe('full UXP migration completeness', () => {
   it('has zero pending P1/P2/P3 catalog tools in the generated inventory', async () => {
-    const inventory = await readFile(join(ROOT, 'docs', 'uxp-migration-inventory.md'), 'utf8');
+    const inventory = await readFile(join(ROOT, 'docs', 'available-tools.md'), 'utf8');
+    const generatedRows = [
+      ...inventory.matchAll(/^\| \x60(photoshop_[^\x60]+)\x60 \| \x60src\//gm),
+    ].map((match) => match[1]);
+    const declaredTotal = Number(
+      inventory.match(/across \*\*(\d+) registered tools\*\*/)?.[1]
+    );
+    expect(Number.isFinite(declaredTotal)).toBe(true);
+    expect(new Set(generatedRows).size).toBe(declaredTotal);
     expect(inventory).not.toContain('UXP migration pending');
     for (const tier of ['P1', 'P2', 'P3']) {
       expect(inventory).toMatch(new RegExp(`### Remaining non-UXP ${tier} catalog tools\\s+\\n\\s*- None\\.`));
@@ -59,13 +67,13 @@ describe('full UXP migration completeness', () => {
     expect(plugin).toContain('document_not_found: no open document with id');
   });
 
-  it('has no stale production-tool guard that disables the pre-dispatch legacy fallback', async () => {
+  it('has no stale production-tool text that re-enables legacy fallback', async () => {
     const toolsDir = join(ROOT, 'src', 'tools');
     const names = (await readdir(toolsDir)).filter((name) => name.endsWith('-tools.ts'));
     const forbidden = [
-      'legacy ExtendScript/COM fallback is disabled',
-      'fallback is disabled',
-      'requires the UXP backend; legacy',
+      'pre-dispatch legacy fallback is allowed',
+      'fall back to ExtendScript',
+      'fall back to COM',
     ];
     for (const name of names) {
       const source = await readFile(join(toolsDir, name), 'utf8');

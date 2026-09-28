@@ -43,7 +43,7 @@ function fixture() {
   return { connection, router, executeScript, backendFor };
 }
 
-describe('canonical selection/mask lane uses UXP-first routing', () => {
+describe('canonical selection/mask lane uses UXP-only routing', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     bridge.createMask.mockResolvedValue({
@@ -151,16 +151,9 @@ describe('canonical selection/mask lane uses UXP-first routing', () => {
     expect(executeScript).not.toHaveBeenCalled();
   });
 
-  it('uses ExtendScript when routing selects legacy before any UXP dispatch', async () => {
+  it('fails closed before any UXP dispatch when the UXP backend is unavailable', async () => {
     const { connection, router, executeScript, backendFor } = fixture();
-    backendFor.mockResolvedValue({ kind: 'extendscript' as const });
-    executeScript
-      .mockResolvedValueOnce('({maskCreated:true,fromSelection:true})')
-      .mockResolvedValueOnce('({applied:true,direction:"bottom_to_top",mask_auto_created:false})')
-      .mockResolvedValueOnce('({shape:"rectangle",bounds:{left:1,top:1,right:10,bottom:10}})')
-      .mockResolvedValueOnce('({shape:"ellipse",bounds:{left:1,top:1,right:10,bottom:10}})')
-      .mockResolvedValueOnce('({pixels:2,bounds:{left:1,top:1,right:10,bottom:10}})')
-      .mockResolvedValueOnce('({method:"selectSubject",bounds:{left:1,top:1,right:10,bottom:10}})');
+    backendFor.mockRejectedValue(new Error('uxp_bridge_unavailable: test fixture'));
 
     const selection = createSelectionTools(connection, router);
     const masks = createMaskTools(connection, router);
@@ -175,7 +168,7 @@ describe('canonical selection/mask lane uses UXP-first routing', () => {
       await selection.find((tool) => tool.tool.name === 'photoshop_select_subject')!.handler({}),
     ];
 
-    for (const result of results) expect(result.isError).not.toBe(true);
+    for (const result of results) expect(result.isError).toBe(true);
     expect(backendFor.mock.calls.map(([primitive]) => primitive)).toEqual([
       'layer.mask.create',
       'layer.mask.gradient',
@@ -190,6 +183,6 @@ describe('canonical selection/mask lane uses UXP-first routing', () => {
     expect(bridge.selectEllipse).not.toHaveBeenCalled();
     expect(bridge.featherSelection).not.toHaveBeenCalled();
     expect(bridge.selectSubject).not.toHaveBeenCalled();
-    expect(executeScript).toHaveBeenCalledTimes(6);
+    expect(executeScript).not.toHaveBeenCalled();
   });
 });

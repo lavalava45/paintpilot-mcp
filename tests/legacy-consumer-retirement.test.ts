@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
@@ -14,7 +14,12 @@ const retiredConsumerTokens = [
   'test-mcp-daemon.mjs',
 ];
 
-const historicalFixtures = [
+const removedLegacySurfaces = [
+  'scripts/photoshop-session.mjs',
+  'scripts/photoshop-mcp-daemon.mjs',
+  'scripts/lib/photoshop-session-store.mjs',
+  'scripts/lib/photoshop-cycle.mjs',
+  'scripts/lib/mcp-daemon-client.mjs',
   'scripts/test-session-controller.mjs',
   'scripts/test-controller-cycle.mjs',
   'scripts/test-stage-a-e2e.mjs',
@@ -24,6 +29,8 @@ const historicalFixtures = [
   'scripts/test-layer-api-live.mjs',
   'scripts/test-paint-coordinate-dpi-live.mjs',
   'scripts/test-protected-layer-live.mjs',
+  'scripts/test-fixtures/mcp-daemon-client-once.mjs',
+  'docs/reliable-core-workflow.md',
 ];
 
 describe('legacy maintained-consumer retirement', () => {
@@ -41,11 +48,9 @@ describe('legacy maintained-consumer retirement', () => {
     }
   });
 
-  it('labels retained legacy controller/daemon fixtures as historical instead of maintained acceptance', () => {
-    for (const relative of historicalFixtures) {
-      const source = readFileSync(path.join(root, relative), 'utf8');
-      expect(source.slice(0, 300), `${relative} must declare its historical-only status`)
-        .toMatch(/HISTORICAL LEGACY .*not (?:part of|a) maintained acceptance/i);
+  it('physically removes retired controller/daemon providers and historical consumers', () => {
+    for (const relative of removedLegacySurfaces) {
+      expect(existsSync(path.join(root, relative)), `${relative} must be deleted; Git history is the archive`).toBe(false);
     }
   });
 });

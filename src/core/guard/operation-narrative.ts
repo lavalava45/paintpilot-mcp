@@ -3,7 +3,6 @@ const LONG_RUNNING_TOOLS = [
   /^photoshop_execute_visual_microplan$/,
   /^photoshop_paint_(?:strokes|dabs|regions)$/,
   /^photoshop_neural_/,
-  /^photoshop_recipe_/,
 ];
 
 function isVisualTool(tool = '') {

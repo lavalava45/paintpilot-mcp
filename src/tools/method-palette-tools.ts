@@ -1,9 +1,12 @@
 import { ToolDefinition } from '../core/tool-registry.js';
 import {
   PAINTING_IMPACT_CLASSES,
+  PAINTING_CONSTRUCTION_ROLES,
   PAINTING_VISUAL_INTENTS,
   paintingMethodCapabilities,
   selectPaintingMethod,
+  selectPaintingConstructionMethod,
+  type PaintingConstructionRole,
   type PaintingImpactClass,
   type PaintingVisualIntent,
 } from '../core/painting-method-palette.js';
@@ -37,6 +40,10 @@ export function createMethodPaletteTools(registry: ToolRegistry): ToolDefinition
         inputSchema: {
           type: 'object',
           properties: {
+            construction_role: {
+              type: 'string', enum: [...PAINTING_CONSTRUCTION_ROLES],
+              description: 'Optional subject-agnostic construction role. When supplied, the role is resolved to a visual intent before a concrete Photoshop method is selected.',
+            },
             visual_intent: { type: 'string', enum: [...PAINTING_VISUAL_INTENTS] },
             impact_class: { type: 'string', enum: [...PAINTING_IMPACT_CLASSES] },
             avoid_method_ids: { type: 'array', items: { type: 'string' } },
@@ -47,20 +54,25 @@ export function createMethodPaletteTools(registry: ToolRegistry): ToolDefinition
             edge_class: { type: 'string', enum: [...EDGE_CLASSES] },
             preferred_method_id: { type: 'string' },
           },
-          required: ['visual_intent', 'impact_class'],
+          required: ['impact_class'],
           additionalProperties: false,
         },
       },
       handler: async (args) => {
-        const visualIntent = args.visual_intent as PaintingVisualIntent;
+        const constructionRole = args.construction_role as PaintingConstructionRole | undefined;
+        const visualIntent = args.visual_intent as PaintingVisualIntent | undefined;
         const impactClass = args.impact_class as PaintingImpactClass;
         const avoid = Array.isArray(args.avoid_method_ids)
           ? args.avoid_method_ids.filter((value): value is string => typeof value === 'string')
           : [];
         try {
-          const selection = selectPaintingMethod(registry, visualIntent, impactClass, avoid, {
-            stage: typeof args.stage === 'string' ? args.stage : undefined,
-          });
+          if (!constructionRole && !visualIntent) {
+            throw new Error('construction_role or visual_intent is required');
+          }
+          const options = { stage: typeof args.stage === 'string' ? args.stage : undefined };
+          const selection = constructionRole
+            ? selectPaintingConstructionMethod(registry, constructionRole, impactClass, avoid, options)
+            : selectPaintingMethod(registry, visualIntent!, impactClass, avoid, options);
           const edgeClass = typeof args.edge_class === 'string' ? args.edge_class as EdgeClass : undefined;
           const edgeSelection = edgeClass
             ? selectEdgeMethod(registry, edgeClass, {

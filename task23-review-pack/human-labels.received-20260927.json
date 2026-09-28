@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "status": "received-not-accepted",
+  "evaluator_type": "human",
+  "provenance": "Human answers relayed by the user on 2026-09-27. Evaluator identity, review date, and the bundle independence attestation were not separately supplied with the returned answers.",
+  "aggregation_rule_version": null,
+  "aggregation_note": "These labels predate the v2 aggregation rule and must not be retroactively rescored as though that rule had been predeclared.",
+  "answers": {
+    "case-01": {
+      "answers": ["YES", "N-A", "YES", "NO", "NO", "YES", "NO", "NO"],
+      "observation": null
+    },
+    "case-02": {
+      "answers": ["YES", "N-A", "NO", "YES", "YES", "YES", "YES", "YES"],
+      "observation": null
+    },
+    "case-03": {
+      "answers": ["N-A", "N-A", "N-A", "N-A", "N-A", "N-A", "N-A", "N-A"],
+      "observation": null
+    },
+    "case-04": {
+      "answers": ["YES", "NO", "NO", "NO", "YES", "NO", "NO", "NO"],
+      "observation": null
+    },
+    "case-05": {
+      "answers": ["YES", "NO", "NO", "NO", "NO", "NO", "NO", "NO"],
+      "observation": null
+    }
+  }
+}

@@ -1,17 +1,16 @@
-# AGENTS.md — Photoshop MCP Digital Painting Fork
+# AGENTS.md — Photoshop MCP Digital Painting Edition
 
 ## First action and every continuation in Chat On Steroids
 
 **Production state, 2026-09-18:** the embedded native-MCP Photoshop Guard and the
 dedicated CoS entry point, `dist/cos-plugin.js`, have passed the dedicated live
 CoS/Photoshop acceptance sequence. The native Plugins route is now canonical for
-ordinary Chat On Steroids Photoshop work. The older Core/controller/daemon route is
-pending audited removal under `docs/PAINTING-ROADMAP.md` tasks 13a–13c; do not use it
-for new work or add new consumers.
+ordinary Chat On Steroids Photoshop work. The retired external Core/controller/daemon
+provider chain has been removed; do not recreate it or add parallel recovery transports.
 
 Do not substitute image_gen for Photoshop work in this project.
 
-Use **Chat On Steroids Plugins** and this fork's `dist/cos-plugin.js` entry for normal
+Use **Chat On Steroids Plugins** and this project's `dist/cos-plugin.js` entry for normal
 Photoshop work. Known read-only Photoshop tools may be called directly; mutations
 must go through `photoshop_guard_cycle_auto`. On interruption or uncertainty, use
 `photoshop_guard_status` / `photoshop_guard_resume`, obtain fresh evidence as required,
@@ -28,14 +27,36 @@ goal. It must not complete the active Planner task by implication. Use explicit
 Planner task. Standalone report/ack/verdict providers are retired; after an actual
 interruption use only the supported compact recovery/status surfaces as documented.
 
-The Core/controller/daemon CLI may still exist during cutover, but
-[the retired workflow notice](docs/reliable-core-workflow.md) is not an alternative
-production recipe. Migrate any real diagnostic or test dependency deliberately; do
-not create new ad-hoc MCP clients/REPLs or new dependencies on the retiring route.
+### Mandatory prompt-conflict and strategy preflight
+
+Before the first Painter mutation, every Art Director directive must record a
+`prompt_conflict_preflight`. Do not silently average contradictory artistic requirements.
+Choose one **dominant rendering objective**, keep secondary traits subordinate to it, and
+declare the rendering strategy plus the first 1–3 passes that follow from that choice.
+
+Classify a conflict as **structural** when two reasonable interpretations require materially
+different first 1–3 rendering passes (for example, line-first illustration versus
+value/material-first photorealism). Structural conflicts must be resolved before Painter
+dispatch. When one interpretation is clearly subordinate to the dominant objective, use
+`resolution_mode=declared-interpretation` and state that interpretation to the user before the
+first mutation. When multiple interpretations remain materially reasonable, set
+`requires_user_choice=true`; Guard then requires `resolution_mode=user-confirmed` plus concrete
+user confirmation before Painter work can start.
+
+Every directive must also set `strategy_validation_after_microplans` to **1 or 2** and begin with
+`strategy_validation.status=pending`. Guard counts only Painter passes whose visual significance
+is `meaningful`. After that many meaningful previews, it forces Art Director re-review. Judge
+whether the **dominant objective itself** is becoming more visible, rather than merely whether
+secondary prompt traits are accumulating. Record `pass` to continue, or `replan` with the exact
+current-frame operation id and a genuinely changed rendering strategy / first-pass sequence. A
+replan starts a fresh early strategy-validation window.
+
+Do not create a second controller CLI, persistent MCP daemon, ad-hoc MCP REPL, or parallel
+recovery transport. Diagnostics and recovery stay on the embedded Guard surfaces.
 
 ### Current architecture decision — keep Photoshop safety out of the COS fork
 
-Read [docs/photoshop-guard-architecture.md](docs/photoshop-guard-architecture.md)
+Read [docs/architecture.md](docs/architecture.md)
 before changing controller/host integration.
 
 The architecture keeps **Photoshop safety owned by this repository's
@@ -43,7 +64,7 @@ Guard**, not by Chat On Steroids internals. The Guard is now implemented inside 
 same MCP server process as the Photoshop tool registry. The canonical model-facing
 loop uses compact `next_pass` and `previous_observation`; the Guard owns technical
 receipt/report/verdict closure internally. Explicit public closure fields are removed;
-the old controller/daemon remains only as a retired internal migration target.
+the retired external controller/daemon implementation has been removed.
 
 The canonical CoS route is:
 
@@ -63,7 +84,7 @@ and are not a model-facing recovery or compatibility path.
 After `npm run build:server`, restart only this repository's Photoshop MCP child process:
 
 ```text
-Chat On Steroids app → Plugins → Photoshop MCP Digital Painting Fork → … → Restart
+Chat On Steroids app → Plugins → this Digital Painting Edition entry → … → Restart
 ```
 
 Do **not** restart the whole Chat On Steroids application merely to pick up a rebuilt
@@ -90,13 +111,11 @@ tool and selection did not change. There is no COM/ExtendScript persistence fall
 the UXP companion is not connected, save/checkpoint fails closed with
 `uxp_bridge_unavailable` rather than foregrounding Photoshop.
 
-`src/platform/photoshop-backend.ts` is the semantic transport boundary for migrated Photoshop
-primitives. `PhotoshopBackendRouter` prefers UXP when the bridge is available and selects
-ExtendScript only before dispatch when it is not. Do **not** add catch-and-replay fallback after
-a semantic operation has started. That rule is mandatory for the now-migrated mutation lane:
-an uncertain/dispatched mutation is reconciled from fresh evidence, never replayed through the
-other backend. Keep public MCP schema/result contracts unchanged and require COM↔UXP parity plus
-foreground acceptance before promoting another primitive.
+`src/platform/photoshop-backend.ts` is the production semantic transport boundary.
+`PhotoshopBackendRouter` configures UXP only and fails closed before dispatch when compatible UXP
+readiness is unavailable. Do **not** reintroduce pre- or post-dispatch ExtendScript/COM fallback.
+An uncertain/dispatched mutation is reconciled from durable state/fresh evidence, never replayed
+through another backend. Keep public MCP schema/result contracts unchanged.
 
 The accepted UXP `state.read` implementation is intentionally `batchPlay`-only for Photoshop
 state collection. Do not replace it with `app.activeDocument` / `app.documents` / active-layer
@@ -106,16 +125,15 @@ open-document regression is 40 consecutive reads with a non-Photoshop window for
 `numberOfLayers` excludes the Background layer, so parity requires adding
 `hasBackgroundLayer` back into the normalized public `layerCount`.
 
-Phase 2 extends the same semantic router to the read-only `document.info`,
+The accepted UXP read lane includes `document.info`,
 `documents.list`, `selection.bounds`, and `layers.list` primitives
 (`photoshop_get_document_info`, `photoshop_list_documents`,
 `photoshop_get_selection_bounds`, and `photoshop_get_layers`). These implementations are also
 read-only `batchPlay`; do not regress them to UXP DOM reads. The layer list reconstructs the
 legacy top-to-bottom recursive hierarchy from Action Manager indexes and `layerSection`
-start/end markers while omitting section-end pseudo-layers. Each migrated primitive keeps
-ExtendScript only as a **pre-dispatch** fallback.
+start/end markers while omitting section-end pseudo-layers. Production semantic dispatch is UXP-only.
 
-Phase 3 extends the UXP-first read lane to brush configuration. Use application
+Brush configuration reads use application
 `currentToolOptions` for `brush.settings.read` and application `presetManager` for
 `brush.presets.list`; both are accepted read-only `batchPlay` paths. Do **not** probe a direct
 Action Manager target of `brush` to discover settings: Photoshop 27.8 can reject that `Get`
@@ -123,7 +141,7 @@ with a modal host dialog, which blocks the bridge until dismissed. The accepted
 `currentToolOptions` implementation preserves the public 14-field settings payload without
 selecting the Brush Tool.
 
-Phase 4/5 extends the read lane to pixels. `photoshop_get_preview`,
+Pixel reads use the UXP Imaging API. `photoshop_get_preview`,
 `photoshop_sample_color`, and `photoshop_sample_colors` use the UXP Imaging API. In the
 accepted Photoshop 27.8 runtime, `imaging.getPixels` is read-only but must execute inside
 `core.executeAsModal`; live 5 ms foreground sampling showed zero Photoshop foreground
@@ -131,16 +149,15 @@ transitions for preview and color sampling. Do not reintroduce the legacy duplic
 preview path or temporary Color Sampler documents on the UXP backend. Preview parity is judged
 on decoded pixels rather than binary JPEG identity because the encoders differ.
 
-Phase 6 removes two more legacy read paths. `photoshop_get_history` enumerates indexed
+`photoshop_get_history` enumerates indexed
 read-only Action Manager `historyState` descriptors and preserves the legacy history/context
 payload. `photoshop_measure_points` now performs its geometry in Node after one migrated
 `document.info` read; do not reintroduce a JSX measurement program for caller-supplied points.
 
-Phase 8 migrates the P0 mutation lane: `photoshop_select_brush_preset`,
+The painting mutation lane — `photoshop_select_brush_preset`,
 `photoshop_set_brush`, `photoshop_set_foreground_color`, `photoshop_fill_layer`,
 `photoshop_paint_regions`, `photoshop_paint_strokes`, and `photoshop_paint_dabs` are
-UXP-first with the same bounded pre-dispatch ExtendScript fallback as the semantic router. Once
-UXP dispatch can have occurred, fallback/replay is forbidden. Fill preserves the exact
+UXP-only and fail closed when the companion is unavailable. Fill preserves the exact
 legacy pixel/target/selection behavior and Photoshop history sequence
 `Select Canvas → Fill → Deselect`. Regions use UXP compound paths, convert the uniquely named
 path to a selection through Action Manager, fill, deselect, and delete the temporary path.
@@ -148,12 +165,12 @@ Strokes/dabs must retrieve the created path through `doc.pathItems.getByName(pat
 calling `strokePath`; do not assume `pathItems.add()` returns a directly usable PathItem in
 this host.
 
-The current bridge source revision is `compact-v2-20260924-targeting`.
-Document create/open use UXP exact-outcome receipts. Phase 9/10 plus the P1/P2/P3 catalog
-source migration are implemented under the same UXP-first/pre-dispatch-fallback contract.
+The current bridge source revision is `compact-v2-20260926-brush-profile`.
+Document create/open use UXP exact-outcome receipts. The remaining catalog migration work is
+implemented under the same UXP-only/fail-closed contract.
 The rebuilt child/current companion load-and-revision preflight is live-accepted; the final
-representative post-migration behavior/no-focus-steal trace remains pending. Do not use obsolete
-Phase 8/9/11 revision strings as readiness targets.
+representative post-migration behavior/no-focus-steal trace remains pending. Do not use older
+migration-era revision strings as readiness targets.
 
 Photoshop 27.8 has one accepted painting quirk: assigning `app.foregroundColor` inside the same
 painting modal can restore stale brush opacity/flow. After a color write, the UXP strokes/dabs
@@ -163,7 +180,9 @@ the whole-`currentToolOptions` writer. Do not move that re-application ahead of 
 `photoshop_set_active_document` is Guard **preparation/navigation**, not a visual mutation. It
 may explicitly switch tabs when the workflow asks for that tool, but document-bound semantic
 tools must not switch tabs implicitly merely to satisfy `document_id`; they verify the pinned
-active document and fail closed on mismatch.
+active document and fail closed on mismatch. Live diagnostic `run-09` showed that this explicit UXP
+tab activation can foreground Photoshop, so classify it as **UI-activating navigation** and exclude it
+from no-focus acceptance traces. Do not claim the tool itself is background-safe.
 
 The current Photoshop 2026 / UXP runtime used for live acceptance rejects the loopback
 HTTP bridge when `requiredPermissions.network.domains` is narrowed to either
@@ -291,6 +310,32 @@ When signing an artwork:
 
 Keep the reference assets persistent even if the artwork from which the first `Sol`
 signature originated is deleted.
+
+### Stamp / motif anti-copy policy
+
+Stamp brushes are reusable visual vocabulary, not permission to duplicate finished objects.
+Use `intentional_regular` only for genuinely deliberate regular systems such as ornament,
+tiles, grids or repeated architectural modules. Organic, character, creature and hero-visible
+motifs remain subject to mechanical-pattern review even when the same source stamp is translated,
+rotated, scaled, mirrored, recolored, faded or given small positional jitter. Those parameter
+changes are not structural variation.
+
+When repetition is visible, prefer multiple evidence-bound source motifs, meaningful overlap /
+occlusion / cropping, selective erase, overpaint or structural redraw. A hero or foreground organic
+element placed from a stamp is not automatically finished; raw stamp-only completion is allowed only
+when the explicit user/style contract calls for a collage/stamp language. Review actual motif
+instances and evidence rather than counting tool calls or imposing a universal repetition maximum.
+
+For a user-supplied pack, build the scene before distributing assets. The Art Director's existing
+composition, focal hierarchy, large-value-mass, depth, silhouette and lighting assessment remains
+primary; `brush_pack_scene_plan` then maps evidence-bound media roles / stamp profiles onto specific
+Painter tasks only where they causally help. Pack availability must not determine the hero pose,
+face, gesture, key silhouette or overall composition by convenience.
+
+When the art run declares `brush_pack_policy.mode=exclusive`, every brush-based mutation must
+explicitly select a preset/profile bound to that `brush_pack_id`; silent fallback to the current or a
+generic unrelated brush is forbidden. Stamp-only passes bind `brush_pack_id + stamp_profile_id`
+directly and do not pretend to be media-brush roles. Non-brush Photoshop operations remain available.
 
 After **every completed external action**, emit a distinct ordinary user-visible
 assistant message:
@@ -426,24 +471,42 @@ This is the hard backstop against repeatedly "improving" local details while the
 whole image drifts into blur, contrast collapse, primitive footprint, or another
 systemic failure.
 
+For non-trivial paintings, broad **global/medium** work whose declared construction/method is
+softness-dominant must also close the exact-current `softness_review`. Judge edge hierarchy, mass
+separation, large-form readability, focal hierarchy and primitive footprint against the declared
+construction/physical role and style contract; do not substitute a generic sharpness score.
+Intentional optical haze may remain soft while preserving underlying structure, but a form-bearing
+soft mass may not dissolve its edge/mass hierarchy. A failed review opens the existing
+`soft-dominance` must-fix problem and therefore blocks finer texture/detail through the ordinary
+stage/scale priority gate.
+
+At `MATERIAL`, do not equate material with texture. Every visual MATERIAL pass must carry the shared
+qualitative `material_response` decomposition before mutation: base response, form/light response,
+specular/reflection, transmission when applicable, surface condition, variation scale, edge/contact
+interaction, plus an explicitly subordinate microtexture policy. Keep base material, surface condition
+and optical effect distinct and consistent with semantic `physical_role` / `opacity_role` and any
+construction role. The exact-current `refinement_check.material_response` reuses this same vocabulary;
+texture-only treatment or unresolved material components cannot close `material_light_response` and
+therefore cannot unlock DETAIL/MICRO_DETAIL. Intentional flat/stylized treatment may omit otherwise
+required form response only through an exact active `style_contract` basis. Never invent numeric
+roughness/PBR/material-quality scores.
+
 > **Navigation map, not a reference manual.**
 > Start with [README.md](README.md), [INSTALL.md](INSTALL.md), or [llms.txt](llms.txt).
 >
-> **Fork notice:** this repository is the independent community fork
-> [lavalava45/photoshop-mcp-digital-painting](https://github.com/lavalava45/photoshop-mcp-digital-painting),
-> based on the original [alisaitteke/photoshop-mcp](https://github.com/alisaitteke/photoshop-mcp).
-> `photoshop-mcp.com`, `@alisaitteke/photoshop-mcp`, and `io.github.alisaitteke/photoshop-mcp`
-> belong to the upstream project and do **not** distribute the fork-specific painting extensions.
+> **Project identity:** this repository is the independently maintained
+> [Photoshop MCP — Digital Painting Edition](https://github.com/lavalava45/photoshop-mcp-digital-painting).
+> Historical origin, upstream identifiers and retained licensing attribution are centralized in
+> [`NOTICE`](NOTICE); those historical identifiers do not distribute this project's maintained surface.
 
 ## Entry strategy
 
 | Scenario | Path |
 | -------- | ---- |
-| Cursor / Claude Desktop / VS Code | Clone this fork, build it, and configure stdio to `node <fork>/dist/index.js` |
-| Claude Code | Add a local stdio server pointing to this fork's built `dist/index.js` |
-| Chat On Steroids (canonical) | Plugins → this fork's `dist/cos-plugin.js` → embedded Guard |
-| Chat On Steroids (retiring; existing dependencies only) | Core → controller/daemon → this fork's `dist/index.js` |
-| Local development | `npm install && npm run build:server && node dist/index.js` — see [docs/development.md](docs/development.md) |
+| Cursor / Claude Desktop / VS Code | Clone this repository, build it, and configure stdio to `node <repo>/dist/index.js` |
+| Claude Code | Add a local stdio server pointing to this repository's built `dist/index.js` |
+| Chat On Steroids (canonical) | Plugins → this project's `dist/cos-plugin.js` → embedded Guard |
+| Local development | `pnpm install --frozen-lockfile && npm run build:server && node dist/index.js` — see [docs/development.md](docs/development.md) |
 
 ### Chat On Steroids: canonical guarded route
 
@@ -451,38 +514,23 @@ The native Plugins route has passed the dedicated live acceptance sequence and i
 the documented production default. Use the installed custom Photoshop plugin pointed
 at `dist/cos-plugin.js` for ordinary work.
 
-The retiring legacy route is shown only so existing dependencies can be identified and migrated:
-
-```text
-ChatGPT agent
-  → Chat_On_Steroids_Core
-  → short-lived photoshop-session controller
-  → repository-local persistent MCP daemon
-  → long-lived direct stdio MCP process
-  → node <this-fork>/dist/index.js
-  → PhotoshopMCPServer
-  → ExtendScript/COM on Windows or AppleScript on macOS
-  → Adobe Photoshop
-```
-
 The canonical native route is:
 
 ```text
 ChatGPT agent
   → Chat_On_Steroids_Plugins
-  → node <this-fork>/dist/cos-plugin.js
+  → node <repo>/dist/cos-plugin.js
   → embedded Photoshop Guard
   → internal ToolRegistry dispatch
-  → ExtendScript/COM on Windows or AppleScript on macOS
+  → PhotoshopBackendRouter
+  → UXP bridge plugin on localhost
   → Adobe Photoshop
 ```
 
-Do not delete the legacy route blindly. Follow roadmap task 13b to enumerate real
-dependencies, migrate them, and then delete the route under tasks 13a–13c. Backward
-compatibility is not a requirement, and no new production, test, or documentation
-dependency may be added to the retiring controller/daemon/CLI path.
+The external controller/daemon route has been deleted after dependency/replacement proof.
+Backward compatibility with that provider chain is not a requirement.
 
-In the current Windows workspace, the fork source lives at:
+In the current Windows workspace, the project source lives at:
 
 ```text
 E:\Downloads\devspace-test\experiments\photoshop-mcp-digital-painting
@@ -492,23 +540,23 @@ and the server entry after `npm run build:server` is this repository's `dist/ind
 
 Agent routing rules:
 
-- **Canonical:** `Chat_On_Steroids_Plugins` → this fork's `dist/cos-plugin.js` → embedded Guard → internal `ToolRegistry` → Photoshop.
-- **Retiring:** `Chat_On_Steroids_Core` → `photoshop-session.mjs` → repository-local persistent daemon → this fork's `dist/index.js`; migrate remaining real consumers, do not select it for new work.
-- The current compact-only native catalog is 148 tools / 13 public Guard tools. Do not interpret a stale legacy connector snapshot as a server limitation.
-- If the native Plugins route is genuinely absent/stale, inspect its discovery/readiness state and repair that route. Do not silently switch an art run onto the retiring Core path.
+- **Canonical:** `Chat_On_Steroids_Plugins` → this project's `dist/cos-plugin.js` → embedded Guard → internal `ToolRegistry` → Photoshop.
+- **Removed:** the former external Core/controller/daemon provider chain is not a supported or recoverable route.
+- The current compact-only native catalog is 130 tools / 14 public Guard tools. Do not interpret a stale legacy connector snapshot as a server limitation.
+- If the native Plugins route is genuinely absent/stale, inspect its discovery/readiness state and repair that route. Do not silently create or switch to a parallel controller path.
 - `Chat_On_Steroids_Desktop` is for read-only desktop/UI inspection when useful, not the Photoshop MCP transport.
-- The Adobe UXP bridge in `uxp-plugin/` is a separate Photoshop-side runtime; it is not the Chat On Steroids Plugins route. Production Photoshop dispatch is UXP-first. Ordinary migrated primitives may select retained ExtendScript/COM only before any UXP dispatch when the router establishes UXP unavailability; there is no cross-backend replay after dispatch/claim/uncertainty/failure. `photoshop_save_document`, `photoshop_neural_filter`, brush-pack import and disposable brush profiling remain UXP-only/fail-closed, while raw `photoshop_execute_script` is retired. The current readiness target is bridge revision `compact-v2-20260926-brush-profile`.
+- The Adobe UXP bridge in `uxp-plugin/` is a separate Photoshop-side runtime; it is not the Chat On Steroids Plugins route. Production semantic Photoshop dispatch is UXP-only and fail-closed for every migrated Photoshop primitive. Raw `photoshop_execute_script` and the production ExtendScript/COM fallback are removed; Guard keeps only negative tombstones for stale callers. The current readiness target is bridge revision `compact-v2-20260926-brush-profile`.
 
-**Prerequisites:** Photoshop running on Windows or macOS, Node.js 18+. This is unofficial and not affiliated with Adobe.
+**Prerequisites:** Photoshop running on Windows 10/11, Node.js 18+. This project intentionally supports Windows only. This is unofficial and not affiliated with Adobe.
 
-**Tool surface:** 148 MCP tools — 132 atomic/non-recipe `photoshop_*` + 16 recipe `photoshop_recipe_*`; 13 of the non-recipe tools are the public embedded `photoshop_guard_*` façade; 21 MCP prompt templates (`ps.*`).
+**Tool surface:** 130 semantic `photoshop_*` MCP tools; 14 are the public embedded `photoshop_guard_*` façade; 5 MCP guide prompt templates (`ps.*`); no `photoshop_recipe_*` tools remain.
 
 ### Continuing painting-pipeline development
 
 Before changing the painting architecture, read
 [`docs/PAINTING-ROADMAP.md`](docs/PAINTING-ROADMAP.md) for implementation order and
-[`docs/uxp-migration-inventory.md`](docs/uxp-migration-inventory.md) for current
-per-tool transport status. Do not infer roadmap state from old chat summaries or
+[`docs/available-tools.md#generated-backend-and-access-inventory`](docs/available-tools.md#generated-backend-and-access-inventory) for current
+per-tool transport/access status. Do not infer roadmap state from old chat summaries or
 dated handoff files.
 
 In particular, the recognition-first block-in, `photoshop_paint_regions`,
@@ -544,13 +592,11 @@ PhotoshopMCPServer (Node.js)
   ▼
 Adobe Photoshop
 
-Primary lane: UXP bridge plugin (`uxp-plugin/`) on 127.0.0.1:38452 using localhost
-long-poll. Current source/readiness revision is `compact-v2-20260924-targeting`. P0 plus
-Phase 9/10 and the P1/P2/P3 catalog source migration are implemented. Ordinary migrated
-tools may still select their retained ExtendScript/COM backend only before any UXP dispatch;
-`save_document` and `neural_filter` stay UXP-only. The rebuilt child/current companion
-load-and-revision preflight is accepted; representative post-migration behavior/no-focus-steal
-coverage remains the outstanding live gate.
+Primary production lane: UXP bridge plugin (`uxp-plugin/`) on 127.0.0.1:38452 using localhost
+long-poll. Current source/readiness revision is `compact-v2-20260926-brush-profile`.
+Production semantic dispatch is UXP-only / fail-closed for the current catalog; retained legacy
+platform executors are not selectable semantic backends. Repository migration acceptance is green;
+the acceptance matrix remains authoritative for any outstanding real-Photoshop retest.
 ```
 
 Deep dive: [docs/architecture.md](docs/architecture.md).
@@ -582,12 +628,25 @@ subject/object independently editable when the scene contains them. A broad
 convenience pass is not a reason to merge unrelated scene entities onto one raster
 layer.
 
+For fresh non-trivial paintings, semantic ownership also carries the **physical
+stack contract**. Every new logical layer declares `physical_role` and
+`opacity_role`; use at most one direct `depth_relations` anchor and chain owners for
+larger depth order. Opaque/support scene masses use opaque pixels and explicit
+above/below layer placement for declared front/behind relations. Glass/transmissive
+surfaces, surface conditions, optical light/glow, atmosphere and camera/post remain
+distinct physical roles; never make an opaque object translucent merely to soften
+its rendering. Before advancing from SHAPE/block-in into VALUE or any later stage,
+Art Director must record an exact-current-frame Physical Stack / Occlusion Gate pass
+covering depth order, occlusion, opaque-mass coverage, transparency intent and
+Photoshop layer-stack alignment. Structural-owner changes make that evidence stale;
+a new structural owner after SHAPE requires a real stage reset and fresh gate.
+
 Every global/shape/form review must include an **independent scene-relationship audit**, not only the current `problem_id`. At normal/thumbnail scale check support/contact, unintended gaps or floating, occlusion/depth order, cast-shadow relationship, accidental tangencies/intersections and silhouette/proportion. A pass may not be accepted merely because its local target improved if one of these structural relationships is visibly broken. Small/detail passes still require a quick regression scan for the same failures before acceptance.
 
 ```
 1. DISCOVER: tools/list + prompts/list (or get_capabilities once per session)
 2. STATE:    photoshop_get_state before the first mutation or when state is uncertain; do not repeat it between healthy pinned visual passes
-3. ACT:      prefer photoshop_recipe_* for multi-step outcomes (single undo step)
+3. ACT:      compose the smallest supported semantic photoshop_* chain
 4. RECOVER:  on uncertain/error state, follow the structured envelope, obtain fresh state/preview evidence as required, reconcile, then continue without blind replay
 ```
 
@@ -595,13 +654,14 @@ Every global/shape/form review must include an **independent scene-relationship 
 
 | Need | Use |
 | ---- | --- |
-| Multi-step outcome (remove BG, export for web, portrait enhance) | `photoshop_recipe_*` |
+| Multi-step outcome | semantic `photoshop_*` chain, optionally guided by `ps.*` |
 | Single precise edit | atomic `photoshop_*` |
-| Vague user intent | MCP prompt `prompts/get` (e.g. `ps.remove_background`) then call linked recipe/tool |
+| Vague user intent | MCP guide prompt `prompts/get`, then call supported semantic tools |
 | Neural Filters (skin smooth, colorize, …) | `photoshop_neural_filter` — requires UXP bridge loaded |
 | Version / feature check | `photoshop_get_capabilities` |
 
-Full catalog: [docs/available-tools.md](docs/available-tools.md). Prompt layer: [docs/prompt-layer.md](docs/prompt-layer.md).
+Full catalog: [docs/available-tools.md](docs/available-tools.md). Prompt/Guard/preview architecture:
+[docs/architecture.md](docs/architecture.md).
 
 ## MCP client configuration
 
@@ -625,7 +685,6 @@ Examples: [examples/cursor-config.json](examples/cursor-config.json), [examples/
 | -------- | ------- |
 | `LOG_LEVEL` | `0`=DEBUG, `1`=INFO, `2`=WARN, `3`=ERROR |
 | `PHOTOSHOP_PATH` | Optional custom Photoshop install path |
-| `PSMCP_UI_TOKEN` | Pin standalone UI API token (see README) |
 
 ## Troubleshooting (common agent blockers)
 
@@ -635,20 +694,20 @@ Examples: [examples/cursor-config.json](examples/cursor-config.json), [examples/
 | Tool times out | Large operations may need retries; check `get_state` for partial progress |
 | `generative_unavailable` / `version_unsupported` | Call `get_capabilities`; feature may need newer Photoshop or Adobe login |
 | Neural filter fails | **Add Plugin** → `uxp-plugin/manifest.json` → **Load** in UXP Developer Tools — see [docs/development.md](docs/development.md) |
-| Rebuilt `dist/cos-plugin.js` still behaves like old code | In the **Chat On Steroids app** open Plugins → Photoshop MCP Digital Painting Fork → `…` → **Restart**. ChatGPT Plugins **Refresh** is schema refresh only and may leave the old child process running. |
+| Rebuilt `dist/cos-plugin.js` still behaves like old code | In the **Chat On Steroids app** open Plugins → this Digital Painting Edition entry → `…` → **Restart**. ChatGPT Plugins **Refresh** is schema refresh only and may leave the old child process running. |
 | Edited `uxp-plugin/main.js` but Photoshop still runs old UXP code | Adobe UXP Developer Tool → Photoshop MCP UXP Bridge → `…` → **Reload**. For `manifest.json` changes use **Unload → Load**. |
 | No active document | Ask user to open/create a document, then `get_state` |
 
-More: [docs/troubleshooting.md](docs/troubleshooting.md).
+More: [docs/development.md](docs/development.md#8-troubleshooting).
 
 ## Distribution
 
 | Channel | Identifier |
 | ------- | ---------- |
-| This fork | https://github.com/lavalava45/photoshop-mcp-digital-painting |
-| Fork npm package | **None** — build from this repository |
-| Fork MCP Registry entry | **None** — use local stdio |
-| Original/upstream project | https://github.com/alisaitteke/photoshop-mcp |
+| Project source | https://github.com/lavalava45/photoshop-mcp-digital-painting |
+| Public npm package | **None** — build from this repository |
+| MCP Registry entry | **None** — use local stdio |
+| Historical provenance | [`NOTICE`](NOTICE) |
 
 ## Key files
 

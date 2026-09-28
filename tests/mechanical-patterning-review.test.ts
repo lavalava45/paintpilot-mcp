@@ -76,6 +76,51 @@ function requestForStrokes(
   };
 }
 
+function requestForStamps(
+  instances: Array<Record<string, unknown>>,
+  motifBounds: Bounds[],
+  patternIntent: 'organic_instances' | 'intentional_regular' = 'organic_instances',
+  options: { category?: string; profileId?: string; overpaint?: Array<{ points: Point[] }> } = {}
+) {
+  const category = options.category ?? 'bird';
+  const profileId = options.profileId ?? 'bird-stamp-profile';
+  return {
+    id: 'mechanical-stamp-pass',
+    tool: 'photoshop_execute_visual_microplan',
+    args: {
+      document_id: 42,
+      summary: 'Place several visible bird stamp instances and integrate them artistically.',
+      intent: 'Use stamp motifs without obvious copy-paste repetition.',
+      region: 'sky',
+      pattern_intent: patternIntent,
+      steps: [
+        {
+          id: 'stamp-motifs',
+          tool: 'photoshop_paint_stamp_instances',
+          args: {
+            stamp_profile_id: profileId,
+            preset_name: 'Bird Stamp',
+            instances,
+          },
+        },
+        ...(options.overpaint?.length ? [{
+          id: 'overpaint-motifs',
+          tool: 'photoshop_paint_strokes',
+          args: { strokes: options.overpaint },
+        }] : []),
+      ],
+    },
+    observed_motif_instances: motifBounds.map((region_bounds, index) => ({
+      id: `stamp-${index + 1}`,
+      category,
+      stamp_profile_id: profileId,
+      region_bounds,
+    })),
+    summary: 'Place several visible bird stamp instances and integrate them artistically.',
+    purpose: 'Exercise repeated stamp-instance review.',
+  };
+}
+
 function fixtureWithRecord(request: Record<string, unknown>) {
   const dir = mkdtempSync(path.join(tmpdir(), 'mechanical-patterning-review-'));
   dirs.push(dir);
@@ -188,6 +233,109 @@ describe('mechanical-patterning review gate', () => {
     expect(result.most_similar_pair?.normalized_error).toBeLessThanOrEqual(0.08);
   });
 
+  it('flags one organic stamp source despite rotation/scale/flip/color/opacity variation', () => {
+    const instances = [
+      { instance_id: 'a', x: 80, y: 70, size: 48, angle: 0, flip_x: false, flip_y: false, opacity: 100 },
+      { instance_id: 'b', x: 180, y: 90, size: 82, angle: 28, flip_x: true, flip_y: false, opacity: 68, color: { red: 220, green: 70, blue: 80 } },
+      { instance_id: 'c', x: 300, y: 75, size: 36, angle: -41, flip_x: false, flip_y: true, opacity: 84, color: { red: 60, green: 130, blue: 220 } },
+      { instance_id: 'd', x: 420, y: 105, size: 64, angle: 73, flip_x: true, flip_y: true, opacity: 55 },
+    ];
+    const motifBounds = instances.map(instance => ({
+      left: Number(instance.x) - Number(instance.size) / 2,
+      top: Number(instance.y) - Number(instance.size) / 2,
+      right: Number(instance.x) + Number(instance.size) / 2,
+      bottom: Number(instance.y) + Number(instance.size) / 2,
+    }));
+    const result = analyzeMechanicalPatterning(requestForStamps(instances, motifBounds));
+
+    expect(result).toMatchObject({
+      triggered: true,
+      classification: 'organic_instances',
+      instance_count: 4,
+      repeated_cluster_size: 4,
+    });
+    expect(result.representative_regions.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('keeps an explicitly intentional regular stamp rhythm exempt', () => {
+    const instances = [0, 1, 2, 3].map(index => ({
+      instance_id: `tile-${index}`,
+      x: 80 + index * 70,
+      y: 120,
+      size: 44,
+      angle: 0,
+      opacity: 100,
+    }));
+    const motifBounds = instances.map(instance => ({
+      left: instance.x - 22, top: instance.y - 22, right: instance.x + 22, bottom: instance.y + 22,
+    }));
+    const result = analyzeMechanicalPatterning(requestForStamps(
+      instances,
+      motifBounds,
+      'intentional_regular',
+      { category: 'ornament' }
+    ));
+
+    expect(result).toMatchObject({ triggered: false, classification: 'intentional_regular' });
+  });
+
+  it('turns execution-derived repeated stamp evidence into durable instance-scale review debt', () => {
+    const instances = [0, 1, 2, 3].map(index => ({
+      instance_id: `bird-${index}`,
+      x: 90 + index * 110,
+      y: 150 + (index % 2) * 20,
+      size: 52 + index * 9,
+      angle: index * 21,
+      flip_x: index % 2 === 1,
+      opacity: 70 + index * 5,
+    }));
+    const motifBounds = instances.map(instance => ({
+      left: instance.x - instance.size / 2,
+      top: instance.y - instance.size / 2,
+      right: instance.x + instance.size / 2,
+      bottom: instance.y + instance.size / 2,
+    }));
+    const request = requestForStamps(instances, motifBounds);
+    const { store } = fixtureWithRecord(request);
+
+    const plan = store.planReviewEscalation('mechanical-stamp-pass', [], { persist: true }) as any;
+    expect(plan.required).toBe(true);
+    expect(plan.captures.length).toBeGreaterThan(0);
+    expect(plan.captures.every((capture: any) => capture.kind === 'mechanical_patterning')).toBe(true);
+    expect(store.read('mechanical-stamp-pass')?.mechanical_patterning).toMatchObject({
+      triggered: true,
+      classification: 'organic_instances',
+      instance_count: 4,
+    });
+  });
+
+  it('allows materially different overpainted instances instead of demanding pointless jitter', () => {
+    const instances = [
+      { instance_id: 'a', x: 80, y: 220, size: 54, angle: 0 },
+      { instance_id: 'b', x: 190, y: 220, size: 54, angle: 20 },
+      { instance_id: 'c', x: 300, y: 220, size: 54, angle: -25 },
+      { instance_id: 'd', x: 410, y: 220, size: 54, angle: 45 },
+    ];
+    const motifBounds = instances.map(instance => ({
+      left: instance.x - 35, top: instance.y - 35, right: instance.x + 35, bottom: instance.y + 35,
+    }));
+    const overpaint = [
+      { points: [{ x: 68, y: 205 }, { x: 82, y: 196 }, { x: 97, y: 210 }] },
+      { points: [{ x: 176, y: 205 }, { x: 188, y: 192 }, { x: 203, y: 198 }, { x: 212, y: 215 }] },
+      { points: [{ x: 284, y: 215 }, { x: 293, y: 194 }, { x: 306, y: 201 }, { x: 319, y: 214 }, { x: 309, y: 231 }] },
+      { points: [{ x: 392, y: 208 }, { x: 401, y: 195 }, { x: 416, y: 191 }, { x: 427, y: 204 }, { x: 432, y: 222 }, { x: 417, y: 234 }] },
+    ];
+    const result = analyzeMechanicalPatterning(requestForStamps(
+      instances,
+      motifBounds,
+      'organic_instances',
+      { overpaint }
+    ));
+
+    expect(result.triggered).toBe(false);
+    expect(result.repeated_cluster_size).toBeLessThan(3);
+  });
+
   it('does not fail structurally different birds merely because they share one semantic class', () => {
     const shapes = [
       transform([{ x: 0, y: 3 }, { x: 8, y: 0 }, { x: 16, y: 4 }], { tx: 50, ty: 70 }),
@@ -202,6 +350,36 @@ describe('mechanical-patterning review gate', () => {
 
     expect(result.triggered).toBe(false);
     expect(result.repeated_cluster_size).toBeLessThan(3);
+  });
+
+  it('flags mechanically uniform foliage distribution even when motif geometry is structurally different', () => {
+    const shapes = [3, 4, 5, 6].map((count, index) => Array.from({ length: count }, (_, point) => ({
+      x: 60 + index * 100 + point * 5,
+      y: 90 + (point % 2) * (4 + index),
+    })));
+    const request: any = requestForStrokes(shapes.map(points => ({ points })), shapes.map(points => bounds(points)), 'organic_instances', 'foliage');
+    request.args.distribution_intent = 'organic-clustered';
+    const result = analyzeMechanicalPatterning(request);
+    expect(result).toMatchObject({ triggered: true, distribution_intent: 'organic-clustered', distribution_failure: 'uniform-organic-spacing' });
+    expect(result.reason).toMatch(/jitter.*not evidence|uniform/i);
+  });
+
+  it('flags depth-invariant ripple/module scale against a declared perspective progression', () => {
+    const shapes = [0, 1, 2, 3].map(index => [{ x: 80 + index * 90, y: 100 + index * 45 }, { x: 110 + index * 90, y: 100 + index * 45 }]);
+    const request: any = requestForStrokes(shapes.map(points => ({ points })), shapes.map(points => bounds(points)), 'intentional_regular', 'ripple');
+    request.args.distribution_intent = 'perspective-regular';
+    request.args.logical_layer = { surface_frame: {
+      axes: [{ id: 'depth', angle_degrees: 25 }], distribution: 'perspective-regular',
+      convergence_anchor: { x: 500, y: 0 }, depth_progression: { near_scale: 1, far_scale: 0.35, direction: 'toward-anchor' },
+    } };
+    expect(analyzeMechanicalPatterning(request)).toMatchObject({ triggered: true, distribution_failure: 'perspective-progression-mismatch' });
+  });
+
+  it('keeps explicit intentional-uniform distribution exempt from organic spacing heuristics', () => {
+    const shapes = [0, 1, 2, 3].map(index => [{ x: 50 + index * 80, y: 200 }, { x: 58 + index * 80, y: 204 + index }, { x: 65 + index * 80, y: 199 }]);
+    const request: any = requestForStrokes(shapes.map(points => ({ points })), shapes.map(points => bounds(points)), 'intentional_regular', 'tile');
+    request.args.distribution_intent = 'intentional-uniform';
+    expect(analyzeMechanicalPatterning(request)).toMatchObject({ triggered: false, distribution_intent: 'intentional-uniform' });
   });
 
   it('allows an explicitly classified regular architectural rhythm', () => {

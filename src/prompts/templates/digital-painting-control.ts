@@ -1,10 +1,10 @@
 import {
-  argEnum,
-  argInt,
-  argString,
-  userPrompt,
+  readChoiceArg as argEnum,
+  readIntegerArg as argInt,
+  readTextArg as argString,
+  makeGuideResult as userPrompt,
   type PhotoshopPromptTemplate,
-} from '../_shared.js';
+} from '../guide-contract.js';
 
 const FINISH_LEVELS = ['sketch', 'study', 'polished'] as const;
 const BUDGET_MODES = ['soft', 'hard'] as const;

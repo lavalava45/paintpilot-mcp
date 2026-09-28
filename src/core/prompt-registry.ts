@@ -1,48 +1,37 @@
 import type { GetPromptResult, Prompt } from '@modelcontextprotocol/sdk/types.js';
+import type { PromptDefinition } from '../prompts/guide-contract.js';
 import { Logger } from '../utils/logger.js';
-import type { PromptDefinition } from '../prompts/_shared.js';
 
 export type { PromptDefinition };
-
-export interface PromptHandler {
-  (args: Record<string, string>): Promise<GetPromptResult> | GetPromptResult;
-}
+export type PromptHandler = (args: Record<string, string>) => Promise<GetPromptResult> | GetPromptResult;
 
 export class PromptRegistry {
-  private logger: Logger;
-  private prompts: Map<string, PromptDefinition>;
-
-  constructor() {
-    this.logger = new Logger('PromptRegistry');
-    this.prompts = new Map();
-  }
+  private readonly entries = new Map<string, PromptDefinition>();
+  private readonly log = new Logger('PromptRegistry');
 
   register(name: string, definition: PromptDefinition): void {
-    if (this.prompts.has(name)) {
-      this.logger.warn(`Prompt '${name}' already registered, overwriting`);
-    }
-    this.prompts.set(name, definition);
-    this.logger.debug(`Registered prompt: ${name}`);
+    const replacing = this.entries.has(name);
+    this.entries.set(name, definition);
+    if (replacing) this.log.warn(`Prompt '${name}' already registered, overwriting`);
+    else this.log.debug(`Registered prompt: ${name}`);
   }
 
   has(name: string): boolean {
-    return this.prompts.has(name);
+    return this.entries.has(name);
   }
 
   list(): Prompt[] {
-    return Array.from(this.prompts.values()).map((def) => def.prompt);
-  }
-
-  async get(name: string, args: Record<string, string>): Promise<GetPromptResult> {
-    const def = this.prompts.get(name);
-    if (!def) {
-      throw new Error(`Prompt not found: ${name}`);
-    }
-    this.logger.debug(`Resolving prompt: ${name}`);
-    return await def.handler(args);
+    return [...this.entries.values()].map(({ prompt }) => prompt);
   }
 
   count(): number {
-    return this.prompts.size;
+    return this.entries.size;
+  }
+
+  async get(name: string, args: Record<string, string>): Promise<GetPromptResult> {
+    const definition = this.entries.get(name);
+    if (!definition) throw new Error(`Prompt not found: ${name}`);
+    this.log.debug(`Resolving prompt: ${name}`);
+    return definition.handler(args);
   }
 }

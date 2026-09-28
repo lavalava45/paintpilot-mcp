@@ -60,6 +60,17 @@ function confirmedTargets(record) {
               ...(typeof layer.rollback_value === 'string' ? { rollback_value: layer.rollback_value } : {}),
               ...(typeof layer.temporary === 'boolean' ? { temporary: layer.temporary } : {}),
               ...(typeof layer.decision === 'string' ? { decision: layer.decision } : {}),
+              ...(typeof layer.physical_role === 'string' ? { physical_role: layer.physical_role } : {}),
+              ...(typeof layer.opacity_role === 'string' ? { opacity_role: layer.opacity_role } : {}),
+              ...(typeof layer.construction_tier === 'string' ? { construction_tier: layer.construction_tier } : {}),
+              ...(typeof layer.parent_hypothesis_id === 'string' ? { parent_hypothesis_id: layer.parent_hypothesis_id } : {}),
+              ...(typeof layer.parent_construction_revision === 'string' ? { parent_construction_revision: layer.parent_construction_revision } : {}),
+              ...(layer.negative_space && typeof layer.negative_space === 'object' ? { negative_space: structuredClone(layer.negative_space) } : {}),
+              ...(layer.causal_effect && typeof layer.causal_effect === 'object' ? { causal_effect: structuredClone(layer.causal_effect) } : {}),
+              ...(layer.surface_frame && typeof layer.surface_frame === 'object' ? { surface_frame: structuredClone(layer.surface_frame) } : {}),
+              ...(Array.isArray(layer.depth_relations) ? {
+                depth_relations: structuredClone(layer.depth_relations),
+              } : {}),
             });
           }
         }
@@ -309,7 +320,7 @@ export function cycleEnvelope(store, record, { replay = false, closed_previous }
   if (!healthyCompletion) {
     envelope.blocking_issue = record.error ?? (record.failed ? 'operation failed or requires reconciliation' : 'operation outcome is uncertain');
     envelope.diagnostics = {
-      route: 'MCP host -> embedded Photoshop Guard -> this fork/dist/index.js -> Photoshop',
+      route: 'MCP host -> embedded Photoshop Guard -> project dist/index.js -> Photoshop',
       summary: record.summary,
       purpose: record.purpose,
       error: record.error,

@@ -5,9 +5,159 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] — Digital Painting fork
+## [Unreleased] — Photoshop MCP — Digital Painting Edition
 
 ### Added
+
+- 2026-09-28: complete **P1-C.9 qualitative material-response decomposition**. MATERIAL planning
+  and exact-current refinement review now share one subject-agnostic `material_response` contract
+  covering base response, form-driven light, specular/reflection, transmission where applicable,
+  surface condition, variation scale, edge/contact interaction and subordinate microtexture. The
+  existing refinement gate remains authoritative: texture-only or unresolved material response cannot
+  unlock DETAIL/MICRO_DETAIL, while exact durable style-contract basis preserves intentional flat/
+  stylized treatment without forcing photorealism. Compact Guard requires the decomposition before
+  MATERIAL mutation. Canonical verification after closure passes **74/74 test files / 736/736 tests**;
+  the catalog remains **130 tools / 14 Guard tools / 5 prompts** and strict source-independence residuals are zero.
+
+- 2026-09-28: implement P1-C.3 Soft-dominance / over-smoothing review as part of the existing Guard
+  visual-closure and stage-priority system. Broad global/medium softness-dominant work in non-trivial
+  paintings now requires an exact-current structured `softness_review` across edge hierarchy, mass
+  separation, large-form readability, focal hierarchy and primitive footprint. The contract is
+  construction-role aware: intentional optical haze is not penalized merely for softness, while a
+  form-bearing volumetric soft mass cannot pass by dissolving its structure. Failed reviews cannot be
+  accepted or marked resolved; they create a stable `soft-dominance` must-fix problem that blocks
+  finer work through the existing priority gate. Soft-round footprint debt is wired into the existing
+  `primitive_footprint=suspect` / cumulative-trend path instead of creating a separate quality score.
+  Focused soft-dominance/review tests pass, and the full canonical gate is green at **73 test files /
+  723 tests**, **130 atomic tools / 14 Guard tools / 5 prompts**, with source-independence still green.
+
+- 2026-09-28: implement P1-C.8 Causal Effects Graph. Semantic effect owners can now persist
+  reflection_of, shadow_from and emission_from relations to durable source owners and, where
+  required, receiving surfaces/media. Guard binds those relations to source/receiver construction
+  revisions, rejects missing or temporary causal owners, inherits the relation across continuation,
+  prevents silent in-place retargeting and marks dependent effects stale after structural source or
+  receiver changes. VisualMicroPlan/compact schemas preserve a qualitative causal statement plus
+  evidence instead of treating local reflection/shadow/glow resemblance as proof of causality.
+
+- 2026-09-28: implement P1-C.7 Aperture / Negative-Space Topology. Semantic owners can now persist
+  `aperture-of` / `negative-space-of` relations to established parent construction, including a
+  parent construction revision, topology statement and structural evidence. Background/color
+  sampling alone is rejected as structural proof. Parent repaint/texture continuation fails closed
+  until all durable opening dependents are explicitly reviewed via `preserve_negative_space_ids`,
+  and parent construction revision drift makes the opening relation stale. Focused regressions cover
+  durable architectural opening topology, silent parent repaint rejection, explicit preservation and
+  the background-color false-proof case.
+
+- 2026-09-28: implement P1-C.6 Pattern Distribution Semantics on top of the existing mechanical-pattern
+  review. Compact passes can declare `organic-clustered`, `directional-broken`, `perspective-regular`
+  or `intentional-uniform` distribution independently from motif-copy intent. Guard can now flag
+  mechanically uniform organic/directional spacing even when individual motifs differ, and reject
+  depth-invariant repeated modules when a perspective Surface Frame declares material scale
+  progression. Findings reuse the existing evidence-bound mechanical-pattern crop/review path;
+  random jitter is not treated as proof of organic distribution.
+
+- 2026-09-28: implement P1-C.5 Surface Frame / Orientation Field as durable semantic-owner metadata.
+  VisualMicroPlan can bind surface-driven work to 1–3 weighted dominant axes, an optional
+  convergence anchor, optional near/far scale progression, distribution semantics and explicit
+  local exceptions. Perspective-regular frames require a convergence anchor; continuation inherits
+  the established frame and Guard rejects silent in-place orientation drift. Focused contracts
+  cover water, facade and fabric cases without subject-name policy.
+
+- 2026-09-28: add the P1-C.4 Hierarchical Construction Graph. Semantic logical-layer owners can now
+  declare `primary -> secondary -> tertiary -> surface` construction dependencies. Guard binds
+  dependent owners to durable parent construction revisions, rejects missing/temporary/out-of-order
+  parents, and detects transitive stale prerequisites after structural parent corrections. Explicit
+  `construction_change` separates structural invalidation from ordinary tone/texture continuation,
+  so unrelated branches are not invalidated. Subject-agnostic fixtures cover tree, architecture and
+  water mappings.
+
+- 2026-09-28: complete P2.5 C6 specification-first replacement of the retained text/style semantic
+  domain. The six public text/style tools keep their established schemas and result contours while
+  their implementation now lives in project-owned `text-operations.ts` / `style-operations.ts`,
+  dispatches only through the UXP backend, fails closed on backend/UXP failure, and preserves pinned
+  `document_id` on document-bound mutations. A focused contract suite freezes tool order, defaults,
+  UXP payloads, style normalization, pinning and no-alternate-execution behavior. Canonical
+  verification passes **72 test files / 706 tests**; the current catalog is **130 tools / 14 Guard
+  tools / 5 prompts** (the additional tool is the independently developed continuous color-gradient
+  primitive already present in this dirty worktree).
+
+- 2026-09-28: add the P1-C.2 construction-role split above raw Photoshop mechanism selection.
+  Planning now distinguishes `continuous-field`, `volumetric-soft-mass`, and `optical-veil` before
+  choosing a concrete method; `photoshop_select_painting_method` can resolve that role directly and
+  still reports normal capability/fallback information. VisualMicroPlan preserves the role in its
+  paint strategy and enforces role/intent consistency plus Physical Stack authority, preventing an
+  optical veil from replacing opaque/form-bearing structure or a volumetric mass from being encoded
+  as a purely atmospheric/optical owner. Subject-agnostic fixtures cover a wall field, smoke body,
+  and aerial haze.
+
+- 2026-09-28: harden P1-C.2 construction-role enforcement for broad soft/environmental work.
+  Global/medium softness-dominant passes now require an explicit construction role. A
+  `continuous-field` stays on `continuous-color-field` by default and alternate execution requires a
+  named, justified fallback. An `optical-veil` can no longer silently fall back to the legacy Soft
+  Round / `soft-brush-build` dab-chain: the plan must name the preferred non-dab method and record a
+  concrete fallback reason.
+
+- 2026-09-28: add the P1-C.1 continuous tonal-field primitive. `photoshop_paint_color_gradient`
+  paints one UXP-native linear raster RGB/value field on an exact `layer_id` from explicit
+  canvas-pixel endpoints and 2–4 strictly ordered bounded color stops. The method palette now has a
+  dedicated `continuous-color-field` / `continuous-field` route and VisualMicroPlan treats it as one
+  semantic `gradient` mutation. Invalid stop topology is rejected rather than being reinterpreted as
+  the existing transparency-only gradient-mask operation. Live Photoshop acceptance is now complete:
+  `p1c1-live-gradient-20260928-04` paints an exact three-stop `(0,0) → (1200,800)` field on a 1200×800
+  raster layer, returns `gradient_kind=raster-color-linear`, and produces accepted frame SHA
+  `0442052123782a5f9134f5df8323022a50c2809612831cdec9794c28d2553354`; visual review confirms a
+  continuous cold-to-warm field with no dab/stamp or mechanical periodicity.
+
+- 2026-09-27: record the first returned Task-23 human labels without retroactively inventing a
+  vote-count acceptance rule. The neutral case answers are preserved in
+  `task23-review-pack/human-labels.received-20260927.json`; the positive case remains unresolved
+  because edge hierarchy was judged NO and secondary forms N-A, while all three negative controls
+  were rejected and the stylized-flat control was not forced toward realism. A non-retroactive v2
+  aggregation rule now requires every applicable target-required positive criterion to pass and
+  restricts N-A to genuinely inapplicable criteria. The same human round exposed a texture-only
+  false-positive on “major form more modelled?”, so `photoshop_analyze_value_structure` now also
+  emits/materializes a low-frequency grayscale thumbnail. A representational refinement PASS must
+  bind to exact-current low-frequency evidence showing that major-form modelling survives suppression
+  of small texture/noise; DETAIL/finalization fail closed when that evidence is absent or unresolved.
+
+- 2026-09-27: add the subject-agnostic Physical Stack / Occlusion Gate for fresh non-trivial
+  paintings. Semantic logical layers now carry explicit physical/opacity roles and optional
+  direct depth anchors; declared front/behind relations are bound to exact Photoshop
+  `above_layer_id` / `below_layer_id` placement. VALUE and later stages fail closed until Art
+  Director records exact-current-frame evidence that depth order, opaque-mass coverage,
+  occlusion, transparency intent and layer-stack alignment are coherent. The pass is bound to a
+  stable signature of occlusion-relevant semantic owners, so later structural-owner changes make
+  it stale; adding a new opaque/support/transmissive owner after SHAPE requires a structural reset.
+  This prevents physically opaque scene masses from surviving into form/material rendering as
+  translucent overlays while preserving explicit glass, atmosphere, light and other optical roles.
+
+- 2026-09-27: define the project-owned release and compatibility policy in docs/release-policy.md. Product SemVer/release criteria are independent of upstream releases; Guard protocol, runtime-state and UXP bridge revisions remain explicit compatibility contracts; release notes must name migrations and the supported Photoshop/UXP host baseline; selectively ported external fixes receive normal project testing and attribution.
+
+- 2026-09-27: complete materialization of the Task-23 blinded perceptual image pack. The three
+  predeclared negative controls now have canonical Guard -> UXP Photoshop AFTER captures with frozen
+  SHA-256 identities and operation provenance: texture-only, residual-block-in geometry and
+  destructive overdetail. All five review pairs are therefore materialized; Task 23 remains
+  intentionally human-required because human-labels.blank.json is still empty and no producer/tool
+  verdict is substituted for independent blinded adjudication.
+
+- 2026-09-27: materialize the first reviewable slice of the Task-23 blinded human perceptual pack.
+  task23-review-pack now freezes exact SHA-bound BEFORE/AFTER evidence for the positive modelled-form
+  case and the intentionally flat/graphic style-preservation control, plus explicit target/style
+  contracts and an intentionally blank independent-human label sheet. The manifest also records the
+  three still-missing negative-control AFTER captures instead of manufacturing human acceptance from
+  repository, tool-success or pixel evidence.
+
+- 2026-09-26: add a mandatory Art Director prompt-conflict / rendering-strategy preflight. Every
+  painting directive now freezes one dominant rendering objective, secondary traits, any prompt
+  tensions that change the first 1–3 passes, the chosen rendering strategy, and the initial pass
+  sequence before Painter mutation. Structural ambiguity fails closed; when multiple materially
+  reasonable interpretations remain, the contract requires explicit user confirmation rather
+  than silently averaging them. Guard also enforces an early strategy-validation checkpoint after
+  1–2 **meaningful** Painter previews: the exact current frame must show that the dominant objective
+  is advancing, otherwise the directive must replan with a genuinely changed rendering strategy
+  and re-enter the early validation window. Focused Planner/Painter regressions cover missing
+  preflight, structural conflicts, user-choice conflicts, insufficient-vs-meaningful preview
+  counting, stale validation evidence, and no-op replans.
 
 - 2026-09-25: expose three core visual-agent research directions in the public README: Adaptive
   Multiscale Visual Verification, Bounded Artistic Autonomy, and Evidence-Bound Recovery. The README
@@ -15,7 +165,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stateful visual-agent control, with links to the multiscale research concept, the P0-C autonomy
   roadmap, and the Guard/recovery architecture.
 
-- 2026-09-25: add `docs/adaptive-multiscale-visual-verification.md`, a publishable technical concept
+- 2026-09-25: add the adaptive-multiscale visual-verification concept (now consolidated in
+  `docs/visual-evaluation.md`), a publishable technical concept
   for treating visual review as adaptive, provenance-bound evidence acquisition across COMPOSITION /
   OBJECT / MICRO scales. A point-by-point audit against the original multiscale task also separates
   the already-live-accepted baseline from four stronger open P0-V guarantees: runtime
@@ -89,13 +240,428 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add structured visual critique fields (`observed_change`, `target_resolved`, `regressions`, `uncertainty`) to the preview barrier contract and durable controller verdicts.
 - Add a compact durable controller `painting-state.json` mirror with current/accepted frame, active problem/hypothesis and last structured critique, linked to operation ids.
 - Add paint-dab execution telemetry for ordered style runs, unique styles, planned internal batches, affected center bounds and measured per-batch duration.
-- Add `docs/painting-evaluation-suite.md` with sphere, cube/building, still-life, portrait and holdout-transfer exercises under fixed execution budgets.
+- Add the painting evaluation suite (now consolidated in `docs/visual-evaluation.md`) with sphere, cube/building, still-life, portrait and holdout-transfer exercises under fixed execution budgets.
 - Add the embedded 13-tool `photoshop_guard_*` surface and dedicated `dist/cos-plugin.js` required-mode entry for Chat On Steroids, with durable operation receipts, exact acknowledgements, preview/verdict barriers, checkpoints, recovery, and in-process async jobs.
 - Add durable continuation recovery data to Guard status/resume: after a lost completed async poll result, callers can recover the exact pending receipt token plus pending visual preview SHA/path without replaying the mutation.
 - Add `silent_stall` continuation monitoring: known-next-step visual workflows are reported after roughly 90 seconds without semantic advancement; pending closure obligations identify the phase and read-only diagnostic churn does not reset the timer.
 - Add sticky technical/artistic/mixed commentary modes with independent short/normal/detailed verbosity and one-action overrides.
 
 ### Changed
+
+- 2026-09-28: close the live-discovered compact compiler gap for global `continuous-field` passes.
+  `photoshop_paint_color_gradient` now participates in automatic mandatory AFTER-preview insertion,
+  and compact passes can carry an explicit subject-agnostic `construction_role` through to the
+  VisualMicroPlan `paint_strategy` instead of losing the role before execution. A regression proves
+  missing construction role rejects before mutation while a valid continuous field executes through
+  the normal durable async Guard path. Full canonical verification after the repair is green at
+  **74/74 Vitest files / 740/740 tests**, with the unchanged **130 tools / 14 Guard tools / 5 prompts**.
+
+- 2026-09-28: close the final retained P0-2 compact-observation gap. Exact negative
+  `previous_observation.regression` sentinels (`none`, `none observed`, `no regression(s) [observed]`)
+  now normalize to **no regression evidence** instead of becoming truthy regression text that forces
+  `verdict=regression` / `disposition=correct`. The compiler reports
+  `negative_regression_sentinel_normalized`; substantive text is deliberately preserved, including
+  phrases that begin with “no regression” but then describe a real degradation. The public compact
+  schema continues to prefer omission/null when no regression is visible. This closes the last retained
+  P0-2 machine follow-up. Final canonical verification is green at **74/74 Vitest files / 738/738
+  tests**, **124 packed dist JS files**, 0 lint errors (30 existing warnings), **130 tools / 14 Guard
+  tools / 5 prompts**, and source-independence **626 / 40,956 = 1.53%** with all strict residuals zero.
+
+- 2026-09-28: close the retained P0-2 `selection-mask` capability/compiler mismatch. The method palette
+  now models selection sources as an explicit `preparationAnyOf` contract rather than pretending that
+  rectangle, ellipse, subject selection and feathering are all simultaneously required. Compact
+  VisualMicroPlan treats selection tools as preparation and `photoshop_create_layer_mask` as the one
+  visual mutation, requires one explicit selection source, preserves optional feathering without
+  inferring geometry, and appends the mandatory AFTER preview barrier. The method runs through the
+  normal moderate-risk durable async Guard job. Focused selection/method/microplan regressions pass,
+  and full canonical verification is green at **74/74 files / 737/737 tests**, **130 tools / 14 Guard
+  tools / 5 prompts**, with source-independence **626 / 40,931 = 1.53%** and all strict residuals zero.
+
+- 2026-09-28: close the retained P0-2 document-activation focus gap by classifying
+  `photoshop_set_active_document` as explicit **UI-activating navigation**. Successful activation reports
+  machine-readable `ui_effect` metadata with `may_foreground_photoshop=true` and
+  `eligible_for_no_focus_acceptance=false`; no-focus acceptance explicitly excludes this operation.
+  Ordinary document-bound work remains pinned by `document_id` and must not switch tabs implicitly.
+
+- 2026-09-28: close repository gates **P2.5–P2.8**. Source-independence, standalone product identity,
+  provenance/license, and selective external-intake verifiers are wired into `verify:canonical`;
+  `NOTICE` is the canonical provenance record and `docs/external-intake.md` is the maintained selective
+  intake contract. The overall P2 gate remains open only on **P2.4**: publish the Windows MCPB
+  packaging repair and repeat the literal fresh origin-only clone proof.
+
+- 2026-09-27: complete **P2.5 Phase D — Windows-only platform cut and legacy transport retirement**.
+  Make Windows the sole supported host platform and remove the now-unreachable macOS AppleScript
+  detector/executor, Windows COM/VBS executor, cross-platform `ScriptExecutor`, script queue,
+  ExtendScript transport helpers, legacy executor/document-target tests, old ExtendScript spike and
+  batching harnesses, and unused POSIX release helpers. Rewrite `windows-detector.ts` around Windows
+  Registry/standard Adobe install paths/`PHOTOSHOP_PATH`/`tasklist.exe`, and reduce
+  `PhotoshopConnection` to discovery/version/status only; it no longer exposes `executeScript()` or
+  launch semantics. MCPB packaging and manifest compatibility are now explicitly Windows-only.
+  Production Photoshop execution remains exclusively Guard → UXP and fail-closed. Canonical verification
+  passes **71 test files / 698 tests** with the unchanged **129 tools / 14 Guard tools / 5 prompts**
+  surface. Exact-line overlap against `v1.7.6` falls from 6.51% to **4.68% canonical runtime**, from
+  8.96% to **5.00% first-party source**, and from 6.76% to **3.55% code + tests**. This is the first
+  phase to pass the predeclared `<5%` canonical-runtime overlap threshold; P2.5 remains open for the
+  remaining high-overlap production islands and final provenance gate. The final Windows-only MCPB is
+  ~5.71 MB / 114 packed dist JS files. A fresh Chat On Steroids child started after that build
+  (`PID 10976`, after the 00:47:11 dist timestamp) reports UXP ready, matching bridge revision,
+  Photoshop 2026 capabilities, and embedded Guard `mode=required` with raw mutation bypass blocked.
+
+- 2026-09-27: complete **P2.5 Phase C5 — image placement + Smart Object source-independence rewrite**.
+  Replace the inherited inline implementation for the six image-placement/Smart Object tools with
+  project-owned `image-placement-operations.ts`, `smart-object-operations.ts` and the narrow
+  `asset-operation-shared.ts` helper; rebuild both public tool modules as compact catalog builders.
+  Preserve absolute-top-left Place semantics, central pinned-document behavior, Smart Object detail
+  projections and pre-dispatch absolute-path/file-existence validation. Preserve `photoshop_open_image`
+  as the special stable-command bootstrap path with `_guard_operation_id`, durable UXP receipt and
+  `not-executed` retry semantics instead of normalizing it into the ordinary mutation path. Production
+  remains UXP-only/fail-closed with no `executeScript` dependency or mutation replay. Add a dedicated
+  six-tool black-box contract. Canonical verification passes **76 test files / 727 tests**; runtime
+  remains 129 tools / 14 Guard tools / 5 prompts. Exact-line overlap against `v1.7.6` falls to **6.51%
+  canonical runtime**, **8.96% first-party source**, and **6.76% code + tests**. Same-path overlap drops
+  from 58.0% to 9.7% for image placement and from 56.0% to 8.3% for Smart Objects; no cross-file
+  implementation block exceeds five contiguous exact lines. The final ~5.74 MB MCPB passes pack
+  verification, and a fresh Chat On Steroids child (`PID 16372`) started after the final build passes
+  UXP/revision readiness. Direct Place and Convert-to-Smart-Object calls are correctly rejected by the
+  required Guard as `guard_required`, confirming the rewritten C5 catalog is live without reopening raw
+  mutation bypass.
+
+- 2026-09-27: complete **P2.5 Phase C4 — filters + adjustments/color source-independence rewrite**.
+  Replace the inherited inline implementation for 18 filter/adjustment/color tools with project-owned
+  `filter-operations.ts`, `adjustment-operations.ts`, `color-adjustment-operations.ts` and the small
+  `adjustment-operation-shared.ts` substrate; rebuild the three public tool modules as compact catalog
+  builders. Preserve the exact primitive/action routing, filter validators/defaults, Curves preset
+  normalization, color clamping/defaults, central pinned-document semantics and the established split
+  between plain-text confirmations and atomic JSON results. Production remains UXP-only/fail-closed
+  with no `executeScript` dependency or mutation replay. Add a dedicated 18-tool black-box contract.
+  Canonical verification passes **75 test files / 720 tests**; runtime remains 129 tools / 14 Guard tools /
+  5 prompts. Exact-line overlap against `v1.7.6` falls to **7.02% canonical runtime**, **9.39%
+  first-party source**, and **7.08% code + tests**. Same-path overlap is now 10.4% for filters, 11.3%
+  for adjustments and 14.4% for color adjustments, with no cross-file implementation block larger than
+  six contiguous exact lines. The final ~5.73 MB MCPB passes pack verification; a Chat On Steroids child
+  started after the final build (`PID 30576`) passes UXP/revision readiness and capabilities reads, and a
+  direct call to the rewritten Curves tool is correctly rejected by the required Guard as `guard_required`,
+  confirming the C4 catalog is live without reopening raw mutation bypass.
+
+- 2026-09-27: complete **P2.5 Phase C3 — selection + masks source-independence rewrite**. Replace the
+  inherited 18-tool selection/mask implementation with project-owned `selection-operations.ts`,
+  `mask-operations.ts` and `selection-operation-shared.ts`, and rebuild `selection-tools.ts` /
+  `mask-tools.ts` as compact catalog builders. Preserve central pinned-document semantics, the accepted
+  mix of atomic JSON and legacy-visible plain-text confirmations, selection normalization/error mappings,
+  gradient/clipping behavior, and UXP-only/fail-closed routing with no mutation replay. Remove the
+  direct `PhotoshopDetector` dependency from Select Subject and use the already rewritten capability
+  contract for the PS 23+ gate. Add `tests/selection-mask-domain-contract.test.ts` covering all 18 tool
+  names/order plus representative payloads, result contours, validation and no-legacy-dispatch behavior.
+  Canonical verification passes **74 test files / 713 tests**; runtime remains 129 tools / 14 Guard tools /
+  5 prompts. Exact-line overlap against `v1.7.6` falls to **8.35% canonical runtime**, **10.53%
+  first-party source**, and **7.90% code + tests**. Same-path overlap drops from 78.2% to 9.0% for
+  `selection-tools.ts` and from 67.5% to 20.8% for `mask-tools.ts`; cross-file review finds no moved
+  implementation block larger than six contiguous exact lines. The final ~5.73 MB MCPB passes pack
+  verification; a Chat On Steroids child started after the final build (`PID 25088`) passes UXP/revision
+  readiness, the rewritten selection-bounds read correctly fails closed with `no_active_document` in
+  the current empty session, and embedded Guard remains required with raw mutation bypass blocked.
+
+- 2026-09-27: complete **P2.5 Phase C2 — full layer-domain source-independence rewrite**. Replace the
+  inherited inline implementations for base layer tools, layer properties, transforms and stack ordering
+  with project-owned `layer-operations.ts`, `layer-property-operations.ts`,
+  `layer-transform-operations.ts`, `layer-ordering-operations.ts` and shared bounded helpers. Rebuild
+  the four public declaration modules as compact catalog builders while preserving the 25-tool public
+  surface, central `document_id` pinning, accepted result contours and UXP-only/fail-closed routing.
+  Reimplement the formerly upstream-identical blend-mode helper and add a full layer-domain black-box
+  contract. Retire the stale current-only ExtendScript layer API harness from README verification.
+  Canonical verification passes 73 test files / 707 tests; runtime remains 129 tools / 14 Guard tools /
+  5 prompts. Exact-line overlap against `v1.7.6` falls to **9.93% canonical runtime**, **11.87%
+  first-party source**, and **8.89% code + tests**. Same-path layer declaration overlap is now
+  6.1–13.3%, and cross-file review finds no transplanted implementation block larger than four lines.
+  The final ~5.72 MB MCPB passes pack verification; a Chat On Steroids child started after the final
+  build (`PID 16012`) passes UXP/revision readiness, the rewritten layer read path correctly fails
+  closed with `no_active_document` in the current empty session, and embedded Guard remains required
+  with raw mutation bypass blocked.
+
+- 2026-09-27: complete **P2.5 Phase C1 — document + history/state source-independence rewrite**.
+  Preserve the existing 12-tool public MCP schemas/results and central document pinning contract while
+  replacing upstream-shaped inline execution with project-owned `document-operations.ts`,
+  `history-operations.ts` and `state-operations.ts`. Reimplement the formerly 97.6%-matching
+  `platform/capabilities.ts` with frozen version/feature behavior and restructure the shared atomic
+  result helper. Production dispatch remains UXP-only with no legacy script execution. New family
+  contract/capability tests plus the existing preview bundle test pass; canonical verification is now
+  72 test files / 701 tests. Exact-line overlap against `v1.7.6` falls to 11.74% for the canonical
+  runtime, 13.38% for first-party source and 10.01% for code + tests. Cross-file inspection finds no
+  large transplanted implementation block (largest contiguous exact match: 10 lines document, 3 lines
+  history/state). The final 5.71 MB MCPB passes pack verification, and a freshly restarted CoS child
+  passes UXP ping/state/list/capabilities plus the expected structured no-document history failure;
+  embedded Guard remains required and raw mutation bypass stays blocked.
+
+- 2026-09-27: complete Phase B of the P2.5 source-independence work by replacing the inherited MCP
+  bootstrap substrate from current behavioral contracts. `src/index.ts`, `src/core/server.ts`,
+  tool/prompt registries, `src/core/session.ts`, `src/utils/logger.ts` and `src/errors/envelope.ts`
+  now use a smaller project-owned structure; server tool wiring moved into the current-only
+  `src/core/server-tool-catalog.ts`. New bootstrap regression coverage freezes registry replacement,
+  Session injection/state, stderr-only logging and structured-error normalization. The static tool-count
+  verifier was updated to follow the new catalog declaration without changing the runtime surface:
+  129 tools / 14 Guard tools / 5 prompts remain intact. Canonical verification passes 70 test files /
+  693 tests. Exact-line overlap against `v1.7.6` is now 12.65% for the canonical runtime, 14.15% for
+  first-party source and 10.60% for code + tests; a freshly restarted CoS child passes UXP/Guard
+  readiness on the rewritten substrate.
+
+- 2026-09-27: complete Phase A of the P2.5 source-independence cutover. Retire the inherited
+  standalone browser product (`web/` + `src/ui/`) and anonymous analytics subsystem
+  (`src/analytics/`) together with their SQLite/provider/AI-SDK/Hono dependencies, UI-only tests,
+  package entrypoints and MCPB payload. Replace the analytics-owned version lookup with the small
+  project-owned `src/core/app-version.ts`, remove telemetry side effects from the canonical MCP
+  runtime, and harden pack verification so retired UI/analytics output cannot ship. The resulting
+  first-party-source exact-line overlap against the original `v1.7.6` baseline falls from ~29.0% to
+  14.87% (canonical runtime 13.40%); canonical verification passes 69 test files / 687 tests, the
+  rebuilt MCPB contains no retired UI/analytics/web payload, and a freshly restarted CoS child passes
+  UXP/Guard readiness.
+
+- 2026-09-27: collapse `docs/PAINTING-ROADMAP.md` back to a true forward-only TODO. Completed
+  P0-C implementation, Task 23a repository implementation, P2.1–P2.3 and P2.5 implementation detail
+  now lives in this changelog / the acceptance matrix instead of remaining as active roadmap prose.
+  Partially complete items were reduced to their actual residual gates: Task 24 real-Photoshop
+  brush/anti-primitive acceptance, Task 23 independent blinded human labels, P0-E.7 supplied-pack
+  live/human acceptance and P2.4 fresh-origin proof. The priority order was rewritten around only
+  work that can still change project acceptance status.
+
+- 2026-09-27: complete the **repository implementation of Task 24a–24f real-paint brush-path and
+  anti-primitive finish hardening**. Guard/VisualMicroPlan now assigns deterministic nested stable UXP
+  command ids instead of reusing one root operation id across distinct brush preparation/mutation
+  commands; stroke-tool readiness fails closed before visual mutation for unproven mechanism/settings
+  combinations; command-identity, tool-readiness and generic bridge failures remain distinguishable;
+  ordinary later-stage passes cannot regress to `GLOBAL_BLOCK_IN` merely to regain broad
+  `paint_regions`; material passes use the existing evidence-backed brush-role/style contracts; and
+  nontrivial finalization consumes exact-frame multiscale refinement evidence plus journal-derived
+  primitive-dominance provenance rather than accepting a recognizable block-in as finished. Focused
+  regression suites and TypeScript builds passed during implementation.
+
+- 2026-09-27: close **Task 24 live brush-path / anti-primitive acceptance** against real Photoshop.
+  `task24-live-brush-smoke-20260927-01` completed preset selection, brush configuration and real BRUSH
+  raster mutation in one Guard/VisualMicroPlan pass without the old `uxp_bridge_command_id_conflict`;
+  dedicated PENCIL, SMUDGE and ERASER live smokes also completed. A deliberate backward-stage request
+  was rejected before dispatch with `painting_stage_regression_requires_reset`, while an incompatible
+  material/brush-role request was rejected with `brush_role_material_fitness_mismatch` /
+  `paint_strategy_required`. Representative document 7090 then progressed from semantic sky/ground/
+  rabbit block-in owners through real FORM_AND_LIGHT and MATERIAL brush passes. The final accepted
+  frame is `task24-rep-directive-final-touch-20260927-01`, SHA
+  `c4788d353c28cbfeb04a6d685f70ec24240622c04440c0bacbc06284599ae04c`; exact-current grayscale
+  evidence is `task24-rep-final-value-exact-20260927-01`, grayscale SHA
+  `bb2e2947a674f57cbe6f842a081bcc63e22da1669fff3ffb7119d53ba60e08a8`. Exact-current Art Director
+  value/refinement gates and completion passed. Evidence summary:
+  `processes/task24-live-brush-acceptance-process/run-02/evidence/task24-live-acceptance.md`.
+
+- 2026-09-27: repair `build:mcpb` for the project's Windows-only release host instead of
+  unconditionally requiring the Unix `zip` executable. A fresh origin-only Windows clone exposed the
+  release-autonomy failure after canonical verification passed 66/66 files and 601/601 tests; the
+  packer now uses PowerShell `Compress-Archive` and fails closed on unsupported host platforms. The
+  repaired current worktree successfully builds both `photoshop-mcp-digital-painting-1.7.6.mcpb` and
+  the stable `photoshop-mcp-digital-painting.mcpb`.
+  Follow-up verification inspected the stable archive and confirmed its manifest, compiled server
+  entry point and UXP manifest are present; the local MCP stdio smoke also starts the packaged source
+  server surface successfully. The strict P2.4 fresh-origin closure remains pending until this repair
+  itself is published to origin and replayed from a new origin-only clone.
+
+- 2026-09-27: tighten the P2.4 repository-autonomy documentation boundary: `docs/development.md` no
+  longer presents an upstream Git remote as a development prerequisite and instead identifies it as
+  optional selective comparison/intake. The literal fresh origin-only clone acceptance remains
+  pending and is not inferred from the current dirty worktree.
+
+- 2026-09-27: complete the repository implementation of **Task 23a semantic layer ownership /
+  layer-separation**. Compact painting passes now bind a stable caller-declared `hypothesis_id` to an
+  exact logical layer, derive the owner registry from durable Guard journal evidence, reject owner/layer
+  mismatches and unrelated-owner reuse before Photoshop dispatch, and preserve temporary ownership
+  across restart/status/resume. Moderate/high temporary owners fail closed at committed
+  `FORM_AND_LIGHT` and later stages until explicitly resolved; Guard-only `keep` promotes accepted
+  temporary ownership without a Photoshop mutation. Status/resume ownership projection now reuses the
+  captured journal/state snapshot instead of rescanning durable state mid-projection. Focused compact,
+  session-store, embedded-Guard, VisualMicroPlan and Planner/Painter validation passes **232/232** tests
+  plus a clean TypeScript server build. Photoshop/UXP connectivity was also verified ready with a
+  matching `compact-v2-20260926-brush-profile` bridge revision; the remaining Task-23 gate is blinded
+  human perceptual acceptance rather than additional repository ownership plumbing.
+
+- 2026-09-26: complete the **repository implementation of P2.1–P2.3 inherited-substrate cleanup and
+  UXP-only cutover**. Added the consolidated `docs/ownership-and-retirement.md`, removed generic product breadth that did not
+  serve the painting/compositing product, and collapsed the public surface from **149 tools / 16
+  recipes / 21 prompts** to **128 semantic tools / 0 recipes / 5 guide prompts**. Removed the entire
+  recipe execution layer, Data Sets/mail-merge subsystem, opaque Actions playback, raw
+  `photoshop_execute_script`, dead `src/api/batch-play.ts`, shared `PhotoshopAPIFactory` /
+  `ExtendScriptSnippets`, duplicate document-target COM preflight and unreachable legacy branches
+  from painting, selection, layer, text, smart-object, transform, filter and other semantic tool
+  modules. `PhotoshopBackendRouter` now defaults to one UXP backend and fails closed with
+  `uxp_bridge_unavailable`; no production semantic path selects or replays through ExtendScript/COM.
+  Legacy platform connection/executors remain bounded to detection/versioning, diagnostics and
+  historical fixtures. The dodge/burn method palette now composes semantic layer/fill/blend tools
+  rather than a removed recipe. Migration inventory and policy verifiers were rewritten for the
+  UXP-only contract. Repository acceptance passes **658/658** Vitest tests plus build, pack, lint
+  (warnings only), compact-v2, painting-policy, prompt, catalog-count and live-evidence-ledger gates.
+  The only remaining P2.3 acceptance item is a post-cutover real-Photoshop smoke after reloading the
+  current server/UXP companion; this live result must not be inferred from repository tests.
+
+- 2026-09-26: complete **P1-A autonomous-product cleanup / legacy retirement**. Reachability audit
+  classified the retired external Core/controller/daemon provider chain and historical manual
+  consumers as dead or migration-only, then physically deleted 16 obsolete files including
+  `photoshop-session.mjs`, the persistent daemon/client, duplicate session-store/cycle helpers,
+  historical controller/stage acceptance scripts and the retired Core workflow document. Maintained
+  README/INSTALL/AGENTS/prompts/policy/architecture now state that the external provider chain is
+  removed rather than compatibility-supported. `tests/legacy-consumer-retirement.test.ts` now asserts
+  physical absence; compact-v2 audit status/verifier were updated to deletion-complete semantics.
+  P1-A.5 found no additional clearly dead production TypeScript surface: standalone UI remains
+  package-reachable and all retained Photoshop tool factories are registered by `src/core/server.ts`;
+  broader live inherited-substrate decisions remain P2. Full `npm run verify:canonical` passes
+  **660/660** tests, build/pack/lint (warnings only), compact-v2, painting-policy, prompt coverage,
+  tool-count and live-evidence-ledger gates.
+
+- 2026-09-26: classify **P0-D Tasks 8/8a/8b** as a completed repository calibration harness with a
+  remaining **human-required** gate. The repo contains the neutral held-out manifest, blinded review
+  pack, balanced/repeated evaluation plan and scorer, but no completed independent human-reference
+  dataset; only the blank pack and reference-shape template exist. Runtime critic/stop authority is
+  therefore not promoted from synthetic evidence, and P1-A cleanup is allowed to proceed without
+  waiting for perceptual adjudication.
+
+- 2026-09-26: complete **P0-V.4 crop provenance / scale-invariance contract**, closing the P0-V
+  multiscale hardening block. Every durable escalation crop now persists source `canvas_width` /
+  `canvas_height`, exact requested/effective source-document regions, crop scale metadata and an
+  explicit native-or-downsampled/no-new-detail-by-upscaling resolution policy. Initial prefetched
+  local review projects the same canvas/source-coordinate contract. Regression coverage proves that
+  the same fractional requested region normalizes/clamps to identical semantic coordinates under
+  1600px and 800px overview metadata while only preview/crop scale changes; restart/status/resume
+  preserve the provenance exactly. Focused region/state/compact/embedded validation passed **108/108**
+  tests plus a clean TypeScript build.
+
+- 2026-09-26: complete **P0-V.3 model-facing image delivery as a visual-closure prerequisite**.
+  Public Guard cycle/job-poll responses now persist a durable `photoshop.guard.visual_delivery.v1`
+  receipt only after MCP image-content blocks are actually assembled and SHA-verified. Artifact
+  capture/path/SHA remain separate from delivery proof. An incomplete delivery creates explicit
+  `redelivery_required` debt in status/resume, blocks verdict closure and the next mutation, and
+  returns the same operation's review package for bounded read-only re-delivery with
+  `mutation_replayed=false`. Re-delivery merges roles for the same whole-frame SHA and clears only
+  delivery debt; it does not reclassify or replay the artistic mutation. Existing unreadable-artifact
+  and response-byte-budget fixtures now prove fail-closed closure behavior. Focused delivery/review
+  validation passed **122/122** tests plus a clean TypeScript build.
+
+- 2026-09-26: complete **P0-V.2 context-preserving direct MICRO review**. Compact passes may now
+  provide an exact broader `object_context_region_bounds` alongside the tight MICRO `region_bounds`.
+  Guard validates containment, never invents context geometry, and after the single artistic mutation
+  captures the broader OBJECT evidence read-only through the existing immutable review-evidence path.
+  Whole/object/micro evidence stays bound to one document and whole-frame SHA; omitting the broader
+  bounds leaves the existing whole+micro contract unchanged. Focused compact/multiscale/embedded
+  validation passed **96/96** tests plus a clean TypeScript build.
+
+- 2026-09-26: complete **P0-V.1 runtime uncertainty-driven multiscale escalation and final-comparison whole-frame contract**. Compact visual observations may now carry structured `uncertainty_review` evidence with exact source-document regions: unresolved overview uncertainty escalates the same operation to read-only OBJECT evidence, and unresolved OBJECT uncertainty with an explicit tighter region escalates to MICRO without replaying the artistic mutation. The runtime never infers crop geometry or escalation level from prose. Uncertainty-driven review debt is durable across restart/status/resume and remains additive to existing structured `review_findings[]`. Final Art Director comparison now requires durable whole-frame composition evidence; local crops are supplemental and cannot substitute for a missing whole-frame artifact. Focused multiscale/Planner/session validation passed **192/192** tests plus a clean TypeScript build.
+
+- 2026-09-26: complete **P0-C.10 artistic-throughput / Guard-choreography telemetry**, closing the
+  P0-C throughput/autonomy block. Guard now counts canonical model-visible `cycle_auto` calls exactly
+  once, distinguishes semantic-dispatch / bookkeeping-only / recovery-only / rejected-before-dispatch
+  round-trips, accumulates actually dispatched semantic artistic actions (including internal async
+  execution without inventing another host call), and reports actions-per-round-trip beside existing
+  latency components plus regression/recovery/evidence-integrity controls. Deterministic same-task
+  repository benchmark for six semantic actions: baseline 12 model-visible Guard calls, ratio 0.5 and
+  240 ms aggregate semantic-cycle proxy; semantic-pass path 2 calls, ratio 3.0 and 75 ms, with zero
+  regression/recovery/evidence failures in both fixtures. A separate regression control proves that an
+  improved ratio cannot mask a quality failure. Full `npm run verify:canonical` passes **654/654**
+  tests plus build, pack, lint (warnings only), compact-v2, painting-policy, prompt/catalog,
+  tool-count and live-evidence-ledger gates.
+
+- 2026-09-26: complete **P0-C.9 task-scoped Painter autonomy window**. Art Director cadence now keeps
+  directive-wide `completed_microplans` only as telemetry while each active Painter task owns its own
+  successful-pass counter, a bounded experimental horizon of up to three successful passes, and a
+  durable `task_autonomy_remaining` count. Moving to the next task resets the task-local window;
+  restart/resume preserves task identity and remaining allowance. Regression, uncertainty, protected
+  quality loss and existing global/stage interrupt paths still force early review; per-pass visual
+  evidence/barriers are unchanged. Focused Planner/session-store validation passed 88/88 tests plus a
+  clean TypeScript server build.
+
+- 2026-09-26: complete **P0-C.8 dependency-aware primary artistic blocker scheduling**. Guard now
+  separates one deterministic `primary_blocker` from the retained `problem_backlog`, selecting eligible
+  work by explicit dependencies, severity, scale and stable order. Resolving a prerequisite promotes
+  the next eligible stored problem without critic rediscovery, while a newly introduced severe
+  whole-frame must-fix can pre-empt a smaller active task. Compact status exposes one
+  `primary_next_action` instead of a flat set of competing corrections. Focused Planner/session-store
+  validation passed 87/87 tests; final Planner regression passed 49/49 plus a clean TypeScript build.
+
+- 2026-09-26: complete **P0-C.7 actionable causal strategy recovery**. Recovery attempts now retain
+  exhausted structural strategy ids and method classes. Reusing an exhausted causal strategy is
+  rejected, while compact dynamic preflight projects machine-readable currently available alternative
+  methods/classes from the live method palette without dispatching them. When no distinct method
+  remains the contract escalates to Art Director/human review. A successful accepted resolution resets
+  strategy debt only for that `problem_id` while unrelated recovery history remains intact. Focused
+  recovery/compact-contract validation passed 26/26 tests plus a clean TypeScript server build.
+
+- 2026-09-26: complete **P0-C.5 conservative artistic-classification normalization**. When an invalid
+  `visual_intent + impact_class` pair conflicts with an otherwise valid compact pass, the compiler may
+  now rewrite classification metadata only when the unchanged goal text and actual execution tool
+  admit one conservative semantics-preserving classification. The normalization is recorded in
+  `compiler_normalizations`; document/layer target, stage, scale, risk, action class, Photoshop tool and
+  artistic goal are never changed. Ambiguous goals and destructive REPLACE/ERASE/ROLLBACK controls
+  remain fail-closed before mutation. Focused compact-contract + method-palette validation passed
+  23/23 tests plus a clean TypeScript server build.
+
+- 2026-09-26: close **P0-C.3 compact hot-loop bookkeeping regression hardening**. Current compact-v2
+  already owns technical report/receipt/verdict closure behind `photoshop_guard_cycle_auto`; public
+  standalone report/ack/verdict providers remain absent. `documentNextRequiredAction()` projects one
+  stable continuation/finalization action for pending closure and one stable reconciliation action for
+  genuine uncertainty, while status/resume agree on the same next step. Table-driven recovery,
+  close-only transaction and session-store coverage passed 129/129 tests plus a clean TypeScript
+  server build, so no additional state-machine rewrite was justified.
+
+- 2026-09-26: complete **P0-C.2 adaptive per-pass mutation budgeting**. VisualMicroPlan's hard cap is
+  now 8 visual mutations, but every pass derives a stricter deterministic budget from risk, scale,
+  destructive action class, protected layers and affected artistic contracts. Low-risk medium passes
+  admit 6 related mutations and small/local passes up to 8; high-risk and destructive replace/erase/
+  rollback passes contract to 1. Over-budget requests fail before dispatch with a split/defer recipe,
+  and successful receipts expose requested/allowed/hard-cap budget diagnostics. Focused validation
+  passed 117/117 VisualMicroPlan/embedded-Guard tests plus a clean TypeScript server build.
+
+- 2026-09-26: complete **P0-C.1 one Guard semantic cycle = one artistic pass**. VisualMicroPlan now
+  projects a pass-level execution receipt across every planned non-preview sub-action with explicit
+  `completed | failed-or-uncertain | not-started` state. A middle visual-action failure stops later
+  actions, captures the same pass-boundary reconciliation preview, preserves already completed
+  action identity and never replays the completed prefix. Successful multi-action passes still expose
+  one final review barrier. Focused validation passed 118/118 VisualMicroPlan/embedded-Guard/recovery
+  tests plus a clean TypeScript server build.
+
+- 2026-09-26: **P0-E repository implementation gate complete.** P0-E.1–P0-E.6 now cover supplied-pack
+  ingestion/attribution, evidence-backed media and stamp profiling, bounded heterogeneous stamp
+  placement with exact partial/no-replay receipts, anti-copy propagation, scene-first pack planning,
+  and `exclusive` pack-only brush enforcement. The P0-E.7 repository gate is green: the complete
+  Vitest acceptance run passes 643/643 tests; painting-policy, prompt/catalog, compact-v2 structural,
+  tool-count (`149 = 133 atomic + 16 recipes`) and live-evidence-ledger verifiers pass individually.
+  P0-E.7 remains explicitly **live/human pending** because no actual user-supplied `.abr`/pack is
+  available in the current workspace/history; that real-art acceptance must not be substituted with
+  default brushes or synthetic pack fixtures and does not block subsequent repository implementation.
+
+- 2026-09-26: complete **P0-E.6 scene-first brush/stamp-pack planning and pack-only enforcement**.
+  Art runs can now persist `brush_pack_policy=preferred|exclusive`; exclusive mode requires every
+  brush mark to explicitly select an evidence-bound preset from the declared pack and every stamp
+  placement to carry matching `brush_pack_id + stamp_profile_id`, while non-brush Photoshop
+  operations remain unaffected. Art Director directives for pack-bound runs now require a
+  `brush_pack_scene_plan` that maps media roles or stamp profiles onto concrete Painter tasks only
+  after the existing composition/focal/mass/depth/light assessment is established. Raw hero stamps
+  require explicit user authorization for a stamp/collage style contract, and Painter dispatch is
+  blocked when pack vocabulary is not causally assigned to the active task. Stamp identity remains
+  separate from media-brush roles. Focused validation passed 141/141 tests plus a clean TypeScript
+  server build.
+
+- 2026-09-26: complete **P0-E.5 motif anti-copy integration** for stamp-instance painting. Guard's
+  mechanical-patterning analysis now treats each stamp instance as evidence-bearing geometry keyed by
+  its source stamp profile, so translation, rotation, uniform scale, reflection, color/opacity changes
+  and small placement variation do not disguise same-source organic repetition. Execution-derived
+  motif bounds from P0-E.4 feed the same durable instance-scale review path; deliberate
+  `intentional_regular` ornament remains exempt, while materially different overpaint can break the
+  near-copy cluster instead of forcing cosmetic jitter. The Painter/agent policy now explicitly
+  forbids treating transform jitter as artistic variation or a raw hero/foreground organic stamp as
+  automatically finished without an explicit collage/stamp style contract. Focused validation passed
+  91/91 tests plus a clean TypeScript server build.
+
+- 2026-09-26: complete repository implementation for **P0-E.4 bounded per-instance stamp
+  placement**. Added Guard-owned `photoshop_paint_stamp_instances`, a bounded UXP-only semantic
+  placement primitive with per-instance size, angle, horizontal/vertical flip, opacity and optional
+  color. One stable command places a heterogeneous batch on a pinned raster `layer_id`; partial
+  execution returns exact completed / failed-or-uncertain / not-started instance identity and is
+  never replayed under the same durable command id. Successful placements return source-document
+  bounds and motif/profile identity, and Guard now persists those execution-derived motif bounds as
+  durable review metadata. The UXP batch restores the prior active layer, foreground color and brush
+  settings after execution. Focused validation passed 154/154 tests across stamp placement,
+  VisualMicroPlan, session-store and embedded Guard plus a clean TypeScript server build.
 
 - 2026-09-26: complete repository implementation for **P0-E.3 stamp/motif visual vocabulary**.
   The brush-pack profile store now keeps stamp profiles as a separate protocol from media-brush mark
@@ -596,10 +1162,10 @@ The final disposable run must prove all of the following on the current post-mig
    `docs/roadmap-final-acceptance-matrix.md` are changed from `live-pending` to `live-pass` only
    if the run actually proves those conditions.
 
-Use `docs/compact-v2-live-acceptance-plan.md` as the detailed execution/evidence procedure. Keep
-`photoshop_save_document` and `photoshop_neural_filter` as intentional UXP-only/fail-closed
-exceptions; ordinary migrated tools may use ExtendScript/COM only when that backend is selected
-**before** any UXP dispatch.
+The detailed execution/evidence procedure used at the time lived in
+`docs/compact-v2-live-acceptance-plan.md`; that superseded plan is now retained only in Git history.
+The pre-dispatch legacy fallback policy described by that acceptance phase was later superseded by
+the P2.3 UXP-only / fail-closed production cutover.
 
 > The three follow-ups discovered during this acceptance were **not** archived; they remain active in
 > `docs/PAINTING-ROADMAP.md` under “Active follow-ups inherited from closed P0-2 acceptance”.
@@ -1295,3 +1861,4 @@ weaken acceptance to a vague “looks similar” claim merely to close the task.
 - 1.1.1 (`5cac9c1`)
 - 1.1.0 (`6e1c1f0`)
 - 1.0.0 (`17d8d91`)
+- Phase E residual pass: prompt helper reduced to a compatibility re-export; core prompt registry now consumes guide-contract directly; image and neural catalog schemas were re-expressed without public-contract changes. Gate: 1,278/40,087 exact lines = 3.19%, 0 identical files, 20 large blocks, 17 high-similarity files. build:server green; canonical tests 72/72 and 716/716, then verify:tool-counts exposed concurrent dirty-worktree drift (128 discovered vs docs expecting 130).

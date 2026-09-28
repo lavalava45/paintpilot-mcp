@@ -2,6 +2,7 @@ export type RecoveryKind = 'technical_uncertainty' | 'artistic_unresolved' | 'cr
 
 export interface RecoveryAttempt {
   strategy_id: string;
+  method_class?: string;
   materially_corrected: boolean;
   useful_partial_work?: boolean;
   failed: boolean;
@@ -39,6 +40,8 @@ export interface ArtisticRecoveryResolution {
   goal_achieved: false;
   retry_allowed: boolean;
   distinct_strategy_required: boolean;
+  exhausted_strategy_ids?: string[];
+  exhausted_method_classes?: string[];
   blocker?: string;
 }
 
@@ -111,6 +114,9 @@ export function resolveArtisticRecovery(facts: RecoveryFacts): ArtisticRecoveryR
   }
 
   const strategyIds = [...new Set(failures.map(attempt => attempt.strategy_id))];
+  const exhaustedMethodClasses = [...new Set(
+    failures.map(attempt => attempt.method_class).filter((value): value is string => !!value)
+  )];
   const sameStrategyFailures = failures.filter(attempt => attempt.strategy_id === failures[0]?.strategy_id);
   if (strategyIds.length === 1 && sameStrategyFailures.length === 1) {
     if (sameStrategyFailures[0]?.materially_corrected !== true) {
@@ -122,13 +128,15 @@ export function resolveArtisticRecovery(facts: RecoveryFacts): ArtisticRecoveryR
         distinct_strategy_required: false,
       };
     }
-    return {
-      decision: 'require_distinct_strategy',
+      return {
+        decision: 'require_distinct_strategy',
       preserve_useful_partial_work: preserveUsefulPartialWork,
       goal_achieved: false,
       retry_allowed: true,
-      distinct_strategy_required: true,
-    };
+        distinct_strategy_required: true,
+        exhausted_strategy_ids: strategyIds,
+        ...(exhaustedMethodClasses.length ? { exhausted_method_classes: exhaustedMethodClasses } : {}),
+      };
   }
 
   if (strategyIds.length >= 2) {
@@ -139,6 +147,8 @@ export function resolveArtisticRecovery(facts: RecoveryFacts): ArtisticRecoveryR
         goal_achieved: false,
         retry_allowed: false,
         distinct_strategy_required: false,
+        exhausted_strategy_ids: strategyIds,
+        ...(exhaustedMethodClasses.length ? { exhausted_method_classes: exhaustedMethodClasses } : {}),
         blocker: facts.dependent_work_remaining === true
           ? 'Dependent artistic problem exhausted two causally distinct failed strategies; continue only independent tasks.'
           : undefined,
@@ -150,6 +160,8 @@ export function resolveArtisticRecovery(facts: RecoveryFacts): ArtisticRecoveryR
       goal_achieved: false,
       retry_allowed: false,
       distinct_strategy_required: false,
+      exhausted_strategy_ids: strategyIds,
+      ...(exhaustedMethodClasses.length ? { exhausted_method_classes: exhaustedMethodClasses } : {}),
       blocker: 'Dependent artistic problem exhausted two causally distinct failed strategies.',
     };
   }
@@ -160,5 +172,7 @@ export function resolveArtisticRecovery(facts: RecoveryFacts): ArtisticRecoveryR
     goal_achieved: false,
     retry_allowed: true,
     distinct_strategy_required: true,
+    exhausted_strategy_ids: strategyIds,
+    ...(exhaustedMethodClasses.length ? { exhausted_method_classes: exhaustedMethodClasses } : {}),
   };
 }

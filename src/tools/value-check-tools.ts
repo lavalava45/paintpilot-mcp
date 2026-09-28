@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
-import { dirname, isAbsolute, resolve } from 'node:path';
+import { basename, dirname, extname, isAbsolute, resolve } from 'node:path';
 import type { ToolDefinition, ToolRegistry } from '../core/tool-registry.js';
 import { analyzeLuminanceJpeg } from '../core/value-check.js';
 
@@ -16,7 +16,7 @@ export function createValueCheckTools(registry: ToolRegistry): ToolDefinition[] 
       tool: {
         name: 'photoshop_analyze_value_structure',
         description:
-          'Capture a non-destructive Photoshop preview and derive grayscale/luminance evidence in Node. Returns a grayscale JPEG plus descriptive luminance summaries for Art Director review. It never declares artistic PASS automatically and does not modify the PSD.',
+          'Capture a non-destructive Photoshop preview and derive grayscale/luminance evidence in Node. Returns a full grayscale JPEG, a low-frequency downsampled grayscale thumbnail, and descriptive luminance summaries for Art Director review. The low-frequency view suppresses small texture/noise so major-form claims can be checked independently of surface activity. It never declares artistic PASS automatically and does not modify the PSD.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -58,14 +58,22 @@ export function createValueCheckTools(registry: ToolRegistry): ToolDefinition[] 
         const original = Buffer.from(image.data, 'base64');
         const evidence = analyzeLuminanceJpeg(original);
         const grayscaleSha = createHash('sha256').update(evidence.grayscale_jpeg).digest('hex');
+        const lowFrequencySha = createHash('sha256').update(evidence.low_frequency_jpeg).digest('hex');
         const materializedPath = requestedPath ? resolve(requestedPath) : undefined;
+        const lowFrequencyPath = materializedPath ? (() => {
+          const ext = extname(materializedPath);
+          const stem = basename(materializedPath, ext);
+          return resolve(dirname(materializedPath), `${stem}.low-frequency${ext || '.jpg'}`);
+        })() : undefined;
         if (materializedPath) {
           await mkdir(dirname(materializedPath), { recursive: true });
           await writeFile(materializedPath, evidence.grayscale_jpeg);
+          await writeFile(lowFrequencyPath!, evidence.low_frequency_jpeg);
         }
         return {
           content: [
             { type: 'image', data: evidence.grayscale_jpeg.toString('base64'), mimeType: 'image/jpeg' },
+            { type: 'image', data: evidence.low_frequency_jpeg.toString('base64'), mimeType: 'image/jpeg' },
             {
               type: 'text',
               text: JSON.stringify({
@@ -74,8 +82,12 @@ export function createValueCheckTools(registry: ToolRegistry): ToolDefinition[] 
                 source_preview_sha256: typeof meta?.sha256 === 'string' ? meta.sha256 : null,
                 grayscale_sha256: grayscaleSha,
                 ...(materializedPath ? { materialized_path: materializedPath } : {}),
+                low_frequency_sha256: lowFrequencySha,
+                ...(lowFrequencyPath ? { low_frequency_materialized_path: lowFrequencyPath } : {}),
                 width: evidence.width,
                 height: evidence.height,
+                low_frequency_width: evidence.low_frequency_width,
+                low_frequency_height: evidence.low_frequency_height,
                 sampled_pixels: evidence.sampled_pixels,
                 luminance_summary: {
                   p10: evidence.p10_luma,
@@ -89,7 +101,7 @@ export function createValueCheckTools(registry: ToolRegistry): ToolDefinition[] 
                   center_border_abs_delta: evidence.center_border_abs_delta,
                 },
                 interpretation_note:
-                  'These are descriptive luminance summaries, not an artistic score. Art Director must inspect the grayscale image and classify value criteria explicitly.',
+                  'These are descriptive luminance summaries, not an artistic score. Art Director must inspect the grayscale image and the low-frequency thumbnail explicitly; the thumbnail is intended to reveal whether large-form modelling survives suppression of small texture/noise.',
               }, null, 2),
             },
           ],

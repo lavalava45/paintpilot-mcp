@@ -1,56 +1,45 @@
 import {
-  argEnum,
-  argInt,
-  userPrompt,
-  type PhotoshopPromptTemplate,
-} from '../_shared.js';
+  defineGuideTemplate,
+  makeGuideResult,
+  readChoiceArg,
+  readIntegerArg,
+} from '../guide-contract.js';
 
-const DIRECTION_OPTIONS = ['top_to_bottom', 'bottom_to_top'] as const;
+const MASK_DIRECTIONS = ['top_to_bottom', 'bottom_to_top'] as const;
 
-export const gradientBlendTemplate: PhotoshopPromptTemplate = {
-  name: 'ps.gradient_blend',
-  description:
-    'Fade the active layer into the background using a linear gradient on the layer mask — common for soft compositing and horizon blends.',
-  arguments: [
+export const gradientBlendTemplate = defineGuideTemplate(
+  'ps.gradient_blend',
+  'Plan a reversible linear transition on an existing or newly created layer mask.',
+  [
     {
       name: 'direction',
-      description:
-        'Gradient direction on the mask: top_to_bottom (fade downward) or bottom_to_top (fade upward, default for sky/horizon).',
+      description: 'Mask gradient direction: top_to_bottom or bottom_to_top (default).',
       required: false,
     },
     {
       name: 'feather_px',
-      description: 'Optional edge feather in pixels (0-20) before masking. Default 0.',
+      description: 'Optional selection feather before mask creation, clamped to 0-20 pixels.',
       required: false,
     },
   ],
-  handler: (args) => {
-    const direction = argEnum(args, 'direction', DIRECTION_OPTIONS, 'bottom_to_top');
-    const feather = Math.max(0, Math.min(20, argInt(args, 'feather_px', 0)));
+  (args) => {
+    const direction = readChoiceArg(args, 'direction', MASK_DIRECTIONS, 'bottom_to_top');
+    const feather = Math.min(20, Math.max(0, readIntegerArg(args, 'feather_px', 0)));
+    const preparation = feather > 0
+      ? `Feather the intended selection by ${feather}px before creating the mask.`
+      : 'Confirm the intended reveal region and whether the target layer already owns a mask.';
 
-    const text = [
-      `Goal: Fade the active layer into the background using a gradient on the layer mask.`,
-      ``,
-      `Intent: fade into background, gradient mask, blend subject, soft edge fade, arka planı yumuşat`,
-      ``,
-      `Plan:`,
-      `1. Call \`photoshop_get_state\` to confirm an active document and an active layer with the subject or composite to fade.`,
-      feather > 0
-        ? `2. If the layer edge needs softening first, apply feather ${feather}px via selection tools before masking.`
-        : `2. Confirm whether the active layer already has a layer mask; if not, add one.`,
-      `3. If no mask exists: call \`photoshop_create_layer_mask\` after a reveal-all or existing selection, or use \`photoshop_recipe_remove_background\` when isolating a subject first.`,
-      `4. Apply the gradient fade:`,
-      `   - Prefer \`photoshop_recipe_gradient_fade\` with { direction: "${direction}" } for a single undo.`,
-      `   - Fallback: \`photoshop_apply_gradient_mask\` with { direction: "${direction}" } on an existing mask.`,
-      `   - Last resort: ask the user to paint a linear black→white gradient (${direction.replace(/_/g, ' ')}) on the mask with the Gradient tool.`,
-      `5. Call \`photoshop_get_preview\` once to confirm the fade.`,
-      ``,
-      `End state: the subject or composite remains visible while the background or lower layers fade in through the mask; each atomic step is individually undoable until a recipe wraps the chain.`,
-    ].join('\n');
-
-    return userPrompt(
-      `Gradient mask blend (${direction.replace(/_/g, ' ')}, feather ${feather}px).`,
-      text
+    return makeGuideResult(
+      `Mask gradient (${direction.replaceAll('_', ' ')}, feather ${feather}px).`,
+      [
+        'Purpose: blend visibility through mask opacity while leaving source pixels intact.',
+        '1. Confirm the active/pinned document and target layer with `photoshop_get_state`.',
+        `2. ${preparation}`,
+        '3. Create a layer mask from an explicit selection when no suitable mask exists.',
+        `4. Apply \`photoshop_apply_gradient_mask\` with direction "${direction}" to the target mask.`,
+        '5. Inspect one preview to verify the transition occurs on the intended layer and in the intended direction.',
+        '6. Refine the mask only if the observed composite requires it; do not replace this with destructive pixel erasure.',
+      ]
     );
-  },
-};
+  }
+);

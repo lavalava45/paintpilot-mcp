@@ -42,38 +42,14 @@ async function call(name, args = {}) {
   return { result, parsed: parseStructured(result) };
 }
 
-function parseCustomScriptResult(text) {
-  if (typeof text !== 'string') return null;
-  const marker = 'Result: ';
-  const index = text.indexOf(marker);
-  if (index < 0) return null;
-  const raw = text.slice(index + marker.length).trim();
-  let unwrapped = raw;
-  try {
-    unwrapped = JSON.parse(raw);
-  } catch {}
-  if (typeof unwrapped !== 'string') return unwrapped;
-  try {
-    return new Function(`return ${unwrapped}`)();
-  } catch {
-    return null;
-  }
-}
-
 let tempDocumentId = null;
 let initialBrush = null;
-let initialForeground = null;
 
 try {
   await client.connect(transport);
 
   const brush = await call('photoshop_get_brush_settings');
   initialBrush = brush.parsed?.details?.settings ?? null;
-
-  const fg = await call('photoshop_execute_script', {
-    code: `var c = app.foregroundColor.rgb; return {red:Number(c.red),green:Number(c.green),blue:Number(c.blue)};`,
-  });
-  initialForeground = parseCustomScriptResult(fg.parsed);
 
   await call('photoshop_create_document', { width: 900, height: 560, resolution: 72, colorMode: 'RGB' });
   const docs = await call('photoshop_list_documents');

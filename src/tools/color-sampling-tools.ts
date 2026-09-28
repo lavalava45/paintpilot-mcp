@@ -52,7 +52,7 @@ export function createColorSamplingTools(connection: PhotoshopConnection): ToolD
         description:
           'Sample the visible composite color at a document-space pixel coordinate. ' +
           'With radius=0, returns a point sample. With radius>0, returns the Photoshop Average-equivalent color of the clipped square neighborhood without changing the source document. ' +
-          'The public operation is UXP-first; the retained ExtendScript fallback may use a temporary merged duplicate and Color Sampler internally. ' +
+          'The public operation is UXP-only and reads visible-composite pixels through the companion. ' +
           'Useful for painting from references, skin/hair/lip palette pickup, and local color checks.',
         inputSchema: {
           type: 'object',
@@ -85,7 +85,7 @@ export function createColorSamplingTools(connection: PhotoshopConnection): ToolD
         description:
           'Sample many visible-composite point colors from one pinned Photoshop document in a single operation. ' +
           'Large requests are automatically split into bounded batches; up to 1024 total point samples are returned without changing the source document. ' +
-          'The public operation is UXP-first; the retained ExtendScript fallback may use a temporary merged duplicate and Color Sampler internally. ' +
+          'The public operation is UXP-only and reads visible-composite pixels through the companion. ' +
           'Use for reference-driven painting value maps, palette studies, and dense visual checkpoints where repeated photoshop_sample_color calls would be inefficient.',
         inputSchema: {
           type: 'object',

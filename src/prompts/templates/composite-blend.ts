@@ -1,76 +1,45 @@
 import {
-  argEnum,
-  argString,
-  userPrompt,
-  type PhotoshopPromptTemplate,
-} from '../_shared.js';
+  defineGuideTemplate,
+  makeGuideResult,
+  readChoiceArg,
+  readTextArg,
+} from '../guide-contract.js';
 
-const BLEND_MODE_OPTIONS = [
-  'normal',
-  'multiply',
-  'screen',
-  'overlay',
-  'soft_light',
-] as const;
-type BlendModeArg = (typeof BLEND_MODE_OPTIONS)[number];
-
-const BLEND_MODE_BY_ARG: Record<BlendModeArg, string> = {
+const COMPOSITE_MODES = ['normal', 'multiply', 'screen', 'overlay', 'soft_light'] as const;
+const PHOTOSHOP_BLEND_MODE = {
   normal: 'NORMAL',
   multiply: 'MULTIPLY',
   screen: 'SCREEN',
   overlay: 'OVERLAY',
   soft_light: 'SOFTLIGHT',
-};
+} as const;
 
-export const compositeBlendTemplate: PhotoshopPromptTemplate = {
-  name: 'ps.composite_blend',
-  description:
-    'Place an external image into the active document, mask it, and set blend mode — interim workflow for sky replacement and compositing.',
-  arguments: [
-    {
-      name: 'image_path',
-      description: 'Absolute path to the image file to place (sky, background, texture). Required.',
-      required: true,
-    },
-    {
-      name: 'blend_mode',
-      description: 'Layer blend mode after placement: normal (default), multiply, screen, overlay, soft_light.',
-      required: false,
-    },
+export const compositeBlendTemplate = defineGuideTemplate(
+  'ps.composite_blend',
+  'Plan a reversible external-image composite using placement, masks and explicit blend-mode control.',
+  [
+    { name: 'image_path', description: 'Absolute path to the external image to place.', required: true },
+    { name: 'blend_mode', description: 'normal, multiply, screen, overlay, or soft_light.', required: false },
   ],
-  handler: (args) => {
-    const imagePath = argString(args, 'image_path', '');
-    const blendArg = argEnum(args, 'blend_mode', BLEND_MODE_OPTIONS, 'normal');
-    const blendMode = BLEND_MODE_BY_ARG[blendArg];
+  (args) => {
+    const imagePath = readTextArg(args, 'image_path', '');
+    const mode = readChoiceArg(args, 'blend_mode', COMPOSITE_MODES, 'normal');
+    const placement = imagePath
+      ? `Place the asset with \`photoshop_place_image\` using filePath "${imagePath}" and explicit canvas coordinates.`
+      : 'No image_path was supplied. Obtain an absolute local path before dispatching `photoshop_place_image`.';
 
-    const pathWarning =
-      imagePath === ''
-        ? `   - WARNING: no image_path provided — ask the user for an absolute file path before placing.`
-        : `   - Place with { filePath: "${imagePath}", x, y } where x/y are absolute canvas top-left pixels (0,0 = document corner).`;
-
-    const text = [
-      `Goal: Composite an external image into the active document with optional masking and blend mode.`,
-      ``,
-      `Intent: replace sky, composite in new background, blend layers, place and mask`,
-      ``,
-      `Plan:`,
-      `1. Call \`photoshop_get_state\` to confirm an active document.`,
-      `2. Call \`photoshop_place_image\`:`,
-      pathWarning,
-      `3. Reposition or scale if needed using transform tools after preview.`,
-      `4. Add a layer mask with \`photoshop_create_layer_mask\` when a selection defines the blend region (e.g. sky area).`,
-      `5. For sky replacement with a sky file, prefer \`photoshop_recipe_sky_blend\` or \`prompts/get\` on \`ps.sky_blend\` (one undo).`,
-      `6. For horizon fades on an existing mask, use \`photoshop_apply_gradient_mask\` or \`prompts/get\` on \`ps.gradient_blend\`.`,
-      `7. Call \`photoshop_set_layer_blend_mode\` with { blendMode: "${blendMode}" } on the placed layer if needed.`,
-      `8. Call \`photoshop_get_preview\` once.`,
-      `9. Note: Photoshop's Sky Replacement menu is not scriptable via ExtendScript — this composite path is the manual multi-step fallback.`,
-      ``,
-      `End state: placed layer is visible in the document with optional mask and blend mode; user can refine mask edges manually; one undo per atomic step.`,
-    ].join('\n');
-
-    return userPrompt(
-      `Composite blend${imagePath ? ` (${imagePath})` : ''} — ${blendArg.replace(/_/g, ' ')} mode.`,
-      text
+    return makeGuideResult(
+      `Composite setup${imagePath ? ` for ${imagePath}` : ''} (${mode.replaceAll('_', ' ')}).`,
+      [
+        'Purpose: keep the incoming asset independently editable and make every blend decision observable.',
+        '1. Establish the target document with `photoshop_get_state` and keep its document_id pinned.',
+        `2. ${placement}`,
+        '3. Reposition/scale the placed layer with semantic transform tools when the first preview requires it.',
+        '4. Use `photoshop_create_layer_mask` when the composite needs a bounded reveal rather than destructive erasure.',
+        '5. Use `photoshop_apply_gradient_mask` or `ps.gradient_blend` only for a genuine mask fade.',
+        `6. If blending is requested, set the placed layer to ${PHOTOSHOP_BLEND_MODE[mode]} with \`photoshop_set_layer_blend_mode\`.`,
+        '7. Inspect one whole-image preview and adjust placement/mask/blend mode from evidence rather than adding blind steps.',
+      ]
     );
-  },
-};
+  }
+);

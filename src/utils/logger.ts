@@ -5,49 +5,55 @@ export enum LogLevel {
   ERROR = 3,
 }
 
+const LEVEL_NAMES = ['DEBUG', 'INFO', 'WARN', 'ERROR'] as const;
+
+function configuredLevel(fallback: LogLevel): LogLevel {
+  const raw = process.env.LOG_LEVEL;
+  if (raw === undefined) return fallback;
+  const parsed = Number.parseInt(raw, 10);
+  return parsed >= LogLevel.DEBUG && parsed <= LogLevel.ERROR ? parsed : fallback;
+}
+
+function renderArgument(value: unknown): string {
+  if (value instanceof Error) return value.stack ?? value.message;
+  if (typeof value === 'string') return value;
+  try {
+    return JSON.stringify(value) ?? String(value);
+  } catch {
+    return String(value);
+  }
+}
+
 export class Logger {
-  private context: string;
-  private logLevel: LogLevel;
+  private readonly threshold: LogLevel;
 
-  constructor(context: string, logLevel: LogLevel = LogLevel.INFO) {
-    this.context = context;
-    this.logLevel = process.env.LOG_LEVEL
-      ? parseInt(process.env.LOG_LEVEL, 10)
-      : logLevel;
+  constructor(
+    private readonly context: string,
+    fallbackLevel: LogLevel = LogLevel.INFO
+  ) {
+    this.threshold = configuredLevel(fallbackLevel);
   }
 
-  private log(level: LogLevel, message: string, ...args: unknown[]) {
-    if (level < this.logLevel) return;
-
-    const timestamp = new Date().toISOString();
-    const levelStr = LogLevel[level];
-    const prefix = `[${timestamp}] [${levelStr}] [${this.context}]`;
-
-    // IMPORTANT: MCP uses stdout for protocol communication
-    // All logs must go to stderr to avoid corrupting the JSON-RPC protocol
-    const formattedArgs = args.map(arg => 
-      typeof arg === 'object' ? JSON.stringify(arg) : String(arg)
-    ).join(' ');
-    
-    const logMessage = `${prefix} ${message} ${formattedArgs}`.trim();
-    
-    // Always write to stderr, never stdout
-    process.stderr.write(logMessage + '\n');
+  debug(message: string, ...details: unknown[]): void {
+    this.write(LogLevel.DEBUG, message, details);
   }
 
-  debug(message: string, ...args: unknown[]) {
-    this.log(LogLevel.DEBUG, message, ...args);
+  info(message: string, ...details: unknown[]): void {
+    this.write(LogLevel.INFO, message, details);
   }
 
-  info(message: string, ...args: unknown[]) {
-    this.log(LogLevel.INFO, message, ...args);
+  warn(message: string, ...details: unknown[]): void {
+    this.write(LogLevel.WARN, message, details);
   }
 
-  warn(message: string, ...args: unknown[]) {
-    this.log(LogLevel.WARN, message, ...args);
+  error(message: string, ...details: unknown[]): void {
+    this.write(LogLevel.ERROR, message, details);
   }
 
-  error(message: string, ...args: unknown[]) {
-    this.log(LogLevel.ERROR, message, ...args);
+  private write(level: LogLevel, message: string, details: unknown[]): void {
+    if (level < this.threshold) return;
+    const suffix = details.length > 0 ? ` ${details.map(renderArgument).join(' ')}` : '';
+    const line = `[${new Date().toISOString()}] [${LEVEL_NAMES[level]}] [${this.context}] ${message}${suffix}`;
+    process.stderr.write(`${line}\n`);
   }
 }

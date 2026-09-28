@@ -13,6 +13,7 @@ export const VISUAL_REVIEW_FINDING_LEVEL = {
   global_color_balance: 'composition',
   global_depth_read: 'composition',
   subject_recognition: 'composition',
+  soft_dominance: 'composition',
   object_readability: 'object',
   silhouette: 'object',
   proportion: 'object',

@@ -2,7 +2,7 @@
  * Fail if any doc reports a tool count that no longer matches the source.
  *
  * The numbers in README/docs are written by hand. This script derives the
- * authoritative count directly from src/core/server.ts and src/tools/** using
+ * authoritative count directly from the MCP catalog declarations and src/tools/** using
  * the TypeScript compiler API, so documentation checks do not depend on any
  * marketing-site build artifacts.
  *
@@ -25,15 +25,15 @@ const FILES = [
   'docs/architecture.md',
   'docs/available-tools.md',
   'docs/development.md',
-  'docs/photoshop-guard-architecture.md',
   'docs/painting-policy/foundations.md',
-  'docs/prompt-layer.md',
-  'docs/uxp-migration-inventory.md',
   'server.json',
 ];
 
 function listToolSourceFiles(): string[] {
-  const files = [join(ROOT, 'src', 'core', 'server.ts')];
+  const files = [
+    join(ROOT, 'src', 'core', 'server.ts'),
+    join(ROOT, 'src', 'core', 'server-tool-catalog.ts'),
+  ];
   for (const name of readdirSync(TOOLS_DIR)) {
     if (name.endsWith('-tools.ts')) files.push(join(TOOLS_DIR, name));
   }
@@ -82,23 +82,55 @@ function literalString(node: ts.Expression | undefined, consts: Map<string, stri
   return '';
 }
 
+function collectToolDefinitionFactories(source: ts.SourceFile): Set<string> {
+  const factories = new Set<string>(['cycleTool']);
+  const visit = (node: ts.Node): void => {
+    if (
+      ts.isFunctionDeclaration(node) &&
+      node.name &&
+      node.type?.getText(source).includes('ToolDefinition')
+    ) {
+      factories.add(node.name.text);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return factories;
+}
+
 function getToolCounts(): { total: number; atomic: number; recipes: number; guard: number } {
   const names = new Set<string>();
   for (const file of listToolSourceFiles()) {
     const source = ts.createSourceFile(file, readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true);
     const consts = collectStringConsts(source);
+    const toolFactories = collectToolDefinitionFactories(source);
     const visit = (node: ts.Node): void => {
       if (ts.isObjectLiteralExpression(node)) {
         const name = literalString(propertyValue(node, 'name'), consts);
         if (name.startsWith('photoshop_') && propertyValue(node, 'description')) names.add(name);
       }
-      // A few schema-identical tool definitions are generated through a small
-      // local helper rather than repeated object literals. Count their literal
-      // names too so this static verifier continues to match tools/list.
+      // A declaration may keep the ToolDefinition wrapper explicit while constructing
+      // its public `tool` shape through a small local helper, e.g.
+      // `tool: imageDefinition('photoshop_resize_image', ...)`. Count the literal tool
+      // name at that exact declaration boundary instead of requiring the helper to use
+      // a particular function syntax or explicit return annotation.
+      if (
+        ts.isPropertyAssignment(node) &&
+        (ts.isIdentifier(node.name) || ts.isStringLiteral(node.name)) &&
+        node.name.text === 'tool' &&
+        ts.isCallExpression(node.initializer)
+      ) {
+        const name = literalString(node.initializer.arguments[0], consts);
+        if (name.startsWith('photoshop_')) names.add(name);
+      }
+      // Some declaration modules intentionally use small project-owned catalog
+      // builders rather than repeating object literals. Any local function that
+      // explicitly returns ToolDefinition is a declaration factory; count its
+      // literal first argument exactly like an object-literal `name` field.
       if (
         ts.isCallExpression(node) &&
         ts.isIdentifier(node.expression) &&
-        node.expression.text === 'cycleTool'
+        toolFactories.has(node.expression.text)
       ) {
         const name = literalString(node.arguments[0], consts);
         if (name.startsWith('photoshop_')) names.add(name);
@@ -119,7 +151,7 @@ function main(): void {
   const allowed = new Set([data.total, data.atomic, data.recipes]);
   const problems: string[] = [];
 
-  // Counts as written in prose: "124 tools", "108 atomic", "16 recipe workflows".
+  // Counts as written in prose: "124 tools", "108 atomic", "10 recipe workflows".
   // Deliberately narrow so test-run tallies and image widths are not flagged.
   const COUNT = /\b(\d{2,3})\s+(?:total\s+)?(?:atomic|recipe|tools?\b)/gi;
   // The compact-v2 cutover retired the old 146/149 catalog totals. Catch those

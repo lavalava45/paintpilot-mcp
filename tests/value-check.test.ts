@@ -78,6 +78,17 @@ function directive(valueCheck: Record<string, unknown>) {
       detail_density: 'detail subordinate to form and value grouping',
       primitive_footprint_tolerance: 'Synthetic value-gate fixture isolates grayscale admission; progressive-refinement evidence is outside this fixture.',
     },
+    prompt_conflict_preflight: {
+      dominant_objective: 'Representational form governed by readable value structure before detail.',
+      secondary_traits: ['restrained warm/cool relationships', 'selective focal edges'],
+      conflicts: [],
+      resolution_mode: 'none',
+      chosen_rendering_strategy: 'Establish value grouping and form first, then admit selective detail only after the value gate passes.',
+      resolution_rationale: 'The synthetic value-gate brief has one coherent representation strategy.',
+      first_pass_strategy: ['establish value groups', 'model form before detail'],
+    },
+    strategy_validation_after_microplans: 2,
+    strategy_validation: { status: 'pending' },
     composition_exploration: { hypotheses: [] },
     assessment: assessment(),
     value_check: valueCheck,
@@ -181,6 +192,35 @@ describe('luminance preview analysis', () => {
     expect(result.dark_ratio).toBeGreaterThan(0.2);
     expect(result.light_ratio).toBeGreaterThan(0.2);
     expect(result.grayscale_jpeg.byteLength).toBeGreaterThan(100);
+    expect(result.low_frequency_width).toBeLessThanOrEqual(64);
+    expect(result.low_frequency_height).toBeLessThanOrEqual(64);
+    expect(result.low_frequency_jpeg.byteLength).toBeGreaterThan(50);
+  });
+
+  it('suppresses high-frequency texture in the low-frequency evidence thumbnail', () => {
+    const width = 128;
+    const height = 128;
+    const rgba = Buffer.alloc(width * height * 4);
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const i = (y * width + x) * 4;
+        const v = (x + y) % 2 === 0 ? 20 : 236;
+        rgba[i] = v;
+        rgba[i + 1] = v;
+        rgba[i + 2] = v;
+        rgba[i + 3] = 255;
+      }
+    }
+    const encoded = jpeg.encode({ data: rgba, width, height }, 100).data;
+    const result = analyzeLuminanceJpeg(encoded);
+    const low = jpeg.decode(result.low_frequency_jpeg, { useTArray: true });
+    const samples: number[] = [];
+    for (let i = 0; i < low.data.length; i += 4) samples.push(low.data[i]);
+    const min = Math.min(...samples);
+    const max = Math.max(...samples);
+    expect(result.low_frequency_width).toBe(64);
+    expect(result.low_frequency_height).toBe(64);
+    expect(max - min).toBeLessThan(35);
   });
 
   it('exposes the analyzer as a read-only tool over the existing preview pipeline', async () => {
@@ -212,11 +252,14 @@ describe('luminance preview analysis', () => {
     const tool = createValueCheckTools(registry)[0]!;
     const output = await tool.handler({ document_id: 42 });
     expect(output.isError).not.toBe(true);
-    expect(output.content.some(item => item.type === 'image')).toBe(true);
+    expect(output.content.filter(item => item.type === 'image')).toHaveLength(2);
     const text = output.content.find(item => item.type === 'text');
     const body = JSON.parse(text && 'text' in text ? text.text : '{}');
     expect(body.observed).toBe(true);
     expect(body.source_preview_sha256).toBe('source-preview-sha');
+    expect(body.low_frequency_sha256).toMatch(/^[0-9a-f]{64}$/);
+    expect(body.low_frequency_width).toBeLessThanOrEqual(64);
+    expect(body.low_frequency_height).toBeLessThanOrEqual(64);
     expect(body.interpretation_note).toMatch(/not an artistic score/i);
     expect(previewArgs).toMatchObject({ document_id: 42, max_dimension_px: 1000, quality: 8, include_image: true });
     expect((tool.tool.inputSchema as any).required).toContain('document_id');

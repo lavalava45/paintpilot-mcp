@@ -1,971 +1,145 @@
-import { ToolDefinition, ToolResult } from '../core/tool-registry.js';
+import type { ToolDefinition } from '../core/tool-registry.js';
 import { PhotoshopConnection } from '../platform/connection.js';
-import { PhotoshopAPIFactory } from '../api/photoshop-api.js';
-import { ExtendScriptSnippets } from '../api/extendscript.js';
-import { PhotoshopDetector } from '../platform/detector.js';
 import { PhotoshopBackendRouter } from '../platform/photoshop-backend.js';
 import {
-  invokeUxpCreateLayerMask,
-  invokeUxpFeatherSelection,
-  invokeUxpOperation,
-  invokeUxpSelectEllipse,
-  invokeUxpSelectRectangle,
-  invokeUxpSelectSubject,
-} from '../platform/uxp-bridge-client.js';
-import {
-  atomicFailure,
-  atomicFailureFromError,
-  atomicSuccess,
-  parseSnippetResult,
-  runSnippet,
-} from './atomic-shared.js';
-import type { PhotoshopErrorCode } from '../errors/envelope.js';
+  runApplyLayerMask,
+  runContentAwareFill,
+  runContractSelection,
+  runCreateLayerMask,
+  runDeleteLayerMask,
+  runDeselect,
+  runExpandSelection,
+  runFeatherSelection,
+  runGetSelectionBounds,
+  runInvertSelection,
+  runSaveSelection,
+  runSelectAll,
+  runSelectEllipse,
+  runSelectRectangle,
+  runSelectSubject,
+} from './selection-operations.js';
 
-function mapSelectionSnippetFailure(parsed: Record<string, unknown>): ToolResult | null {
-  if (parsed.ok !== false) return null;
-  const rawCode = typeof parsed.code === 'string' ? parsed.code : 'extendscript_runtime_error';
-  const code: PhotoshopErrorCode =
-    rawCode === 'no_document'
-      ? 'no_active_document'
-      : rawCode === 'selection_required'
-        ? 'selection_required'
-        : 'extendscript_runtime_error';
-  return atomicFailure({
-    ok: false,
-    code,
-    message: String(parsed.message || 'Selection operation failed'),
-    suggested_next_tool:
-      code === 'selection_required' ? 'photoshop_select_rectangle' : 'photoshop_get_state',
-  });
+type Fields = Record<string, Record<string, unknown>>;
+
+function selectionTool(
+  name: string,
+  description: string,
+  properties: Fields,
+  required: string[] | undefined,
+  handler: ToolDefinition['handler']
+): ToolDefinition {
+  return {
+    tool: {
+      name,
+      description,
+      inputSchema: { type: 'object', properties, ...(required ? { required } : {}) },
+    },
+    handler,
+  };
 }
 
-function parseRequiredPixels(args: Record<string, unknown>): number | null {
-  const value = args.pixels;
-  if (typeof value !== 'number' || !Number.isFinite(value)) return null;
-  return Math.max(1, Math.round(value));
+const none: Fields = {};
+const rectangleFields: Fields = {
+  left: { type: 'number', description: 'Left edge in pixels' },
+  top: { type: 'number', description: 'Top edge in pixels' },
+  right: { type: 'number', description: 'Right edge in pixels' },
+  bottom: { type: 'number', description: 'Bottom edge in pixels' },
+};
+const rectangleRequired = ['left', 'top', 'right', 'bottom'];
+
+const readBoundsDescription = [
+  'Read the active pixel selection bounds in document pixels (read-only).',
+  'Use when: verifying selection exists and its size/position before mask, fill, or recipe steps.\nDo NOT use when: creating or modifying a selection — use photoshop_select_rectangle or photoshop_select_subject.',
+  'Returns: JSON { ok, summary, details: { has_selection, bounds?, context } }.\nPreconditions: active document. Side effects: none.',
+].join('\n\n');
+
+const ellipseDescription = [
+  'Create an elliptical pixel selection from a bounding box (anti-aliased).',
+  'Use when: circular or oval masks, vignettes, or radial edits inside a region.\nDo NOT use when: a rectangular region is enough — use photoshop_select_rectangle.',
+  'Returns: JSON { ok, summary, details: { shape, bounds?, context } }.\nPreconditions: active document; right > left and bottom > top. Side effects: replaces current selection.',
+].join('\n\n');
+
+function pixelAdjustmentDescription(kind: 'Expand' | 'Contract' | 'Feather'): string {
+  if (kind === 'Expand') {
+    return 'Expand the active pixel selection outward by a pixel amount.\n\nUse when: growing a tight subject selection or adding padding before feather/fill.\nDo NOT use when: no selection exists — create one first.\n\nReturns: JSON { ok, summary, details: { pixels, bounds?, context } }.\nPreconditions: active document and active pixel selection. Side effects: modifies selection.';
+  }
+  if (kind === 'Contract') {
+    return 'Contract (shrink) the active pixel selection inward by a pixel amount.\n\nUse when: tightening a loose selection or trimming halo after expand.\nDo NOT use when: no selection exists — create one first.\n\nReturns: JSON { ok, summary, details: { pixels, bounds?, context } }.\nPreconditions: active document and active pixel selection. Side effects: modifies selection.';
+  }
+  return 'Feather (soften) the edges of the active pixel selection.\n\nUse when: soft transitions before fill, mask, or delete operations.\nDo NOT use when: a hard edge is required or no selection exists.\n\nReturns: JSON { ok, summary, details: { pixels, bounds?, context } }.\nPreconditions: active document and active pixel selection. Side effects: modifies selection edges.';
 }
 
-function parseSelectionBounds(
-  parsed: Record<string, unknown>
-): Record<string, unknown> | undefined {
-  const details: Record<string, unknown> = {};
-  if (parsed.bounds !== undefined) details.bounds = parsed.bounds;
-  if (parsed.pixels !== undefined) details.pixels = parsed.pixels;
-  if (parsed.operation !== undefined) details.operation = parsed.operation;
-  if (parsed.shape !== undefined) details.shape = parsed.shape;
-  if (parsed.channel_name !== undefined) details.channel_name = parsed.channel_name;
-  if (parsed.context !== undefined) details.context = parsed.context;
-  return Object.keys(details).length > 0 ? details : undefined;
-}
+const saveDescription = 'Save the active pixel selection to a new alpha channel.\n\nUse when: preserving a selection for later reload or batch workflows.\nDo NOT use when: no selection exists — create one first.\n\nReturns: JSON { ok, summary, details: { channel_name, context } }.\nPreconditions: active document and active pixel selection. Side effects: adds alpha channel.';
+const rectangleDescription = 'Create a rectangular pixel selection from corner coordinates.\n\nUse when: masking, cropping a region, or preparing for layer mask.\nDo NOT use when: subject isolation requires a final mask — follow with photoshop_create_layer_mask.\n\nReturns: selection bounds [left, top, right, bottom].\nPreconditions: active document. Side effects: replaces current selection.';
+const createMaskDescription = 'Create a layer mask on the active layer from the current selection (reveal selection).\n\nUsers often say: mask this, hide the background, non-destructive cutout (after selection).\n\nUse when: non-destructive hide/show after a selection exists.\nDo NOT use when: no selection exists — create selection first or use remove_background recipe.\n\nReturns: maskCreated confirmation.\nPreconditions: active document and active selection. Side effects: adds mask to active layer.';
+const subjectDescription = 'Run Select Subject on the active layer (creates a pixel selection only, no mask).\n\nUsers often say: cut out, isolate subject, select person, select object.\n\nUse when: you need a subject selection for masking, fill, or further edits.\nDo NOT use when: a different selection method is more appropriate before mask creation.\n\nReturns: JSON { ok, summary, details: { selected, method } }.\nPreconditions: PS ≥ 23, active document, non-Background active layer with a recognizable subject.\nSide effects: replaces current selection.';
+const contentAwareDescription = 'Fill the current pixel selection using Content-Aware Fill.\n\nUsers often say: remove distraction, erase object, content aware fill, inpaint selection.\n\nUse when: a rectangular or other selection covers the area to remove/replace.\nDo NOT use when: no selection exists — use photoshop_select_rectangle first.\nUse this for deterministic local inpainting or object removal after making a selection.\n\nReturns: JSON { ok, summary, details: { filled } }.\nPreconditions: active document and active pixel selection.\nSide effects: modifies pixels inside selection; deselects afterward.';
 
 export function createSelectionTools(
   connection: PhotoshopConnection,
-  backendRouter = new PhotoshopBackendRouter(connection)
+  router = new PhotoshopBackendRouter(connection)
 ): ToolDefinition[] {
+  const pixels = (description: string): Fields => ({
+    pixels: { type: 'number', description, minimum: 1 },
+  });
+
   return [
-    {
-      tool: {
-        name: 'photoshop_get_selection_bounds',
-        description:
-          'Read the active pixel selection bounds in document pixels (read-only).\n\n' +
-          'Use when: verifying selection exists and its size/position before mask, fill, or recipe steps.\n' +
-          'Do NOT use when: creating or modifying a selection — use photoshop_select_rectangle or photoshop_select_subject.\n\n' +
-          'Returns: JSON { ok, summary, details: { has_selection, bounds?, context } }.\n' +
-          'Preconditions: active document. Side effects: none.',
-        inputSchema: {
-          type: 'object',
-          properties: {},
+    selectionTool('photoshop_get_selection_bounds', readBoundsDescription, none, undefined, () => runGetSelectionBounds(router)),
+    selectionTool(
+      'photoshop_select_ellipse', ellipseDescription,
+      {
+        left: { type: 'number', description: 'Left edge of bounding box in pixels' },
+        top: { type: 'number', description: 'Top edge of bounding box in pixels' },
+        right: { type: 'number', description: 'Right edge of bounding box in pixels' },
+        bottom: { type: 'number', description: 'Bottom edge of bounding box in pixels' },
+      },
+      rectangleRequired,
+      (args) => runSelectEllipse(router, args)
+    ),
+    selectionTool(
+      'photoshop_expand_selection', pixelAdjustmentDescription('Expand'),
+      pixels('Pixels to expand by (minimum 1)'), ['pixels'],
+      (args) => runExpandSelection(router, args)
+    ),
+    selectionTool(
+      'photoshop_contract_selection', pixelAdjustmentDescription('Contract'),
+      pixels('Pixels to contract by (minimum 1)'), ['pixels'],
+      (args) => runContractSelection(router, args)
+    ),
+    selectionTool(
+      'photoshop_feather_selection', pixelAdjustmentDescription('Feather'),
+      pixels('Feather radius in pixels (minimum 1)'), ['pixels'],
+      (args) => runFeatherSelection(router, args)
+    ),
+    selectionTool(
+      'photoshop_save_selection', saveDescription,
+      { channel_name: { type: 'string', description: 'Optional name for the new alpha channel (auto-generated if omitted)' } },
+      undefined,
+      (args) => runSaveSelection(router, args)
+    ),
+    selectionTool(
+      'photoshop_select_rectangle', rectangleDescription,
+      rectangleFields, rectangleRequired,
+      (args) => runSelectRectangle(router, args)
+    ),
+    selectionTool('photoshop_select_all', 'Select the entire document', none, undefined, () => runSelectAll(router)),
+    selectionTool('photoshop_deselect', 'Deselect all selections', none, undefined, () => runDeselect(router)),
+    selectionTool('photoshop_invert_selection', 'Invert the current selection', none, undefined, () => runInvertSelection(router)),
+    selectionTool('photoshop_create_layer_mask', createMaskDescription, none, undefined, (args) => runCreateLayerMask(router, args)),
+    selectionTool('photoshop_delete_layer_mask', 'Delete the layer mask from active layer', none, undefined, () => runDeleteLayerMask(router)),
+    selectionTool('photoshop_apply_layer_mask', 'Apply (merge) the layer mask to the layer', none, undefined, () => runApplyLayerMask(router)),
+    selectionTool(
+      'photoshop_select_subject', subjectDescription,
+      {
+        sample_all_layers: {
+          type: 'boolean',
+          description: 'Sample all layers for autoCutout fallback (default false)',
+          default: false,
         },
       },
-      handler: async () => getSelectionBounds(backendRouter),
-    },
-    {
-      tool: {
-        name: 'photoshop_select_ellipse',
-        description:
-          'Create an elliptical pixel selection from a bounding box (anti-aliased).\n\n' +
-          'Use when: circular or oval masks, vignettes, or radial edits inside a region.\n' +
-          'Do NOT use when: a rectangular region is enough — use photoshop_select_rectangle.\n\n' +
-          'Returns: JSON { ok, summary, details: { shape, bounds?, context } }.\n' +
-          'Preconditions: active document; right > left and bottom > top. Side effects: replaces current selection.',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            left: {
-              type: 'number',
-              description: 'Left edge of bounding box in pixels',
-            },
-            top: {
-              type: 'number',
-              description: 'Top edge of bounding box in pixels',
-            },
-            right: {
-              type: 'number',
-              description: 'Right edge of bounding box in pixels',
-            },
-            bottom: {
-              type: 'number',
-              description: 'Bottom edge of bounding box in pixels',
-            },
-          },
-          required: ['left', 'top', 'right', 'bottom'],
-        },
-      },
-      handler: async (args) => selectEllipse(connection, backendRouter, args),
-    },
-    {
-      tool: {
-        name: 'photoshop_expand_selection',
-        description:
-          'Expand the active pixel selection outward by a pixel amount.\n\n' +
-          'Use when: growing a tight subject selection or adding padding before feather/fill.\n' +
-          'Do NOT use when: no selection exists — create one first.\n\n' +
-          'Returns: JSON { ok, summary, details: { pixels, bounds?, context } }.\n' +
-          'Preconditions: active document and active pixel selection. Side effects: modifies selection.',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            pixels: {
-              type: 'number',
-              description: 'Pixels to expand by (minimum 1)',
-              minimum: 1,
-            },
-          },
-          required: ['pixels'],
-        },
-      },
-      handler: async (args) => expandSelection(connection, backendRouter, args),
-    },
-    {
-      tool: {
-        name: 'photoshop_contract_selection',
-        description:
-          'Contract (shrink) the active pixel selection inward by a pixel amount.\n\n' +
-          'Use when: tightening a loose selection or trimming halo after expand.\n' +
-          'Do NOT use when: no selection exists — create one first.\n\n' +
-          'Returns: JSON { ok, summary, details: { pixels, bounds?, context } }.\n' +
-          'Preconditions: active document and active pixel selection. Side effects: modifies selection.',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            pixels: {
-              type: 'number',
-              description: 'Pixels to contract by (minimum 1)',
-              minimum: 1,
-            },
-          },
-          required: ['pixels'],
-        },
-      },
-      handler: async (args) => contractSelection(connection, backendRouter, args),
-    },
-    {
-      tool: {
-        name: 'photoshop_feather_selection',
-        description:
-          'Feather (soften) the edges of the active pixel selection.\n\n' +
-          'Use when: soft transitions before fill, mask, or delete operations.\n' +
-          'Do NOT use when: a hard edge is required or no selection exists.\n\n' +
-          'Returns: JSON { ok, summary, details: { pixels, bounds?, context } }.\n' +
-          'Preconditions: active document and active pixel selection. Side effects: modifies selection edges.',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            pixels: {
-              type: 'number',
-              description: 'Feather radius in pixels (minimum 1)',
-              minimum: 1,
-            },
-          },
-          required: ['pixels'],
-        },
-      },
-      handler: async (args) => featherSelection(connection, backendRouter, args),
-    },
-    {
-      tool: {
-        name: 'photoshop_save_selection',
-        description:
-          'Save the active pixel selection to a new alpha channel.\n\n' +
-          'Use when: preserving a selection for later reload or batch workflows.\n' +
-          'Do NOT use when: no selection exists — create one first.\n\n' +
-          'Returns: JSON { ok, summary, details: { channel_name, context } }.\n' +
-          'Preconditions: active document and active pixel selection. Side effects: adds alpha channel.',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            channel_name: {
-              type: 'string',
-              description: 'Optional name for the new alpha channel (auto-generated if omitted)',
-            },
-          },
-        },
-      },
-      handler: async (args) => saveSelection(connection, backendRouter, args),
-    },
-    {
-      tool: {
-        name: 'photoshop_select_rectangle',
-        description:
-          'Create a rectangular pixel selection from corner coordinates.\n\n' +
-          'Use when: masking, cropping a region, or preparing for layer mask.\n' +
-          'Do NOT use when: subject isolation is needed — use photoshop_recipe_remove_background.\n\n' +
-          'Returns: selection bounds [left, top, right, bottom].\n' +
-          'Preconditions: active document. Side effects: replaces current selection.',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            left: {
-              type: 'number',
-              description: 'Left edge in pixels',
-            },
-            top: {
-              type: 'number',
-              description: 'Top edge in pixels',
-            },
-            right: {
-              type: 'number',
-              description: 'Right edge in pixels',
-            },
-            bottom: {
-              type: 'number',
-              description: 'Bottom edge in pixels',
-            },
-          },
-          required: ['left', 'top', 'right', 'bottom'],
-        },
-      },
-      handler: async (args) => selectRectangle(connection, backendRouter, args),
-    },
-    {
-      tool: {
-        name: 'photoshop_select_all',
-        description: 'Select the entire document',
-        inputSchema: {
-          type: 'object',
-          properties: {},
-        },
-      },
-      handler: async () => selectAll(connection, backendRouter),
-    },
-    {
-      tool: {
-        name: 'photoshop_deselect',
-        description: 'Deselect all selections',
-        inputSchema: {
-          type: 'object',
-          properties: {},
-        },
-      },
-      handler: async () => deselect(connection, backendRouter),
-    },
-    {
-      tool: {
-        name: 'photoshop_invert_selection',
-        description: 'Invert the current selection',
-        inputSchema: {
-          type: 'object',
-          properties: {},
-        },
-      },
-      handler: async () => invertSelection(connection, backendRouter),
-    },
-    {
-      tool: {
-        name: 'photoshop_create_layer_mask',
-        description:
-          'Create a layer mask on the active layer from the current selection (reveal selection).\n\n' +
-          'Users often say: mask this, hide the background, non-destructive cutout (after selection).\n\n' +
-          'Use when: non-destructive hide/show after a selection exists.\n' +
-          'Do NOT use when: no selection exists — create selection first or use remove_background recipe.\n\n' +
-          'Returns: maskCreated confirmation.\n' +
-          'Preconditions: active document and active selection. Side effects: adds mask to active layer.',
-        inputSchema: {
-          type: 'object',
-          properties: {},
-        },
-      },
-        handler: async (args) => createLayerMask(connection, backendRouter, args),
-    },
-    {
-      tool: {
-        name: 'photoshop_delete_layer_mask',
-        description: 'Delete the layer mask from active layer',
-        inputSchema: {
-          type: 'object',
-          properties: {},
-        },
-      },
-      handler: async () => deleteLayerMask(connection, backendRouter),
-    },
-    {
-      tool: {
-        name: 'photoshop_apply_layer_mask',
-        description: 'Apply (merge) the layer mask to the layer',
-        inputSchema: {
-          type: 'object',
-          properties: {},
-        },
-      },
-      handler: async () => applyLayerMask(connection, backendRouter),
-    },
-    {
-      tool: {
-        name: 'photoshop_select_subject',
-        description:
-          'Run Select Subject on the active layer (creates a pixel selection only, no mask).\n\n' +
-          'Users often say: cut out, isolate subject, select person, select object.\n\n' +
-          'Use when: you need a subject selection for masking, fill, or further edits.\n' +
-          'Do NOT use when: full background removal with mask — use photoshop_recipe_remove_background.\n\n' +
-          'Returns: JSON { ok, summary, details: { selected, method } }.\n' +
-          'Preconditions: PS ≥ 23, active document, non-Background active layer with a recognizable subject.\n' +
-          'Side effects: replaces current selection.',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            sample_all_layers: {
-              type: 'boolean',
-              description: 'Sample all layers for autoCutout fallback (default false)',
-              default: false,
-            },
-          },
-        },
-      },
-      handler: async (args) => selectSubject(connection, backendRouter, args),
-    },
-    {
-      tool: {
-        name: 'photoshop_content_aware_fill',
-        description:
-          'Fill the current pixel selection using Content-Aware Fill.\n\n' +
-          'Users often say: remove distraction, erase object, content aware fill, inpaint selection.\n\n' +
-          'Use when: a rectangular or other selection covers the area to remove/replace.\n' +
-          'Do NOT use when: no selection exists — use photoshop_select_rectangle first.\n' +
-          'Use this for deterministic local inpainting or object removal after making a selection.\n\n' +
-          'Returns: JSON { ok, summary, details: { filled } }.\n' +
-          'Preconditions: active document and active pixel selection.\n' +
-          'Side effects: modifies pixels inside selection; deselects afterward.',
-        inputSchema: {
-          type: 'object',
-          properties: {},
-        },
-      },
-      handler: async () => contentAwareFill(connection, backendRouter),
-    },
+      undefined,
+      (args) => runSelectSubject(connection, router, args)
+    ),
+    selectionTool('photoshop_content_aware_fill', contentAwareDescription, none, undefined, () => runContentAwareFill(router)),
   ];
-}
-
-async function getSelectionBounds(backendRouter: PhotoshopBackendRouter): Promise<ToolResult> {
-  try {
-    const parsed = await backendRouter.readSelectionBounds();
-
-    if (parsed.ok === false) {
-      const code = parsed.code === 'no_document' ? 'no_active_document' : 'extendscript_runtime_error';
-      return atomicFailure({
-        ok: false,
-        code,
-        message: String(parsed.message || 'Failed to read selection bounds'),
-        suggested_next_tool: 'photoshop_get_state',
-      });
-    }
-
-    const hasSelection = parsed.has_selection === true;
-    const details: Record<string, unknown> = {
-      has_selection: hasSelection,
-    };
-    if (hasSelection && parsed.bounds) {
-      details.bounds = parsed.bounds;
-    }
-    if (parsed.context !== undefined) {
-      details.context = parsed.context;
-    }
-
-    return atomicSuccess(
-      hasSelection ? 'Active pixel selection present' : 'No active pixel selection',
-      details,
-      hasSelection ? 'photoshop_get_preview' : 'photoshop_select_rectangle'
-    );
-  } catch (error) {
-    return atomicFailureFromError(error);
-  }
-}
-
-async function selectEllipse(
-  connection: PhotoshopConnection,
-  backendRouter: PhotoshopBackendRouter,
-  args: Record<string, unknown>
-): Promise<ToolResult> {
-  const left = args.left as number;
-  const top = args.top as number;
-  const right = args.right as number;
-  const bottom = args.bottom as number;
-
-  if (right <= left || bottom <= top) {
-    return atomicFailure({
-      ok: false,
-      code: 'invalid_arguments',
-      message: 'Invalid ellipse bounds: right must be greater than left and bottom greater than top',
-      suggested_next_tool: 'photoshop_get_selection_bounds',
-    });
-  }
-
-  try {
-    const backend = await backendRouter.backendFor('selection.ellipse');
-    if (backend.kind === 'uxp') {
-      const result = await invokeUxpSelectEllipse({ left, top, right, bottom });
-      if (!result.ok || !result.data) throw new Error(result.error ?? 'uxp_select_ellipse_failed');
-      return atomicSuccess('Elliptical selection created', parseSelectionBounds(result.data));
-    }
-    const raw = await runSnippet(connection, ExtendScriptSnippets.selectEllipse(left, top, right, bottom));
-    const parsed = parseSnippetResult(raw);
-    if (!parsed) throw new Error(`Snippet returned unparseable payload: ${String(raw)}`);
-    const failure = mapSelectionSnippetFailure(parsed);
-    if (failure) return failure;
-    return atomicSuccess('Elliptical selection created', parseSelectionBounds(parsed));
-  } catch (error) {
-    return atomicFailureFromError(error);
-  }
-}
-
-async function expandSelection(
-  connection: PhotoshopConnection,
-  backendRouter: PhotoshopBackendRouter,
-  args: Record<string, unknown>
-): Promise<ToolResult> {
-  const pixels = parseRequiredPixels(args);
-  if (pixels === null) {
-    return atomicFailure({
-      ok: false,
-      code: 'invalid_arguments',
-      message: 'pixels must be a finite number >= 1',
-      suggested_next_tool: 'photoshop_get_selection_bounds',
-    });
-  }
-
-  try {
-    const backend = await backendRouter.backendFor('selection.expand');
-    if (backend.kind === 'uxp') {
-      const result = await invokeUxpOperation(
-        'expand_selection',
-        { pixels },
-        'uxp_expand_selection_failed'
-      );
-      if (!result.ok || !result.data) {
-        throw new Error(result.error ?? 'uxp_expand_selection_failed');
-      }
-      const failure = mapSelectionSnippetFailure(result.data);
-      if (failure) return failure;
-      return atomicSuccess(`Selection expanded by ${pixels}px`, parseSelectionBounds(result.data));
-    }
-
-    const raw = await runSnippet(connection, ExtendScriptSnippets.expandSelection(pixels));
-    const parsed = parseSnippetResult(raw);
-    if (!parsed) {
-      return atomicFailureFromError(new Error(`Snippet returned unparseable payload: ${String(raw)}`));
-    }
-
-    const failure = mapSelectionSnippetFailure(parsed);
-    if (failure) return failure;
-
-    return atomicSuccess(`Selection expanded by ${pixels}px`, parseSelectionBounds(parsed));
-  } catch (error) {
-    return atomicFailureFromError(error);
-  }
-}
-
-async function contractSelection(
-  connection: PhotoshopConnection,
-  backendRouter: PhotoshopBackendRouter,
-  args: Record<string, unknown>
-): Promise<ToolResult> {
-  const pixels = parseRequiredPixels(args);
-  if (pixels === null) {
-    return atomicFailure({
-      ok: false,
-      code: 'invalid_arguments',
-      message: 'pixels must be a finite number >= 1',
-      suggested_next_tool: 'photoshop_get_selection_bounds',
-    });
-  }
-
-  try {
-    const backend = await backendRouter.backendFor('selection.contract');
-    if (backend.kind === 'uxp') {
-      const result = await invokeUxpOperation(
-        'contract_selection',
-        { pixels },
-        'uxp_contract_selection_failed'
-      );
-      if (!result.ok || !result.data) {
-        throw new Error(result.error ?? 'uxp_contract_selection_failed');
-      }
-      const failure = mapSelectionSnippetFailure(result.data);
-      if (failure) return failure;
-      return atomicSuccess(`Selection contracted by ${pixels}px`, parseSelectionBounds(result.data));
-    }
-
-    const raw = await runSnippet(connection, ExtendScriptSnippets.contractSelection(pixels));
-    const parsed = parseSnippetResult(raw);
-    if (!parsed) {
-      return atomicFailureFromError(new Error(`Snippet returned unparseable payload: ${String(raw)}`));
-    }
-
-    const failure = mapSelectionSnippetFailure(parsed);
-    if (failure) return failure;
-
-    return atomicSuccess(`Selection contracted by ${pixels}px`, parseSelectionBounds(parsed));
-  } catch (error) {
-    return atomicFailureFromError(error);
-  }
-}
-
-async function featherSelection(
-  connection: PhotoshopConnection,
-  backendRouter: PhotoshopBackendRouter,
-  args: Record<string, unknown>
-): Promise<ToolResult> {
-  const pixels = parseRequiredPixels(args);
-  if (pixels === null) {
-    return atomicFailure({
-      ok: false,
-      code: 'invalid_arguments',
-      message: 'pixels must be a finite number >= 1',
-      suggested_next_tool: 'photoshop_get_selection_bounds',
-    });
-  }
-
-  try {
-    const backend = await backendRouter.backendFor('selection.feather');
-    if (backend.kind === 'uxp') {
-      const result = await invokeUxpFeatherSelection({ pixels });
-      if (!result.ok || !result.data) throw new Error(result.error ?? 'uxp_feather_selection_failed');
-      return atomicSuccess(`Selection feathered by ${pixels}px`, parseSelectionBounds(result.data));
-    }
-    const raw = await runSnippet(connection, ExtendScriptSnippets.featherSelection(pixels));
-    const parsed = parseSnippetResult(raw);
-    if (!parsed) throw new Error(`Snippet returned unparseable payload: ${String(raw)}`);
-    const failure = mapSelectionSnippetFailure(parsed);
-    if (failure) return failure;
-    return atomicSuccess(`Selection feathered by ${pixels}px`, parseSelectionBounds(parsed));
-  } catch (error) {
-    return atomicFailureFromError(error);
-  }
-}
-
-async function saveSelection(
-  connection: PhotoshopConnection,
-  backendRouter: PhotoshopBackendRouter,
-  args: Record<string, unknown>
-): Promise<ToolResult> {
-  const channelName =
-    typeof args.channel_name === 'string' && args.channel_name.length > 0
-      ? args.channel_name
-      : undefined;
-
-  try {
-    const backend = await backendRouter.backendFor('selection.save');
-    if (backend.kind === 'uxp') {
-      const result = await invokeUxpOperation(
-        'save_selection',
-        channelName ? { channel_name: channelName } : {},
-        'uxp_save_selection_failed'
-      );
-      if (!result.ok || !result.data) {
-        throw new Error(result.error ?? 'uxp_save_selection_failed');
-      }
-      const failure = mapSelectionSnippetFailure(result.data);
-      if (failure) return failure;
-      const name = typeof result.data.channel_name === 'string' ? result.data.channel_name : channelName;
-      return atomicSuccess(
-        name ? `Selection saved to channel "${name}"` : 'Selection saved to new alpha channel',
-        parseSelectionBounds(result.data)
-      );
-    }
-
-    const raw = await runSnippet(connection, ExtendScriptSnippets.saveSelection(channelName));
-    const parsed = parseSnippetResult(raw);
-    if (!parsed) {
-      return atomicFailureFromError(new Error(`Snippet returned unparseable payload: ${String(raw)}`));
-    }
-
-    const failure = mapSelectionSnippetFailure(parsed);
-    if (failure) return failure;
-
-    const name = typeof parsed.channel_name === 'string' ? parsed.channel_name : channelName;
-    return atomicSuccess(
-      name ? `Selection saved to channel "${name}"` : 'Selection saved to new alpha channel',
-      parseSelectionBounds(parsed)
-    );
-  } catch (error) {
-    return atomicFailureFromError(error);
-  }
-}
-
-async function selectRectangle(
-  connection: PhotoshopConnection,
-  backendRouter: PhotoshopBackendRouter,
-  args: Record<string, unknown>
-): Promise<ToolResult> {
-  const left = args.left as number;
-  const top = args.top as number;
-  const right = args.right as number;
-  const bottom = args.bottom as number;
-
-  try {
-    const backend = await backendRouter.backendFor('selection.rectangle');
-    if (backend.kind === 'uxp') {
-      const result = await invokeUxpSelectRectangle({ left, top, right, bottom });
-      if (!result.ok) throw new Error(result.error ?? 'uxp_select_rectangle_failed');
-    } else {
-      await runSnippet(connection, ExtendScriptSnippets.selectRectangle(left, top, right, bottom));
-    }
-
-    return {
-      content: [
-        {
-          type: 'text' as const,
-          text: `Rectangular selection created: (${left}, ${top}) to (${right}, ${bottom})`,
-        },
-      ],
-    };
-  } catch (error) {
-    return {
-      content: [
-        {
-          type: 'text' as const,
-          text: `Error creating selection: ${error instanceof Error ? error.message : String(error)}`,
-        },
-      ],
-      isError: true,
-    };
-  }
-}
-
-async function selectAll(
-  connection: PhotoshopConnection,
-  backendRouter: PhotoshopBackendRouter
-): Promise<ToolResult> {
-  try {
-    const backend = await backendRouter.backendFor('selection.all');
-    if (backend.kind === 'uxp') {
-      const result = await invokeUxpOperation('select_all', {}, 'uxp_select_all_failed');
-      if (!result.ok) throw new Error(result.error ?? 'uxp_select_all_failed');
-      return {
-        content: [{ type: 'text' as const, text: 'All selected' }],
-      };
-    }
-
-    const apiFactory = new PhotoshopAPIFactory(connection);
-    const api = await apiFactory.createAPI();
-
-    const script = ExtendScriptSnippets.selectAll();
-    await api.executeScript(script);
-
-    return {
-      content: [
-        {
-          type: 'text' as const,
-          text: 'All selected',
-        },
-      ],
-    };
-  } catch (error) {
-    return {
-      content: [
-        {
-          type: 'text' as const,
-          text: `Error selecting all: ${error instanceof Error ? error.message : String(error)}`,
-        },
-      ],
-      isError: true,
-    };
-  }
-}
-
-async function deselect(
-  connection: PhotoshopConnection,
-  backendRouter: PhotoshopBackendRouter
-): Promise<ToolResult> {
-  try {
-    const backend = await backendRouter.backendFor('selection.deselect');
-    if (backend.kind === 'uxp') {
-      const result = await invokeUxpOperation('deselect', {}, 'uxp_deselect_failed');
-      if (!result.ok) throw new Error(result.error ?? 'uxp_deselect_failed');
-      return {
-        content: [{ type: 'text' as const, text: 'Selection cleared' }],
-      };
-    }
-
-    const apiFactory = new PhotoshopAPIFactory(connection);
-    const api = await apiFactory.createAPI();
-
-    const script = ExtendScriptSnippets.deselect();
-    await api.executeScript(script);
-
-    return {
-      content: [
-        {
-          type: 'text' as const,
-          text: 'Selection cleared',
-        },
-      ],
-    };
-  } catch (error) {
-    return {
-      content: [
-        {
-          type: 'text' as const,
-          text: `Error deselecting: ${error instanceof Error ? error.message : String(error)}`,
-        },
-      ],
-      isError: true,
-    };
-  }
-}
-
-async function invertSelection(
-  connection: PhotoshopConnection,
-  backendRouter: PhotoshopBackendRouter
-): Promise<ToolResult> {
-  try {
-    const backend = await backendRouter.backendFor('selection.invert');
-    if (backend.kind === 'uxp') {
-      const result = await invokeUxpOperation(
-        'invert_selection',
-        {},
-        'uxp_invert_selection_failed'
-      );
-      if (!result.ok) throw new Error(result.error ?? 'uxp_invert_selection_failed');
-      return {
-        content: [{ type: 'text' as const, text: 'Selection inverted' }],
-      };
-    }
-
-    const apiFactory = new PhotoshopAPIFactory(connection);
-    const api = await apiFactory.createAPI();
-
-    const script = ExtendScriptSnippets.invertSelection();
-    await api.executeScript(script);
-
-    return {
-      content: [
-        {
-          type: 'text' as const,
-          text: 'Selection inverted',
-        },
-      ],
-    };
-  } catch (error) {
-    return {
-      content: [
-        {
-          type: 'text' as const,
-          text: `Error inverting selection: ${error instanceof Error ? error.message : String(error)}`,
-        },
-      ],
-      isError: true,
-    };
-  }
-}
-
-async function createLayerMask(
-  connection: PhotoshopConnection,
-  backendRouter: PhotoshopBackendRouter,
-  args: Record<string, unknown>
-): Promise<ToolResult> {
-  try {
-    const backend = await backendRouter.backendFor('layer.mask.create');
-    if (backend.kind === 'uxp') {
-      const documentId =
-        typeof args.document_id === 'number' &&
-        Number.isSafeInteger(args.document_id) &&
-        args.document_id > 0
-          ? args.document_id
-          : undefined;
-      const result = await invokeUxpCreateLayerMask(
-        documentId !== undefined ? { document_id: documentId } : {}
-      );
-      if (!result.ok || !result.data) throw new Error(result.error ?? 'uxp_create_layer_mask_failed');
-    } else {
-      await runSnippet(connection, ExtendScriptSnippets.createLayerMask());
-    }
-    return {
-      content: [{
-        type: 'text' as const,
-        text: 'Layer mask created from selection',
-      }],
-    };
-  } catch (error) {
-    return atomicFailureFromError(error);
-  }
-}
-
-async function deleteLayerMask(
-  connection: PhotoshopConnection,
-  backendRouter: PhotoshopBackendRouter
-): Promise<ToolResult> {
-  try {
-    const backend = await backendRouter.backendFor('layer.mask.delete');
-    if (backend.kind === 'uxp') {
-      const result = await invokeUxpOperation(
-        'delete_layer_mask',
-        {},
-        'uxp_delete_layer_mask_failed'
-      );
-      if (!result.ok) throw new Error(result.error ?? 'uxp_delete_layer_mask_failed');
-      return {
-        content: [{ type: 'text' as const, text: 'Layer mask deleted' }],
-      };
-    }
-
-    const apiFactory = new PhotoshopAPIFactory(connection);
-    const api = await apiFactory.createAPI();
-
-    const script = ExtendScriptSnippets.deleteLayerMask();
-    await api.executeScript(script);
-
-    return {
-      content: [
-        {
-          type: 'text' as const,
-          text: 'Layer mask deleted',
-        },
-      ],
-    };
-  } catch (error) {
-    return {
-      content: [
-        {
-          type: 'text' as const,
-          text: `Error deleting layer mask: ${error instanceof Error ? error.message : String(error)}`,
-        },
-      ],
-      isError: true,
-    };
-  }
-}
-
-async function applyLayerMask(
-  connection: PhotoshopConnection,
-  backendRouter: PhotoshopBackendRouter
-): Promise<ToolResult> {
-  try {
-    const backend = await backendRouter.backendFor('layer.mask.apply');
-    if (backend.kind === 'uxp') {
-      const result = await invokeUxpOperation(
-        'apply_layer_mask',
-        {},
-        'uxp_apply_layer_mask_failed'
-      );
-      if (!result.ok) throw new Error(result.error ?? 'uxp_apply_layer_mask_failed');
-      return {
-        content: [{ type: 'text' as const, text: 'Layer mask applied (merged to layer)' }],
-      };
-    }
-
-    const apiFactory = new PhotoshopAPIFactory(connection);
-    const api = await apiFactory.createAPI();
-
-    const script = ExtendScriptSnippets.applyLayerMask();
-    await api.executeScript(script);
-
-    return {
-      content: [
-        {
-          type: 'text' as const,
-          text: 'Layer mask applied (merged to layer)',
-        },
-      ],
-    };
-  } catch (error) {
-    return {
-      content: [
-        {
-          type: 'text' as const,
-          text: `Error applying layer mask: ${error instanceof Error ? error.message : String(error)}`,
-        },
-      ],
-      isError: true,
-    };
-  }
-}
-
-async function selectSubject(
-  connection: PhotoshopConnection,
-  backendRouter: PhotoshopBackendRouter,
-  args: Record<string, unknown>
-): Promise<ToolResult> {
-  const sampleAllLayers = args.sample_all_layers === true;
-
-  await connection.ping().catch(() => undefined);
-  const info = connection.getPhotoshopInfo();
-  if (info) {
-    const detector = new PhotoshopDetector();
-    if (!detector.supportsSelectSubjectV2(info.version)) {
-      return atomicFailure({
-        ok: false,
-        code: 'version_unsupported',
-        message: `Select Subject v2 requires Photoshop 23.0+; detected version ${info.version}. Upgrade Photoshop or select manually.`,
-        suggested_next_tool: 'photoshop_get_capabilities',
-      });
-    }
-  }
-
-  try {
-    const backend = await backendRouter.backendFor('selection.subject');
-    if (backend.kind === 'uxp') {
-      const result = await invokeUxpSelectSubject({ sample_all_layers: sampleAllLayers });
-      if (!result.ok || !result.data) throw new Error(result.error ?? 'uxp_select_subject_failed');
-      const method = typeof result.data.method === 'string' ? result.data.method : 'selectSubject';
-      return atomicSuccess(`Subject selected via ${method}`, result.data);
-    }
-    const raw = await runSnippet(connection, ExtendScriptSnippets.selectSubject(sampleAllLayers));
-    const parsed = parseSnippetResult(raw);
-    if (!parsed) throw new Error(`Snippet returned unparseable payload: ${String(raw)}`);
-    const method = typeof parsed.method === 'string' ? parsed.method : 'selectSubject';
-    return atomicSuccess(`Subject selected via ${method}`, parsed);
-  } catch (error) {
-    return atomicFailureFromError(error);
-  }
-}
-
-async function contentAwareFill(
-  connection: PhotoshopConnection,
-  backendRouter: PhotoshopBackendRouter
-): Promise<ToolResult> {
-  try {
-    const backend = await backendRouter.backendFor('selection.content_aware_fill');
-    if (backend.kind === 'uxp') {
-      const result = await invokeUxpOperation(
-        'content_aware_fill',
-        {},
-        'uxp_content_aware_fill_failed'
-      );
-      if (!result.ok || !result.data) {
-        throw new Error(result.error ?? 'uxp_content_aware_fill_failed');
-      }
-      const failure = mapSelectionSnippetFailure(result.data);
-      if (failure) return failure;
-      return atomicSuccess('Content-aware fill applied', result.data);
-    }
-
-    const raw = await runSnippet(connection, ExtendScriptSnippets.contentAwareFill());
-    const parsed = parseSnippetResult(raw);
-    if (!parsed) {
-      return atomicFailureFromError(new Error(`Snippet returned unparseable payload: ${String(raw)}`));
-    }
-
-    return atomicSuccess('Content-aware fill applied', parsed);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (/selection_required/i.test(message)) {
-      return atomicFailure({
-        ok: false,
-        code: 'selection_required',
-        message: 'Active pixel selection required before content-aware fill',
-        suggested_next_tool: 'photoshop_select_rectangle',
-      });
-    }
-    return atomicFailureFromError(error);
-  }
 }

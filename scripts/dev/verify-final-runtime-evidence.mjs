@@ -19,6 +19,10 @@ assert(preflight.uxp_companion?.connected === true, 'UXP companion is not proven
 assert(preflight.uxp_companion?.revision_match === true, 'UXP revision equality is not proven');
 assert(operation.pid === preflight.loaded_child.pid, 'visual operation did not run under the preflighted child PID');
 assert(operation.phase === 'completed', 'visual operation did not complete');
+assert(
+  operation.tool !== 'photoshop_set_active_document',
+  'photoshop_set_active_document is UI-activating navigation and cannot be credited as no-focus acceptance evidence',
+);
 assert(operation.operation_receipt?.execution === 'completed', 'visual operation receipt is not completed');
 assert(operation.verdict?.execution_outcome === 'completed', 'visual execution outcome is not completed');
 assert(operation.verdict?.artistic_outcome === 'resolved', 'bounded visual target did not close as resolved');

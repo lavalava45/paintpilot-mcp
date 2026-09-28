@@ -107,11 +107,8 @@ export function createBrushPackTools(
 
         let backendKind = 'unavailable';
         try {
-          const backend = await backendRouter.backendFor('brush.presets.import');
-          backendKind = backend.kind;
-          if (backend.kind !== 'uxp') {
-            throw new Error(`brush_pack_import_unavailable: missing host capability uxp.localFileSystem+photoshop.app.open; selected backend=${backend.kind}`);
-          }
+          await backendRouter.backendFor('brush.presets.import');
+          backendKind = 'uxp';
         } catch (error) {
           const record: BrushPackIngestionRecord = {
             ...manifest,

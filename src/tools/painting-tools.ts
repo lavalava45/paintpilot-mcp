@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { ToolDefinition, ToolResult } from '../core/tool-registry.js';
 import { PhotoshopBackendRouter } from '../platform/photoshop-backend.js';
 import {
@@ -7,14 +8,17 @@ import {
   invokeUxpPaintRegions,
   invokeUxpPaintStrokes,
   invokeUxpPaintDabs,
+  invokeUxpPaintStampInstances,
 } from '../platform/uxp-bridge-client.js';
 import { PhotoshopConnection } from '../platform/connection.js';
-import { currentToolExecutionContext } from '../core/execution-context.js';
+import {
+  currentStableCommandId,
+  currentToolExecutionContext,
+} from '../core/execution-context.js';
+import { listStampMotifProfiles } from '../core/brush-pack-profile.js';
 import {
   atomicFailureFromError,
   atomicSuccess,
-  parseSnippetResult,
-  runSnippet,
 } from './atomic-shared.js';
 
 const PAINT_TOOLS = ['BRUSH', 'PENCIL', 'ERASER', 'SMUDGE'] as const;
@@ -55,6 +59,18 @@ interface PaintDabGroup {
   opacity?: number;
   flow?: number;
   points: Array<{ x: number; y: number }>;
+}
+
+interface StampInstance extends Record<string, unknown> {
+  instance_id: string;
+  x: number;
+  y: number;
+  size: number;
+  angle: number;
+  flip_x: boolean;
+  flip_y: boolean;
+  opacity: number;
+  color?: { red: number; green: number; blue: number };
 }
 
 type PaintRegionOperation = 'ADD' | 'SUBTRACT';
@@ -266,6 +282,67 @@ function parseDab(value: unknown, index: number): PaintDab {
     size: optionalNumber(rec.size, `dabs[${index}].size`, 1, 5000),
     opacity: optionalNumber(rec.opacity, `dabs[${index}].opacity`, 0, 100),
     flow: optionalNumber(rec.flow, `dabs[${index}].flow`, 0, 100),
+  };
+}
+
+function validateStrokeMechanismReadiness(strokes: PaintStroke[]): void {
+  for (let index = 0; index < strokes.length; index++) {
+    const stroke = strokes[index]!;
+    if (stroke.tool === 'BRUSH') continue;
+
+    const requestedStyleOverrides = [
+      stroke.size !== undefined ? 'size' : null,
+      stroke.opacity !== undefined ? 'opacity' : null,
+      stroke.flow !== undefined ? 'flow' : null,
+      stroke.dynamics !== undefined ? 'dynamics' : null,
+    ].filter((value): value is string => value !== null);
+    if (requestedStyleOverrides.length) {
+      throw new Error(
+        `paint_tool_not_ready:${stroke.tool}: per-stroke ${requestedStyleOverrides.join(', ')} ` +
+        `overrides are not proven for this UXP stroke mechanism; use the mechanism's current Photoshop tool settings ` +
+        `or choose BRUSH for explicit size/opacity/flow control`
+      );
+    }
+    if ((stroke.tool === 'SMUDGE' || stroke.tool === 'ERASER') && stroke.color) {
+      throw new Error(
+        `paint_tool_not_ready:${stroke.tool}: foreground color is not a meaningful supported override for this UXP stroke mechanism`
+      );
+    }
+  }
+}
+
+function parseStampInstance(value: unknown, index: number): StampInstance {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`instances[${index}] must be an object`);
+  }
+  const rec = value as Record<string, unknown>;
+  const instanceId = typeof rec.instance_id === 'string' ? rec.instance_id.trim() : '';
+  if (!instanceId) throw new Error(`instances[${index}].instance_id is required`);
+  let color: { red: number; green: number; blue: number } | undefined;
+  if (rec.color !== undefined) {
+    if (!rec.color || typeof rec.color !== 'object' || Array.isArray(rec.color)) {
+      throw new Error(`instances[${index}].color must be an object`);
+    }
+    const c = rec.color as Record<string, unknown>;
+    color = {
+      red: finiteNumber(c.red, `instances[${index}].color.red`),
+      green: finiteNumber(c.green, `instances[${index}].color.green`),
+      blue: finiteNumber(c.blue, `instances[${index}].color.blue`),
+    };
+    for (const [channel, n] of Object.entries(color)) {
+      if (n < 0 || n > 255) throw new Error(`instances[${index}].color.${channel} must be between 0 and 255`);
+    }
+  }
+  return {
+    instance_id: instanceId,
+    x: finiteNumber(rec.x, `instances[${index}].x`),
+    y: finiteNumber(rec.y, `instances[${index}].y`),
+    size: optionalNumber(rec.size, `instances[${index}].size`, 1, 5000) ?? 1,
+    angle: optionalNumber(rec.angle, `instances[${index}].angle`, -180, 180) ?? 0,
+    flip_x: rec.flip_x === true,
+    flip_y: rec.flip_y === true,
+    opacity: optionalNumber(rec.opacity, `instances[${index}].opacity`, 0, 100) ?? 100,
+    color,
   };
 }
 
@@ -630,553 +707,6 @@ function expandDynamicStroke(stroke: PaintStroke): PaintStroke[] {
   return segments;
 }
 
-function paintRuntime(): string {
-  return `
-function __paint_cTID(s) { return app.charIDToTypeID(s); }
-function __paint_sTID(s) { return app.stringIDToTypeID(s); }
-function __paint_selectBrushTool() {
-  var d = new ActionDescriptor();
-  var r = new ActionReference();
-  r.putClass(__paint_sTID('paintbrushTool'));
-  d.putReference(__paint_cTID('null'), r);
-  executeAction(__paint_cTID('slct'), d, DialogModes.NO);
-}
-function __paint_readBrush() {
-  __paint_selectBrushTool();
-  var ref = new ActionReference();
-  ref.putEnumerated(__paint_cTID('capp'), __paint_cTID('Ordn'), __paint_cTID('Trgt'));
-  var appDesc = executeActionGet(ref);
-  var opts = appDesc.getObjectValue(__paint_sTID('currentToolOptions'));
-  var brush = opts.getObjectValue(__paint_sTID('brush'));
-  function optUnit(obj, key, fallback) {
-    try { return obj.getUnitDoubleValue(__paint_sTID(key)); } catch (e) {}
-    try { return obj.getDouble(__paint_sTID(key)); } catch (e2) {}
-    try { return obj.getInteger(__paint_sTID(key)); } catch (e3) {}
-    return fallback;
-  }
-  function optBool(obj, key, fallback) {
-    try { return obj.getBoolean(__paint_sTID(key)); } catch (e) { return fallback; }
-  }
-  function optDouble(obj, key, fallback) {
-    try { return obj.getDouble(__paint_sTID(key)); } catch (e) {}
-    try { return obj.getInteger(__paint_sTID(key)); } catch (e2) {}
-    return fallback;
-  }
-  return {
-    size: optUnit(brush, 'diameter', 1),
-    hardness: optUnit(brush, 'hardness', 100),
-    angle: optUnit(brush, 'angle', 0),
-    roundness: optUnit(brush, 'roundness', 100),
-    spacing: optUnit(brush, 'spacing', 25),
-    opacity: optUnit(opts, 'opacity', 100),
-    flow: optUnit(opts, 'flow', 100),
-    flip_x: optBool(brush, 'flipX', false),
-    flip_y: optBool(brush, 'flipY', false),
-    use_pressure_size: optBool(opts, 'usePressureOverridesSize', false),
-    use_pressure_opacity: optBool(opts, 'usePressureOverridesOpacity', false),
-    airbrush: optBool(opts, 'repeat', false),
-    smoothing_enabled: optBool(opts, 'smoothing', false),
-    smoothing: optDouble(opts, 'smooth', 10)
-  };
-}
-function __paint_createBrushCache() {
-  __paint_selectBrushTool();
-  var ref = new ActionReference();
-  ref.putEnumerated(__paint_cTID('capp'), __paint_cTID('Ordn'), __paint_cTID('Trgt'));
-  var appDesc = executeActionGet(ref);
-  var opts = appDesc.getObjectValue(__paint_sTID('currentToolOptions'));
-  var brush = opts.getObjectValue(__paint_sTID('brush'));
-  function optUnit(obj, key, fallback) {
-    try { return obj.getUnitDoubleValue(__paint_sTID(key)); } catch (e) {}
-    try { return obj.getDouble(__paint_sTID(key)); } catch (e2) {}
-    try { return obj.getInteger(__paint_sTID(key)); } catch (e3) {}
-    return fallback;
-  }
-  return {
-    opts: opts,
-    brush: brush,
-    state: {
-      size: optUnit(brush, 'diameter', 1),
-      opacity: optUnit(opts, 'opacity', 100),
-      flow: optUnit(opts, 'flow', 100)
-    }
-  };
-}
-function __paint_applyBrushCache(cache) {
-  cache.brush.putDouble(__paint_sTID('diameter'), cache.state.size);
-  cache.opts.putObject(__paint_sTID('brush'), __paint_sTID('brush'), cache.brush);
-  cache.opts.putInteger(__paint_sTID('opacity'), Math.round(cache.state.opacity));
-  cache.opts.putInteger(__paint_sTID('flow'), Math.round(cache.state.flow));
-  var toolDesc = new ActionDescriptor();
-  var toolRef = new ActionReference();
-  toolRef.putClass(__paint_sTID('paintbrushTool'));
-  toolDesc.putReference(__paint_sTID('null'), toolRef);
-  toolDesc.putObject(__paint_sTID('to'), __paint_sTID('null'), cache.opts);
-  executeAction(__paint_sTID('set'), toolDesc, DialogModes.NO);
-}
-function __paint_setBrush(v) {
-  __paint_selectBrushTool();
-  var desc = new ActionDescriptor();
-  var ref = new ActionReference();
-  ref.putEnumerated(__paint_cTID('Brsh'), __paint_cTID('Ordn'), __paint_cTID('Trgt'));
-  desc.putReference(__paint_cTID('null'), ref);
-  var b = new ActionDescriptor();
-  b.putDouble(__paint_sTID('diameter'), v.size);
-  b.putDouble(__paint_sTID('hardness'), v.hardness);
-  b.putDouble(__paint_sTID('angle'), v.angle);
-  b.putDouble(__paint_sTID('roundness'), v.roundness);
-  b.putUnitDouble(__paint_sTID('spacing'), __paint_cTID('#Prc'), v.spacing);
-  b.putBoolean(__paint_sTID('flipX'), v.flip_x);
-  b.putBoolean(__paint_sTID('flipY'), v.flip_y);
-  desc.putObject(__paint_sTID('to'), __paint_cTID('Brsh'), b);
-  executeAction(__paint_cTID('setd'), desc, DialogModes.NO);
-
-  var currentRef = new ActionReference();
-  currentRef.putEnumerated(__paint_cTID('capp'), __paint_cTID('Ordn'), __paint_cTID('Trgt'));
-  var currentApp = executeActionGet(currentRef);
-  var toolOptions = currentApp.getObjectValue(__paint_sTID('currentToolOptions'));
-  toolOptions.putInteger(__paint_sTID('opacity'), Math.round(v.opacity));
-  toolOptions.putInteger(__paint_sTID('flow'), Math.round(v.flow));
-  toolOptions.putBoolean(__paint_sTID('usePressureOverridesOpacity'), v.use_pressure_opacity);
-  toolOptions.putBoolean(__paint_sTID('usePressureOverridesSize'), v.use_pressure_size);
-  toolOptions.putBoolean(__paint_sTID('repeat'), v.airbrush);
-  toolOptions.putBoolean(__paint_sTID('smoothing'), v.smoothing_enabled);
-  toolOptions.putInteger(__paint_sTID('smooth'), Math.round(v.smoothing));
-  toolOptions.putDouble(__paint_sTID('smoothingValue'), v.smoothing);
-
-  var toolDesc = new ActionDescriptor();
-  var toolRef = new ActionReference();
-  toolRef.putClass(__paint_sTID('paintbrushTool'));
-  toolDesc.putReference(__paint_sTID('null'), toolRef);
-  toolDesc.putObject(__paint_sTID('to'), __paint_sTID('null'), toolOptions);
-  executeAction(__paint_sTID('set'), toolDesc, DialogModes.NO);
-}
-`;
-}
-
-function setBrushScript(values: Record<string, number | boolean | undefined>): string {
-  const overrides = JSON.stringify(values);
-  return `${paintRuntime()}
-var current = __paint_readBrush();
-var overrides = ${overrides};
-for (var key in overrides) {
-  if (overrides.hasOwnProperty(key) && overrides[key] !== undefined) current[key] = overrides[key];
-}
-__paint_setBrush(current);
-return { ok: true, settings: __paint_readBrush() };`;
-}
-
-function selectBrushPresetScript(name: string): string {
-  const preset = JSON.stringify(name);
-  return `${paintRuntime()}
-var presetName = ${preset};
-var desc = new ActionDescriptor();
-var ref = new ActionReference();
-ref.putName(__paint_cTID('Brsh'), presetName);
-desc.putReference(__paint_cTID('null'), ref);
-executeAction(__paint_cTID('slct'), desc, DialogModes.NO);
-return { ok: true, preset: presetName, settings: __paint_readBrush() };
-`;
-}
-function foregroundColorScript(red: number, green: number, blue: number): string {
-  return `
-var color = new SolidColor();
-color.rgb.red = ${red};
-color.rgb.green = ${green};
-color.rgb.blue = ${blue};
-app.foregroundColor = color;
-return { ok: true, red: ${red}, green: ${green}, blue: ${blue} };
-`;
-}
-
-function paintStrokesScript(strokes: PaintStroke[], layerId?: number): string {
-  const payload = JSON.stringify(strokes);
-  const layerIdPayload = JSON.stringify(layerId ?? null);
-  return `
-${paintRuntime()}
-if (app.documents.length === 0) throw new Error('No active document');
-var doc = app.activeDocument;
-var __paint_requestedLayerId = ${layerIdPayload};
-function __paint_findLayerById(container, id) {
-  for (var li = 0; li < container.layers.length; li++) {
-    var layer = container.layers[li];
-    try { if (layer.id === id) return layer; } catch (eId) {}
-    if (layer.typename === 'LayerSet') {
-      var nested = __paint_findLayerById(layer, id);
-      if (nested) return nested;
-    }
-  }
-  return null;
-}
-function __paint_layerId(layer) { try { return layer.id; } catch (e) { return null; } }
-var __paint_originalActive = doc.activeLayer;
-var __paint_targetLayer = __paint_requestedLayerId ? __paint_findLayerById(doc, __paint_requestedLayerId) : __paint_originalActive;
-if (!__paint_targetLayer) throw new Error('paint_strokes target layer not found: ' + __paint_requestedLayerId);
-if (__paint_targetLayer.typename === 'LayerSet') throw new Error('paint_strokes target must be an ArtLayer, not a LayerSet');
-try {
-  if (__paint_targetLayer.kind !== LayerKind.NORMAL) throw new Error('paint_strokes target must be a normal raster ArtLayer: ' + __paint_targetLayer.name);
-} catch (eKind) { if (String(eKind).indexOf('paint_strokes target') >= 0) throw eKind; }
-try {
-  if (__paint_targetLayer.allLocked) throw new Error('paint_strokes target layer is locked: ' + __paint_targetLayer.name);
-} catch (eLocked) { if (String(eLocked).indexOf('paint_strokes target layer is locked') >= 0) throw eLocked; }
-doc.activeLayer = __paint_targetLayer;
-// Photoshop PathPointInfo coordinates are point-based. Public MCP painting
-// coordinates are canvas pixels, so normalize them here at execution time.
-// 72 dpi remains identity; higher/lower DPI documents keep identical pixel geometry.
-var __paint_pathScale = 72 / Number(doc.resolution || 72);
-function __paint_canvasPx(v) { return Number(v) * __paint_pathScale; }
-var strokes = ${payload};
-function __paint_setForeground(c) {
-  var color = new SolidColor();
-  color.rgb.red = c.red;
-  color.rgb.green = c.green;
-  color.rgb.blue = c.blue;
-  app.foregroundColor = color;
-}
-function __paint_sameColor(a, b) {
-  return a && b && a.red === b.red && a.green === b.green && a.blue === b.blue;
-}
-function __paint_differs(a, b) {
-  return Math.abs(Number(a) - Number(b)) > 0.0001;
-}
-function __paint_applyStrokes() {
-  var brushCache = __paint_createBrushCache();
-  var brushState = brushCache.state;
-  var fg = app.foregroundColor.rgb;
-  var cachedColor = { red: Number(fg.red), green: Number(fg.green), blue: Number(fg.blue) };
-  for (var s = 0; s < strokes.length; s++) {
-    var stroke = strokes[s];
-    var brushChanged = false;
-    if (stroke.size !== undefined || stroke.opacity !== undefined || stroke.flow !== undefined) {
-      if (stroke.size !== undefined && __paint_differs(brushState.size, stroke.size)) {
-        brushState.size = stroke.size;
-        brushChanged = true;
-      }
-      if (stroke.opacity !== undefined && __paint_differs(brushState.opacity, stroke.opacity)) {
-        brushState.opacity = stroke.opacity;
-        brushChanged = true;
-      }
-      if (stroke.flow !== undefined && __paint_differs(brushState.flow, stroke.flow)) {
-        brushState.flow = stroke.flow;
-        brushChanged = true;
-      }
-      if (brushChanged) __paint_applyBrushCache(brushCache);
-    }
-    var desiredColor = stroke.color ? stroke.color : cachedColor;
-    if (desiredColor && (brushChanged || !__paint_sameColor(cachedColor, desiredColor))) {
-      __paint_setForeground(desiredColor);
-    }
-    if (stroke.color) {
-      cachedColor = { red: stroke.color.red, green: stroke.color.green, blue: stroke.color.blue };
-    }
-    var pts = [];
-    for (var i = 0; i < stroke.points.length; i++) {
-      var src = stroke.points[i];
-      var p = new PathPointInfo();
-      p.kind = src.smooth ? PointKind.SMOOTHPOINT : PointKind.CORNERPOINT;
-      p.anchor = [__paint_canvasPx(src.x), __paint_canvasPx(src.y)];
-      p.leftDirection = src.left
-        ? [__paint_canvasPx(src.left[0]), __paint_canvasPx(src.left[1])]
-        : [__paint_canvasPx(src.x), __paint_canvasPx(src.y)];
-      p.rightDirection = src.right
-        ? [__paint_canvasPx(src.right[0]), __paint_canvasPx(src.right[1])]
-        : [__paint_canvasPx(src.x), __paint_canvasPx(src.y)];
-      pts.push(p);
-    }
-    if (pts.length === 1) {
-      var src0 = stroke.points[0];
-      var p2 = new PathPointInfo();
-      p2.kind = PointKind.CORNERPOINT;
-      p2.anchor = [__paint_canvasPx(src0.x), __paint_canvasPx(src0.y)];
-      p2.leftDirection = [__paint_canvasPx(src0.x), __paint_canvasPx(src0.y)];
-      p2.rightDirection = [__paint_canvasPx(src0.x), __paint_canvasPx(src0.y)];
-      pts.push(p2);
-    }
-    var sub = new SubPathInfo();
-    sub.closed = stroke.closed;
-    sub.operation = ShapeOperation.SHAPEADD;
-    sub.entireSubPath = pts;
-    var path = doc.pathItems.add('__MCP_PAINT_' + s, [sub]);
-    try {
-      path.strokePath(ToolType[stroke.tool], stroke.simulatePressure);
-    } finally {
-      try { path.remove(); } catch (eRemove) {}
-    }
-  }
-}
-try {
-  doc.suspendHistory('MCP Digital Painting', '__paint_applyStrokes()');
-  return {
-    ok: true,
-    stroke_count: strokes.length,
-    layer_id: __paint_layerId(__paint_targetLayer),
-    layer_name: __paint_targetLayer.name,
-    coordinate_space: 'canvas_pixels',
-    document_resolution_dpi: Number(doc.resolution),
-    path_coordinate_scale: __paint_pathScale
-  };
-} finally {
-  try { doc.activeLayer = __paint_originalActive; } catch (eRestore) {}
-}
-`;
-}
-
-function paintDabsScript(groups: PaintDabGroup[], layerId?: number): string {
-  const payload = JSON.stringify(groups);
-  const layerIdPayload = JSON.stringify(layerId ?? null);
-  return `
-${paintRuntime()}
-if (app.documents.length === 0) throw new Error('No active document');
-var doc = app.activeDocument;
-var __paint_requestedLayerId = ${layerIdPayload};
-function __paint_findLayerById(container, id) {
-  for (var li = 0; li < container.layers.length; li++) {
-    var layer = container.layers[li];
-    try { if (layer.id === id) return layer; } catch (eId) {}
-    if (layer.typename === 'LayerSet') {
-      var nested = __paint_findLayerById(layer, id);
-      if (nested) return nested;
-    }
-  }
-  return null;
-}
-function __paint_layerId(layer) { try { return layer.id; } catch (e) { return null; } }
-var __paint_originalActive = doc.activeLayer;
-var __paint_targetLayer = __paint_requestedLayerId ? __paint_findLayerById(doc, __paint_requestedLayerId) : __paint_originalActive;
-if (!__paint_targetLayer) throw new Error('paint_dabs target layer not found: ' + __paint_requestedLayerId);
-if (__paint_targetLayer.typename === 'LayerSet') throw new Error('paint_dabs target must be an ArtLayer, not a LayerSet');
-try {
-  if (__paint_targetLayer.kind !== LayerKind.NORMAL) throw new Error('paint_dabs target must be a normal raster ArtLayer: ' + __paint_targetLayer.name);
-} catch (eKind) { if (String(eKind).indexOf('paint_dabs target') >= 0) throw eKind; }
-try {
-  if (__paint_targetLayer.allLocked) throw new Error('paint_dabs target layer is locked: ' + __paint_targetLayer.name);
-} catch (eLocked) { if (String(eLocked).indexOf('paint_dabs target layer is locked') >= 0) throw eLocked; }
-doc.activeLayer = __paint_targetLayer;
-var __paint_pathScale = 72 / Number(doc.resolution || 72);
-function __paint_canvasPx(v) { return Number(v) * __paint_pathScale; }
-var groups = ${payload};
-function __paint_dabsSetForeground(c) {
-  var color = new SolidColor();
-  color.rgb.red = c.red;
-  color.rgb.green = c.green;
-  color.rgb.blue = c.blue;
-  app.foregroundColor = color;
-}
-function __paint_dabsDiffers(a, b) {
-  return Math.abs(Number(a) - Number(b)) > 0.0001;
-}
-function __paint_applyDabGroups() {
-  var brushCache = __paint_createBrushCache();
-  var brushState = brushCache.state;
-  for (var g = 0; g < groups.length; g++) {
-    var group = groups[g];
-    var brushChanged = false;
-    if (group.size !== undefined && __paint_dabsDiffers(brushState.size, group.size)) {
-      brushState.size = group.size;
-      brushChanged = true;
-    }
-    if (group.opacity !== undefined && __paint_dabsDiffers(brushState.opacity, group.opacity)) {
-      brushState.opacity = group.opacity;
-      brushChanged = true;
-    }
-    if (group.flow !== undefined && __paint_dabsDiffers(brushState.flow, group.flow)) {
-      brushState.flow = group.flow;
-      brushChanged = true;
-    }
-    if (brushChanged) __paint_applyBrushCache(brushCache);
-    if (group.color) __paint_dabsSetForeground(group.color);
-
-    var subpaths = [];
-    for (var i = 0; i < group.points.length; i++) {
-      var src = group.points[i];
-      var p1 = new PathPointInfo();
-      p1.kind = PointKind.CORNERPOINT;
-      p1.anchor = [__paint_canvasPx(src.x), __paint_canvasPx(src.y)];
-      p1.leftDirection = [__paint_canvasPx(src.x), __paint_canvasPx(src.y)];
-      p1.rightDirection = [__paint_canvasPx(src.x), __paint_canvasPx(src.y)];
-      var p2 = new PathPointInfo();
-      p2.kind = PointKind.CORNERPOINT;
-      p2.anchor = [__paint_canvasPx(src.x), __paint_canvasPx(src.y)];
-      p2.leftDirection = [__paint_canvasPx(src.x), __paint_canvasPx(src.y)];
-      p2.rightDirection = [__paint_canvasPx(src.x), __paint_canvasPx(src.y)];
-      var sub = new SubPathInfo();
-      sub.closed = false;
-      sub.operation = ShapeOperation.SHAPEADD;
-      sub.entireSubPath = [p1, p2];
-      subpaths.push(sub);
-    }
-    var path = doc.pathItems.add('__MCP_DABS_' + g, subpaths);
-    try {
-      path.strokePath(ToolType.BRUSH, false);
-    } finally {
-      try { path.remove(); } catch (eRemove) {}
-    }
-  }
-}
-try {
-  doc.suspendHistory('MCP Paint Dabs', '__paint_applyDabGroups()');
-  return {
-    ok: true,
-    group_count: groups.length,
-    layer_id: __paint_layerId(__paint_targetLayer),
-    layer_name: __paint_targetLayer.name,
-    coordinate_space: 'canvas_pixels',
-    document_resolution_dpi: Number(doc.resolution),
-    path_coordinate_scale: __paint_pathScale
-  };
-} finally {
-  try { doc.activeLayer = __paint_originalActive; } catch (eRestore) {}
-}
-`;
-}
-
-function paintRegionsScript(regions: PaintRegion[], clipBounds?: PaintClipBounds): string {
-  const regionPayload = JSON.stringify(regions);
-  const clipPayload = JSON.stringify(clipBounds ?? null);
-  return `
-if (app.documents.length === 0) throw new Error('No active document');
-var doc = app.activeDocument;
-var regions = ${regionPayload};
-var clipBounds = ${clipPayload};
-var __paint_pathScale = 72 / Number(doc.resolution || 72);
-function __paint_canvasPx(v) { return Number(v) * __paint_pathScale; }
-function __paint_findLayerById(container, id) {
-  for (var i = 0; i < container.layers.length; i++) {
-    var layer = container.layers[i];
-    try { if (layer.id === id) return layer; } catch (eId) {}
-    if (layer.typename === 'LayerSet') {
-      var nested = __paint_findLayerById(layer, id);
-      if (nested) return nested;
-    }
-  }
-  return null;
-}
-function __paint_layerId(layer) {
-  try { return layer.id; } catch (e) { return null; }
-}
-function __paint_assertPoint(p, label) {
-  var w = doc.width.as('px');
-  var h = doc.height.as('px');
-  function assertXY(x, y, suffix) {
-    if (x < 0 || x > w || y < 0 || y > h) {
-      throw new Error(label + suffix + ' lies outside document canvas');
-    }
-    if (clipBounds && (x < clipBounds.left || x > clipBounds.right || y < clipBounds.top || y > clipBounds.bottom)) {
-      throw new Error(label + suffix + ' lies outside clip_bounds');
-    }
-  }
-  assertXY(Number(p.x), Number(p.y), '.anchor');
-  if (p.left) assertXY(Number(p.left[0]), Number(p.left[1]), '.left');
-  if (p.right) assertXY(Number(p.right[0]), Number(p.right[1]), '.right');
-}
-function __paint_makeSubPath(contour, regionIndex, contourIndex) {
-  var pts = [];
-  for (var i = 0; i < contour.points.length; i++) {
-    var src = contour.points[i];
-    __paint_assertPoint(src, 'regions[' + regionIndex + '].contours[' + contourIndex + '].points[' + i + ']');
-    var p = new PathPointInfo();
-    p.kind = src.smooth ? PointKind.SMOOTHPOINT : PointKind.CORNERPOINT;
-    p.anchor = [__paint_canvasPx(src.x), __paint_canvasPx(src.y)];
-    p.leftDirection = src.left
-      ? [__paint_canvasPx(src.left[0]), __paint_canvasPx(src.left[1])]
-      : [__paint_canvasPx(src.x), __paint_canvasPx(src.y)];
-    p.rightDirection = src.right
-      ? [__paint_canvasPx(src.right[0]), __paint_canvasPx(src.right[1])]
-      : [__paint_canvasPx(src.x), __paint_canvasPx(src.y)];
-    pts.push(p);
-  }
-  var sub = new SubPathInfo();
-  sub.closed = true;
-  sub.operation = contour.operation === 'SUBTRACT'
-    ? ShapeOperation.SHAPESUBTRACT
-    : ShapeOperation.SHAPEADD;
-  sub.entireSubPath = pts;
-  return sub;
-}
-function __paint_preflightRegions(originalActive) {
-  var targets = [];
-  for (var r = 0; r < regions.length; r++) {
-    var region = regions[r];
-    var target = region.layerId ? __paint_findLayerById(doc, region.layerId) : originalActive;
-    if (!target) throw new Error('Target layer not found for region ' + (region.id || r));
-    if (target.typename === 'LayerSet') throw new Error('paint_regions target must be an ArtLayer, not a LayerSet');
-    try {
-      if (target.kind !== LayerKind.NORMAL) {
-        throw new Error('paint_regions target must be a normal raster ArtLayer: ' + target.name);
-      }
-    } catch (eKind) {
-      if (String(eKind).indexOf('paint_regions target') >= 0) throw eKind;
-    }
-    try {
-      if (target.allLocked) throw new Error('paint_regions target layer is locked: ' + target.name);
-    } catch (eLocked) {
-      if (String(eLocked).indexOf('paint_regions target layer is locked') >= 0) throw eLocked;
-    }
-    for (var c = 0; c < region.contours.length; c++) {
-      var contour = region.contours[c];
-      for (var i = 0; i < contour.points.length; i++) {
-        __paint_assertPoint(
-          contour.points[i],
-          'regions[' + r + '].contours[' + c + '].points[' + i + ']'
-        );
-      }
-    }
-    targets.push(target);
-  }
-  return targets;
-}
-var __paint_originalActive = doc.activeLayer;
-var __paint_regionTargets = __paint_preflightRegions(__paint_originalActive);
-function __paint_applyRegions() {
-  var originalActive = __paint_originalActive;
-  var painted = [];
-  try {
-    for (var r = 0; r < regions.length; r++) {
-      var region = regions[r];
-      var target = __paint_regionTargets[r];
-      doc.activeLayer = target;
-      var subpaths = [];
-      for (var c = 0; c < region.contours.length; c++) {
-        subpaths.push(__paint_makeSubPath(region.contours[c], r, c));
-      }
-      var path = doc.pathItems.add('__MCP_REGION_' + r, subpaths);
-      var fillColor = new SolidColor();
-      fillColor.rgb.red = region.color.red;
-      fillColor.rgb.green = region.color.green;
-      fillColor.rgb.blue = region.color.blue;
-      try {
-        path.fillPath(fillColor, ColorBlendMode.NORMAL, region.opacity, false, 0, true, true);
-      } finally {
-        try { path.remove(); } catch (eRemove) {}
-      }
-      painted.push({
-        id: region.id || String(r),
-        layer_id: __paint_layerId(target),
-        layer_name: target.name,
-        contour_count: region.contours.length,
-        opacity: region.opacity
-      });
-    }
-  } finally {
-    try { doc.activeLayer = originalActive; } catch (eRestore) {}
-  }
-  return painted;
-}
-var paintedRegions = null;
-function __paint_regions_history() { paintedRegions = __paint_applyRegions(); }
-doc.suspendHistory('MCP Paint Regions', '__paint_regions_history()');
-return {
-  ok: true,
-  region_count: regions.length,
-  painted_regions: paintedRegions,
-  coordinate_space: 'canvas_pixels',
-  document_resolution_dpi: Number(doc.resolution),
-  path_coordinate_scale: __paint_pathScale,
-  clip_bounds: clipBounds
-};
-`;
-}
-
 function paintStrokeCost(stroke: PaintStroke): number {
   let cost = 1;
   if (stroke.color) cost += 0.5;
@@ -1242,7 +772,7 @@ export function createPaintingTools(
           required: ['name'],
         },
       },
-      handler: async (args) => selectBrushPreset(connection, backendRouter, args),
+      handler: async (args) => selectBrushPreset(backendRouter, args),
     },
     {
       tool: {
@@ -1325,7 +855,7 @@ export function createPaintingTools(
           },
         },
       },
-      handler: async (args) => setBrush(connection, backendRouter, args),
+      handler: async (args) => setBrush(backendRouter, args),
     },
     {
       tool: {
@@ -1341,13 +871,13 @@ export function createPaintingTools(
           required: ['red', 'green', 'blue'],
         },
       },
-      handler: async (args) => setForegroundColor(connection, backendRouter, args),
+      handler: async (args) => setForegroundColor(backendRouter, args),
     },
     {
       tool: {
         name: 'photoshop_paint_strokes',
         description:
-          'Paint one or many raster strokes on the active layer using Photoshop path stroking. Supports Brush, Pencil, Eraser and Smudge, optional Bezier handles, closed paths, simulated pressure, one-point dabs, per-stroke color/size/opacity/flow overrides, and interpolated dynamics. AUTO batching proactively splits expensive mixed batches into short Photoshop scripts to avoid ExtendScript timeouts; small batches remain one history step.',
+          'Paint one or many raster strokes on the active layer using Photoshop path stroking. BRUSH supports optional Bezier handles, closed paths, simulated pressure, per-stroke color/size/opacity/flow overrides and interpolated dynamics. PENCIL, SMUDGE and ERASER use their current Photoshop tool settings; explicit size/opacity/flow/dynamics overrides are fail-closed until live-proven for those mechanisms, and SMUDGE/ERASER do not accept color overrides. AUTO batching proactively splits expensive mixed batches into short UXP commands; small batches remain one history step.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -1457,7 +987,7 @@ export function createPaintingTools(
           required: ['strokes'],
         },
       },
-      handler: async (args) => paintStrokes(connection, backendRouter, args),
+      handler: async (args) => paintStrokes(backendRouter, args),
     },
     {
       tool: {
@@ -1544,7 +1074,7 @@ export function createPaintingTools(
           required: ['regions'],
         },
       },
-      handler: async (args) => paintRegions(connection, backendRouter, args),
+      handler: async (args) => paintRegions(backendRouter, args),
     },
     {
       tool: {
@@ -1589,7 +1119,52 @@ export function createPaintingTools(
           required: ['dabs'],
         },
       },
-      handler: async (args) => paintDabs(connection, backendRouter, args),
+      handler: async (args) => paintDabs(backendRouter, args),
+    },
+    {
+      tool: {
+        name: 'photoshop_paint_stamp_instances',
+        description:
+          'Place a bounded heterogeneous set of instances from one evidence-bound stamp profile in one Guard semantic mutation. Supports per-instance size, angle, mirror, opacity and optional color. UXP-only, stable-command/no-replay, pinned to one raster layer. Returns exact completed / failed-or-uncertain / not-started instance identity plus source-document placement bounds. Use through VisualMicroPlan/Guard, not as a raw repeated-call loop.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            document_id: { type: 'number', minimum: 1 },
+            layer_id: { type: 'number', minimum: 1 },
+            brush_pack_id: { type: 'string' },
+            stamp_profile_id: { type: 'string' },
+            preset_name: { type: 'string' },
+            instances: {
+              type: 'array', minItems: 1, maxItems: 64,
+              items: {
+                type: 'object',
+                properties: {
+                  instance_id: { type: 'string' },
+                  x: { type: 'number' }, y: { type: 'number' },
+                  size: { type: 'number', minimum: 1, maximum: 5000 },
+                  angle: { type: 'number', minimum: -180, maximum: 180, default: 0 },
+                  flip_x: { type: 'boolean', default: false },
+                  flip_y: { type: 'boolean', default: false },
+                  opacity: { type: 'number', minimum: 0, maximum: 100, default: 100 },
+                  color: {
+                    type: 'object',
+                    properties: {
+                      red: { type: 'number', minimum: 0, maximum: 255 },
+                      green: { type: 'number', minimum: 0, maximum: 255 },
+                      blue: { type: 'number', minimum: 0, maximum: 255 },
+                    },
+                    required: ['red', 'green', 'blue'], additionalProperties: false,
+                  },
+                },
+                required: ['instance_id', 'x', 'y', 'size'], additionalProperties: false,
+              },
+            },
+          },
+          required: ['layer_id', 'brush_pack_id', 'stamp_profile_id', 'preset_name', 'instances'],
+          additionalProperties: false,
+        },
+      },
+      handler: async (args) => paintStampInstances(backendRouter, args),
     },
   ];
 }
@@ -1615,7 +1190,6 @@ async function listBrushPresets(
 }
 
 async function selectBrushPreset(
-  connection: PhotoshopConnection,
   backendRouter: PhotoshopBackendRouter,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
@@ -1624,21 +1198,13 @@ async function selectBrushPreset(
       throw new Error('name is required');
     }
     const name = args.name.trim();
-    const backend = await backendRouter.backendFor('brush.presets.select');
-    let parsed: Record<string, unknown>;
-    const guardOperationId = currentToolExecutionContext()?.guardOperationId;
-    if (backend.kind === 'uxp') {
-      const result = await invokeUxpSelectBrushPreset(name, guardOperationId);
-      if (!result.ok || !result.data) {
-        throw new Error(result.error ?? 'uxp_select_brush_preset_failed');
-      }
-      parsed = result.data;
-    } else {
-      const raw = await runSnippet(connection, selectBrushPresetScript(name));
-      const legacy = parseSnippetResult(raw);
-      if (!legacy) throw new Error(`Unparseable brush preset selection: ${String(raw)}`);
-      parsed = legacy;
+    await backendRouter.backendFor('brush.presets.select');
+    const stableCommandId = currentStableCommandId();
+    const result = await invokeUxpSelectBrushPreset(name, stableCommandId);
+    if (!result.ok || !result.data) {
+      throw new Error(result.error ?? 'uxp_select_brush_preset_failed');
     }
+    const parsed = result.data;
     const effectivePreset = typeof parsed.preset === 'string' ? parsed.preset.trim() : '';
     const setterOutcome = effectivePreset === name ? 'applied' : effectivePreset ? 'not-applied' : 'uncertain';
     return atomicSuccess(
@@ -1654,7 +1220,7 @@ async function selectBrushPreset(
       preset: parsed.preset,
       settings: parsed.settings,
       ...(parsed.setter_recovery ? { setter_recovery: parsed.setter_recovery } : {}),
-      ...(guardOperationId ? { stable_command_id: guardOperationId } : {}),
+      ...(stableCommandId ? { stable_command_id: stableCommandId } : {}),
     });
   } catch (error) {
     return atomicFailureFromError(error);
@@ -1671,7 +1237,6 @@ async function getBrushSettings(backendRouter: PhotoshopBackendRouter): Promise<
 }
 
 async function setBrush(
-  connection: PhotoshopConnection,
   backendRouter: PhotoshopBackendRouter,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
@@ -1695,19 +1260,11 @@ async function setBrush(
         typeof args.smoothing_enabled === 'boolean' ? args.smoothing_enabled : undefined,
       smoothing: optionalNumber(args.smoothing, 'smoothing', 0, 100),
     };
-    const backend = await backendRouter.backendFor('brush.settings.write');
-    let parsed: Record<string, unknown>;
-    const guardOperationId = currentToolExecutionContext()?.guardOperationId;
-    if (backend.kind === 'uxp') {
-      const result = await invokeUxpSetBrush(values, guardOperationId);
-      if (!result.ok || !result.data) throw new Error(result.error ?? 'uxp_set_brush_failed');
-      parsed = result.data;
-    } else {
-      const raw = await runSnippet(connection, setBrushScript(values));
-      const legacy = parseSnippetResult(raw);
-      if (!legacy) throw new Error(`Unparseable set-brush result: ${String(raw)}`);
-      parsed = legacy;
-    }
+    await backendRouter.backendFor('brush.settings.write');
+    const stableCommandId = currentStableCommandId();
+    const result = await invokeUxpSetBrush(values, stableCommandId);
+    if (!result.ok || !result.data) throw new Error(result.error ?? 'uxp_set_brush_failed');
+    const parsed = result.data;
     const effective = parsed.settings && typeof parsed.settings === 'object' && !Array.isArray(parsed.settings)
       ? parsed.settings as Record<string, unknown>
       : {};
@@ -1735,7 +1292,7 @@ async function setBrush(
         mismatches,
         settings: effective,
         ...(parsed.setter_recovery ? { setter_recovery: parsed.setter_recovery } : {}),
-        ...(guardOperationId ? { stable_command_id: guardOperationId } : {}),
+        ...(stableCommandId ? { stable_command_id: stableCommandId } : {}),
       }
     );
   } catch (error) {
@@ -1744,7 +1301,6 @@ async function setBrush(
 }
 
 async function setForegroundColor(
-  connection: PhotoshopConnection,
   backendRouter: PhotoshopBackendRouter,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
@@ -1754,23 +1310,17 @@ async function setForegroundColor(
     const blue = optionalNumber(args.blue, 'blue', 0, 255);
     if (red === undefined || green === undefined || blue === undefined)
       throw new Error('red, green and blue are required');
-    const backend = await backendRouter.backendFor('foreground.write');
-    const guardOperationId = currentToolExecutionContext()?.guardOperationId;
-    if (backend.kind === 'uxp') {
-      const result = await invokeUxpSetForegroundColor({ red, green, blue }, guardOperationId);
-      if (!result.ok || !result.data) {
-        throw new Error(result.error ?? 'uxp_set_foreground_color_failed');
-      }
-    } else {
-      const raw = await runSnippet(connection, foregroundColorScript(red, green, blue));
-      const parsed = parseSnippetResult(raw);
-      if (!parsed) throw new Error(`Unparseable color result: ${String(raw)}`);
+    await backendRouter.backendFor('foreground.write');
+    const stableCommandId = currentStableCommandId();
+    const result = await invokeUxpSetForegroundColor({ red, green, blue }, stableCommandId);
+    if (!result.ok || !result.data) {
+      throw new Error(result.error ?? 'uxp_set_foreground_color_failed');
     }
     return atomicSuccess('Foreground color updated', {
       red,
       green,
       blue,
-      ...(guardOperationId ? { stable_command_id: guardOperationId } : {}),
+      ...(stableCommandId ? { stable_command_id: stableCommandId } : {}),
     });
   } catch (error) {
     return atomicFailureFromError(error);
@@ -1778,7 +1328,6 @@ async function setForegroundColor(
 }
 
 async function paintStrokes(
-  connection: PhotoshopConnection,
   backendRouter: PhotoshopBackendRouter,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
@@ -1788,6 +1337,7 @@ async function paintStrokes(
     if (args.strokes.length > 250)
       throw new Error('strokes may contain at most 250 strokes per call');
     const inputStrokes = args.strokes.map((stroke, index) => parseStroke(stroke, index));
+    validateStrokeMechanismReadiness(inputStrokes);
     const layerId = optionalPositiveLayerId(args.layer_id, 'layer_id');
     const renderStrokes = inputStrokes.flatMap((stroke) => expandDynamicStroke(stroke));
     if (renderStrokes.length > 1000) {
@@ -1799,7 +1349,7 @@ async function paintStrokes(
       throw new Error('batch_mode must be AUTO or SINGLE_HISTORY');
     }
     const batches = rawMode === 'SINGLE_HISTORY' ? [renderStrokes] : chunkPaintStrokes(renderStrokes);
-    const backend = await backendRouter.backendFor('painting.strokes');
+    await backendRouter.backendFor('painting.strokes');
     const documentId =
       typeof args.document_id === 'number' &&
       Number.isSafeInteger(args.document_id) &&
@@ -1810,28 +1360,30 @@ async function paintStrokes(
     let coordinateSpace: unknown;
     let documentResolutionDpi: unknown;
     let pathCoordinateScale: unknown;
+    let strokeToolReadiness: unknown;
     let completed = 0;
+    const stableCommandBase = currentStableCommandId();
+    const stableCommandIds: string[] = [];
     for (let i = 0; i < batches.length; i++) {
       try {
-        let parsed: Record<string, unknown>;
-        if (backend.kind === 'uxp') {
-          const result = await invokeUxpPaintStrokes({
-            ...(documentId !== undefined ? { document_id: documentId } : {}),
-            ...(layerId !== undefined ? { layer_id: layerId } : {}),
-            strokes: batches[i],
-          });
-          if (!result.ok || !result.data) throw new Error(result.error ?? 'uxp_paint_strokes_failed');
-          parsed = result.data;
-        } else {
-          const raw = await runSnippet(connection, paintStrokesScript(batches[i], layerId));
-          const legacy = parseSnippetResult(raw);
-          if (!legacy) throw new Error(`Unparseable paint result: ${String(raw)}`);
-          parsed = legacy;
-        }
+        const stableCommandId = stableCommandBase
+          ? `${stableCommandBase}:batch:${i}`
+          : undefined;
+        const result = await invokeUxpPaintStrokes({
+          ...(documentId !== undefined ? { document_id: documentId } : {}),
+          ...(layerId !== undefined ? { layer_id: layerId } : {}),
+          strokes: batches[i],
+        }, stableCommandId);
+        if (!result.ok || !result.data) throw new Error(result.error ?? 'uxp_paint_strokes_failed');
+        if (stableCommandId) stableCommandIds.push(stableCommandId);
+        const parsed = result.data;
         layerName = parsed.layer_name;
         coordinateSpace = parsed.coordinate_space;
         documentResolutionDpi = parsed.document_resolution_dpi;
         pathCoordinateScale = parsed.path_coordinate_scale;
+        if (strokeToolReadiness === undefined && parsed.stroke_tool_readiness !== undefined) {
+          strokeToolReadiness = parsed.stroke_tool_readiness;
+        }
         completed += batches[i].length;
       } catch (error) {
         throw new Error(
@@ -1849,11 +1401,13 @@ async function paintStrokes(
       batch_count: batches.length,
       history_steps: batches.length,
       auto_chunked: rawMode === 'AUTO' && batches.length > 1,
+      ...(stableCommandIds.length ? { stable_command_ids: stableCommandIds } : {}),
       layer_name: layerName,
       layer_id: layerId ?? null,
       coordinate_space: coordinateSpace ?? 'canvas_pixels',
       document_resolution_dpi: documentResolutionDpi,
       path_coordinate_scale: pathCoordinateScale,
+      ...(strokeToolReadiness === undefined ? {} : { stroke_tool_readiness: strokeToolReadiness }),
     });
   } catch (error) {
     return atomicFailureFromError(error);
@@ -1861,7 +1415,6 @@ async function paintStrokes(
 }
 
 async function paintRegions(
-  connection: PhotoshopConnection,
   backendRouter: PhotoshopBackendRouter,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
@@ -1873,28 +1426,21 @@ async function paintRegions(
     const regions = args.regions.map((region, index) => parseRegion(region, index));
     const clipBounds = parseClipBounds(args.clip_bounds);
     const startedAt = Date.now();
-    const backend = await backendRouter.backendFor('painting.regions');
-    let parsed: Record<string, unknown>;
-    if (backend.kind === 'uxp') {
-      const documentId =
-        typeof args.document_id === 'number' &&
-        Number.isSafeInteger(args.document_id) &&
-        args.document_id > 0
-          ? args.document_id
-          : undefined;
-      const result = await invokeUxpPaintRegions({
-        ...(documentId !== undefined ? { document_id: documentId } : {}),
-        regions,
-        ...(clipBounds ? { clip_bounds: clipBounds } : {}),
-      });
-      if (!result.ok || !result.data) throw new Error(result.error ?? 'uxp_paint_regions_failed');
-      parsed = result.data;
-    } else {
-      const raw = await runSnippet(connection, paintRegionsScript(regions, clipBounds));
-      const legacy = parseSnippetResult(raw);
-      if (!legacy) throw new Error(`Unparseable paint regions result: ${String(raw)}`);
-      parsed = legacy;
-    }
+    await backendRouter.backendFor('painting.regions');
+    const documentId =
+      typeof args.document_id === 'number' &&
+      Number.isSafeInteger(args.document_id) &&
+      args.document_id > 0
+        ? args.document_id
+        : undefined;
+    const stableCommandId = currentStableCommandId();
+    const result = await invokeUxpPaintRegions({
+      ...(documentId !== undefined ? { document_id: documentId } : {}),
+      regions,
+      ...(clipBounds ? { clip_bounds: clipBounds } : {}),
+    }, stableCommandId);
+    if (!result.ok || !result.data) throw new Error(result.error ?? 'uxp_paint_regions_failed');
+    const parsed = result.data;
     return atomicSuccess(`Painted ${regions.length} region${regions.length === 1 ? '' : 's'}`, {
       region_count: parsed.region_count ?? regions.length,
       painted_regions: parsed.painted_regions ?? [],
@@ -1902,6 +1448,7 @@ async function paintRegions(
       document_resolution_dpi: parsed.document_resolution_dpi,
       path_coordinate_scale: parsed.path_coordinate_scale,
       clip_bounds: parsed.clip_bounds ?? clipBounds ?? null,
+      ...(stableCommandId ? { stable_command_id: stableCommandId } : {}),
       execution_duration_ms: Date.now() - startedAt,
       history_steps: 1,
     });
@@ -1910,7 +1457,6 @@ async function paintRegions(
   }
 }
 async function paintDabs(
-  connection: PhotoshopConnection,
   backendRouter: PhotoshopBackendRouter,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
@@ -1925,7 +1471,7 @@ async function paintDabs(
     const batches = chunkPaintDabGroups(groups);
     const uniqueStyleCount = new Set(dabs.map((dab) => paintDabStyleKey(dab))).size;
     const centerBounds = paintDabCenterBounds(dabs);
-    const backend = await backendRouter.backendFor('painting.dabs');
+    await backendRouter.backendFor('painting.dabs');
     const documentId =
       typeof args.document_id === 'number' &&
       Number.isSafeInteger(args.document_id) &&
@@ -1939,24 +1485,22 @@ async function paintDabs(
     let documentResolutionDpi: unknown;
     let pathCoordinateScale: unknown;
     let completed = 0;
+    const stableCommandBase = currentStableCommandId();
+    const stableCommandIds: string[] = [];
     for (let i = 0; i < batches.length; i++) {
       try {
         const batchStartedAt = Date.now();
-        let parsed: Record<string, unknown>;
-        if (backend.kind === 'uxp') {
-          const result = await invokeUxpPaintDabs({
-            ...(documentId !== undefined ? { document_id: documentId } : {}),
-            ...(layerId !== undefined ? { layer_id: layerId } : {}),
-            groups: batches[i],
-          });
-          if (!result.ok || !result.data) throw new Error(result.error ?? 'uxp_paint_dabs_failed');
-          parsed = result.data;
-        } else {
-          const raw = await runSnippet(connection, paintDabsScript(batches[i], layerId));
-          const legacy = parseSnippetResult(raw);
-          if (!legacy) throw new Error(`Unparseable paint dabs result: ${String(raw)}`);
-          parsed = legacy;
-        }
+        const stableCommandId = stableCommandBase
+          ? `${stableCommandBase}:batch:${i}`
+          : undefined;
+        const result = await invokeUxpPaintDabs({
+          ...(documentId !== undefined ? { document_id: documentId } : {}),
+          ...(layerId !== undefined ? { layer_id: layerId } : {}),
+          groups: batches[i],
+        }, stableCommandId);
+        if (!result.ok || !result.data) throw new Error(result.error ?? 'uxp_paint_dabs_failed');
+        if (stableCommandId) stableCommandIds.push(stableCommandId);
+        const parsed = result.data;
         batchDurationsMs.push(Date.now() - batchStartedAt);
         layerName = parsed.layer_name;
         coordinateSpace = parsed.coordinate_space;
@@ -1980,6 +1524,7 @@ async function paintDabs(
       batch_count: batches.length,
       history_steps: batches.length,
       auto_chunked: batches.length > 1,
+      ...(stableCommandIds.length ? { stable_command_ids: stableCommandIds } : {}),
       points_per_script_limit: PAINT_DABS_MAX_POINTS_PER_SCRIPT,
       center_bounds: centerBounds,
       execution_duration_ms: Date.now() - startedAt,
@@ -1990,6 +1535,96 @@ async function paintDabs(
       document_resolution_dpi: documentResolutionDpi,
       path_coordinate_scale: pathCoordinateScale,
     });
+  } catch (error) {
+    return atomicFailureFromError(error);
+  }
+}
+
+async function paintStampInstances(
+  backendRouter: PhotoshopBackendRouter,
+  args: Record<string, unknown>
+): Promise<ToolResult> {
+  try {
+    if (!Array.isArray(args.instances) || args.instances.length === 0) throw new Error('instances must be a non-empty array');
+    if (args.instances.length > 64) throw new Error('instances may contain at most 64 entries per semantic placement pass');
+    const instances = args.instances.map((row, index) => parseStampInstance(row, index));
+    const ids = new Set<string>();
+    for (const instance of instances) {
+      if (ids.has(instance.instance_id)) throw new Error(`duplicate stamp instance_id: ${instance.instance_id}`);
+      ids.add(instance.instance_id);
+    }
+    const layerId = optionalPositiveLayerId(args.layer_id, 'layer_id');
+    if (!layerId) throw new Error('layer_id is required');
+    const documentId = optionalPositiveLayerId(args.document_id, 'document_id');
+    const brushPackId = typeof args.brush_pack_id === 'string' ? args.brush_pack_id.trim() : '';
+    const profileId = typeof args.stamp_profile_id === 'string' ? args.stamp_profile_id.trim() : '';
+    const presetName = typeof args.preset_name === 'string' ? args.preset_name.trim() : '';
+    if (!brushPackId || !profileId || !presetName) throw new Error('brush_pack_id, stamp_profile_id and preset_name are required');
+    const profile = listStampMotifProfiles(brushPackId).find(row => row.profile_id === profileId);
+    if (!profile) throw new Error(`stamp_profile_not_found: ${profileId}`);
+    if (profile.preset_name !== presetName) {
+      throw new Error(`stamp_profile_preset_mismatch: profile=${profile.preset_name} requested=${presetName}`);
+    }
+    const backend = await backendRouter.backendFor('painting.stamp_instances');
+    if (backend.kind !== 'uxp') throw new Error('capability_unavailable: painting.stamp_instances requires UXP');
+    const guardOperationId = currentToolExecutionContext()?.guardOperationId;
+    if (!guardOperationId) throw new Error('guard_required: stamp-instance placement requires a Guard-owned semantic pass');
+    const stableCommandBase = currentStableCommandId() ?? guardOperationId;
+    const digest = createHash('sha256').update(JSON.stringify({
+      document_id: documentId ?? null,
+      layer_id: layerId,
+      brush_pack_id: brushPackId,
+      stamp_profile_id: profileId,
+      preset_name: presetName,
+      instances,
+    })).digest('hex');
+    const stableCommandId = `${stableCommandBase}:stamp:${digest}`;
+    const result = await invokeUxpPaintStampInstances({
+      ...(documentId ? { document_id: documentId } : {}),
+      layer_id: layerId,
+      instances,
+    }, stableCommandId);
+    if (!result.ok || !result.data) throw new Error(result.error ?? 'uxp_paint_stamp_instances_failed');
+    const data = result.data;
+    const completed = Array.isArray(data.completed_instances) ? data.completed_instances : [];
+    const failed = data.failed_or_uncertain_instance ?? null;
+    const notStarted = Array.isArray(data.not_started_instances) ? data.not_started_instances : [];
+    const placementStatus = data.placement_status === 'complete' ? 'complete' : 'partial';
+    const details = {
+      placement_status: placementStatus,
+      brush_pack_id: brushPackId,
+      stamp_profile_id: profileId,
+      preset_name: presetName,
+      layer_id: layerId,
+      completed_instances: completed,
+      failed_or_uncertain_instance: failed,
+      not_started_instances: notStarted,
+      motif_instances: completed.map((row: unknown) => {
+        const item = row && typeof row === 'object' && !Array.isArray(row) ? row as Record<string, unknown> : {};
+        return {
+          id: item.instance_id,
+          category: profile.motif_category ?? 'unclassified',
+          stamp_profile_id: profileId,
+          region_bounds: item.source_bounds,
+        };
+      }),
+      coordinate_space: data.coordinate_space ?? 'canvas_pixels',
+      stable_command_id: stableCommandId,
+      receipt_state: result.receipt?.state ?? null,
+    };
+    if (placementStatus !== 'complete') {
+      return {
+        content: [{ type: 'text', text: JSON.stringify({
+          ok: false,
+          code: 'stamp_instance_partial_execution',
+          message: 'Stamp placement partially executed. Do not replay this operation; reconcile from the mandatory Guard preview and continue only with not-started instances under a new semantic pass.',
+          details,
+          suggested_next_tool: 'photoshop_get_preview',
+        }, null, 2) }],
+        isError: true,
+      };
+    }
+    return atomicSuccess(`Placed ${completed.length} stamp instance${completed.length === 1 ? '' : 's'}`, details);
   } catch (error) {
     return atomicFailureFromError(error);
   }

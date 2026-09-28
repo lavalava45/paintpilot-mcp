@@ -1,328 +1,96 @@
-import { stat } from 'node:fs/promises';
-import { isAbsolute } from 'node:path';
-import { ToolDefinition, ToolResult } from '../core/tool-registry.js';
-import { ExtendScriptSnippets } from '../api/extendscript.js';
+import type { ToolDefinition } from '../core/tool-registry.js';
 import { PhotoshopConnection } from '../platform/connection.js';
 import { PhotoshopBackendRouter } from '../platform/photoshop-backend.js';
-import { invokeUxpOperation } from '../platform/uxp-bridge-client.js';
 import {
-  atomicFailureFromError,
-  atomicSuccess,
-  parseSnippetResult,
-  runSnippet,
-} from './atomic-shared.js';
+  runConvertToSmartObject,
+  runCreateSmartObjectViaCopy,
+  runEditSmartObjectContents,
+  runReplaceSmartObjectContents,
+} from './smart-object-operations.js';
+
+type Fields = Record<string, Record<string, unknown>>;
+
+function smartObjectTool(
+  name: string,
+  description: string,
+  properties: Fields,
+  required: string[] | undefined,
+  handler: ToolDefinition['handler']
+): ToolDefinition {
+  return {
+    tool: {
+      name,
+      description,
+      inputSchema: { type: 'object', properties, ...(required ? { required } : {}) },
+    },
+    handler,
+  };
+}
+
+const layerNameField: Fields = {
+  layer_name: { type: 'string', description: 'Optional exact layer name (recursive search). Default: active layer.' },
+};
+
+const descriptions = {
+  convert: [
+    'Convert the active layer, or an exact named layer, to an embedded Smart Object.',
+    'Use when non-destructive transforms or filters are needed. An already-Smart-Object target reports success with already_smart_object; unlock or duplicate a Background layer first.',
+    'Returns layer_name, kind and optional already_smart_object/context. Side effect: one history step.',
+  ].join('\n\n'),
+  replace: [
+    'Replace the embedded contents of a Smart Object from an image file while preserving transforms, warps and Smart Filters.',
+    'Use for mockup/template asset replacement. The target must already be a Smart Object; this is embedded-content replacement rather than linked-object relinking.',
+    'file_path must be an existing absolute path. Returns layer_name/file_path/context and replaces embedded pixels.',
+  ].join('\n\n'),
+  edit: [
+    'Open a Smart Object for Edit Contents; its embedded .psb becomes the active document until saved and closed.',
+    'Use to edit embedded pixels non-destructively; use photoshop_replace_smart_object_contents when swapping the whole asset.',
+    'Returns parent_document, embedded_document, layer_name and context; changes the active document to the embedded contents.',
+  ].join('\n\n'),
+  copy: [
+    'Create an independent Smart Object via Copy with its own embedded contents.',
+    'Use when the duplicate must not share embedded data with the source. Use photoshop_duplicate_layer when linked instances are desired.',
+    'Returns source_layer_name, new_layer_name, kind and context; adds a new Smart Object layer.',
+  ].join('\n\n'),
+};
 
 export function createSmartObjectTools(
   connection: PhotoshopConnection,
-  backendRouter = new PhotoshopBackendRouter(connection)
+  router = new PhotoshopBackendRouter(connection)
 ): ToolDefinition[] {
   return [
-    {
-      tool: {
-        name: 'photoshop_convert_to_smart_object',
-        description:
-          'Convert the active layer (or a named layer) to an embedded Smart Object.\n\n' +
-          'Users often say: convert to smart object, make smart layer, embed layer.\n\n' +
-          'Use when: non-destructive transforms/filters are needed on a raster or shape layer.\n' +
-          'Do NOT use when: the layer is already a Smart Object — returns success with already_smart_object.\n' +
-          'Do NOT use on background layers — unlock or duplicate first.\n\n' +
-          'Returns: JSON { ok, summary, details: { layer_name, kind, already_smart_object? } }.\n' +
-          'Preconditions: active document; target layer must be selected or named. Side effects: one history step.',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            layer_name: {
-              type: 'string',
-              description: 'Optional exact layer name (recursive search). Default: active layer.',
-            },
-          },
-        },
+    smartObjectTool(
+      'photoshop_convert_to_smart_object',
+      descriptions.convert,
+      layerNameField,
+      undefined,
+      (args) => runConvertToSmartObject(router, args)
+    ),
+    smartObjectTool(
+      'photoshop_replace_smart_object_contents',
+      descriptions.replace,
+      {
+        file_path: { type: 'string', description: 'Absolute path to the replacement image file (JPEG, PNG, PSD, etc.)' },
+        layer_name: { type: 'string', description: 'Optional exact Smart Object layer name. Default: active layer.' },
       },
-      handler: async (args) => convertToSmartObject(connection, backendRouter, args),
-    },
-    {
-      tool: {
-        name: 'photoshop_replace_smart_object_contents',
-        description:
-          'Replace the embedded contents of a Smart Object layer from an image file. Preserves transforms, warps, and Smart Filters on the layer.\n\n' +
-          'Users often say: replace smart object, swap mockup screen, relink embedded file.\n\n' +
-          'Use when: updating a mockup or template Smart Object with a new asset file.\n' +
-          'Do NOT use when: the target is not a Smart Object — convert first or use photoshop_place_image.\n' +
-          'Do NOT use for linked Smart Objects that need Relink to File — this replaces embedded contents.\n\n' +
-          'Returns: JSON { ok, summary, details: { layer_name, file_path } }.\n' +
-          'Preconditions: Smart Object layer active or named; file_path must exist (absolute). Side effects: replaces embedded pixels.',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            file_path: {
-              type: 'string',
-              description: 'Absolute path to the replacement image file (JPEG, PNG, PSD, etc.)',
-            },
-            layer_name: {
-              type: 'string',
-              description: 'Optional exact Smart Object layer name. Default: active layer.',
-            },
-          },
-          required: ['file_path'],
-        },
+      ['file_path'],
+      (args) => runReplaceSmartObjectContents(router, args)
+    ),
+    smartObjectTool(
+      'photoshop_edit_smart_object_contents',
+      descriptions.edit,
+      layerNameField,
+      undefined,
+      (args) => runEditSmartObjectContents(router, args)
+    ),
+    smartObjectTool(
+      'photoshop_create_smart_object_via_copy',
+      descriptions.copy,
+      {
+        layer_name: { type: 'string', description: 'Optional source Smart Object layer name. Default: active layer.' },
       },
-      handler: async (args) => replaceSmartObjectContents(connection, backendRouter, args),
-    },
-    {
-      tool: {
-        name: 'photoshop_edit_smart_object_contents',
-        description:
-          'Open a Smart Object for editing (double-click / Edit Contents). The embedded .psb becomes the active document until you save and close it.\n\n' +
-          'Users often say: edit smart object, open embedded file, double-click smart layer.\n\n' +
-          'Use when: modifying pixels inside an embedded Smart Object non-destructively.\n' +
-          'Do NOT use when: replacing the whole asset — use photoshop_replace_smart_object_contents.\n\n' +
-          'Returns: JSON { ok, summary, details: { parent_document, embedded_document, layer_name } }.\n' +
-          'Preconditions: Smart Object layer active or named.\n' +
-          'Side effects: active document switches to the embedded .psb — save/close it to return to the parent document.',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            layer_name: {
-              type: 'string',
-              description: 'Optional exact Smart Object layer name. Default: active layer.',
-            },
-          },
-        },
-      },
-      handler: async (args) => editSmartObjectContents(connection, backendRouter, args),
-    },
-    {
-      tool: {
-        name: 'photoshop_create_smart_object_via_copy',
-        description:
-          'Create an independent Smart Object via Copy — unlinked duplicate with its own embedded contents.\n\n' +
-          'Users often say: new smart object via copy, independent smart copy, duplicate smart object separately.\n\n' +
-          'Use when: you need a second Smart Object that does not share embedded data with the original.\n' +
-          'Do NOT use when: you want linked instances — use photoshop_duplicate_layer (Layer via Copy).\n\n' +
-          'Returns: JSON { ok, summary, details: { source_layer_name, new_layer_name, kind } }.\n' +
-          'Preconditions: Smart Object layer active or named. Side effects: adds a new Smart Object layer.',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            layer_name: {
-              type: 'string',
-              description: 'Optional source Smart Object layer name. Default: active layer.',
-            },
-          },
-        },
-      },
-      handler: async (args) => createSmartObjectViaCopy(connection, backendRouter, args),
-    },
+      undefined,
+      (args) => runCreateSmartObjectViaCopy(router, args)
+    ),
   ];
-}
-
-async function runSmartObjectSnippet(
-  connection: PhotoshopConnection,
-  script: string,
-  successSummary: string,
-  detailsKeys?: string[]
-): Promise<ToolResult> {
-  try {
-    const raw = await runSnippet(connection, script);
-    const parsed = parseSnippetResult(raw);
-    if (!parsed) {
-      return atomicFailureFromError(new Error(`Unparseable Smart Object result: ${String(raw)}`));
-    }
-    if (parsed.ok === false) {
-      return atomicFailureFromError(new Error(String(parsed.message || 'Smart Object operation failed')));
-    }
-    const details: Record<string, unknown> = {};
-    if (detailsKeys) {
-      for (const key of detailsKeys) {
-        if (parsed[key] !== undefined) details[key] = parsed[key];
-      }
-    }
-    if (parsed.context !== undefined) details.context = parsed.context;
-    return atomicSuccess(successSummary, details);
-  } catch (error) {
-    return atomicFailureFromError(error);
-  }
-}
-
-async function convertToSmartObject(
-  connection: PhotoshopConnection,
-  backendRouter: PhotoshopBackendRouter,
-  args: Record<string, unknown>
-): Promise<ToolResult> {
-  const layerName = typeof args.layer_name === 'string' ? args.layer_name.trim() : undefined;
-  try {
-    const backend = await backendRouter.backendFor('smart_object.convert');
-    if (backend.kind === 'uxp') {
-      const documentId =
-        typeof args.document_id === 'number' && Number.isSafeInteger(args.document_id) && args.document_id > 0
-          ? args.document_id
-          : undefined;
-      const result = await invokeUxpOperation(
-        'convert_to_smart_object',
-        {
-          ...(layerName ? { layer_name: layerName } : {}),
-          ...(documentId !== undefined ? { document_id: documentId } : {}),
-        },
-        'uxp_convert_to_smart_object_failed'
-      );
-      if (!result.ok || !result.data) throw new Error(result.error ?? 'uxp_convert_to_smart_object_failed');
-      return atomicSuccess(
-        layerName ? `Layer "${layerName}" converted to Smart Object` : 'Active layer converted to Smart Object',
-        Object.fromEntries(
-          ['layer_name', 'kind', 'already_smart_object', 'context']
-            .filter((key) => result.data?.[key] !== undefined)
-            .map((key) => [key, result.data?.[key]])
-        )
-      );
-    }
-  } catch (error) {
-    return atomicFailureFromError(error);
-  }
-  return runSmartObjectSnippet(
-    connection,
-    ExtendScriptSnippets.convertToSmartObject(layerName),
-    layerName ? `Layer "${layerName}" converted to Smart Object` : 'Active layer converted to Smart Object',
-    ['layer_name', 'kind', 'already_smart_object']
-  );
-}
-
-async function replaceSmartObjectContents(
-  connection: PhotoshopConnection,
-  backendRouter: PhotoshopBackendRouter,
-  args: Record<string, unknown>
-): Promise<ToolResult> {
-  const filePath = typeof args.file_path === 'string' ? args.file_path.trim() : '';
-  const layerName = typeof args.layer_name === 'string' ? args.layer_name.trim() : undefined;
-
-  if (!filePath) {
-    return atomicFailureFromError(new Error('file_path is required.'));
-  }
-  if (!isAbsolute(filePath)) {
-    return atomicFailureFromError(new Error('file_path must be an absolute path.'));
-  }
-
-  try {
-    await stat(filePath);
-  } catch (error) {
-    return atomicFailureFromError(
-      new Error(
-        `Replacement file not found: ${filePath} (${error instanceof Error ? error.message : String(error)})`
-      )
-    );
-  }
-
-  try {
-    const backend = await backendRouter.backendFor('smart_object.replace');
-    if (backend.kind === 'uxp') {
-      const documentId =
-        typeof args.document_id === 'number' && Number.isSafeInteger(args.document_id) && args.document_id > 0
-          ? args.document_id
-          : undefined;
-      const result = await invokeUxpOperation(
-        'replace_smart_object_contents',
-        {
-          file_path: filePath,
-          ...(layerName ? { layer_name: layerName } : {}),
-          ...(documentId !== undefined ? { document_id: documentId } : {}),
-        },
-        'uxp_replace_smart_object_contents_failed'
-      );
-      if (!result.ok || !result.data) throw new Error(result.error ?? 'uxp_replace_smart_object_contents_failed');
-      const details: Record<string, unknown> = {};
-      for (const key of ['layer_name', 'file_path', 'context']) {
-        if (result.data[key] !== undefined) details[key] = result.data[key];
-      }
-      return atomicSuccess(`Smart Object contents replaced from ${filePath}`, details);
-    }
-  } catch (error) {
-    return atomicFailureFromError(error);
-  }
-
-  return runSmartObjectSnippet(
-    connection,
-    ExtendScriptSnippets.replaceSmartObjectContents(filePath, layerName),
-    `Smart Object contents replaced from ${filePath}`,
-    ['layer_name', 'file_path']
-  );
-}
-
-async function editSmartObjectContents(
-  connection: PhotoshopConnection,
-  backendRouter: PhotoshopBackendRouter,
-  args: Record<string, unknown>
-): Promise<ToolResult> {
-  const layerName = typeof args.layer_name === 'string' ? args.layer_name.trim() : undefined;
-  try {
-    const backend = await backendRouter.backendFor('smart_object.edit');
-    if (backend.kind === 'uxp') {
-      const documentId =
-        typeof args.document_id === 'number' && Number.isSafeInteger(args.document_id) && args.document_id > 0
-          ? args.document_id
-          : undefined;
-      const result = await invokeUxpOperation(
-        'edit_smart_object_contents',
-        {
-          ...(layerName ? { layer_name: layerName } : {}),
-          ...(documentId !== undefined ? { document_id: documentId } : {}),
-        },
-        'uxp_edit_smart_object_contents_failed'
-      );
-      if (!result.ok || !result.data) throw new Error(result.error ?? 'uxp_edit_smart_object_contents_failed');
-      const details: Record<string, unknown> = {};
-      for (const key of ['parent_document', 'embedded_document', 'layer_name', 'context']) {
-        if (result.data[key] !== undefined) details[key] = result.data[key];
-      }
-      return atomicSuccess(
-        'Smart Object opened for editing — active document is now the embedded contents',
-        details
-      );
-    }
-  } catch (error) {
-    return atomicFailureFromError(error);
-  }
-  return runSmartObjectSnippet(
-    connection,
-    ExtendScriptSnippets.editSmartObjectContents(layerName),
-    'Smart Object opened for editing — active document is now the embedded contents',
-    ['parent_document', 'embedded_document', 'layer_name']
-  );
-}
-
-async function createSmartObjectViaCopy(
-  connection: PhotoshopConnection,
-  backendRouter: PhotoshopBackendRouter,
-  args: Record<string, unknown>
-): Promise<ToolResult> {
-  const layerName = typeof args.layer_name === 'string' ? args.layer_name.trim() : undefined;
-  try {
-    const backend = await backendRouter.backendFor('smart_object.copy');
-    if (backend.kind === 'uxp') {
-      const documentId =
-        typeof args.document_id === 'number' && Number.isSafeInteger(args.document_id) && args.document_id > 0
-          ? args.document_id
-          : undefined;
-      const result = await invokeUxpOperation(
-        'create_smart_object_via_copy',
-        {
-          ...(layerName ? { layer_name: layerName } : {}),
-          ...(documentId !== undefined ? { document_id: documentId } : {}),
-        },
-        'uxp_create_smart_object_via_copy_failed'
-      );
-      if (!result.ok || !result.data) throw new Error(result.error ?? 'uxp_create_smart_object_via_copy_failed');
-      const details: Record<string, unknown> = {};
-      for (const key of ['source_layer_name', 'new_layer_name', 'kind', 'context']) {
-        if (result.data[key] !== undefined) details[key] = result.data[key];
-      }
-      return atomicSuccess('New Smart Object created via copy', details);
-    }
-  } catch (error) {
-    return atomicFailureFromError(error);
-  }
-  return runSmartObjectSnippet(
-    connection,
-    ExtendScriptSnippets.createSmartObjectViaCopy(layerName),
-    'New Smart Object created via copy',
-    ['source_layer_name', 'new_layer_name', 'kind']
-  );
 }

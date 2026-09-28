@@ -7,7 +7,7 @@ import {
 
 function inventoryTools(): string[] {
   const inventory = readFileSync(
-    new URL('../docs/uxp-migration-inventory.md', import.meta.url),
+    new URL('../docs/available-tools.md', import.meta.url),
     'utf8'
   );
   return [...inventory.matchAll(/^\| `(photoshop_[^`]+)`/gm)].map((match) => match[1]);

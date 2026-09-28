@@ -53,6 +53,16 @@ export interface RefinementStyleBasis {
   criterion: string;
 }
 
+export interface RefinementLowFrequencyEvidence {
+  status: 'resolved' | 'debt' | 'uncertain';
+  observed: boolean;
+  source_preview_sha256: string;
+  evidence_operation_id: string;
+  note: string;
+  low_frequency_sha256?: string;
+  low_frequency_path?: string;
+}
+
 export interface RefinementCheck {
   status: RefinementCheckStatus;
   observed: boolean;
@@ -64,6 +74,26 @@ export interface RefinementCheck {
   limitations: string[];
   applicability_reason: string | null;
   style_contract_basis: RefinementStyleBasis | null;
+  low_frequency_evidence: RefinementLowFrequencyEvidence | null;
+  material_response: MaterialResponseReview | null;
+}
+
+export interface PaintingDevelopmentProvenance {
+  region_construction_operations: number;
+  post_blockin_markmaking_operations: number;
+  post_blockin_markmaking_tools: string[];
+  blockin_primitive_dominance: boolean;
+}
+
+export interface VisualDevelopmentGateResult {
+  ok: boolean;
+  bands: {
+    primary_structure: 'resolved' | 'unresolved' | 'style-exempt';
+    secondary_form: 'resolved' | 'unresolved' | 'style-exempt';
+    tertiary_material: 'resolved' | 'unresolved' | 'style-exempt';
+  };
+  primitive_style_exception: boolean;
+  errors: string[];
 }
 
 function text(value: unknown): string | undefined {
@@ -114,6 +144,47 @@ function parseCriteria(value: unknown): Record<RefinementCriterion, RefinementCr
   return parsed;
 }
 
+function parseLowFrequencyEvidence(
+  value: unknown,
+  status: RefinementCheckStatus
+): RefinementLowFrequencyEvidence | null {
+  if (value === undefined) {
+    if (status === 'pass') {
+      throw new Error(
+        'refinement_check.status=pass requires low_frequency_evidence proving major-form modelling survives thumbnail/low-frequency inspection'
+      );
+    }
+    return null;
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('directive.refinement_check.low_frequency_evidence must be an object');
+  }
+  const record = value as Record<string, unknown>;
+  const evidenceStatus = text(record.status)?.toLowerCase() as RefinementLowFrequencyEvidence['status'] | undefined;
+  if (!evidenceStatus || !['resolved', 'debt', 'uncertain'].includes(evidenceStatus)) {
+    throw new Error('directive.refinement_check.low_frequency_evidence.status must be resolved, debt, or uncertain');
+  }
+  const observed = record.observed === true;
+  const sourcePreviewSha = text(record.source_preview_sha256)?.toLowerCase();
+  const evidenceOperationId = text(record.evidence_operation_id);
+  const note = text(record.note);
+  if (!observed || !sourcePreviewSha || !/^[0-9a-f]{64}$/.test(sourcePreviewSha) || !evidenceOperationId || !note) {
+    throw new Error(
+      'refinement_check.low_frequency_evidence requires observed=true, source_preview_sha256, evidence_operation_id, and note'
+    );
+  }
+  if (status === 'pass' && evidenceStatus !== 'resolved') {
+    throw new Error('refinement_check.status=pass requires low_frequency_evidence.status=resolved');
+  }
+  return {
+    status: evidenceStatus,
+    observed,
+    source_preview_sha256: sourcePreviewSha,
+    evidence_operation_id: evidenceOperationId,
+    note,
+  };
+}
+
 /**
  * Durable, subject-agnostic stage-exit evidence for progressive de-block-in.
  *
@@ -149,6 +220,8 @@ export function normalizeRefinementCheck(raw: unknown): RefinementCheck {
       limitations,
       applicability_reason: null,
       style_contract_basis: null,
+      low_frequency_evidence: null,
+      material_response: null,
     };
   }
 
@@ -183,6 +256,8 @@ export function normalizeRefinementCheck(raw: unknown): RefinementCheck {
       limitations,
       applicability_reason: applicabilityReason,
       style_contract_basis: { field, criterion },
+      low_frequency_evidence: null,
+      material_response: null,
     };
   }
 
@@ -207,6 +282,10 @@ export function normalizeRefinementCheck(raw: unknown): RefinementCheck {
   }
 
   const criteria = parseCriteria(record.criteria);
+  const lowFrequencyEvidence = parseLowFrequencyEvidence(record.low_frequency_evidence, status);
+  const materialResponse = record.material_response === undefined
+    ? null
+    : normalizeMaterialResponseReview(record.material_response);
   const unresolved = REFINEMENT_CRITERIA.filter(key => {
     const criterion = criteria[key];
     return criterion.status === 'debt' || criterion.status === 'uncertain';
@@ -234,6 +313,32 @@ export function normalizeRefinementCheck(raw: unknown): RefinementCheck {
     if (criteria.selective_detail.status === 'debt' || criteria.selective_detail.status === 'uncertain') {
       throw new Error('refinement_check.status=pass cannot leave selective_detail unresolved');
     }
+    if (!materialResponse) {
+      throw new Error(
+        'refinement_check.status=pass requires material_response decomposition supporting material_light_response'
+      );
+    }
+    if (!materialResponseReviewResolved(materialResponse)) {
+      const unresolvedMaterial = unresolvedMaterialResponseComponents(materialResponse);
+      if (materialResponse.textureOnlyTreatment) {
+        throw new Error(
+          'refinement_check.status=pass cannot resolve material_light_response from texture-only material treatment'
+        );
+      }
+      throw new Error(
+        `refinement_check.status=pass cannot leave material_response debt: ${unresolvedMaterial.join(', ')}`
+      );
+    }
+  }
+
+  if (
+    criteria.material_light_response.status === 'resolved'
+    && materialResponse
+    && !materialResponseReviewResolved(materialResponse)
+  ) {
+    throw new Error(
+      'refinement_check.material_light_response cannot be resolved while material_response remains texture-only, debt, or uncertain'
+    );
   }
 
   if (status === 'fail' && representationChange === 'meaningful' && unresolved.length === 0) {
@@ -251,6 +356,8 @@ export function normalizeRefinementCheck(raw: unknown): RefinementCheck {
     limitations,
     applicability_reason: null,
     style_contract_basis: null,
+    low_frequency_evidence: lowFrequencyEvidence,
+    material_response: materialResponse,
   };
 }
 
@@ -258,3 +365,90 @@ export function isRefinementGatedStage(stage: unknown): boolean {
   const normalized = String(stage ?? '').trim().toUpperCase().replace(/[\s-]+/g, '_');
   return ['DETAIL', 'MICRO_DETAIL'].includes(normalized);
 }
+
+/**
+ * Final non-trivial-painting development gate. This intentionally consumes
+ * already-observed exact-frame refinement evidence plus deterministic execution
+ * provenance; it does not invent an aesthetic score or use stroke-count quotas.
+ */
+export function resolveVisualDevelopmentGate(input: {
+  paintingProfile?: string | null;
+  refinementCheck?: RefinementCheck | null;
+  provenance: PaintingDevelopmentProvenance;
+}): VisualDevelopmentGateResult {
+  if (input.paintingProfile !== 'nontrivial_painting') {
+    return {
+      ok: true,
+      bands: {
+        primary_structure: 'style-exempt',
+        secondary_form: 'style-exempt',
+        tertiary_material: 'style-exempt',
+      },
+      primitive_style_exception: true,
+      errors: [],
+    };
+  }
+
+  const check = input.refinementCheck;
+  // Exact style-contract binding is validated by SessionStore when the Art
+  // Director records the refinement check and revalidated again at finalization.
+  // Do not introduce a second taxonomy here: a valid explicit
+  // style-not-applicable judgement is the one existing representation exception.
+  const primitiveStyleException = check?.status === 'style-not-applicable';
+
+  if (check?.status === 'style-not-applicable') {
+    return {
+      ok: primitiveStyleException,
+      bands: {
+        primary_structure: 'style-exempt',
+        secondary_form: 'style-exempt',
+        tertiary_material: 'style-exempt',
+      },
+      primitive_style_exception: primitiveStyleException,
+      errors: primitiveStyleException ? [] : [
+        'visual_development_incomplete: style-not-applicable refinement requires a representation/style basis that can legitimately exempt multiscale painted development',
+      ],
+    };
+  }
+
+  const errors: string[] = [];
+  const primaryResolved = check?.status === 'pass'
+    && check.criteria.major_form_modelling?.status === 'resolved'
+    && check.low_frequency_evidence?.status === 'resolved'
+    && check.criteria.residual_block_in?.status === 'resolved';
+  const secondaryResolved = check?.status === 'pass'
+    && check.criteria.secondary_forms?.status === 'resolved'
+    && check.criteria.edge_hierarchy?.status === 'resolved';
+  const tertiaryResolved = check?.status === 'pass'
+    && check.criteria.material_light_response?.status === 'resolved'
+    && !['debt', 'uncertain'].includes(check.criteria.selective_detail?.status ?? 'uncertain');
+
+  if (!check || check.status !== 'pass') {
+    errors.push('visual_development_incomplete: nontrivial_painting finalization requires a current-frame passing refinement_check');
+  }
+  if (!primaryResolved) errors.push('visual_development_incomplete: primary structure/residual block-in evidence is unresolved');
+  if (!secondaryResolved) errors.push('visual_development_incomplete: secondary form/edge hierarchy evidence is unresolved');
+  if (!tertiaryResolved) errors.push('tertiary_material_debt_unresolved: material/light/selective-detail development is unresolved');
+  if (input.provenance.blockin_primitive_dominance && !primitiveStyleException) {
+    errors.push(
+      'blockin_primitive_dominance: final nontrivial painting has repeated region construction but no successful post-block-in brush/dab/stamp mark-making development'
+    );
+  }
+
+  return {
+    ok: errors.length === 0,
+    bands: {
+      primary_structure: primaryResolved ? 'resolved' : 'unresolved',
+      secondary_form: secondaryResolved ? 'resolved' : 'unresolved',
+      tertiary_material: tertiaryResolved ? 'resolved' : 'unresolved',
+    },
+    primitive_style_exception: primitiveStyleException,
+    errors,
+  };
+}
+import {
+  materialResponseReviewResolved,
+  normalizeMaterialResponseReview,
+  unresolvedMaterialResponseComponents,
+  type MaterialResponseReview,
+} from './material-response.js';

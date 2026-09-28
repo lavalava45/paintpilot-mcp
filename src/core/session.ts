@@ -1,88 +1,38 @@
-import { Logger } from '../utils/logger.js';
-import { capture, captureAnalyticsMilestoneOnce, identifyPhotoshopVersion } from '../analytics/index.js';
 import { PhotoshopConnection } from '../platform/connection.js';
-
-export interface SessionConfig {
-  autoConnect?: boolean;
-  reconnectAttempts?: number;
-  reconnectDelay?: number;
-}
+import { Logger } from '../utils/logger.js';
 
 export class Session {
-  private logger: Logger;
-  private connection: PhotoshopConnection;
-  private config: SessionConfig;
-  private isConnected: boolean = false;
-  private lastActivity: Date;
+  private online = false;
 
-  constructor(config: SessionConfig = {}) {
-    this.logger = new Logger('Session');
-    this.connection = new PhotoshopConnection();
-    this.config = {
-      autoConnect: true,
-      reconnectAttempts: 3,
-      reconnectDelay: 1000,
-      ...config,
-    };
-    this.lastActivity = new Date();
-  }
+  constructor(
+    private readonly connection: PhotoshopConnection = new PhotoshopConnection(),
+    private readonly log: Logger = new Logger('Session')
+  ) {}
 
   async initialize(): Promise<void> {
-    this.logger.info('Initializing session...');
-
-    if (this.config.autoConnect) {
-      const connected = await this.connect();
-      this.captureConnectionEvent(connected);
-    }
+    this.log.info('Initializing session...');
+    void await this.connect();
   }
 
   async connect(): Promise<boolean> {
+    this.log.info('Connecting to Photoshop...');
+    let nextState = false;
     try {
-      this.logger.info('Connecting to Photoshop...');
-      const connected = await this.connection.ping();
-      
-      if (connected) {
-        this.isConnected = true;
-        this.updateActivity();
-        this.logger.info('Successfully connected to Photoshop');
-        void this.refreshPhotoshopVersionOnPerson();
-        return true;
-      } else {
-        this.isConnected = false;
-        this.logger.warn('Failed to connect to Photoshop');
-        return false;
-      }
+      nextState = await this.connection.ping();
     } catch (error) {
-      this.logger.error('Connection error:', error);
-      this.isConnected = false;
-      return false;
+      this.log.error('Connection error:', error);
     }
-  }
-
-  async reconnect(): Promise<boolean> {
-    this.logger.info('Attempting to reconnect...');
-    
-    for (let attempt = 1; attempt <= (this.config.reconnectAttempts || 3); attempt++) {
-      this.logger.debug(`Reconnect attempt ${attempt}/${this.config.reconnectAttempts}`);
-      
-      const connected = await this.connect();
-      if (connected) {
-        return true;
-      }
-
-      if (attempt < (this.config.reconnectAttempts || 3)) {
-        await this.delay(this.config.reconnectDelay || 1000);
-      }
-    }
-
-    this.logger.error('Failed to reconnect after all attempts');
-    this.captureConnectionEvent(false);
-    return false;
+    this.online = nextState;
+    this.log[nextState ? 'info' : 'warn'](
+      nextState ? 'Successfully connected to Photoshop' : 'Failed to connect to Photoshop'
+    );
+    return nextState;
   }
 
   async disconnect(): Promise<void> {
-    this.logger.info('Disconnecting session...');
-    this.isConnected = false;
+    const wasOnline = this.online;
+    this.online = false;
+    if (wasOnline) this.log.info('Disconnecting session...');
   }
 
   getConnection(): PhotoshopConnection {
@@ -90,42 +40,6 @@ export class Session {
   }
 
   getConnectionStatus(): boolean {
-    return this.isConnected;
-  }
-
-  getLastActivity(): Date {
-    return this.lastActivity;
-  }
-
-  updateActivity(): void {
-    this.lastActivity = new Date();
-  }
-
-  private captureConnectionEvent(connected: boolean): void {
-    capture('mcp_photoshop_connection', {
-      ok: connected,
-      photoshop_connected: connected,
-      ...(connected ? {} : { error_code: 'photoshop_unreachable' }),
-      event_source: 'mcp',
-    });
-
-    if (connected) {
-      captureAnalyticsMilestoneOnce('mcp_photoshop_first_connected', {
-        event_source: 'mcp',
-      });
-    }
-  }
-
-  private async refreshPhotoshopVersionOnPerson(): Promise<void> {
-    try {
-      const version = await this.connection.getVersion();
-      identifyPhotoshopVersion(version);
-    } catch {
-      // Best-effort person enrichment only.
-    }
-  }
-
-  private delay(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+    return this.online;
   }
 }

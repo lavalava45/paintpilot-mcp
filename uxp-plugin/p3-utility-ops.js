@@ -64,30 +64,6 @@ function guideRecord(guide, index, doc, includeNormalized = true) {
   };
 }
 
-async function playAction(params = {}) {
-  const actionName = String(params.actionName ?? '');
-  const actionSetName = String(params.actionSetName ?? '');
-  if (!actionName || !actionSetName) throw new Error('actionName and actionSetName are required');
-  return core.executeAsModal(
-    async () => {
-      pinnedDocument(params, false);
-      await action.batchPlay(
-        [{
-          _obj: 'play',
-          _target: [
-            { _ref: 'action', _name: actionName },
-            { _ref: 'actionSet', _name: actionSetName },
-          ],
-          _options: { dialogOptions: 'dontDisplay' },
-        }],
-        { synchronousExecution: true }
-      );
-      return { action: actionName, set: actionSetName };
-    },
-    { commandName: 'MCP Play Action' }
-  );
-}
-
 async function readCurrentHistoryState() {
   const [descriptor] = await action.batchPlay(
     [{
@@ -242,7 +218,6 @@ async function clearGuides(params = {}) {
 
 async function tryHandleP3UtilityOperation(cmdAction, params = {}) {
   switch (cmdAction) {
-    case 'play_action': return { handled: true, data: await playAction(params) };
     case 'redo': return { handled: true, data: await redo(params) };
     case 'add_guides': return { handled: true, data: await addGuides(params) };
     case 'list_guides': return { handled: true, data: await listGuides(params) };

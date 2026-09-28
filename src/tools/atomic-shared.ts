@@ -1,65 +1,48 @@
-import { ToolResult } from '../core/tool-registry.js';
-import { PhotoshopAPIFactory } from '../api/photoshop-api.js';
-import { PhotoshopConnection } from '../platform/connection.js';
+import type { ToolResult } from '../core/tool-registry.js';
 import { classifyError, type PhotoshopErrorEnvelope } from '../errors/envelope.js';
-import { parseExtendScriptPayload } from '../utils/extendscript-result.js';
 
-export interface AtomicSuccess {
+export type AtomicSuccess = Readonly<{
   ok: true;
   summary: string;
   details?: Record<string, unknown>;
   next_suggested_tool?: string;
+}>;
+
+function resultFromPayload(payload: unknown, error: boolean): ToolResult {
+  const textItem = { type: 'text' as const, text: JSON.stringify(payload, null, 2) };
+  return error ? { content: [textItem], isError: true } : { content: [textItem] };
 }
 
-export async function runSnippet(
-  connection: PhotoshopConnection,
-  script: string
-): Promise<unknown> {
-  const apiFactory = new PhotoshopAPIFactory(connection);
-  const api = await apiFactory.createAPI();
-  return api.executeScript(script);
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
-export function parseSnippetResult(raw: unknown): Record<string, unknown> | null {
-  const payload = parseExtendScriptPayload(raw);
-  if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) {
-    return null;
-  }
-  return payload as Record<string, unknown>;
-}
-
-export function atomicSuccess(
+export const atomicSuccess = (
   summary: string,
   details?: Record<string, unknown>,
   nextSuggestedTool = 'photoshop_get_preview'
-): ToolResult {
-  const body: AtomicSuccess = {
+): ToolResult => {
+  const payload: AtomicSuccess = {
     ok: true,
     summary,
-    ...(details ? { details } : {}),
     next_suggested_tool: nextSuggestedTool,
+    ...(details === undefined ? {} : { details }),
   };
-  return {
-    content: [{ type: 'text' as const, text: JSON.stringify(body, null, 2) }],
-  };
-}
+  return resultFromPayload(payload, false);
+};
 
-export function atomicFailure(envelope: PhotoshopErrorEnvelope): ToolResult {
-  return {
-    content: [{ type: 'text' as const, text: JSON.stringify(envelope, null, 2) }],
-    isError: true,
-  };
-}
+export const atomicFailure = (payload: PhotoshopErrorEnvelope): ToolResult =>
+  resultFromPayload(payload, true);
 
-export function atomicFailureFromError(
+export const atomicFailureFromError = (
   error: unknown,
-  overrides?: Partial<Pick<PhotoshopErrorEnvelope, 'code' | 'message' | 'suggested_next_tool'>>
-): ToolResult {
-  const message = error instanceof Error ? error.message : String(error);
-  const base = classifyError(message);
-  return atomicFailure({
-    ...base,
+  overrides: Partial<Pick<PhotoshopErrorEnvelope, 'code' | 'message' | 'suggested_next_tool'>> = {}
+): ToolResult => {
+  const classified = classifyError(errorMessage(error));
+  const payload: PhotoshopErrorEnvelope = {
+    ...classified,
     ...overrides,
-    message: overrides?.message ?? base.message,
-  });
-}
+    message: overrides.message ?? classified.message,
+  };
+  return atomicFailure(payload);
+};

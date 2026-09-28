@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { SessionStore } from '../src/core/guard/session-store.js';
@@ -113,6 +113,17 @@ function directive(id = 'face-focus', reviewAfter = 3) {
       detail_density: 'high only near focal face and hands',
       finish_criteria: 'coherent expressive hierarchy without over-rendering the background',
     },
+    prompt_conflict_preflight: {
+      dominant_objective: 'Naturalistic painterly focal hierarchy on the face.',
+      secondary_traits: ['restrained cool-warm harmony', 'selective detail'],
+      conflicts: [],
+      resolution_mode: 'none',
+      chosen_rendering_strategy: 'Build form and focal hierarchy with value, light and selective edges before decorative detail.',
+      resolution_rationale: 'The synthetic brief has no pipeline-level contradiction, so one form-first strategy is sufficient.',
+      first_pass_strategy: ['establish value/form hierarchy', 'refine selective focal edges'],
+    },
+    strategy_validation_after_microplans: 2,
+    strategy_validation: { status: 'pending' },
     artistic_evaluation_contract: {
       contract_id: 'synthetic-planner-brief-contract',
       revision: 1,
@@ -201,6 +212,32 @@ function acceptedVerdict() {
   };
 }
 
+function suppliedPackPreflight() {
+  return {
+    completed: true,
+    inventory_observed: true,
+    inventory_total: 4,
+    brush_pack_id: 'brush-pack-sha256:scene-pack',
+    roles: [{
+      role_id: 'broad-form',
+      purpose: 'Build broad and medium form from the supplied pack.',
+      material_roles: ['form'],
+      visual_intents: ['directional-mass'],
+      preferred_preset: 'Pack Form Brush',
+      alternative_presets: [],
+      effective_settings: {
+        size: 90, hardness: 55, roundness: 100, opacity: 80, flow: 55, spacing: 12,
+        use_pressure_size: false, use_pressure_opacity: false, airbrush: false,
+        smoothing_enabled: true, smoothing: 12,
+      },
+      working_scale: 'medium',
+      pressure_policy: 'none',
+      probe_status: 'cached',
+      profile_id: 'media-profile-sha256:broad-form',
+    }],
+  };
+}
+
 function seedTrendSignal(
   s: SessionStore,
   id: string,
@@ -267,6 +304,160 @@ function seedTrendSignal(
 }
 
 describe('Art Director / Painter controller contract', () => {
+  it('fails closed when the mandatory prompt-conflict preflight is missing', () => {
+    const s = store();
+    const d = directive();
+    delete (d as any).prompt_conflict_preflight;
+    expect(() => s.setArtDirectorState({ document_id: 42, action: 'review', directive: d }))
+      .toThrow(/prompt_conflict_preflight is required/);
+  });
+
+  it('requires a pipeline-level prompt conflict to be resolved before Painter mutation', () => {
+    const s = store();
+    const d = directive();
+    d.prompt_conflict_preflight = {
+      dominant_objective: 'Photorealistic materially convincing old-town environment.',
+      secondary_traits: ['intricate linework'],
+      conflicts: [{
+        requirement_a: 'photorealistic material rendering',
+        requirement_b: 'intricate linework as a dominant visual language',
+        pipeline_consequence: 'A value/material-first pipeline and a line-first pipeline require different first passes.',
+        severity: 'structural',
+        requires_user_choice: false,
+      }],
+      resolution_mode: 'none',
+      chosen_rendering_strategy: 'Build value, light and material first; reserve line for selective late accents.',
+      resolution_rationale: 'Photorealism is the dominant objective and must determine the structural representation strategy.',
+      first_pass_strategy: ['large value and light masses', 'material/form modelling'],
+    } as any;
+    expect(() => s.setArtDirectorState({ document_id: 42, action: 'review', directive: d }))
+      .toThrow(/structural prompt conflict changes the rendering pipeline/);
+
+    d.prompt_conflict_preflight.resolution_mode = 'declared-interpretation';
+    const state = s.setArtDirectorState({ document_id: 42, action: 'review', directive: d });
+    expect(state.art_director.prompt_conflict_preflight).toMatchObject({
+      dominant_objective: 'Photorealistic materially convincing old-town environment.',
+      resolution_mode: 'declared-interpretation',
+      first_pass_strategy: ['large value and light masses', 'material/form modelling'],
+    });
+  });
+
+  it('requires evidence when a prompt conflict was resolved by asking the user', () => {
+    const s = store();
+    const d = directive();
+    d.prompt_conflict_preflight = {
+      ...d.prompt_conflict_preflight,
+      conflicts: [{
+        requirement_a: 'flat poster-like shapes',
+        requirement_b: 'photorealistic volumetric lighting',
+        pipeline_consequence: 'The first rendering passes diverge between flat graphic construction and volumetric form modelling.',
+        severity: 'structural',
+        requires_user_choice: true,
+      }],
+      resolution_mode: 'declared-interpretation',
+      chosen_rendering_strategy: 'Use volumetric form modelling because the user selected photorealistic depth as primary.',
+      resolution_rationale: 'The prompt supports two materially different pipelines, so the user choice controls the dominant objective.',
+      first_pass_strategy: ['value/light block-in', 'volumetric form modelling'],
+    } as any;
+    expect(() => s.setArtDirectorState({ document_id: 42, action: 'review', directive: d }))
+      .toThrow(/user-confirmed resolution is required/);
+    d.prompt_conflict_preflight.resolution_mode = 'user-confirmed';
+    expect(() => s.setArtDirectorState({ document_id: 42, action: 'review', directive: d }))
+      .toThrow(/requires user_confirmation evidence/);
+    d.prompt_conflict_preflight.user_confirmation = 'User chose photorealistic volume over flat poster treatment.';
+    expect(() => s.setArtDirectorState({ document_id: 42, action: 'review', directive: d })).not.toThrow();
+  });
+
+  it('forces an early strategy review after the configured number of meaningful previews and ignores insufficient passes', () => {
+    const s = store();
+    const d = directive('face-focus', 8);
+    d.strategy_validation_after_microplans = 2;
+    s.setArtDirectorState({ document_id: 42, action: 'review', directive: d });
+
+    let current = s.paintingState().documents['42'];
+    let next = s.advanceArtDirectorAfterVerdict(current, context(), acceptedVerdict(), {
+      id: 'weak-first',
+      significance: { execution_effect: 'insufficient' },
+      verdict: { trend_signals: [], at: new Date().toISOString() },
+    });
+    s.updatePaintingState(42, () => next);
+    expect(next.art_director.strategy_meaningful_microplans).toBe(0);
+    expect(next.art_director.review_due).toBe(false);
+
+    current = s.paintingState().documents['42'];
+    next = s.advanceArtDirectorAfterVerdict(current, context(), acceptedVerdict(), {
+      id: 'meaningful-one',
+      significance: { execution_effect: 'meaningful' },
+      verdict: { trend_signals: [], at: new Date().toISOString() },
+    });
+    s.updatePaintingState(42, () => next);
+    expect(next.art_director.strategy_meaningful_microplans).toBe(1);
+    expect(next.art_director.review_due).toBe(false);
+
+    current = s.paintingState().documents['42'];
+    next = s.advanceArtDirectorAfterVerdict(current, context(), acceptedVerdict(), {
+      id: 'meaningful-two',
+      significance: { execution_effect: 'meaningful' },
+      verdict: { trend_signals: [], at: new Date().toISOString() },
+    });
+    expect(next.art_director.status).toBe('review_due');
+    expect(next.art_director.review_reason).toBe('strategy_validation:2_meaningful_microplans');
+  });
+
+  it('requires exact-current-frame strategy validation and forces a changed strategy on replan', () => {
+    const s = store();
+    const d = directive('face-focus', 8);
+    s.setArtDirectorState({ document_id: 42, action: 'review', directive: d });
+    s.updatePaintingState(42, current => ({
+      ...current,
+      current_frame: { operation_id: 'strategy-frame', sha256: 'a'.repeat(64), path: 'frame.jpg' },
+      art_director: {
+        ...current.art_director,
+        status: 'review_due',
+        review_due: true,
+        review_reason: 'strategy_validation:2_meaningful_microplans',
+        strategy_meaningful_microplans: 2,
+      },
+    }));
+
+    const pending = directive('face-focus', 8);
+    expect(() => s.setArtDirectorState({ document_id: 42, action: 'review', directive: pending }))
+      .toThrow(/strategy validation is due/);
+
+    const stale = directive('face-focus', 8);
+    stale.strategy_validation = {
+      status: 'pass', evidence_operation_id: 'other-frame',
+      dominant_objective_read: 'The dominant objective is visibly advancing.',
+      strategy_fit: 'The chosen rendering strategy matches the intended representation.',
+      reason: 'The current preview confirms the strategy is producing the intended visual signal.',
+    } as any;
+    expect(() => s.setArtDirectorState({ document_id: 42, action: 'review', directive: stale }))
+      .toThrow(/exact current artistic frame/);
+
+    const unchangedReplan = directive('face-focus', 8);
+    unchangedReplan.strategy_validation = {
+      status: 'replan', evidence_operation_id: 'strategy-frame',
+      dominant_objective_read: 'The dominant objective is not advancing strongly enough.',
+      strategy_fit: 'The current approach optimizes secondary traits instead of the dominant representation objective.',
+      reason: 'The exact current preview shows a strategy mismatch that requires a different rendering pipeline.',
+    } as any;
+    expect(() => s.setArtDirectorState({ document_id: 42, action: 'review', directive: unchangedReplan }))
+      .toThrow(/requires a changed chosen_rendering_strategy or first_pass_strategy/);
+
+    const replanned = directive('face-focus', 8);
+    replanned.prompt_conflict_preflight.chosen_rendering_strategy = 'Rebuild broad value and material masses first; defer all contour accents until form reads without them.';
+    replanned.prompt_conflict_preflight.first_pass_strategy = ['broad value/material rebuild', 'preview strategy validation'];
+    replanned.strategy_validation = {
+      status: 'replan', evidence_operation_id: 'strategy-frame',
+      dominant_objective_read: 'The dominant objective is not advancing strongly enough.',
+      strategy_fit: 'The current approach optimizes secondary traits instead of the dominant representation objective.',
+      reason: 'The exact current preview shows a strategy mismatch that requires a different rendering pipeline.',
+    } as any;
+    const reviewed = s.setArtDirectorState({ document_id: 42, action: 'review', directive: replanned });
+    expect(reviewed.art_director.strategy_validation).toMatchObject({ status: 'pending', last_result: 'replan' });
+    expect(reviewed.art_director.strategy_meaningful_microplans).toBe(0);
+  });
+
   it('keeps a repeated localized cumulative trend medium-scoped and allows unrelated medium work', () => {
     const s = store();
     seedTrendSignal(s, 'trend-local-1', 1, {
@@ -314,6 +505,84 @@ describe('Art Director / Painter controller contract', () => {
         problem_id: 'background-tone',
       },
     }))).toBeNull();
+  });
+
+  it('schedules one dependency-aware primary blocker while retaining the rest as backlog', () => {
+    const s = store();
+    const first = s.setPriorityState({
+      document_id: 42,
+      problems: [
+        {
+          problem_id: 'form-foundation', scale: 'medium', severity: 'must-fix', status: 'open',
+          region: 'subject', hypothesis: 'The major form structure must read before dependent light/detail work.',
+        },
+        {
+          problem_id: 'lighting-model', scale: 'medium', severity: 'must-fix', status: 'open',
+          region: 'subject', hypothesis: 'Lighting depends on the established form planes.',
+          depends_on_problem_ids: ['form-foundation'],
+        },
+        {
+          problem_id: 'texture-finish', scale: 'small', severity: 'should-fix', status: 'open',
+          region: 'subject', hypothesis: 'Texture follows form and lighting.',
+          depends_on_problem_ids: ['lighting-model'],
+        },
+      ],
+    });
+    expect(first.active_problem.problem_id).toBe('form-foundation');
+    let compact = s.statusCompact().documents['42'] as any;
+    expect(compact.primary_blocker.problem_id).toBe('form-foundation');
+    expect(compact.primary_next_action).toBe('resolve primary artistic problem form-foundation');
+    expect(compact.problem_backlog.map((problem: any) => problem.problem_id)).toEqual([
+      'lighting-model', 'texture-finish',
+    ]);
+
+    const second = s.setPriorityState({
+      document_id: 42,
+      problems: [
+        { problem_id: 'form-foundation', scale: 'medium', severity: 'must-fix', status: 'resolved', region: 'subject' },
+        {
+          problem_id: 'lighting-model', scale: 'medium', severity: 'must-fix', status: 'open', region: 'subject',
+          depends_on_problem_ids: ['form-foundation'],
+        },
+        {
+          problem_id: 'texture-finish', scale: 'small', severity: 'should-fix', status: 'open', region: 'subject',
+          depends_on_problem_ids: ['lighting-model'],
+        },
+      ],
+    });
+    expect(second.active_problem.problem_id).toBe('lighting-model');
+    compact = s.statusCompact().documents['42'] as any;
+    expect(compact.primary_blocker.problem_id).toBe('lighting-model');
+    expect(compact.primary_next_action).toBe('resolve primary artistic problem lighting-model');
+    expect(compact.problem_backlog.map((problem: any) => problem.problem_id)).toEqual(['texture-finish']);
+  });
+
+  it('allows a new severe whole-frame regression to pre-empt a smaller active problem', () => {
+    const s = store();
+    s.setPriorityState({
+      document_id: 42,
+      problems: [
+        { problem_id: 'local-light', scale: 'medium', severity: 'must-fix', status: 'open', region: 'subject' },
+        { problem_id: 'texture', scale: 'small', severity: 'should-fix', status: 'open', region: 'subject' },
+      ],
+    });
+    const preempted = s.setPriorityState({
+      document_id: 42,
+      problems: [
+        { problem_id: 'local-light', scale: 'medium', severity: 'must-fix', status: 'open', region: 'subject' },
+        { problem_id: 'texture', scale: 'small', severity: 'should-fix', status: 'open', region: 'subject' },
+        {
+          problem_id: 'global-readability-regression', scale: 'global', severity: 'must-fix', status: 'open',
+          region: 'whole image', hypothesis: 'A new whole-frame regression outranks the smaller current task.',
+        },
+      ],
+    });
+    expect(preempted.active_problem.problem_id).toBe('global-readability-regression');
+    const compact = s.statusCompact().documents['42'] as any;
+    expect(compact.primary_blocker.problem_id).toBe('global-readability-regression');
+    expect(compact.problem_backlog.map((problem: any) => problem.problem_id).sort()).toEqual([
+      'local-light', 'texture',
+    ]);
   });
 
   it('promotes a repeated cumulative trend to global only when source regions are materially separate', () => {
@@ -541,6 +810,98 @@ describe('Art Director / Painter controller contract', () => {
     })).toThrow(/downgrade is forbidden/);
   });
 
+  it('requires a scene-first causal brush-pack plan and persists its task bindings', () => {
+    const s = store();
+    s.setArtRunState({
+      document_id: 42,
+      process_dir: 'processes/scene-pack-process/run-01',
+      painting_profile: 'nontrivial_painting',
+      commentary_mode: 'technical',
+      brush_preflight: suppliedPackPreflight(),
+      brush_pack_policy: { mode: 'exclusive', brush_pack_id: 'brush-pack-sha256:scene-pack' },
+    });
+
+    const missing = directive('scene-pack-directive', 5) as any;
+    expect(() => s.setArtDirectorState({ document_id: 42, action: 'review', directive: missing }))
+      .toThrow(/brush_pack_scene_plan is required/);
+
+    const badHero = directive('scene-pack-directive', 5) as any;
+    badHero.brush_pack_scene_plan = {
+      brush_pack_id: 'brush-pack-sha256:scene-pack',
+      scene_first: true,
+      uses: [{
+        task_id: 'shadow-side', source_kind: 'stamp-profile', source_id: 'stamp-profile-sha256:hero',
+        causal_use: 'Place the primary hero silhouette directly.', integration_mode: 'raw-style-contract',
+        subject_importance: 'hero',
+      }],
+    };
+    expect(() => s.setArtDirectorState({ document_id: 42, action: 'review', directive: badHero }))
+      .toThrow(/hero raw stamp placement requires explicit user_authorization/);
+
+    const valid = directive('scene-pack-directive', 5) as any;
+    valid.brush_pack_scene_plan = {
+      brush_pack_id: 'brush-pack-sha256:scene-pack',
+      scene_first: true,
+      uses: [{
+        task_id: 'shadow-side', source_kind: 'media-role', source_id: 'broad-form',
+        causal_use: 'Model the shadow-side form using the supplied pack after scene structure is fixed.',
+        integration_mode: 'integrate', subject_importance: 'hero',
+      }],
+    };
+    const state = s.setArtDirectorState({ document_id: 42, action: 'review', directive: valid });
+    expect(state.art_director.brush_pack_scene_plan).toEqual(valid.brush_pack_scene_plan);
+    expect(s.statusCompact().documents['42'].brush_pack_policy).toMatchObject({ mode: 'exclusive' });
+    expect(s.statusCompact().documents['42'].art_director.brush_pack_scene_plan.uses[0]).toMatchObject({
+      task_id: 'shadow-side', source_kind: 'media-role', source_id: 'broad-form',
+    });
+  });
+
+  it('blocks pack vocabulary that was not causally assigned to the active Painter task', () => {
+    const s = store();
+    s.setArtRunState({
+      document_id: 42,
+      process_dir: 'processes/scene-pack-binding-process/run-01',
+      painting_profile: 'nontrivial_painting',
+      commentary_mode: 'technical',
+      brush_preflight: suppliedPackPreflight(),
+      brush_pack_policy: { mode: 'exclusive', brush_pack_id: 'brush-pack-sha256:scene-pack' },
+    });
+    const d = directive('face-focus', 5) as any;
+    d.brush_pack_scene_plan = {
+      brush_pack_id: 'brush-pack-sha256:scene-pack', scene_first: true,
+      uses: [{
+        task_id: 'cheek-edge', source_kind: 'media-role', source_id: 'broad-form',
+        causal_use: 'Reserve this pack role for the later cheek integration task.',
+        integration_mode: 'integrate', subject_importance: 'hero',
+      }],
+    };
+    s.setArtDirectorState({ document_id: 42, action: 'review', directive: d });
+    // This fixture isolates the independent brush-pack task-binding rejection.
+    // Simulate a pre-Physical-Stack journal already past the new gate so that
+    // the older contract remains directly testable; dedicated physical-stack
+    // tests cover fresh nontrivial admission.
+    s.updatePaintingState(42, current => ({
+      ...current,
+      current_stage: 'FORM_AND_LIGHT',
+      art_director: {
+        ...current.art_director,
+        physical_stack_check: undefined,
+      },
+    }));
+
+    expect(() => s.begin(painterRequest({ args: {
+      method_class: 'preset-brush',
+      paint_strategy: {
+        material_role: 'form', visual_intent: 'directional-mass', brush_role: 'broad-form',
+        preset_name: 'Pack Form Brush', pressure_policy: 'none',
+      },
+      steps: [
+        { id: 'preset', tool: 'photoshop_select_brush_preset', args: { name: 'Pack Form Brush' } },
+        { id: 'paint', tool: 'photoshop_paint_strokes', args: { strokes: [{ tool: 'BRUSH', points: [{ x: 10, y: 10 }, { x: 20, y: 20 }] }] } },
+      ],
+    } }))).toThrow(/brush_pack_scene_binding_required/);
+  });
+
   it('binds global brief claims to the exact contract revision, frame SHA and authorized critic', () => {
     const s = store();
     const frame = seedClassifiedFrame(s, 'global-claim-frame', 1);
@@ -658,6 +1019,55 @@ describe('Art Director / Painter controller contract', () => {
     expect(third.art_director.completed_microplans).toBe(3);
     expect(third.art_director.status).toBe('review_due');
     expect(third.art_director.review_reason).toBe('cadence:3_microplans');
+  });
+
+  it('persists the task-scoped three-pass autonomy window across restart', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'planner-task-autonomy-'));
+    dirs.push(dir);
+    const s = storeAt(dir);
+    s.setArtDirectorState({ document_id: 42, action: 'review', directive: directive('task-window', 8) });
+
+    for (let i = 1; i <= 2; i++) {
+      const current = s.paintingState().documents['42'];
+      const next = s.advanceArtDirectorAfterVerdict(
+        current,
+        { ...context(), planner_directive_id: 'task-window' },
+        acceptedVerdict(),
+        { id: `window-${i}`, verdict: { trend_signals: [], at: new Date().toISOString() } }
+      );
+      s.updatePaintingState(42, () => next);
+    }
+    let compact = s.statusCompact().documents['42'] as any;
+    expect(compact.art_director).toMatchObject({
+      current_task_id: 'shadow-side',
+      task_review_after_microplans: 3,
+      task_successful_microplans: 2,
+      task_autonomy_remaining: 1,
+      review_due: false,
+    });
+
+    const restarted = storeAt(dir);
+    compact = restarted.statusCompact().documents['42'] as any;
+    expect(compact.art_director).toMatchObject({
+      current_task_id: 'shadow-side',
+      task_successful_microplans: 2,
+      task_autonomy_remaining: 1,
+    });
+
+    const current = restarted.paintingState().documents['42'];
+    const third = restarted.advanceArtDirectorAfterVerdict(
+      current,
+      { ...context(), planner_directive_id: 'task-window' },
+      acceptedVerdict(),
+      { id: 'window-3', verdict: { trend_signals: [], at: new Date().toISOString() } }
+    );
+    expect(third.art_director).toMatchObject({
+      current_task_id: 'shadow-side',
+      task_successful_microplans: 3,
+      task_autonomy_remaining: 0,
+      review_due: true,
+      review_reason: 'cadence:3_microplans',
+    });
   });
 
   it('keeps the planner task active when only the local operation goal is resolved', () => {
@@ -1436,6 +1846,68 @@ describe('Art Director / Painter controller contract', () => {
       path: current.path,
       selection: 'current',
     });
+    expect(completed.art_director.final_comparison).toMatchObject({
+      evidence_contract: 'composition-whole-frame',
+    });
+  });
+
+  it('rejects final comparison when only local/crop evidence survives but the whole-frame artifact is missing', () => {
+    const s = store();
+    const primary = seedClassifiedFrame(s, 'crop-only-primary', 1);
+    const single = directive('crop-only-final-directive', 5);
+    single.tasks = [single.tasks[0]];
+    s.setArtDirectorState({
+      document_id: 42,
+      action: 'review',
+      directive: single,
+      anchor_decision: {
+        action: 'promote_primary',
+        operation_id: primary.operation_id,
+        rationale: 'Establish durable whole-frame anchor before crop-only final comparison control.',
+      },
+    });
+    const current = seedClassifiedFrame(s, 'crop-only-current', 2);
+    const currentRecord = s.read(current.operation_id)!;
+    currentRecord.review_evidence = [{
+      capture_id: 'crop-only-evidence',
+      source_operation_id: current.operation_id,
+      document_id: 42,
+      bound_whole_sha256: current.sha256,
+      review_level: 'object',
+      requested_region: { left: 10, top: 10, right: 40, bottom: 40 },
+      effective_region: { left: 5, top: 5, right: 45, bottom: 45 },
+      sha256: 'f'.repeat(64),
+      materialized_path: current.path + '.crop.jpg',
+    }];
+    s.write(currentRecord);
+    unlinkSync(current.path);
+    s.updatePaintingState(42, state => ({
+      ...state,
+      art_director: {
+        ...state.art_director,
+        tasks: state.art_director.tasks.map(task => ({ ...task, status: 'completed' })),
+        current_task_id: null,
+      },
+    }));
+
+    expect(() => s.setArtDirectorState({
+      document_id: 42,
+      action: 'complete',
+      final_comparison: {
+        scope: 'compared',
+        current_operation_id: current.operation_id,
+        best_previous_operation_id: primary.operation_id,
+        preferred: 'current',
+        reason: 'Crop-only evidence must not substitute for the missing whole-frame final comparison artifact.',
+        criteria: {
+          coherence: 'Local crop is insufficient to judge whole-image coherence.',
+          expressiveness: 'Local crop is insufficient to judge whole-image expressiveness.',
+          color: 'Local crop is insufficient to judge whole-image color relationships.',
+          rhythm: 'Local crop is insufficient to judge whole-image rhythm.',
+          detail_selectivity: 'Local crop is insufficient to judge global detail selectivity.',
+        },
+      },
+    })).toThrow(/whole-frame composition evidence/);
   });
 
   it('allows canonical completion after a failed experiment is really restored to the primary anchor', () => {
@@ -1604,6 +2076,7 @@ describe('Art Director / Painter controller contract', () => {
 
   it('supports directive completion and a fresh replan as a new Planner review', () => {
     const s = store();
+    seedClassifiedFrame(s, 'single-task-current-frame', 1);
     const single = directive('single-task', 5);
     single.tasks = [single.tasks[0]];
     s.setArtDirectorState({ document_id: 42, action: 'review', directive: single });

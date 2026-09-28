@@ -29,6 +29,9 @@ export interface LuminanceEvidence {
   border_mean_luma: number;
   center_border_abs_delta: number;
   grayscale_jpeg: Buffer;
+  low_frequency_width: number;
+  low_frequency_height: number;
+  low_frequency_jpeg: Buffer;
 }
 
 function clampByte(value: number): number {
@@ -43,6 +46,42 @@ function percentile(histogram: number[], total: number, p: number): number {
     if (accumulated >= target) return i;
   }
   return 255;
+}
+
+function lowFrequencyThumbnail(
+  gray: Buffer,
+  width: number,
+  height: number,
+  maxDimension = 64
+): { width: number; height: number; data: Buffer } {
+  const scale = Math.min(1, maxDimension / Math.max(width, height));
+  const outWidth = Math.max(1, Math.round(width * scale));
+  const outHeight = Math.max(1, Math.round(height * scale));
+  const out = Buffer.alloc(outWidth * outHeight * 4);
+
+  for (let oy = 0; oy < outHeight; oy++) {
+    const y0 = Math.floor((oy * height) / outHeight);
+    const y1 = Math.max(y0 + 1, Math.ceil(((oy + 1) * height) / outHeight));
+    for (let ox = 0; ox < outWidth; ox++) {
+      const x0 = Math.floor((ox * width) / outWidth);
+      const x1 = Math.max(x0 + 1, Math.ceil(((ox + 1) * width) / outWidth));
+      let sum = 0;
+      let count = 0;
+      for (let y = y0; y < Math.min(height, y1); y++) {
+        for (let x = x0; x < Math.min(width, x1); x++) {
+          sum += gray[(y * width + x) * 4] ?? 0;
+          count++;
+        }
+      }
+      const value = clampByte(count ? sum / count : 0);
+      const offset = (oy * outWidth + ox) * 4;
+      out[offset] = value;
+      out[offset + 1] = value;
+      out[offset + 2] = value;
+      out[offset + 3] = 255;
+    }
+  }
+  return { width: outWidth, height: outHeight, data: out };
 }
 
 export function analyzeLuminanceJpeg(buffer: Buffer, maxSamples = 240_000): LuminanceEvidence {
@@ -96,6 +135,12 @@ export function analyzeLuminanceJpeg(buffer: Buffer, maxSamples = 240_000): Lumi
   const centerMean = centerCount ? centerSum / centerCount : 0;
   const borderMean = borderCount ? borderSum / borderCount : 0;
   const grayscaleJpeg = jpeg.encode({ data: gray, width, height }, 82).data;
+  const lowFrequency = lowFrequencyThumbnail(gray, width, height);
+  const lowFrequencyJpeg = jpeg.encode({
+    data: lowFrequency.data,
+    width: lowFrequency.width,
+    height: lowFrequency.height,
+  }, 82).data;
   return {
     width,
     height,
@@ -110,6 +155,9 @@ export function analyzeLuminanceJpeg(buffer: Buffer, maxSamples = 240_000): Lumi
     border_mean_luma: borderMean,
     center_border_abs_delta: Math.abs(centerMean - borderMean),
     grayscale_jpeg: grayscaleJpeg,
+    low_frequency_width: lowFrequency.width,
+    low_frequency_height: lowFrequency.height,
+    low_frequency_jpeg: lowFrequencyJpeg,
   };
 }
 

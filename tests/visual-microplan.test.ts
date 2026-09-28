@@ -5,6 +5,10 @@ import {
 } from '../src/core/visual-microplan.js';
 import { ToolRegistry, type ToolDefinition } from '../src/core/tool-registry.js';
 import { createVisualMicroPlanTools } from '../src/tools/visual-microplan-tools.js';
+import {
+  currentStableCommandId,
+  withToolExecutionContext,
+} from '../src/core/execution-context.js';
 
 function basePlan(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
@@ -45,7 +49,40 @@ function basePlan(overrides: Record<string, unknown> = {}): Record<string, unkno
   };
 }
 
+function materialResponsePlan(): Record<string, unknown> {
+  const required = (intent: string) => ({ applicability: 'required', intent });
+  const notApplicable = (intent: string) => ({ applicability: 'not-applicable', intent });
+  return {
+    response_role: 'base-material',
+    components: {
+      base_response: required('Establish the base color/value family before texture.'),
+      form_light_response: required('Keep material light and shadow causally aligned to form.'),
+      specular_reflection: required('Establish the intended qualitative highlight/reflection character.'),
+      transmission: notApplicable('This fixture represents an opaque material with no transmission.'),
+      surface_condition: notApplicable('No separate surface-condition overlay is intended in this pass.'),
+      variation_scale: required('Keep variation at broad and medium scale before microtexture.'),
+      edge_contact: required('Preserve material contact and neighbouring-form edge interaction.'),
+    },
+    microtexture: {
+      policy: 'deferred',
+      intent: 'Microtexture is deferred until larger material response components read coherently.',
+    },
+  };
+}
+
 describe('parseVisualMicroPlan', () => {
+  it('requires qualitative material-response planning before MATERIAL execution', () => {
+    expect(() => parseVisualMicroPlan(basePlan({ stage: 'MATERIAL' })))
+      .toThrow(/MATERIAL VisualMicroPlan requires material_response decomposition/i);
+
+    const parsed = parseVisualMicroPlan(basePlan({
+      stage: 'MATERIAL',
+      material_response: materialResponsePlan(),
+    }));
+    expect(parsed.materialResponse?.responseRole).toBe('base-material');
+    expect(parsed.materialResponse?.microtexture.policy).toBe('deferred');
+  });
+
   it('accepts preparation + one mutation + final preview', () => {
     const parsed = parseVisualMicroPlan(
       basePlan({
@@ -177,6 +214,371 @@ describe('parseVisualMicroPlan', () => {
     expect(parsed.logicalLayer?.decision).toBe('create-new');
     expect(parsed.logicalLayer?.createStepId).toBe('layer');
     expect(parsed.logicalLayer?.hypothesisId).toBe('cheek-volume');
+  });
+
+  it('carries physical opacity/depth semantics on logical layers without inventing scene-specific materials', () => {
+    const parsed = parseVisualMicroPlan(basePlan({
+      layer_separation_check: {
+        change_kind: 'new-object',
+        substantial: true,
+        rollback_value: 'moderate',
+        independent_adjustment_expected: true,
+        reasons: ['The foreground mass owns an independent occlusion relationship.'],
+      },
+      logical_layer: {
+        decision: 'create-new',
+        hypothesis_id: 'foreground-house',
+        hypothesis: 'The foreground house is an opaque scene mass in front of the rear house.',
+        rollback_value: 'moderate',
+        expected_independent_rollback: true,
+        separation_reasons: ['Independent silhouette and depth correction.'],
+        layer_name: 'Foreground house',
+        physical_role: 'opaque-mass',
+        opacity_role: 'opaque',
+        depth_relations: [{ relation: 'in-front-of', target_hypothesis_id: 'rear-house' }],
+      },
+      steps: [
+        { id: 'layer', tool: 'photoshop_create_layer', args: { name: 'Foreground house' } },
+        { id: 'paint', tool: 'photoshop_paint_dabs', args: { layer_id: '$steps.layer.details.layerId', dabs: [{ x: 10, y: 20 }] } },
+        { id: 'preview', tool: 'photoshop_get_preview', args: {} },
+      ],
+    }));
+    expect(parsed.logicalLayer).toMatchObject({
+      physicalRole: 'opaque-mass',
+      opacityRole: 'opaque',
+      depthRelations: [{ relation: 'in-front-of', targetHypothesisId: 'rear-house' }],
+    });
+  });
+
+  it('keeps transparent/optical owners explicit and rejects physically contradictory opacity roles', () => {
+    const optical = parseVisualMicroPlan(basePlan({
+      layer_separation_check: {
+        change_kind: 'new-light',
+        substantial: true,
+        rollback_value: 'moderate',
+        independent_adjustment_expected: true,
+        reasons: ['Glow is an independently adjustable optical effect.'],
+      },
+      logical_layer: {
+        decision: 'create-new',
+        hypothesis_id: 'window-glow',
+        hypothesis: 'Warm window glow remains an optical overlay, not structural mass.',
+        rollback_value: 'moderate',
+        expected_independent_rollback: true,
+        separation_reasons: ['Independent optical correction.'],
+        layer_name: 'Window glow',
+        physical_role: 'optical-effect',
+        opacity_role: 'transparent-overlay',
+        depth_relations: [],
+      },
+      steps: [
+        { id: 'layer', tool: 'photoshop_create_layer', args: { name: 'Window glow' } },
+        { id: 'paint', tool: 'photoshop_paint_dabs', args: { layer_id: '$steps.layer.details.layerId', dabs: [{ x: 10, y: 20 }] } },
+        { id: 'preview', tool: 'photoshop_get_preview', args: {} },
+      ],
+    }));
+    expect(optical.logicalLayer).toMatchObject({
+      physicalRole: 'optical-effect',
+      opacityRole: 'transparent-overlay',
+    });
+
+    expect(() => parseVisualMicroPlan(basePlan({
+      layer_separation_check: {
+        change_kind: 'new-object',
+        substantial: true,
+        rollback_value: 'moderate',
+        independent_adjustment_expected: true,
+        reasons: ['Opaque object should not become a transparent overlay.'],
+      },
+      logical_layer: {
+        decision: 'create-new',
+        hypothesis_id: 'bad-roof',
+        hypothesis: 'Invalid transparent structural roof.',
+        rollback_value: 'moderate',
+        expected_independent_rollback: true,
+        separation_reasons: ['Test contradictory physical metadata.'],
+        layer_name: 'Bad roof',
+        physical_role: 'opaque-mass',
+        opacity_role: 'transparent-overlay',
+        depth_relations: [],
+      },
+      steps: [
+        { id: 'layer', tool: 'photoshop_create_layer', args: { name: 'Bad roof' } },
+        { id: 'paint', tool: 'photoshop_paint_dabs', args: { layer_id: '$steps.layer.details.layerId', dabs: [{ x: 10, y: 20 }] } },
+        { id: 'preview', tool: 'photoshop_get_preview', args: {} },
+      ],
+    }))).toThrow(/requires opacity_role=opaque/i);
+  });
+
+  it('preserves construction role separately from mechanism and enforces physical-role authority', () => {
+    const veil = parseVisualMicroPlan(basePlan({
+      paint_strategy: {
+        construction_role: 'optical-veil',
+        material_role: 'aerial depth overlay',
+        visual_intent: 'atmospheric-mass',
+        pressure_policy: 'none',
+      },
+      logical_layer: {
+        decision: 'continue-logical-layer',
+        hypothesis_id: 'distance-veil',
+        hypothesis: 'Transparent depth veil over established structure.',
+        rollback_value: 'low',
+        expected_independent_rollback: false,
+        separation_reasons: ['Continue the existing depth veil.'],
+        layer_id: 9,
+        physical_role: 'atmosphere',
+        opacity_role: 'transparent-overlay',
+        depth_relations: [],
+      },
+      steps: [
+        { id: 'paint', tool: 'photoshop_paint_strokes', args: { layer_id: 9, strokes: [{ points: [{ x: 10, y: 20 }, { x: 14, y: 20 }] }] } },
+        { id: 'preview', tool: 'photoshop_get_preview', args: {} },
+      ],
+    }));
+    expect(veil.paintStrategy).toMatchObject({ constructionRole: 'optical-veil', visualIntent: 'atmospheric-mass' });
+
+    expect(() => parseVisualMicroPlan(basePlan({
+      paint_strategy: {
+        construction_role: 'optical-veil', material_role: 'wall', visual_intent: 'atmospheric-mass', pressure_policy: 'none',
+      },
+      logical_layer: {
+        decision: 'continue-logical-layer', hypothesis_id: 'wall', hypothesis: 'Opaque wall mass', rollback_value: 'low',
+        expected_independent_rollback: false, separation_reasons: ['Continue wall.'], layer_id: 9,
+        physical_role: 'opaque-mass', opacity_role: 'opaque', depth_relations: [],
+      },
+      steps: [
+        { id: 'paint', tool: 'photoshop_paint_strokes', args: { layer_id: 9, strokes: [{ points: [{ x: 10, y: 20 }, { x: 14, y: 20 }] }] } },
+        { id: 'preview', tool: 'photoshop_get_preview', args: {} },
+      ],
+    }))).toThrow(/optical-veil cannot replace opaque\/form-bearing/i);
+
+    expect(() => parseVisualMicroPlan(basePlan({
+      paint_strategy: {
+        construction_role: 'volumetric-soft-mass', material_role: 'smoke body', visual_intent: 'soft-transition', pressure_policy: 'none',
+      },
+    }))).toThrow(/volumetric-soft-mass requires a form-bearing/i);
+  });
+
+  it('requires construction-role classification for broad soft/environmental passes', () => {
+    expect(() => parseVisualMicroPlan(basePlan({
+      scale: 'global',
+      paint_strategy: {
+        material_role: 'mist over established forms',
+        visual_intent: 'soft-transition',
+        pressure_policy: 'none',
+      },
+    }))).toThrow(/requires paint_strategy\.construction_role classification/i);
+  });
+
+  it('keeps continuous-field on continuous-color-field unless fallback is explicit', () => {
+    expect(() => parseVisualMicroPlan(basePlan({
+      paint_strategy: {
+        construction_role: 'continuous-field',
+        material_role: 'broad sky value field',
+        visual_intent: 'continuous-field',
+        pressure_policy: 'none',
+      },
+    }))).toThrow(/defaults to method_id=continuous-color-field/i);
+
+    const parsed = parseVisualMicroPlan(basePlan({
+      method_class: 'gradient',
+      paint_strategy: {
+        construction_role: 'continuous-field',
+        material_role: 'broad sky value field',
+        visual_intent: 'continuous-field',
+        pressure_policy: 'none',
+      },
+      steps: [
+        { id: 'field', tool: 'photoshop_paint_color_gradient', method_id: 'continuous-color-field', args: {} },
+        { id: 'preview', tool: 'photoshop_get_preview', args: {} },
+      ],
+    }));
+    expect(parsed.paintStrategy?.constructionRole).toBe('continuous-field');
+  });
+
+  it('blocks silent optical-veil fallback to the legacy soft dab-chain', () => {
+    expect(() => parseVisualMicroPlan(basePlan({
+      paint_strategy: {
+        construction_role: 'optical-veil',
+        material_role: 'aerial haze veil',
+        visual_intent: 'soft-transition',
+        pressure_policy: 'none',
+      },
+    }))).toThrow(/cannot silently degrade to Soft Round\/soft-brush dab-chain/i);
+
+    const parsed = parseVisualMicroPlan(basePlan({
+      paint_strategy: {
+        construction_role: 'optical-veil',
+        material_role: 'aerial haze veil',
+        visual_intent: 'soft-transition',
+        fallback_from_method_id: 'gradient-mask',
+        fallback_reason: 'Mask-gradient path is unavailable for this direct raster target, so controlled dabs are a bounded fallback.',
+        pressure_policy: 'none',
+      },
+    }));
+    expect(parsed.paintStrategy).toMatchObject({
+      constructionRole: 'optical-veil',
+      fallbackFromMethodId: 'gradient-mask',
+    });
+  });
+
+  it('uses the same construction-tier contract across tree, architecture, and water domains', () => {
+    for (const fixture of [
+      { owner: 'crown-clusters', parent: 'tree-mass' },
+      { owner: 'facade-openings', parent: 'building-mass' },
+      { owner: 'wave-groups', parent: 'water-plane' },
+    ]) {
+      const parsed = parseVisualMicroPlan(basePlan({
+        layer_separation_check: {
+          change_kind: 'new-object', substantial: true, rollback_value: 'moderate',
+          independent_adjustment_expected: true, reasons: ['Dependent structure remains independently correctable.'],
+        },
+        logical_layer: {
+          decision: 'create-new', hypothesis_id: fixture.owner, hypothesis: `Dependent structure ${fixture.owner}`,
+          rollback_value: 'moderate', expected_independent_rollback: true,
+          separation_reasons: ['Keep dependent construction reversible.'], layer_name: fixture.owner,
+          construction_tier: 'secondary', parent_hypothesis_id: fixture.parent,
+        },
+        steps: [
+          { id: 'layer', tool: 'photoshop_create_layer', args: { name: fixture.owner } },
+          { id: 'paint', tool: 'photoshop_paint_dabs', args: { layer_id: '$steps.layer.details.layerId', dabs: [{ x: 10, y: 20 }] } },
+          { id: 'preview', tool: 'photoshop_get_preview', args: {} },
+        ],
+      }));
+      expect(parsed.logicalLayer).toMatchObject({
+        constructionTier: 'secondary', parentHypothesisId: fixture.parent,
+      });
+    }
+  });
+
+  it('parses bounded surface frames while preserving local stylistic exceptions', () => {
+    for (const fixture of [
+      { owner: 'water-plane', axes: [{ id: 'ripple-flow', angle_degrees: 8 }], distribution: 'directional' },
+      { owner: 'facade-plane', axes: [{ id: 'courses', angle_degrees: 0 }, { id: 'verticals', angle_degrees: 90 }], distribution: 'perspective-regular', convergence_anchor: { x: 1200, y: 180 } },
+      { owner: 'fabric-plane', axes: [{ id: 'fold-flow', angle_degrees: 62, weight: 0.8 }], distribution: 'free' },
+    ]) {
+      const parsed = parseVisualMicroPlan(basePlan({
+        logical_layer: {
+          decision: 'continue-logical-layer', hypothesis_id: fixture.owner, hypothesis: fixture.owner,
+          rollback_value: 'low', expected_independent_rollback: false, separation_reasons: ['Continue surface.'],
+          layer_id: 9, surface_frame: {
+            axes: fixture.axes, distribution: fixture.distribution,
+            ...(fixture.convergence_anchor ? { convergence_anchor: fixture.convergence_anchor } : {}),
+            local_exceptions: ['Allow one local turn where the depicted surface bends.'],
+          },
+        },
+        steps: [
+          { id: 'paint', tool: 'photoshop_paint_dabs', args: { layer_id: 9, dabs: [{ x: 10, y: 20 }] } },
+          { id: 'preview', tool: 'photoshop_get_preview', args: {} },
+        ],
+      }));
+      expect(parsed.logicalLayer?.surfaceFrame?.axes.length).toBe(fixture.axes.length);
+      expect(parsed.logicalLayer?.surfaceFrame?.localExceptions).toHaveLength(1);
+    }
+    expect(() => parseVisualMicroPlan(basePlan({
+      logical_layer: {
+        decision: 'continue-logical-layer', hypothesis_id: 'tiles', hypothesis: 'tiles',
+        rollback_value: 'low', expected_independent_rollback: false, separation_reasons: ['Continue tiles.'],
+        layer_id: 9, surface_frame: {
+          axes: [{ id: 'rows', angle_degrees: 0 }], distribution: 'perspective-regular',
+        },
+      },
+      steps: [
+        { id: 'paint', tool: 'photoshop_paint_dabs', args: { layer_id: 9, dabs: [{ x: 10, y: 20 }] } },
+        { id: 'preview', tool: 'photoshop_get_preview', args: {} },
+      ],
+    }))).toThrow(/perspective-regular.*convergence_anchor/i);
+  });
+
+  it('requires structural evidence for aperture/negative-space topology', () => {
+    const logical = {
+      decision: 'continue-logical-layer', hypothesis_id: 'arch-opening', hypothesis: 'Arch opening',
+      rollback_value: 'low', expected_independent_rollback: false, separation_reasons: ['Preserve the opening.'],
+      layer_id: 9, construction_tier: 'tertiary', parent_hypothesis_id: 'wall-mass',
+      negative_space: {
+        relation: 'aperture-of', parent_hypothesis_id: 'wall-mass',
+        topology: 'One through-opening bounded by the arch and side reveals.',
+        evidence: ['Reveal edges and silhouette continuity establish a structural void.'],
+      },
+    };
+    const parsed = parseVisualMicroPlan(basePlan({ logical_layer: logical, steps: [
+      { id: 'paint', tool: 'photoshop_paint_dabs', args: { layer_id: 9, dabs: [{ x: 10, y: 20 }] } },
+      { id: 'preview', tool: 'photoshop_get_preview', args: {} },
+    ] }));
+    expect(parsed.logicalLayer?.negativeSpace).toMatchObject({ relation: 'aperture-of', parentHypothesisId: 'wall-mass' });
+
+    expect(() => parseVisualMicroPlan(basePlan({ logical_layer: {
+      ...logical, negative_space: { ...logical.negative_space, evidence: ['Sampled background color matches the sky.'] },
+    }, steps: [
+      { id: 'paint', tool: 'photoshop_paint_dabs', args: { layer_id: 9, dabs: [{ x: 10, y: 20 }] } },
+      { id: 'preview', tool: 'photoshop_get_preview', args: {} },
+    ] }))).toThrow(/background-color sampling alone is insufficient/i);
+  });
+
+  it('parses causal effects and requires a receiver for reflection/shadow', () => {
+    const base = {
+      decision: 'continue-logical-layer', hypothesis_id: 'water-reflection', hypothesis: 'Building reflection on water',
+      rollback_value: 'low', expected_independent_rollback: false, separation_reasons: ['Continue the independently established effect.'], layer_id: 9,
+      physical_role: 'surface-condition', opacity_role: 'effect-only',
+      causal_effect: {
+        relation: 'reflection_of', source_hypothesis_id: 'building', receiver_hypothesis_id: 'water-plane',
+        causal_statement: 'The reflected mass derives from the building and is transformed by the water surface.',
+        evidence: ['Reflection placement remains registered below the source and follows the receiving water plane.'],
+      },
+    };
+    const withSteps = (logical_layer: Record<string, unknown>) => basePlan({ logical_layer, steps: [
+      { id: 'paint', tool: 'photoshop_paint_dabs', args: { layer_id: 9, dabs: [{ x: 10, y: 20 }] } },
+      { id: 'preview', tool: 'photoshop_get_preview', args: {} },
+    ] });
+    const parsed = parseVisualMicroPlan(withSteps(base));
+    expect(parsed.logicalLayer?.causalEffect).toMatchObject({
+      relation: 'reflection_of', sourceHypothesisId: 'building', receiverHypothesisId: 'water-plane',
+    });
+    expect(() => parseVisualMicroPlan(withSteps({
+      ...base, causal_effect: { ...base.causal_effect, receiver_hypothesis_id: undefined },
+    }))).toThrow(/reflection_of requires receiver_hypothesis_id/i);
+  });
+
+  it('rejects self-referential or unclassified physical depth relations', () => {
+    const logical = {
+      decision: 'create-new',
+      hypothesis_id: 'house',
+      hypothesis: 'House stack owner.',
+      rollback_value: 'moderate',
+      expected_independent_rollback: true,
+      separation_reasons: ['Test physical relation validation.'],
+      layer_name: 'House',
+    };
+    const separation = {
+      change_kind: 'new-object',
+      substantial: true,
+      rollback_value: 'moderate',
+      independent_adjustment_expected: true,
+      reasons: ['House is independently editable.'],
+    };
+    const steps = [
+      { id: 'layer', tool: 'photoshop_create_layer', args: { name: 'House' } },
+      { id: 'paint', tool: 'photoshop_paint_dabs', args: { layer_id: '$steps.layer.details.layerId', dabs: [{ x: 10, y: 20 }] } },
+      { id: 'preview', tool: 'photoshop_get_preview', args: {} },
+    ];
+    expect(() => parseVisualMicroPlan(basePlan({
+      layer_separation_check: separation,
+      logical_layer: {
+        ...logical,
+        physical_role: 'opaque-mass',
+        opacity_role: 'opaque',
+        depth_relations: [{ relation: 'behind', target_hypothesis_id: 'house' }],
+      },
+      steps,
+    }))).toThrow(/cannot target the same hypothesis_id/i);
+    expect(() => parseVisualMicroPlan(basePlan({
+      layer_separation_check: separation,
+      logical_layer: {
+        ...logical,
+        depth_relations: [{ relation: 'behind', target_hypothesis_id: 'other-house' }],
+      },
+      steps,
+    }))).toThrow(/requires physical_role and opacity_role/i);
   });
 
   it('requires Layer Separation Check isolation for substantial independent new concerns', () => {
@@ -433,7 +835,7 @@ describe('parseVisualMicroPlan', () => {
           ],
         })
       )
-    ).toThrow(/requires 1-4 visual mutations/);
+    ).toThrow(/requires 1-8 visual mutations/);
 
     const parsed = parseVisualMicroPlan(
       basePlan({
@@ -446,6 +848,58 @@ describe('parseVisualMicroPlan', () => {
     );
     expect(parsed.mutationIndexes).toEqual([0, 1]);
     expect(parsed.lastMutationIndex).toBe(1);
+  });
+
+  it('derives an adaptive mutation budget from risk, scale, destructive intent, and protection', () => {
+    const lowRisk = parseVisualMicroPlan(basePlan({
+      scale: 'medium',
+      risk: 'low',
+      steps: [
+        ...[1, 2, 3, 4, 5].map(index => ({
+          id: `paint-${index}`,
+          tool: 'photoshop_paint_dabs',
+          args: { dabs: [{ x: 10 * index, y: 10 * index }] },
+        })),
+        { id: 'preview', tool: 'photoshop_get_preview', args: {} },
+      ],
+    }));
+    expect(lowRisk.mutationIndexes).toHaveLength(5);
+    expect(lowRisk.mutationBudget).toMatchObject({ allowedMutations: 6, hardCap: 8 });
+
+    expect(() => parseVisualMicroPlan(basePlan({
+      scale: 'medium',
+      risk: 'low',
+      steps: [
+        ...[1, 2, 3, 4, 5, 6, 7].map(index => ({
+          id: `paint-${index}`,
+          tool: 'photoshop_paint_dabs',
+          args: { dabs: [{ x: 10 * index, y: 10 * index }] },
+        })),
+        { id: 'preview', tool: 'photoshop_get_preview', args: {} },
+      ],
+    }))).toThrow(/mutation budget exceeded: requested=7 allowed=6/);
+
+    expect(() => parseVisualMicroPlan(basePlan({
+      risk: 'high',
+      steps: [
+        { id: 'paint-a', tool: 'photoshop_paint_dabs', args: { dabs: [{ x: 10, y: 10 }] } },
+        { id: 'paint-b', tool: 'photoshop_paint_dabs', args: { dabs: [{ x: 20, y: 20 }] } },
+        { id: 'preview', tool: 'photoshop_get_preview', args: {} },
+      ],
+    }))).toThrow(/mutation budget exceeded: requested=2 allowed=1/);
+
+    const protectedReplacement = parseVisualMicroPlan(basePlan({
+      scale: 'medium',
+      risk: 'low',
+      protected_layer_ids: [77],
+      replace_protected_layer_ids: [77],
+      action_class: 'REPLACE',
+      steps: [
+        { id: 'paint', tool: 'photoshop_paint_dabs', args: { layer_id: 77, dabs: [{ x: 10, y: 10 }] } },
+        { id: 'preview', tool: 'photoshop_get_preview', args: {} },
+      ],
+    }));
+    expect(protectedReplacement.mutationBudget.allowedMutations).toBe(1);
   });
 
   it('forbids batching across region, method class, or hidden higher risk while step prose stays explanatory', () => {
@@ -602,6 +1056,34 @@ describe('parseVisualMicroPlan', () => {
         { id: 'preview', tool: 'photoshop_get_preview', args: {} },
       ],
     }))).toThrow(/must declare method_id/);
+  });
+
+  it('keeps stamp profile identity separate from media brush roles', () => {
+    const parsed = parseVisualMicroPlan(basePlan({
+      method_class: 'preset-brush',
+      paint_strategy: {
+        material_role: 'foliage support',
+        visual_intent: 'texture',
+        preset_name: 'Leaf Stamp',
+        brush_pack_id: 'brush-pack-sha256:test-pack',
+        stamp_profile_id: 'stamp-profile-sha256:leaf',
+        pressure_policy: 'native-preset',
+      },
+      steps: [
+        { id: 'preset', tool: 'photoshop_select_brush_preset', args: { name: 'Leaf Stamp' } },
+        {
+          id: 'stamp', tool: 'photoshop_paint_stamp_instances', method_id: 'installed-brush-preset',
+          args: {
+            brush_pack_id: 'brush-pack-sha256:test-pack', stamp_profile_id: 'stamp-profile-sha256:leaf',
+            preset_name: 'Leaf Stamp', instances: [{ instance_id: 'leaf-1', x: 20, y: 20, size: 30 }],
+          },
+        },
+        { id: 'preview', tool: 'photoshop_get_preview', args: {} },
+      ],
+    }));
+    expect(parsed.paintStrategy?.brushRole).toBeUndefined();
+    expect(parsed.paintStrategy?.brushPackId).toBe('brush-pack-sha256:test-pack');
+    expect(parsed.paintStrategy?.stampProfileId).toBe('stamp-profile-sha256:leaf');
   });
 
   it('rejects paint_regions after block-in stages instead of allowing polygon refinement', () => {
@@ -990,6 +1472,50 @@ function knownGoodCreateNewRegionPlan(): Record<string, unknown> {
 }
 
 describe('photoshop_execute_visual_microplan', () => {
+  it('gives every nested Guard step a distinct deterministic physical command identity', async () => {
+    const registry = new ToolRegistry();
+    const commandIds: Array<[string, string | undefined]> = [];
+    for (const name of [
+      'photoshop_select_brush_preset',
+      'photoshop_set_brush',
+      'photoshop_paint_strokes',
+    ]) {
+      registry.register(name, definition(name, async () => {
+        commandIds.push([name, currentStableCommandId()]);
+        return { content: [{ type: 'text', text: '{"ok":true}' }] };
+      }, true));
+    }
+    registry.register('photoshop_get_preview', definition('photoshop_get_preview', async () => ({
+      content: [{ type: 'text', text: '{"ok":true,"sha256":"24a-frame"}' }],
+    }), true));
+
+    const plan = basePlan({
+      plan_id: 'guard-pass-24a',
+      steps: [
+        { id: 'select-brush', tool: 'photoshop_select_brush_preset', args: { name: 'Round' } },
+        { id: 'set-brush', tool: 'photoshop_set_brush', args: { size: 32 } },
+        {
+          id: 'paint-strokes',
+          tool: 'photoshop_paint_strokes',
+          args: { strokes: [{ tool: 'BRUSH', points: [{ x: 1, y: 1 }, { x: 2, y: 2 }] }] },
+        },
+        { id: 'preview', tool: 'photoshop_get_preview', args: {} },
+      ],
+    });
+    const execute = createVisualMicroPlanTools(registry)[0]!.handler;
+    const result = await withToolExecutionContext(
+      { guardOperationId: 'guard-pass-24a' },
+      () => execute(plan)
+    );
+
+    expect(result.isError).not.toBe(true);
+    expect(commandIds).toEqual([
+      ['photoshop_select_brush_preset', 'guard-pass-24a:step:select-brush'],
+      ['photoshop_set_brush', 'guard-pass-24a:step:set-brush'],
+      ['photoshop_paint_strokes', 'guard-pass-24a:step:paint-strokes'],
+    ]);
+  });
+
   it('keeps a known-good create-new region template valid across schema, parser and handler preflight without Photoshop', async () => {
     const registry = new ToolRegistry();
     const calls: Array<{ tool: string; args: Record<string, unknown> }> = [];
@@ -1460,6 +1986,19 @@ describe('photoshop_execute_visual_microplan', () => {
     const body = JSON.parse(text && 'text' in text ? text.text : '{}');
     expect(body.mutation_count).toBe(2);
     expect(Object.keys(body.mutation_results)).toEqual(['light', 'turn']);
+    expect(body.semantic_action_budget).toMatchObject({
+      requested_mutations: 2,
+      allowed_mutations: 8,
+      hard_cap: 8,
+    });
+    expect(body.pass_execution).toEqual({
+      pass_id: 'bundle-1',
+      state: 'completed',
+      actions: [
+        { step_id: 'light', tool: 'photoshop_paint_dabs', kind: 'visual-mutation', state: 'completed' },
+        { step_id: 'turn', tool: 'photoshop_paint_dabs', kind: 'visual-mutation', state: 'completed' },
+      ],
+    });
     expect(body.barrier.next_visual_mutation_allowed).toBe(false);
 
     const blocked = await tool.handler(basePlan({ plan_id: 'bundle-2' }));
@@ -1548,5 +2087,72 @@ describe('photoshop_execute_visual_microplan', () => {
     expect(paintCalls).toBe(1);
     expect(previewCalls).toBe(1);
     expect(result.content.some((item) => item.type === 'image')).toBe(true);
+  });
+
+  it('projects completed, failed-or-uncertain, and not-started sub-actions after a middle mutation failure without replay', async () => {
+    const registry = new ToolRegistry();
+    const paintCalls: string[] = [];
+    let previewCalls = 0;
+    registry.register(
+      'photoshop_paint_dabs',
+      definition(
+        'photoshop_paint_dabs',
+        async (args) => {
+          const tag = String(args.tag);
+          paintCalls.push(tag);
+          if (tag === 'middle') {
+            return {
+              content: [{ type: 'text', text: JSON.stringify({ ok: false, code: 'injected_middle_failure' }) }],
+              isError: true,
+            };
+          }
+          return { content: [{ type: 'text', text: JSON.stringify({ ok: true, tag }) }] };
+        },
+        true
+      )
+    );
+    registry.register(
+      'photoshop_get_preview',
+      definition(
+        'photoshop_get_preview',
+        async () => {
+          previewCalls++;
+          return {
+            content: [
+              { type: 'image', data: 'aGVsbG8=', mimeType: 'image/jpeg' },
+              { type: 'text', text: JSON.stringify({ ok: true, sha256: 'sha-middle-failure' }) },
+            ],
+          };
+        },
+        true
+      )
+    );
+
+    const result = await createVisualMicroPlanTools(registry)[0]!.handler(basePlan({
+      plan_id: 'partial-pass-1',
+      steps: [
+        { id: 'first', tool: 'photoshop_paint_dabs', args: { tag: 'first', dabs: [{ x: 10, y: 10 }] } },
+        { id: 'middle', tool: 'photoshop_paint_dabs', args: { tag: 'middle', dabs: [{ x: 20, y: 20 }] } },
+        { id: 'last', tool: 'photoshop_paint_dabs', args: { tag: 'last', dabs: [{ x: 30, y: 30 }] } },
+        { id: 'preview', tool: 'photoshop_get_preview', args: { max_dimension_px: 800 } },
+      ],
+    }));
+
+    expect(result.isError).toBe(true);
+    expect(paintCalls).toEqual(['first', 'middle']);
+    expect(previewCalls).toBe(1);
+    const text = result.content.find((item) => item.type === 'text');
+    const body = JSON.parse(text && 'text' in text ? text.text : '{}');
+    expect(body.failed_mutation_step).toBe('middle');
+    expect(body.failure_category).toBe('injected_middle_failure');
+    expect(body.pass_execution).toEqual({
+      pass_id: 'partial-pass-1',
+      state: 'failed-or-uncertain',
+      actions: [
+        { step_id: 'first', tool: 'photoshop_paint_dabs', kind: 'visual-mutation', state: 'completed' },
+        { step_id: 'middle', tool: 'photoshop_paint_dabs', kind: 'visual-mutation', state: 'failed-or-uncertain' },
+        { step_id: 'last', tool: 'photoshop_paint_dabs', kind: 'visual-mutation', state: 'not-started' },
+      ],
+    });
   });
 });

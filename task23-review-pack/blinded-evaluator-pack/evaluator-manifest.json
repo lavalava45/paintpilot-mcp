@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "task": "Task 23 — независимая слепая оценка прогрессивного визуального уточнения",
+  "status": "ready-for-independent-human-review",
+  "questions_source": "docs/visual-evaluation.md section 12",
+  "cases": [
+    {
+      "case_id": "case-01",
+      "before": {
+        "filename": "images/case-01-before.jpg",
+        "sha256": "043661a763cb857fe7b07f74ff725eac16a7cfa9588624e8e913c162577570d2"
+      },
+      "after": {
+        "filename": "images/case-01-after.jpg",
+        "sha256": "ae1ae3db31129bbc27921fe302cd293ddbae0086a104b4839b1d58c33adc4b38"
+      },
+      "target_style_contract": "Широкая камнеподобная форма: перейти от плоской примитивной заготовки к читаемому моделированию основных и вторичных форм, контролируемой иерархии краёв и более конкретной передаче света и материала без опоры на текстурный шум."
+    },
+    {
+      "case_id": "case-02",
+      "before": {
+        "filename": "images/case-02-before.jpg",
+        "sha256": "043661a763cb857fe7b07f74ff725eac16a7cfa9588624e8e913c162577570d2"
+      },
+      "after": {
+        "filename": "images/case-02-after.jpg",
+        "sha256": "ee0ff1079af179ab6d31509a722c88875e81aa1b8ff87a875695ede76b02d5db"
+      },
+      "target_style_contract": "Широкая камнеподобная форма: перейти от плоской примитивной заготовки к читаемому моделированию основных и вторичных форм, контролируемой иерархии краёв и более конкретной передаче света и материала без опоры на текстурный шум."
+    },
+    {
+      "case_id": "case-03",
+      "before": {
+        "filename": "images/case-03-before.jpg",
+        "sha256": "d685b54aed82e345e8175034245868d6766a21d55dad498c06b6eaf996f8be97"
+      },
+      "after": {
+        "filename": "images/case-03-after.jpg",
+        "sha256": "d685b54aed82e345e8175034245868d6766a21d55dad498c06b6eaf996f8be97"
+      },
+      "target_style_contract": "Намеренно графичная, похожая на рисунок маркерами трактовка розового фантазийного города; плоская и стилизованная подача является частью заданного визуального решения."
+    },
+    {
+      "case_id": "case-04",
+      "before": {
+        "filename": "images/case-04-before.jpg",
+        "sha256": "ee0ff1079af179ab6d31509a722c88875e81aa1b8ff87a875695ede76b02d5db"
+      },
+      "after": {
+        "filename": "images/case-04-after.jpg",
+        "sha256": "4329989bdad2820c42f731f01fd3ec70209cd3e9dd7fee7c61a9b20e9e21216b"
+      },
+      "target_style_contract": "Широкая камнеподобная форма: перейти от плоской примитивной заготовки к читаемому моделированию основных и вторичных форм, контролируемой иерархии краёв и более конкретной передаче света и материала без опоры на текстурный шум."
+    },
+    {
+      "case_id": "case-05",
+      "before": {
+        "filename": "images/case-05-before.jpg",
+        "sha256": "043661a763cb857fe7b07f74ff725eac16a7cfa9588624e8e913c162577570d2"
+      },
+      "after": {
+        "filename": "images/case-05-after.jpg",
+        "sha256": "9dc597febe9efb0d3dce736f70daeeaa01b0f2e6a873e2578411bbac8699f69b"
+      },
+      "target_style_contract": "Широкая камнеподобная форма: перейти от плоской примитивной заготовки к читаемому моделированию основных и вторичных форм, контролируемой иерархии краёв и более конкретной передаче света и материала без опоры на текстурный шум."
+    }
+  ]
+}

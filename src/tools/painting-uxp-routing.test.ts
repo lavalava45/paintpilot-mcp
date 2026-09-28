@@ -21,6 +21,10 @@ vi.mock('../platform/uxp-bridge-client.js', () => ({
 }));
 
 import { createPaintingTools } from './painting-tools.js';
+import {
+  withToolExecutionContext,
+  withToolExecutionStepContext,
+} from '../core/execution-context.js';
 
 function textOf(result: { content?: Array<{ type: string; text?: string }> }): string {
   return result.content?.find((item) => item.type === 'text')?.text ?? '';
@@ -116,6 +120,123 @@ describe('canonical painting tools UXP routing', () => {
     expect(executeScript).not.toHaveBeenCalled();
   });
 
+  it('passes nested Guard step identities through setters and paint batches without sibling collisions', async () => {
+    const { connection, router } = fixture();
+    const tools = createPaintingTools(connection, router);
+    const byName = (name: string) => tools.find((tool) => tool.tool.name === name)!;
+
+    await withToolExecutionContext({ guardOperationId: 'guard-pass-24a' }, async () => {
+      await withToolExecutionStepContext('select-brush', () =>
+        byName('photoshop_select_brush_preset').handler({ name: 'Round' })
+      );
+      await withToolExecutionStepContext('set-brush', () =>
+        byName('photoshop_set_brush').handler({ size: 32, opacity: 80 })
+      );
+      await withToolExecutionStepContext('paint-strokes', () =>
+        byName('photoshop_paint_strokes').handler({
+          document_id: 42,
+          strokes: [{ points: [{ x: 10, y: 10 }, { x: 20, y: 20 }] }],
+        })
+      );
+    });
+
+    expect(bridge.selectPreset.mock.calls[0]?.[1]).toBe('guard-pass-24a:step:select-brush');
+    expect(bridge.setBrush.mock.calls[0]?.[1]).toBe('guard-pass-24a:step:set-brush');
+    expect(bridge.paintStrokes.mock.calls[0]?.[1]).toBe('guard-pass-24a:step:paint-strokes:batch:0');
+    expect(new Set([
+      bridge.selectPreset.mock.calls[0]?.[1],
+      bridge.setBrush.mock.calls[0]?.[1],
+      bridge.paintStrokes.mock.calls[0]?.[1],
+    ]).size).toBe(3);
+  });
+
+  it('fails non-BRUSH style overrides before UXP dispatch while allowing a bare PENCIL stroke', async () => {
+    const { connection, router, backendFor } = fixture();
+    const paint = createPaintingTools(connection, router)
+      .find((tool) => tool.tool.name === 'photoshop_paint_strokes')!;
+
+    const rejected = await paint.handler({
+      document_id: 42,
+      strokes: [{
+        tool: 'PENCIL',
+        size: 5,
+        opacity: 80,
+        points: [{ x: 10, y: 10 }, { x: 20, y: 20 }],
+      }],
+    });
+    expect(rejected.isError).toBe(true);
+    expect(JSON.parse(textOf(rejected))).toMatchObject({
+      code: 'paint_tool_not_ready',
+      message: expect.stringContaining('paint_tool_not_ready:PENCIL'),
+    });
+    expect(bridge.paintStrokes).not.toHaveBeenCalled();
+    expect(backendFor).not.toHaveBeenCalled();
+
+    const allowed = await paint.handler({
+      document_id: 42,
+      strokes: [{
+        tool: 'PENCIL',
+        points: [{ x: 10, y: 10 }, { x: 20, y: 20 }],
+      }],
+    });
+    expect(allowed.isError).not.toBe(true);
+    expect(bridge.paintStrokes).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects meaningless SMUDGE/ERASER color overrides before UXP dispatch', async () => {
+    const { connection, router } = fixture();
+    const paint = createPaintingTools(connection, router)
+      .find((tool) => tool.tool.name === 'photoshop_paint_strokes')!;
+    for (const tool of ['SMUDGE', 'ERASER']) {
+      const result = await paint.handler({
+        strokes: [{
+          tool,
+          color: { red: 10, green: 20, blue: 30 },
+          points: [{ x: 1, y: 1 }, { x: 2, y: 2 }],
+        }],
+      });
+      expect(result.isError).toBe(true);
+      expect(textOf(result)).toContain(`paint_tool_not_ready:${tool}`);
+    }
+    expect(bridge.paintStrokes).not.toHaveBeenCalled();
+  });
+
+  it('reports stable-command identity conflicts separately from bridge unavailability', async () => {
+    bridge.selectPreset.mockResolvedValueOnce({ ok: false, error: 'uxp_bridge_command_id_conflict' });
+    const { connection, router } = fixture();
+    const select = createPaintingTools(connection, router)
+      .find((tool) => tool.tool.name === 'photoshop_select_brush_preset')!;
+    const result = await withToolExecutionContext(
+      { guardOperationId: 'guard-pass-conflict' },
+      () => select.handler({ name: 'Round' })
+    );
+
+    expect(result.isError).toBe(true);
+    expect(JSON.parse(textOf(result))).toMatchObject({
+      code: 'uxp_command_identity_conflict',
+      message: 'uxp_bridge_command_id_conflict',
+    });
+  });
+
+  it('preflights the whole mixed stroke batch so a later unsupported mechanism cannot follow an earlier rendered stroke', async () => {
+    const { connection, router, backendFor } = fixture();
+    const paint = createPaintingTools(connection, router)
+      .find((tool) => tool.tool.name === 'photoshop_paint_strokes')!;
+
+    const result = await paint.handler({
+      document_id: 42,
+      strokes: [
+        { tool: 'BRUSH', size: 12, points: [{ x: 1, y: 1 }, { x: 5, y: 5 }] },
+        { tool: 'SMUDGE', opacity: 50, points: [{ x: 5, y: 5 }, { x: 9, y: 9 }] },
+      ],
+    });
+
+    expect(result.isError).toBe(true);
+    expect(textOf(result)).toContain('paint_tool_not_ready:SMUDGE');
+    expect(bridge.paintStrokes).not.toHaveBeenCalled();
+    expect(backendFor).not.toHaveBeenCalled();
+  });
+
   it('does not fall through to ExtendScript after a possibly dispatched UXP painting mutation fails', async () => {
     bridge.paintStrokes.mockResolvedValueOnce({ ok: false, error: 'uxp_failed_after_possible_dispatch' });
     const { connection, router, executeScript } = fixture();
@@ -201,16 +322,9 @@ describe('canonical painting tools UXP routing', () => {
     });
   });
 
-  it('uses ExtendScript when routing selects legacy before any canonical painting UXP dispatch', async () => {
+  it('fails closed before canonical painting dispatch when UXP is unavailable', async () => {
     const { connection, router, executeScript, backendFor } = fixture();
-    backendFor.mockResolvedValue({ kind: 'extendscript' as const });
-    executeScript
-      .mockResolvedValueOnce('({preset:"Round",settings:{size:24}})')
-      .mockResolvedValueOnce('({settings:{size:32}})')
-      .mockResolvedValueOnce('({red:1,green:2,blue:3})')
-      .mockResolvedValueOnce('({layer_name:"Paint",coordinate_space:"canvas_pixels"})')
-      .mockResolvedValueOnce('({region_count:1,painted_regions:["r1"],coordinate_space:"canvas_pixels"})')
-      .mockResolvedValueOnce('({layer_name:"Paint",coordinate_space:"canvas_pixels"})');
+    backendFor.mockRejectedValue(new Error('uxp_bridge_unavailable: test fixture'));
     const tools = createPaintingTools(connection, router);
     const byName = (name: string) => tools.find((tool) => tool.tool.name === name)!;
     const results = [
@@ -230,7 +344,7 @@ describe('canonical painting tools UXP routing', () => {
       await byName('photoshop_paint_dabs').handler({ dabs: [{ x: 1, y: 1 }] }),
     ];
 
-    for (const result of results) expect(result.isError).not.toBe(true);
+    for (const result of results) expect(result.isError).toBe(true);
     expect(backendFor.mock.calls.map(([primitive]) => primitive)).toEqual([
       'brush.presets.select',
       'brush.settings.write',
@@ -239,7 +353,7 @@ describe('canonical painting tools UXP routing', () => {
       'painting.regions',
       'painting.dabs',
     ]);
-    expect(executeScript).toHaveBeenCalledTimes(6);
+    expect(executeScript).not.toHaveBeenCalled();
     expect(bridge.selectPreset).not.toHaveBeenCalled();
     expect(bridge.setBrush).not.toHaveBeenCalled();
     expect(bridge.setForeground).not.toHaveBeenCalled();

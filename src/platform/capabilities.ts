@@ -1,14 +1,13 @@
-import { PhotoshopDetector } from './detector.js';
 import { isUxpBridgeReachable } from './uxp-bridge-client.js';
 
-export interface ParsedPhotoshopVersion {
+export type ParsedPhotoshopVersion = {
   major: number;
   minor: number;
   year?: number;
   raw: string;
-}
+};
 
-export interface PhotoshopCapabilities {
+export type PhotoshopCapabilities = {
   version: string;
   features: {
     select_subject_v2: boolean;
@@ -18,66 +17,58 @@ export interface PhotoshopCapabilities {
     execute_as_modal_timeout: boolean;
     uxp_plugin_api: boolean;
   };
+};
+
+function parsedPair(raw: string): Pick<ParsedPhotoshopVersion, 'major' | 'minor'> | null {
+  const match = /(\d+)(?:\.(\d*))?/.exec(raw);
+  if (!match) return null;
+  return {
+    major: Number.parseInt(match[1]!, 10),
+    minor: match[2] ? Number.parseInt(match[2], 10) : 0,
+  };
 }
 
-export function parsePhotoshopVersion(version: string): ParsedPhotoshopVersion {
-  const numeric = version.match(/(\d+)\.?(\d*)/);
-  if (numeric) {
-    return {
-      major: parseInt(numeric[1], 10),
-      minor: numeric[2] ? parseInt(numeric[2], 10) : 0,
-      raw: version,
-    };
-  }
+export function parsePhotoshopVersion(raw: string): ParsedPhotoshopVersion {
+  const pair = parsedPair(raw);
+  if (pair) return { ...pair, raw };
+  const yearMatch = /20(\d{2})/.exec(raw);
+  if (!yearMatch) return { major: 0, minor: 0, raw };
+  const year = Number.parseInt(`20${yearMatch[1]}`, 10);
+  return { major: year - 1990, minor: 0, year, raw };
+}
 
-  const yearMatch = version.match(/20(\d{2})/);
-  if (yearMatch) {
-    const year = parseInt(`20${yearMatch[1]}`, 10);
-    return {
-      major: year - 1990,
-      minor: 0,
-      year,
-      raw: version,
-    };
-  }
+function calendarYear(version: ParsedPhotoshopVersion): number | undefined {
+  if (version.year !== undefined) return version.year;
+  return version.major >= 13 ? version.major + 1990 : undefined;
+}
 
-  return { major: 0, minor: 0, raw: version };
+function meets(version: ParsedPhotoshopVersion, major: number, year: number): boolean {
+  const inferred = calendarYear(version);
+  return version.major >= major || (inferred !== undefined && inferred >= year);
 }
 
 export function getPhotoshopCapabilities(version: string): PhotoshopCapabilities {
   const parsed = parsePhotoshopVersion(version);
-  const detector = new PhotoshopDetector();
-
-  const major = parsed.major;
-  const year = parsed.year ?? (major >= 13 ? 1990 + major : undefined);
-
-  const selectSubjectV2 = major >= 23 || (year !== undefined && year >= 2020);
-  const skyReplacementNative = major >= 22 || (year !== undefined && year >= 2021);
-  const executeAsModal = major >= 23 || (year !== undefined && year >= 2022);
-
-  return {
-    version,
-    features: {
-      select_subject_v2: selectSubjectV2,
-      sky_replacement_native: skyReplacementNative,
-      neural_filters: false,
-      uxp_bridge_reachable: false,
-      execute_as_modal_timeout: executeAsModal,
-      uxp_plugin_api: detector.supportsUXP(version),
-    },
+  const features: PhotoshopCapabilities['features'] = {
+    select_subject_v2: meets(parsed, 23, 2020),
+    sky_replacement_native: meets(parsed, 22, 2021),
+    neural_filters: false,
+    uxp_bridge_reachable: false,
+    execute_as_modal_timeout: meets(parsed, 23, 2022),
+    uxp_plugin_api: parsed.major > 23 || (parsed.major === 23 && parsed.minor >= 5),
   };
+  return { version, features };
 }
 
-/** Merge runtime UXP bridge reachability into version-derived capabilities. */
 export async function resolvePhotoshopCapabilities(version: string): Promise<PhotoshopCapabilities> {
   const base = getPhotoshopCapabilities(version);
-  const bridgeUp = await isUxpBridgeReachable();
+  const bridgeReady = await isUxpBridgeReachable();
   return {
-    ...base,
+    version: base.version,
     features: {
       ...base.features,
-      uxp_bridge_reachable: bridgeUp,
-      neural_filters: bridgeUp && base.features.uxp_plugin_api,
+      uxp_bridge_reachable: bridgeReady,
+      neural_filters: bridgeReady && base.features.uxp_plugin_api,
     },
   };
 }

@@ -38,6 +38,17 @@ function directive() {
       color_policy: 'preserve palette relationships',
       layer_or_mask_bias: 'prefer editable masks/layers where useful',
     },
+    prompt_conflict_preflight: {
+      dominant_objective: 'Execute one bounded artistic operation without structural drift.',
+      secondary_traits: ['selective edges', 'editable layer structure'],
+      conflicts: [],
+      resolution_mode: 'none',
+      chosen_rendering_strategy: 'Preserve the established representation and apply only the bounded requested operation.',
+      resolution_rationale: 'This routing fixture contains no competing rendering strategies.',
+      first_pass_strategy: ['apply the bounded operation'],
+    },
+    strategy_validation_after_microplans: 2,
+    strategy_validation: { status: 'pending' },
     composition_exploration: { hypotheses: [] },
     assessment: {
       composition: 'Stable composition.',

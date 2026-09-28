@@ -15,7 +15,7 @@ capability information—not by a manually maintained Markdown list.
 | What to implement next | [`PAINTING-ROADMAP.md`](PAINTING-ROADMAP.md) |
 | Which tools exist in the current build | Runtime tool catalog and [`available-tools.md`](available-tools.md) |
 | Which semantic painting methods are currently executable | Runtime method-capability snapshot produced from registered tools |
-| Which backend each tool currently uses | [`uxp-migration-inventory.md`](uxp-migration-inventory.md) |
+| Which backend/access mode each tool currently uses | [`available-tools.md`](available-tools.md#generated-backend-and-access-inventory) |
 | Exact accepted fields and result shapes | Current public JSON schema and TypeScript compiler/runtime validators |
 | Protocol conformance examples | [`visual-microplan-contract-fixtures.md`](visual-microplan-contract-fixtures.md); fixtures are tests, never artistic recipes |
 
@@ -81,13 +81,12 @@ registered, Guard-admitted Photoshop primitives that fit one coherent artistic o
 - Photoshop must remain background-safe. No implementation may launch, foreground or switch the
   active application/document without the explicitly authorized route.
 
-The current migration work for compact-only control, capability snapshots, configuration setters,
-art-profile transitions, preview comparability and closure is specified in roadmap tasks 13a–13c.
-Do not restate those evolving contracts here.
+The compact-only migration work that formerly lived under roadmap tasks 13a–13c is accepted. Current
+forward work is tracked only in `PAINTING-ROADMAP.md`; do not resurrect completed migration tasks here.
 
 ## Runtime capability discovery
 
-The target design exposes one revision-bound capability snapshot at art-run start. It should include:
+The Guard exposes a revision-bound capability snapshot at art-run start. It includes:
 
 - supported semantic methods and their executable primitive families;
 - installed/preflighted brush roles where applicable;
@@ -95,13 +94,11 @@ The target design exposes one revision-bound capability snapshot at art-run star
 - unavailable capabilities and explicit bounded alternatives;
 - compact contract, runtime and UXP bridge revisions.
 
-The snapshot is cached for the matching revision and invalidated only by a real readiness, revision or
-capability change. A healthy Painter must not read this file, source code or raw schemas between
-passes to discover how to proceed.
-
-Until that target is complete, the runtime method-capability tools and public catalog describe current
-availability. Their output remains evidence, not an artistic decision and not permission to select the
-smallest technically admissible primitive.
+The snapshot is cached for the matching revision and invalidated by real readiness/revision/capability
+changes. A healthy Painter must not read this file, source code or raw schemas between passes to
+discover how to proceed. Runtime method-capability tools and the public catalog supplement the
+snapshot for explicit planning/diagnostic needs; their output is evidence, not an artistic decision
+and not permission to select the smallest technically admissible primitive.
 
 ## Photoshop 27.8 / UXP implementation constraints
 

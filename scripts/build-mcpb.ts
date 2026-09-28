@@ -1,15 +1,17 @@
 /**
  * Build a Smithery / Claude Desktop MCPB bundle from the compiled server.
  *
- * Output: release/photoshop-mcp-<version>.mcpb (zip archive with manifest.json + server/)
+ * Output: release/photoshop-mcp-digital-painting-<version>.mcpb
+ * (zip archive with manifest.json + server/)
  * Run: npm run build:mcpb
  */
-import { execSync } from 'node:child_process';
+import { execFileSync, execSync } from 'node:child_process';
 import {
   copyFileSync,
   cpSync,
   mkdirSync,
   readFileSync,
+  renameSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
@@ -43,6 +45,26 @@ function assertExists(path: string, label: string): void {
   }
 }
 
+function packMcpb(outFile: string): void {
+  if (process.platform !== 'win32') {
+    throw new Error(`Windows-only build: unsupported host platform ${process.platform}`);
+  }
+  const zipFile = `${outFile}.zip`;
+  rmSync(zipFile, { force: true });
+  const psZipFile = zipFile.replaceAll("'", "''");
+  execFileSync(
+    'powershell.exe',
+    [
+      '-NoProfile',
+      '-NonInteractive',
+      '-Command',
+      `Compress-Archive -LiteralPath manifest.json,server -DestinationPath '${psZipFile}' -CompressionLevel Optimal`,
+    ],
+    { cwd: STAGING, stdio: 'inherit' },
+  );
+  renameSync(zipFile, outFile);
+}
+
 function main(): void {
   console.log('Building server…');
   run('npm run build');
@@ -60,9 +82,9 @@ function main(): void {
   writeFileSync(join(STAGING, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
 
   cpSync(join(ROOT, 'dist'), join(SERVER_DIR, 'dist'), { recursive: true });
-  cpSync(join(ROOT, 'web', 'dist'), join(SERVER_DIR, 'web', 'dist'), { recursive: true });
   cpSync(join(ROOT, 'uxp-plugin'), join(SERVER_DIR, 'uxp-plugin'), { recursive: true });
   copyFileSync(join(ROOT, 'LICENSE'), join(SERVER_DIR, 'LICENSE'));
+  copyFileSync(join(ROOT, 'NOTICE'), join(SERVER_DIR, 'NOTICE'));
 
   const bundlePkg = {
     name: pkg.name,
@@ -78,20 +100,18 @@ function main(): void {
   console.log('Installing production dependencies into bundle…');
   run('npm install --omit=dev --no-audit --no-fund', SERVER_DIR);
 
-  const outFile = join(RELEASE_DIR, `photoshop-mcp-${pkg.version}.mcpb`);
-  // The site links to .../releases/latest/download/photoshop-mcp.mcpb, so ship a
-  // version-less copy alongside the versioned one.
-  const stableFile = join(RELEASE_DIR, 'photoshop-mcp.mcpb');
+  const outFile = join(RELEASE_DIR, `photoshop-mcp-digital-painting-${pkg.version}.mcpb`);
+  const stableFile = join(RELEASE_DIR, 'photoshop-mcp-digital-painting.mcpb');
   rmSync(outFile, { force: true });
   rmSync(stableFile, { force: true });
 
   console.log(`Packing ${outFile}…`);
-  run(`zip -rq "${outFile}" manifest.json server`, STAGING);
+  packMcpb(outFile);
   copyFileSync(outFile, stableFile);
 
   rmSync(STAGING, { recursive: true, force: true });
   console.log(`MCPB ready: ${outFile} (+ ${stableFile})`);
-  console.log('Fork bundle built for local/source distribution. Do not publish it under the upstream alisaitteke/photoshop-mcp identity.');
+  console.log('Independent Digital Painting Edition bundle built for local/source distribution.');
 }
 
 main();

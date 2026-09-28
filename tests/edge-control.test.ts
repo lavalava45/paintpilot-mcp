@@ -48,6 +48,12 @@ function basePlan(overrides: Record<string, unknown> = {}) {
     risk: 'low',
     expected_visual_delta: 'The target boundary changes edge character without moving the neighboring regions.',
     verification_envelope: { mode: 'after_only' },
+    paint_strategy: {
+      construction_role: 'volumetric-soft-mass',
+      material_role: 'form-bearing cheek mass',
+      visual_intent: 'painted-mass',
+      pressure_policy: 'none',
+    },
     layer_separation_check: {
       change_kind: 'continuation',
       substantial: false,

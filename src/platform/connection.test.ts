@@ -1,15 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { PhotoshopConnection, type PhotoshopInfo } from './connection.js';
-import type { ScriptExecutor } from './script-executor.js';
 
-function fixture(platformType: NodeJS.Platform, running = true) {
+function fixture(running = true) {
   let detects = 0;
-  let probes = 0;
-  let executions = 0;
   const info: PhotoshopInfo = {
     version: '2026',
     path: 'C:\\Program Files\\Adobe\\Adobe Photoshop 2026\\Photoshop.exe',
-    isRunning: true,
+    isRunning: running,
   };
   const detector = {
     detect: async () => {
@@ -17,33 +14,24 @@ function fixture(platformType: NodeJS.Platform, running = true) {
       return info;
     },
   };
-  const executor: ScriptExecutor = {
-    execute: async () => {
-      executions++;
-      return { ok: true };
-    },
-    isPhotoshopRunning: async () => {
-      probes++;
-      return running;
-    },
-    launchPhotoshop: async () => undefined,
-  };
-  const connection = new PhotoshopConnection({ detector, executor, platformType });
-  return { connection, counts: () => ({ detects, probes, executions }) };
+  const connection = new PhotoshopConnection({ detector });
+  return { connection, counts: () => ({ detects }) };
 }
 
-describe('PhotoshopConnection pre-dispatch legacy fallback', () => {
-  it('executes through an injected Windows fallback executor', async () => {
-    const { connection, counts } = fixture('win32');
-    await expect(connection.executeScript('return 1;')).resolves.toEqual({ ok: true });
-    await expect(connection.executeScript('return 2;')).resolves.toEqual({ ok: true });
-    expect(counts()).toEqual({ detects: 1, probes: 2, executions: 2 });
+describe('PhotoshopConnection Windows discovery facade', () => {
+  it('caches detection across ping/version reads', async () => {
+    const { connection, counts } = fixture();
+    await expect(connection.ping()).resolves.toBe(true);
+    await expect(connection.getVersion()).resolves.toBe('2026');
+    expect(connection.getPhotoshopInfo()).toMatchObject({ version: '2026', isRunning: true });
+    expect(counts()).toEqual({ detects: 1 });
   });
 
-  it('executes and probes through an injected macOS fallback executor', async () => {
-    const { connection, counts } = fixture('darwin');
-    await expect(connection.executeScript('return 1;')).resolves.toEqual({ ok: true });
-    await expect(connection.ensurePhotoshopRunning()).resolves.toBeUndefined();
-    expect(counts()).toEqual({ detects: 1, probes: 2, executions: 1 });
+  it('reports detector failures as ping=false while version reads fail closed', async () => {
+    const connection = new PhotoshopConnection({
+      detector: { detect: async () => { throw new Error('Photoshop missing'); } },
+    });
+    await expect(connection.ping()).resolves.toBe(false);
+    await expect(connection.getVersion()).rejects.toThrow('Photoshop missing');
   });
 });

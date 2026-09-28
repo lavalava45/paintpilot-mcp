@@ -1,10 +1,23 @@
 import { describe, expect, it } from 'vitest';
 import {
+  canonicalPaintingStage,
+  isBackwardPaintingStageTransition,
+  paintingStageRank,
   projectPaintingStagePolicy,
   serializePaintingStagePolicy,
 } from '../src/core/painting-stage-policy.js';
 
 describe('stage-scoped painting policy projection', () => {
+  it('canonicalizes live aliases and ranks backward transitions deterministically', () => {
+    expect(canonicalPaintingStage('EDGE_CONTROL')).toBe('EDGE');
+    expect(canonicalPaintingStage('ACCEPTANCE')).toBe('FINAL_SELECTION');
+    expect(paintingStageRank('FORM_AND_LIGHT')).toBe(4);
+    expect(paintingStageRank('EDGE_CONTROL')).toBe(5);
+    expect(isBackwardPaintingStageTransition('DETAIL', 'GLOBAL_BLOCK_IN')).toBe(true);
+    expect(isBackwardPaintingStageTransition('FORM', 'EDGE_CONTROL')).toBe(false);
+    expect(isBackwardPaintingStageTransition('EDGE_CONTROL', 'EDGE')).toBe(false);
+  });
+
   it('early block-in activates invariants plus recognition policy and excludes detail/final modules', () => {
     const policy = projectPaintingStagePolicy({ stage: 'RECOGNITION_BLOCK_IN' });
     expect(policy.activeModules).toEqual(['invariants', 'recognition_block_in']);

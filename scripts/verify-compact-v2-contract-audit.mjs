@@ -40,7 +40,7 @@ const requiredTerms = [
   '`strategy_signature`',
   '`comparison_metric`',
   '`PersistentMcpClient`',
-  '`photoshop-session.mjs`',
+  'DONE / DELETED',
   '`legacy_contract_removed`',
   '`uxp_bridge_unavailable`',
 ];
@@ -62,12 +62,9 @@ const instructionFiles = [
   'docs/development.md',
   'docs/digital-painting-agent-skill.md',
   'docs/digital-painting.md',
-  'docs/photoshop-guard-architecture.md',
-  'docs/prompt-layer.md',
   'docs/painting-policy/foundations.md',
   'docs/painting-policy/operations.md',
-  'docs/painting-policy/optimization-audit.md',
-  'docs/uxp-migration-inventory.md',
+  'docs/performance-and-latency.md',
   'src/prompts/instructions.ts',
   'src/prompts/templates/digital-painting-control.ts',
 ];
@@ -85,14 +82,6 @@ const removedPublicTokens = [
   /\bfull Guard contract\b/i,
 ];
 
-const staleCurrentCounts = [
-  /\b(?:146|149)\s+tools?\b/i,
-  /\b(?:146|149)-tool\b/i,
-  /\b(?:146|149)\s+total\b/i,
-  /\b(?:14|15)\s+public Guard tools?\b/i,
-  /\b(?:14|15)\s+Guard tools?\b/i,
-];
-
 const forbiddenRecommendations = [
   /(?:use|call|send)\s+`?next_operation`?\s+(?:for|as)\s+(?:the\s+)?normal/i,
   /(?:use|call)\s+`?photoshop_guard_report`?\s+(?:for|as)\s+(?:the\s+)?normal/i,
@@ -105,9 +94,6 @@ for (const relative of instructionFiles) {
   const text = fs.readFileSync(path.join(root, relative), 'utf8');
   for (const pattern of removedPublicTokens) {
     if (pattern.test(text)) violations.push(`${relative}: removed public token ${pattern}`);
-  }
-  for (const pattern of staleCurrentCounts) {
-    if (pattern.test(text)) violations.push(`${relative}: stale public catalog count ${pattern}`);
   }
   for (const pattern of forbiddenRecommendations) {
     if (pattern.test(text)) violations.push(`${relative}: ${pattern}`);

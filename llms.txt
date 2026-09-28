@@ -1,9 +1,9 @@
-# Photoshop MCP — Digital Painting Fork
+# Photoshop MCP — Digital Painting Edition
 
-> Independent digital-painting fork of Photoshop MCP, based on upstream 1.7.6 — 148 tools including painting, VisualMicroPlan execution, color sampling, landmarks/guides, previews, generative AI, embedded Guard orchestration and 16 recipes. Unofficial; not affiliated with Adobe.
+> Independently maintained Windows-first Photoshop MCP system — 130 tools including painting, VisualMicroPlan execution, color sampling, landmarks/guides, previews, embedded Guard orchestration and 0 recipes. Not affiliated with Adobe.
 
-**This fork:** https://github.com/lavalava45/photoshop-mcp-digital-painting
-**Original/upstream:** https://github.com/alisaitteke/photoshop-mcp
+**Project:** https://github.com/lavalava45/photoshop-mcp-digital-painting
+**Historical provenance:** `NOTICE`
 
 ## Quick start
 
@@ -15,21 +15,21 @@ npm run build:server
 node dist/index.js
 ```
 
-**Prerequisites:** Adobe Photoshop (Windows or macOS), Node.js 18+. Photoshop must be running. Optional UXP bridge plugin in `uxp-plugin/` for Neural Filters.
+**Prerequisites:** Adobe Photoshop on Windows 10/11, Node.js 18+. Photoshop must be running. The maintained semantic route uses the UXP companion in `uxp-plugin/`.
 
 **Chat On Steroids:** ordinary Photoshop work uses the live-accepted
 `Chat_On_Steroids_Plugins → dist/cos-plugin.js → embedded Guard → Photoshop` route.
 `dist/cos-plugin.js` enables required mode: direct reads remain available, while raw
 mutations fail closed with `guard_required` and must run through
-`photoshop_guard_cycle_auto`. The Core/controller route is compatibility-only.
+`photoshop_guard_cycle_auto`. The retired external Core/controller/daemon provider chain is removed.
 
 ## Agent workflow
 
 ```
-get_capabilities → get_state → (recipe or atomic tool) → get_preview to verify
+get_capabilities → get_state → semantic tool chain → get_preview to verify
 ```
 
-Prefer `photoshop_recipe_*` for multi-step outcomes (single undo step). Use atomic `photoshop_*` tools for fine-grained edits. On failure, read structured error envelopes (`code`, `suggested_next_tool`) and call `get_state` before retrying.
+Compose supported semantic `photoshop_*` tools directly. Use the five `ps.*` guide prompts for reusable multi-step planning. On failure, read structured error envelopes (`code`, `suggested_next_tool`) and call `get_state` before retrying.
 
 ## MCP client configuration
 
@@ -47,18 +47,17 @@ Prefer `photoshop_recipe_*` for multi-step outcomes (single undo step). Use atom
 
 ## Tool surface
 
-- **148 tools** — 132 atomic/non-recipe + 16 recipe (`photoshop_recipe_*`); 13 of the non-recipe tools are the embedded `photoshop_guard_*` surface
-- **21 MCP prompts** — including `ps.digital_painting_control`
+- **130 tools** — semantic `photoshop_*` surface; 14 are the embedded `photoshop_guard_*` façade
+- **5 MCP prompts** — including `ps.digital_painting_control`
 - **Native Sky Replacement** — optional sky replacement using Photoshop's built-in feature
 - **State** — `photoshop_get_state`, `photoshop_get_preview`, `photoshop_get_capabilities`
-- **Standalone UI** — Action Plan (beta): plan all steps in one LLM call, then execute
 
 ## Distribution
 
-- Fork source/docs/issues: https://github.com/lavalava45/photoshop-mcp-digital-painting
-- Fork npm package: none
-- Fork MCP Registry entry: none
-- Original/upstream: https://github.com/alisaitteke/photoshop-mcp
+- Project source/docs/issues: https://github.com/lavalava45/photoshop-mcp-digital-painting
+- Public npm package: none
+- MCP Registry entry: none
+- Historical origin/licensing: `NOTICE` + `LICENSE`
 
 ## Documentation
 

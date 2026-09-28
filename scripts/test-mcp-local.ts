@@ -8,7 +8,6 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const TEST_CHAT_ID = 'local-mcp-test';
 
 function section(title: string): void {
   console.log(`\n=== ${title} ===`);
@@ -40,7 +39,6 @@ async function main(): Promise<void> {
     env: {
       ...process.env,
       LOG_LEVEL: '0',
-      PHOTOSHOP_EXPORT_CHAT_ID: TEST_CHAT_ID,
     },
     stderr: 'pipe',
     cwd: ROOT,
@@ -60,7 +58,7 @@ async function main(): Promise<void> {
 
   const instructions = client.getInstructions() ?? '';
   if (instructions.length < 200) fail('instructions length', String(instructions.length));
-  for (const marker of ['photoshop_get_state', 'photoshop_recipe_', 'suggested_next_tool']) {
+  for (const marker of ['photoshop_get_state', 'ps.digital_painting_control', 'suggested_next_tool']) {
     if (!instructions.includes(marker)) fail('instructions marker', marker);
   }
   ok('instructions', `${instructions.length} chars, contract markers present`);
@@ -68,24 +66,6 @@ async function main(): Promise<void> {
   section('List prompts');
   const { prompts } = await client.listPrompts();
   const promptNames = prompts.map((p) => p.name).sort();
-  const expectedRecipePrompts = [
-    'ps.apply_color_grade',
-    'ps.batch_mockup_replace',
-    'ps.batch_watermark',
-    'ps.csv_to_cards',
-    'ps.dodge_burn',
-    'ps.enhance_portrait',
-    'ps.export_social_variants',
-    'ps.frequency_separation',
-    'ps.gradient_fade',
-    'ps.organize_layers',
-    'ps.passport_photo',
-    'ps.prepare_for_web',
-    'ps.remove_background',
-    'ps.remove_distraction',
-    'ps.sky_blend',
-    'ps.split_carousel',
-  ];
   const expectedGuidePrompts = [
     'ps.color_correct',
     'ps.composite_blend',
@@ -93,46 +73,28 @@ async function main(): Promise<void> {
     'ps.gradient_blend',
     'ps.digital_painting_control',
   ];
-  const expectedPromptCount = expectedRecipePrompts.length + expectedGuidePrompts.length;
+  const expectedPromptCount = expectedGuidePrompts.length;
   if (promptNames.length !== expectedPromptCount) fail('prompt count', String(promptNames.length));
-  for (const name of [...expectedRecipePrompts, ...expectedGuidePrompts]) {
+  for (const name of expectedGuidePrompts) {
     if (!promptNames.includes(name)) fail('missing prompt', name);
   }
   for (const removed of ['ps.generative_fill', 'ps.generative_remove', 'ps.generative_expand']) {
     if (promptNames.includes(removed)) fail('removed prompt still exposed', removed);
   }
-  ok(
-    `${expectedPromptCount} prompt templates`,
-    `${expectedRecipePrompts.length} recipe + ${expectedGuidePrompts.length} guide`
-  );
+  ok(`${expectedPromptCount} guide prompt templates`, 'legacy recipe prompts absent');
 
-  section('Get prompt (ps.remove_background)');
+  section('Get prompt (ps.gradient_blend)');
   const promptResult = await client.getPrompt({
-    name: 'ps.remove_background',
-    arguments: { feather_px: '2', keep_shadow: 'true' },
+    name: 'ps.gradient_blend',
+    arguments: { direction: 'bottom_to_top', start_pct: '10', end_pct: '90' },
   });
   const promptText = promptResult.messages
     .map((m) => (m.content.type === 'text' ? m.content.text : ''))
     .join('\n');
-  if (!promptText.includes('photoshop_recipe_remove_background')) {
-    fail('prompt content', 'missing recipe reference');
+  if (!promptText.includes('photoshop_apply_gradient_mask')) {
+    fail('prompt content', 'missing semantic gradient-mask reference');
   }
-  if (!promptText.includes('feather_px: 2')) fail('prompt content', 'missing feather_px coercion');
-  if (!promptText.includes('keep_shadow: true')) fail('prompt content', 'missing keep_shadow coercion');
-  ok('ps.remove_background', `${promptText.length} chars`);
-
-  section('Get prompt (ps.sky_blend)');
-  const skyPrompt = await client.getPrompt({
-    name: 'ps.sky_blend',
-    arguments: { sky_image_path: '/tmp/sky.jpg', horizon_pct: '45', feather_pct: '15' },
-  });
-  const skyText = skyPrompt.messages
-    .map((m) => (m.content.type === 'text' ? m.content.text : ''))
-    .join('\n');
-  if (!skyText.includes('photoshop_recipe_sky_blend')) {
-    fail('sky prompt content', 'missing recipe reference');
-  }
-  ok('ps.sky_blend', `${skyText.length} chars`);
+  ok('ps.gradient_blend', `${promptText.length} chars`);
 
   section('List tools (new layer)');
   const { tools } = await client.listTools();
@@ -141,19 +103,6 @@ async function main(): Promise<void> {
     'photoshop_get_state',
     'photoshop_get_preview',
     'photoshop_get_capabilities',
-    'photoshop_recipe_remove_background',
-    'photoshop_recipe_enhance_portrait',
-    'photoshop_recipe_frequency_separation',
-    'photoshop_recipe_prepare_for_web',
-    'photoshop_recipe_export_social_variants',
-    'photoshop_recipe_apply_color_grade',
-    'photoshop_recipe_batch_mockup_replace',
-    'photoshop_recipe_organize_layers',
-    'photoshop_recipe_gradient_fade',
-    'photoshop_recipe_sky_blend',
-    'photoshop_recipe_dodge_burn',
-    'photoshop_recipe_remove_distraction',
-    'photoshop_recipe_csv_to_cards',
     'photoshop_sky_replacement',
     'photoshop_neural_filter',
     'photoshop_apply_layer_style',
@@ -162,9 +111,6 @@ async function main(): Promise<void> {
     'photoshop_adjust_exposure',
     'photoshop_apply_photo_filter',
     'photoshop_apply_gradient_map',
-    'photoshop_list_datasets',
-    'photoshop_import_datasets',
-    'photoshop_generate_from_datasets',
     'photoshop_image_stack',
     'photoshop_export_as',
   ];
@@ -172,6 +118,7 @@ async function main(): Promise<void> {
     if (!toolNames.has(name)) fail('missing tool', name);
   }
   for (const removed of [
+    ...[...toolNames].filter((name) => name.startsWith('photoshop_recipe_')),
     'photoshop_generative_fill',
     'photoshop_generative_remove',
     'photoshop_generative_expand',
@@ -180,7 +127,7 @@ async function main(): Promise<void> {
   ]) {
     if (toolNames.has(removed)) fail('removed tool still exposed', removed);
   }
-  ok('recipe + state tools registered', `${required.length} checked`);
+  ok('semantic + state tools registered', `${required.length} checked`);
 
   section('Call photoshop_ping');
   const ping = await client.callTool({ name: 'photoshop_ping', arguments: {} });
@@ -220,29 +167,9 @@ async function main(): Promise<void> {
       ok('get_state', `hasDocument=${String(hasDocument)}`);
     }
 
-    if (hasDocument) {
-      section('Call photoshop_recipe_organize_layers (dry, preserve)');
-      const organize = await client.callTool({
-        name: 'photoshop_recipe_organize_layers',
-        arguments: { auto_group: false, preserve: true },
-      });
-      const organizeText = textFromToolResult(organize);
-      if (organize.isError) {
-        console.log(`  WARN recipe organize_layers: ${organizeText.slice(0, 300)}`);
-      } else {
-        ok('organize_layers', organizeText.slice(0, 120));
-      }
-    } else {
-      console.log('  SKIP recipe test — no active document in Photoshop');
-    }
+    if (!hasDocument) console.log('  SKIP active-document semantic smoke — no active document in Photoshop');
   } else {
     console.log('  SKIP Photoshop-dependent calls — Photoshop not reachable');
-  }
-
-  section('Export path env');
-  if (process.env.PHOTOSHOP_EXPORT_CHAT_ID !== TEST_CHAT_ID) {
-    // env is on server child, not parent — verify via prepare_for_web path hint in instructions
-    ok('chat scoping', `server spawned with PHOTOSHOP_EXPORT_CHAT_ID=${TEST_CHAT_ID}`);
   }
 
   await transport.close();

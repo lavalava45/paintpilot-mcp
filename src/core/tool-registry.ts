@@ -1,11 +1,8 @@
-import { Tool, CallToolResult } from '@modelcontextprotocol/sdk/types.js';
+import type { CallToolResult, Tool } from '@modelcontextprotocol/sdk/types.js';
 import { Logger } from '../utils/logger.js';
 
-export interface ToolHandler {
-  (args: Record<string, unknown>): Promise<CallToolResult>;
-}
-
 export type ToolResult = CallToolResult;
+export type ToolHandler = (args: Record<string, unknown>) => Promise<ToolResult>;
 
 export interface ToolDefinition {
   tool: Tool;
@@ -13,66 +10,54 @@ export interface ToolDefinition {
 }
 
 export class ToolRegistry {
-  private logger: Logger;
-  private tools: Map<string, ToolDefinition>;
-
-  constructor() {
-    this.logger = new Logger('ToolRegistry');
-    this.tools = new Map();
-  }
+  private readonly entries = new Map<string, ToolDefinition>();
+  private readonly log = new Logger('ToolRegistry');
 
   register(name: string, definition: ToolDefinition): void {
-    if (this.tools.has(name)) {
-      this.logger.warn(`Tool '${name}' already registered, overwriting`);
-    }
-
-    this.tools.set(name, definition);
-    this.logger.debug(`Registered tool: ${name}`);
+    const replacing = this.entries.has(name);
+    this.entries.set(name, definition);
+    if (replacing) this.log.warn(`Tool '${name}' already registered, overwriting`);
+    else this.log.debug(`Registered tool: ${name}`);
   }
 
   unregister(name: string): boolean {
-    const result = this.tools.delete(name);
-    if (result) {
-      this.logger.debug(`Unregistered tool: ${name}`);
-    }
-    return result;
+    const removed = this.entries.delete(name);
+    if (removed) this.log.debug(`Unregistered tool: ${name}`);
+    return removed;
   }
 
   has(name: string): boolean {
-    return this.tools.has(name);
+    return this.entries.has(name);
   }
 
   get(name: string): ToolDefinition | undefined {
-    return this.tools.get(name);
+    return this.entries.get(name);
   }
 
   list(): Tool[] {
-    return Array.from(this.tools.values()).map((def) => def.tool);
-  }
-
-  async execute(name: string, args: Record<string, unknown>): Promise<ToolResult> {
-    const definition = this.tools.get(name);
-    
-    if (!definition) {
-      throw new Error(`Tool not found: ${name}`);
-    }
-
-    try {
-      this.logger.debug(`Executing tool: ${name}`);
-      const result = await definition.handler(args);
-      return result;
-    } catch (error) {
-      this.logger.error(`Tool execution failed: ${name}`, error);
-      throw error;
-    }
-  }
-
-  clear(): void {
-    this.tools.clear();
-    this.logger.debug('All tools cleared');
+    return [...this.entries.values()].map(({ tool }) => tool);
   }
 
   count(): number {
-    return this.tools.size;
+    return this.entries.size;
+  }
+
+  clear(): void {
+    if (this.entries.size === 0) return;
+    this.entries.clear();
+    this.log.debug('All tools cleared');
+  }
+
+  async execute(name: string, args: Record<string, unknown>): Promise<ToolResult> {
+    const definition = this.entries.get(name);
+    if (!definition) throw new Error(`Tool not found: ${name}`);
+
+    this.log.debug(`Executing tool: ${name}`);
+    try {
+      return await definition.handler(args);
+    } catch (error) {
+      this.log.error(`Tool execution failed: ${name}`, error);
+      throw error;
+    }
   }
 }

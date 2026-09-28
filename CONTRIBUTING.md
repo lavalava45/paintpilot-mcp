@@ -1,11 +1,11 @@
-# Contributing to Photoshop MCP
+# Contributing to Photoshop MCP — Digital Painting Edition
 
 Thank you for your interest in contributing! This is a community-maintained project and is not affiliated with or endorsed by Adobe Inc.
 
-> **Fork notice:** this checkout is the independent digital-painting fork at
-> `lavalava45/photoshop-mcp-digital-painting`. The original project is
-> `alisaitteke/photoshop-mcp`. Do not publish fork builds under the upstream npm scope
-> `@alisaitteke`, the upstream MCP Registry id, or the upstream website/domain.
+> **Project identity:** this repository is independently maintained at
+> `lavalava45/photoshop-mcp-digital-painting`. Historical origin and upstream distribution
+> separation are documented in [`NOTICE`](NOTICE). Do not publish this project's builds under
+> another project's npm scope, MCP Registry id, website, or author branding.
 
 ## Language policy
 
@@ -19,7 +19,7 @@ Issues and review comments may be written in any language, but English is prefer
 
 ## Before you start
 
-1. Search [fork issues](https://github.com/lavalava45/photoshop-mcp-digital-painting/issues) and [pull requests](https://github.com/lavalava45/photoshop-mcp-digital-painting/pulls) to avoid duplicate work. Check upstream separately when the issue may originate there.
+1. Search [project issues](https://github.com/lavalava45/photoshop-mcp-digital-painting/issues) and [pull requests](https://github.com/lavalava45/photoshop-mcp-digital-painting/pulls) to avoid duplicate work. Check historical upstream separately when useful for provenance or comparison.
 2. For large or architectural changes, open an issue first to discuss the approach.
 3. For bug fixes and small improvements, a PR without a prior issue is fine.
 
@@ -36,51 +36,40 @@ Issues and review comments may be written in any language, but English is prefer
 ```bash
 git clone https://github.com/lavalava45/photoshop-mcp-digital-painting.git
 cd photoshop-mcp-digital-painting
-npm install
+pnpm install --frozen-lockfile
 npm run build
 ```
 
-### UI development
-
-The standalone web UI runs a Hono backend and a Vite + Vue frontend:
-
-```bash
-npm run dev:ui
-```
-
-This starts the server on port 5174 (with hot reload) and the web dev server concurrently.
-
 ## Distribution and releases
 
-This fork is source-distributed from
+This project is source-distributed from
 [lavalava45/photoshop-mcp-digital-painting](https://github.com/lavalava45/photoshop-mcp-digital-painting)
-and is normally used through a local stdio build. It currently has **no fork npm
-package, no fork MCP Registry entry, and no fork directory-listing release flow**.
+and is normally used through a local stdio build. It currently has **no public npm
+package, no MCP Registry entry, and no directory-listing release flow**.
 
 The repository intentionally does not contain GitHub Actions that publish to npm,
 the MCP Registry, Smithery, Glama, or other third-party catalogs. Do not add
-credentials or publishing commands for upstream identifiers to this fork.
+credentials or publishing commands for unrelated/historical distribution identifiers to this project.
 
-For a source release of the fork:
+For a source release of the project:
 
 1. Run the validation suite documented below.
-2. Update the fork's changelog/version metadata if a tagged GitHub source release is desired.
+2. Update the project's changelog/version metadata if a tagged GitHub source release is desired.
 3. Keep `server.json`, `mcpb/manifest.json`, package metadata, links, and release notes
-   under the fork's own `lavalava45/photoshop-mcp-digital-painting` identity.
+   under the project's own `lavalava45/photoshop-mcp-digital-painting` identity.
 4. Create/push a Git tag or GitHub Release only under this repository. No external
    registry publication is implied by a GitHub tag.
 
 The original project's release and registry procedures belong to
 [alisaitteke/photoshop-mcp](https://github.com/alisaitteke/photoshop-mcp). Consult
 that repository when auditing upstream changes; do not copy its distribution
-credentials or identifiers into this fork.
+credentials or identifiers into this project. See `NOTICE` for provenance.
 
 ## Project layout
 
 | Path | Purpose |
 | --- | --- |
-| `src/` | MCP server core, tools, recipes, and UI backend |
-| `web/` | Vue 3 standalone UI (Tailwind v4, shadcn-vue) |
+| `src/` | MCP server core, Guard, semantic tools, prompts and platform routing |
 | `scripts/` | Integration and verification test scripts |
 | `docs/` | Additional project documentation |
 
@@ -91,10 +80,26 @@ See [`docs/architecture.md`](docs/architecture.md) for a detailed breakdown.
 1. Branch from `master`.
 2. Keep diffs focused — avoid unrelated refactors in the same PR.
 3. Follow existing patterns:
-   - Provider adapters in `src/ui/providers/`
    - MCP tools in `src/tools/`
-   - Recipe tools in `src/tools/recipes/`
    - Prompt templates in `src/prompts/templates/`
+
+### External/upstream source intake
+
+Do not wholesale merge historical upstream changes into the maintained architecture. For any
+non-trivial selective port from `alisaitteke/photoshop-mcp` or another external source, record in the
+PR/change evidence:
+
+- source repository and exact commit/tag/PR;
+- the current project problem, compatibility need, or measured value that justifies intake now;
+- affected project paths that received the port or adaptation;
+- whether source text was copied, substantially adapted, or independently reimplemented;
+- any license/copyright/notice obligations that must travel with the change.
+
+Retain required third-party notices. Project ownership notices may be added for new work, but must
+not obscure or replace the upstream MIT notice in `LICENSE`. See [`NOTICE`](NOTICE) for the canonical
+provenance policy and [`docs/external-intake.md`](docs/external-intake.md) for the maintained intake
+decision workflow. An external release or upstream branch advance is not, by itself, a reason to
+merge, rebase, version-bump, or publish this project.
 
 ## Code style
 
@@ -128,8 +133,8 @@ canonical verification failure unless formatting is explicitly promoted into
 
 ```bash
 npm run test:mcp-local    # prompt-layer smoke tests
-npm run spike:issue-2     # issue #2 targeted regression
-npm run test:mcp-all      # full sequential tool sweep
+npm run test:measurement-tools
+npm run test:document-targeting-live
 ```
 
 Integration tests communicate with a live Photoshop instance over stdio — the same path used by Cursor and Claude Desktop. Note which tests you ran in your PR description.
@@ -146,9 +151,9 @@ A [pull request template](.github/pull_request_template.md) is provided automati
 
 ## Reporting bugs
 
-Open a [fork GitHub Issue](https://github.com/lavalava45/photoshop-mcp-digital-painting/issues) and include:
+Open a [project GitHub Issue](https://github.com/lavalava45/photoshop-mcp-digital-painting/issues) and include:
 
-- Operating system (Windows / macOS) and version
+- Windows version
 - Photoshop version
 - Node.js version
 - Steps to reproduce

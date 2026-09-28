@@ -25,6 +25,8 @@ Prefer a method because its causal effect matches the visual problem:
 
 A fallback is not permission to use a generic brush automatically. It must be the next **available method that preserves the original visual intent and impact class**. Record unavailable preferred methods explicitly when that fact changes the plan.
 
+For **global or medium** softness-dominant/environmental passes, `construction_role` is mandatory before mechanism selection. Classify the pass as `continuous-field`, `volumetric-soft-mass`, or `optical-veil`; do not leave a broad sky/fog/glow/smooth-field operation as an untyped `soft-transition` or generic brush pass. `continuous-field` routes to `continuous-color-field` by default. Using another mechanism requires an explicit fallback from `continuous-color-field` with a concrete reason. `optical-veil` must not silently collapse to the legacy Soft Round / `soft-brush-build` dab-chain: that route is allowed only when the plan names the preferred non-dab method in `fallback_from_method_id` and records a concrete `fallback_reason` explaining why it cannot be used for the current target.
+
 #### Two-level Art Director / Painter loop
 
 Separate **global direction** from **local execution** in controller state. The Art Director owns composition, focal hierarchy, large value masses, lighting, silhouette, depth, likeness/main shape, overall detail level and the next priority. A review writes a compact directive with a bounded task queue and an explicit review horizon. The normal horizon is roughly **5–10 completed Painter micro-plans**, but this is an adaptive planning choice, not a hard-coded magic constant.
@@ -111,6 +113,14 @@ The check records the exact current-frame preview/operation plus:
 - `selective_detail` — any detail is structurally useful and non-uniform;
 - `residual_block_in` — temporary scaffold geometry no longer dominates the representation.
 
+For a representational `refinement_check.status=pass`, `major_form_modelling` must also be backed by
+an observed **low-frequency structure view** derived from the exact same current frame. The canonical
+`photoshop_analyze_value_structure` result includes a downsampled grayscale low-frequency image that
+suppresses small texture/noise. A PASS requires that this view still supports major-form modelling;
+surface noise or fine marks that create only a local illusion of volume cannot close major-form debt.
+The low-frequency evidence is provenance-bound to the current source preview and materialized
+artifact, not a free-form textual assertion.
+
 Each criterion is `resolved|debt|uncertain|not-applicable`. The representation transition
 is separately classified `meaningful|insufficient|texture-only|not-assessed`.
 `refinement_check.status=pass` requires `representation_change=meaningful`, resolved
@@ -124,6 +134,30 @@ stylization and must cite an exact relevant `style_contract` field/value. This p
 the generic de-block-in rule from silently forcing flat/graphic work toward photorealism.
 The check is persisted in the existing painting state and is reconstructed unchanged after
 restart/resume.
+
+#### Qualitative material-response decomposition
+
+`MATERIAL` is not a synonym for texture. Before a MATERIAL mutation, declare one qualitative
+`material_response` contract. It distinguishes **base material**, **surface condition**, and
+**optical effect**, then states the intended visible response for: base/local color-value family,
+form-driven light/shadow, specular/reflection character, transmission/translucency when applicable,
+surface condition, scale/frequency of variation, and edge/contact interaction. Microtexture is
+explicitly `deferred`, `supporting-only`, or `not-applicable`; it is never proof by itself that the
+material reads.
+
+Components may be `not-applicable` when physics/style genuinely does not require them. A transmissive
+physical owner must still declare transmission; a surface-condition owner must actually describe the
+condition; optical/atmospheric owners remain optical effects rather than silently becoming base
+material. Intentionally flat/stylized work may omit otherwise form-bearing response only through an
+exact `style_contract` basis such as `material_treatment` or `texture_policy`. Do not invent numeric
+roughness, gloss, PBR or "material quality" scores.
+
+The same vocabulary is reused inside `refinement_check.material_response` on the exact current frame.
+That review supports the existing `material_light_response` criterion; it does **not** create a second
+quality framework. A refinement PASS is impossible while any required material component is
+`debt|uncertain` or while `texture_only_treatment=true`. Consequently the existing refinement gate
+continues to block `DETAIL` / `MICRO_DETAIL` when noise, grain or repeated marks have been added without
+coherent form/light/material response.
 
 #### Cumulative visual trend guard
 
@@ -140,6 +174,14 @@ Judge these against the current frame, the previous accepted frame, an earlier u
 The controller inspects the latest three classified visual operations. If the same negative signal appears in at least two of them, it automatically promotes `cumulative-trend-<signal>` to a **global / must-fix** problem. `global_readability=degraded` and `primitive_footprint=suspect` also contribute canonical trend signals. The ordinary stage priority gate then blocks medium/small work until that cumulative global problem is resolved or deliberately reclassified.
 
 This guard exists specifically to catch sequences such as repeated soft glazing, edge loss, contrast collapse, append-only texture, or a recurring brush footprint that may look harmless frame-to-frame but progressively damages the image. Recovery requires a real causal strategy change (primitive/method, coverage/region, scale, brush role, edge policy, value structure, action class or mutation structure), not different explanatory prose or a cosmetic parameter tweak.
+
+#### Soft-dominance / over-smoothing review
+
+For a non-trivial painting, any **global or medium** pass whose declared construction/method is broadly softness-dominant must also supply a structured `softness_review` when the exact current frame is classified. This covers broad `volumetric-soft-mass` / `optical-veil` work, atmospheric/soft-transition/lost-edge/smoothing intents, Smudge, broad soft-brush build, and blur-family methods. Ordinary small/local edge softening stays under the existing edge-observation path and does not acquire a second review tax.
+
+The review is contextual, not a numeric sharpness score. It records `resolved|debt|uncertain|not-applicable` evidence for `edge_hierarchy`, `mass_separation`, `large_form_readability`, `focal_hierarchy`, and `primitive_footprint`, all bound internally to the exact current preview SHA. A form-bearing `volumetric-soft-mass` cannot pass while edge hierarchy or mass separation is unresolved; an `optical-veil` may legitimately make its own edge hierarchy not applicable, but the underlying masses, large-form read and focal hierarchy must remain resolved. `style-not-applicable` is allowed only against an exact durable `style_contract` field/value and cannot be used as a generic fog/softness escape hatch.
+
+A failed review cannot be accepted or marked target-resolved. It immediately opens the existing `soft-dominance` **must-fix** visual problem at the affected broad scale, so the normal stage/scale priority gate blocks finer texture/detail work until a real corrective pass restores structure. Failures also emit the stable negative `soft-dominance` trend signal; visible soft-round/mechanical footprint debt additionally requires top-level `primitive_footprint=suspect` and emits `soft-round-footprint`, feeding the existing primitive-footprint/cumulative-trend machinery rather than creating a parallel quality score.
 
 The controller enforces this with a persistent **stage/scale priority gate**. Keep `current_stage` plus open visual problems with `problem_id`, `scale` (`global|medium|small`) and `severity` (`must-fix|should-fix|optional`). Before every visual mutation, the Guard finds the largest unresolved `must-fix`; a finer-scale mutation is rejected until that problem is resolved/reclassified. Free-text `replan`, including words such as “override”, “probe” or “diagnostic”, does not bypass this ordering. Use `photoshop_guard_set_priorities` on the native route to seed/update this non-Photoshop planning state. Native `photoshop_guard_status` / `photoshop_guard_resume` expose the current gate. Any duplicate legacy priority/replan field is subject to the 13b audit and 13a removal; do not author a second workflow around it.
 

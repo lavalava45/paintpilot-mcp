@@ -25,6 +25,7 @@ export const PAINTING_VISUAL_INTENTS = [
   'directional-mass',
   'surface-flow',
   'soft-transition',
+  'continuous-field',
   'hard-edge',
   'lost-edge',
   'texture',
@@ -40,6 +41,13 @@ export const PAINTING_VISUAL_INTENTS = [
 ] as const;
 export type PaintingVisualIntent = (typeof PAINTING_VISUAL_INTENTS)[number];
 
+export const PAINTING_CONSTRUCTION_ROLES = [
+  'continuous-field',
+  'volumetric-soft-mass',
+  'optical-veil',
+] as const;
+export type PaintingConstructionRole = (typeof PAINTING_CONSTRUCTION_ROLES)[number];
+
 export type MethodAvailability = 'available' | 'conditional' | 'unavailable';
 
 export interface PaintingMethodCapability {
@@ -51,6 +59,7 @@ export interface PaintingMethodCapability {
   primaryTool?: string;
   executionTools?: string[];
   preparationTools?: string[];
+  preparationAnyOf?: string[];
   fallbackMethodIds?: string[];
   availability: MethodAvailability;
   availabilityReason: string;
@@ -92,6 +101,9 @@ function verificationExpectationFor(seed: CapabilitySeed): PaintingMethodCapabil
   }
   if (seed.preparationTools?.includes('photoshop_create_layer_mask')) {
     stateReadback.push('the target layer/mask identity must remain pinned through mutation and verification');
+  }
+  if (seed.preparationAnyOf?.some(tool => tool.startsWith('photoshop_select_'))) {
+    stateReadback.push('the selection source/geometry must come from one explicit preparation step rather than an inferred region');
   }
   if (seed.methodClass === 'transform' || seed.methodClass === 'blend' || seed.methodClass === 'adjustment') {
     stateReadback.push('the target document/layer identity must be current and pinned before mutation');
@@ -244,6 +256,16 @@ const SEEDS: CapabilitySeed[] = [
     limitations: ['Availability of a suitable textured/dry/scatter/bristle preset depends on the installed Photoshop brush library.'],
   },
   {
+    id: 'continuous-color-field',
+    label: 'Continuous linear color/value field',
+    methodClass: 'gradient',
+    impactClasses: ['construct', 'tone', 'transition'],
+    visualIntents: ['continuous-field', 'soft-transition'],
+    primaryTool: 'photoshop_paint_color_gradient',
+    requiredTools: ['photoshop_paint_color_gradient'],
+    limitations: ['Linear raster color field with 2–4 bounded stops; distinct from transparency/mask gradients.'],
+  },
+  {
     id: 'gradient-mask',
     label: 'Linear gradient on layer mask',
     methodClass: 'mask-gradient',
@@ -262,8 +284,9 @@ const SEEDS: CapabilitySeed[] = [
     impactClasses: ['isolate', 'subtract', 'composite'],
     visualIntents: ['isolate-region', 'hard-edge', 'blend-layers'],
     primaryTool: 'photoshop_create_layer_mask',
-    preparationTools: ['photoshop_select_rectangle', 'photoshop_select_ellipse', 'photoshop_select_subject', 'photoshop_feather_selection'],
+    preparationAnyOf: ['photoshop_select_rectangle', 'photoshop_select_ellipse', 'photoshop_select_subject'],
     requiredTools: ['photoshop_create_layer_mask'],
+    limitations: ['Requires one explicit selection source before mask creation; optional feathering may refine that selection but is never inferred by the compiler.'],
   },
   {
     id: 'gaussian-blur',
@@ -341,10 +364,11 @@ const SEEDS: CapabilitySeed[] = [
     methodClass: 'light-sculpt',
     impactClasses: ['tone'],
     visualIntents: ['light-sculpt'],
-    primaryTool: 'photoshop_recipe_dodge_burn',
-    requiredTools: ['photoshop_recipe_dodge_burn'],
+    primaryTool: 'photoshop_create_layer',
+    executionTools: ['photoshop_create_layer', 'photoshop_fill_layer', 'photoshop_set_layer_blend_mode'],
+    requiredTools: ['photoshop_create_layer', 'photoshop_fill_layer', 'photoshop_set_layer_blend_mode'],
     fallbackMethodIds: ['soft-brush-build', 'curves-tone'],
-    limitations: ['Runtime exposes a non-destructive dodge/burn setup recipe, not dedicated Dodge/Burn brush primitives.'],
+    limitations: ['Runtime uses a semantic gray-layer + blend-mode setup, not dedicated Dodge/Burn brush primitives.'],
   },
   {
     id: 'blend-mode',
@@ -423,6 +447,14 @@ function resolveSeed(seed: CapabilitySeed, registry: ToolRegistry): PaintingMeth
       availabilityReason: `Required runtime tool(s) not registered: ${missingRequired.join(', ')}`,
     };
   }
+  if (seed.preparationAnyOf?.length && !seed.preparationAnyOf.some(tool => registry.has(tool))) {
+    return {
+      ...seed,
+      verificationExpectation,
+      availability: 'unavailable',
+      availabilityReason: `No alternative preparation tool is registered; need one of: ${seed.preparationAnyOf.join(', ')}`,
+    };
+  }
   if (seed.conditionalTools?.length) {
     const missingConditional = seed.conditionalTools.filter(tool => !registry.has(tool));
     if (missingConditional.length) {
@@ -461,6 +493,7 @@ const INTENT_PREFERENCE: Record<PaintingVisualIntent, string[]> = {
   'atmospheric-mass': ['installed-brush-preset', 'soft-brush-build', 'smudge-shape', 'gradient-mask'],
   'directional-mass': ['installed-brush-preset', 'hard-brush-line', 'soft-brush-build'],
   'surface-flow': ['installed-brush-preset', 'soft-brush-build', 'smudge-shape'],
+  'continuous-field': ['continuous-color-field'],
   'soft-transition': ['gradient-mask', 'smudge-shape', 'soft-brush-build', 'smart-blur', 'gaussian-blur', 'radial-gradient'],
   'hard-edge': ['region-block-in', 'pencil-line', 'hard-brush-line', 'selection-mask', 'unsharp-sharpen'],
   'lost-edge': ['smudge-shape', 'soft-brush-build', 'gaussian-blur', 'eraser-carve'],
@@ -477,11 +510,35 @@ const INTENT_PREFERENCE: Record<PaintingVisualIntent, string[]> = {
 };
 
 export interface PaintingMethodSelection {
+  constructionRole?: PaintingConstructionRole;
   visualIntent: PaintingVisualIntent;
   impactClass: PaintingImpactClass;
   selected: PaintingMethodCapability;
   fallbacks: PaintingMethodCapability[];
   rejected: Array<{ id: string; availability: MethodAvailability; reason: string }>;
+}
+
+const CONSTRUCTION_ROLE_INTENT: Record<PaintingConstructionRole, PaintingVisualIntent> = {
+  'continuous-field': 'continuous-field',
+  'volumetric-soft-mass': 'painted-mass',
+  'optical-veil': 'atmospheric-mass',
+};
+
+/**
+ * Select the Photoshop mechanism only after the semantic construction role is fixed.
+ * The role vocabulary is intentionally subject-agnostic: it describes how a visual
+ * thing is constructed, not what the depicted thing is called.
+ */
+export function selectPaintingConstructionMethod(
+  registry: ToolRegistry,
+  constructionRole: PaintingConstructionRole,
+  impactClass: PaintingImpactClass,
+  avoidMethodIds: string[] = [],
+  options: PaintingMethodSelectionOptions = {},
+): PaintingMethodSelection {
+  const visualIntent = CONSTRUCTION_ROLE_INTENT[constructionRole];
+  const selection = selectPaintingMethod(registry, visualIntent, impactClass, avoidMethodIds, options);
+  return { ...selection, constructionRole };
 }
 
 export interface PaintingMethodSelectionOptions {

@@ -31,6 +31,7 @@ export interface ArtisticOperationPlan {
   fallbackFromMethodId?: string;
   allowedExecutionTools: string[];
   requiredPreparationTools: string[];
+  requiredPreparationAnyOf: string[];
   documentId: number;
   layerId?: number;
   runtimeRevision: string;
@@ -107,6 +108,7 @@ export function compileArtisticOperation(
     ...(fallbackFromMethodId ? { fallbackFromMethodId } : {}),
     allowedExecutionTools,
     requiredPreparationTools: [...(method.preparationTools ?? [])],
+    requiredPreparationAnyOf: [...(method.preparationAnyOf ?? [])],
     documentId: request.documentId,
     ...(request.layerId !== undefined ? { layerId: request.layerId } : {}),
     runtimeRevision: request.runtimeRevision,
@@ -134,6 +136,21 @@ export function validateArtisticOperationPreparation(
     if ((requiredTool === 'photoshop_set_brush' || requiredTool === 'photoshop_select_brush_preset')
       && !row.effectiveStateFingerprint) {
       throw new Error('artistic_method_preparation_missing_effective_state: ' + requiredTool);
+    }
+  }
+  if (plan.requiredPreparationAnyOf.length) {
+    const row = evidence.find(item => plan.requiredPreparationAnyOf.includes(item.tool) && item.ok);
+    if (!row) {
+      throw new Error('artistic_method_preparation_missing_any_of: ' + plan.requiredPreparationAnyOf.join('|'));
+    }
+    if (row.documentId !== plan.documentId) {
+      throw new Error('artistic_method_preparation_stale_document: ' + row.tool);
+    }
+    if (plan.layerId !== undefined && row.layerId !== undefined && row.layerId !== plan.layerId) {
+      throw new Error('artistic_method_preparation_stale_layer: ' + row.tool);
+    }
+    if (row.runtimeRevision !== plan.runtimeRevision) {
+      throw new Error('artistic_method_preparation_stale_revision: ' + row.tool);
     }
   }
 }

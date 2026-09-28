@@ -1,6 +1,3 @@
-import { ExtendScriptSnippets } from '../api/extendscript.js';
-import { PhotoshopAPIFactory } from '../api/photoshop-api.js';
-import { parseExtendScriptPayload } from '../utils/extendscript-result.js';
 import { PhotoshopConnection } from './connection.js';
 import {
   recordBackendRouteSelection,
@@ -46,6 +43,7 @@ export type PhotoshopPrimitive =
   | 'layer.duplicate'
   | 'layer.order.write'
   | 'layer.fill'
+  | 'layer.color_gradient'
   | 'layer.select_by_name'
   | 'layer.mask.create'
   | 'layer.mask.gradient'
@@ -100,10 +98,6 @@ export type PhotoshopPrimitive =
   | 'text.font.write'
   | 'text.content.write'
   | 'document.export'
-  | 'action.play'
-  | 'datasets.list'
-  | 'datasets.import'
-  | 'datasets.generate'
   | 'document.resize'
   | 'document.crop'
   | 'document.place'
@@ -122,7 +116,8 @@ export type PhotoshopPrimitive =
   | 'smart_object.replace'
   | 'painting.regions'
   | 'painting.strokes'
-  | 'painting.dabs';
+  | 'painting.dabs'
+  | 'painting.stamp_instances';
 export type PhotoshopBackendKind = 'uxp' | 'extendscript';
 
 export interface PhotoshopStateSnapshot {
@@ -275,6 +270,7 @@ export class UxpPhotoshopBackend implements PhotoshopBackend {
       primitive === 'layer.duplicate' ||
       primitive === 'layer.order.write' ||
       primitive === 'layer.fill' ||
+      primitive === 'layer.color_gradient' ||
       primitive === 'layer.select_by_name' ||
       primitive === 'layer.mask.create' ||
       primitive === 'layer.mask.gradient' ||
@@ -329,10 +325,6 @@ export class UxpPhotoshopBackend implements PhotoshopBackend {
       primitive === 'text.font.write' ||
       primitive === 'text.content.write' ||
       primitive === 'document.export' ||
-      primitive === 'action.play' ||
-      primitive === 'datasets.list' ||
-      primitive === 'datasets.import' ||
-      primitive === 'datasets.generate' ||
       primitive === 'document.resize' ||
       primitive === 'document.crop' ||
       primitive === 'document.place' ||
@@ -351,7 +343,8 @@ export class UxpPhotoshopBackend implements PhotoshopBackend {
       primitive === 'smart_object.replace' ||
       primitive === 'painting.regions' ||
       primitive === 'painting.strokes' ||
-      primitive === 'painting.dabs'
+      primitive === 'painting.dabs' ||
+      primitive === 'painting.stamp_instances'
     );
   }
 
@@ -466,271 +459,24 @@ export class UxpPhotoshopBackend implements PhotoshopBackend {
   }
 }
 
-export class ExtendScriptPhotoshopBackend implements PhotoshopBackend {
-  readonly kind = 'extendscript' as const;
-
-  constructor(private readonly connection: PhotoshopConnection) {}
-
-  async isAvailable(): Promise<boolean> {
-    // Keep this check side-effect free. The legacy executor remains the final
-    // authority on whether the running Photoshop COM/AppleScript endpoint is
-    // reachable, preserving the existing error envelope behavior.
-    return true;
-  }
-
-  supports(primitive: PhotoshopPrimitive): boolean {
-    return (
-      primitive === 'state.read' ||
-      primitive === 'document.info' ||
-      primitive === 'documents.list' ||
-      primitive === 'selection.bounds' ||
-      primitive === 'layers.list' ||
-      primitive === 'brush.presets.list' ||
-      primitive === 'brush.settings.read' ||
-      primitive === 'preview.read' ||
-      primitive === 'color.sample' ||
-      primitive === 'colors.sample' ||
-      primitive === 'history.read' ||
-      primitive === 'brush.presets.select' ||
-      primitive === 'brush.settings.write' ||
-      primitive === 'foreground.write' ||
-      primitive === 'layer.create' ||
-      primitive === 'layer.delete' ||
-      primitive === 'layer.opacity.write' ||
-      primitive === 'layer.blend_mode.write' ||
-      primitive === 'layer.visibility.write' ||
-      primitive === 'layer.locked.write' ||
-      primitive === 'layer.rename' ||
-      primitive === 'layer.duplicate' ||
-      primitive === 'layer.order.write' ||
-      primitive === 'layer.fill' ||
-      primitive === 'layer.select_by_name' ||
-      primitive === 'layer.mask.create' ||
-      primitive === 'layer.mask.gradient' ||
-      primitive === 'history.undo' ||
-      primitive === 'selection.rectangle' ||
-      primitive === 'selection.ellipse' ||
-      primitive === 'selection.feather' ||
-      primitive === 'selection.subject' ||
-      primitive === 'document.activate' ||
-      primitive === 'document.close' ||
-      primitive === 'document.create' ||
-      primitive === 'document.open' ||
-      primitive === 'layer.mask.apply' ||
-      primitive === 'selection.content_aware_fill' ||
-      primitive === 'selection.contract' ||
-      primitive === 'layer.clipping.create' ||
-      primitive === 'layer.mask.delete' ||
-      primitive === 'selection.deselect' ||
-      primitive === 'selection.expand' ||
-      primitive === 'selection.invert' ||
-      primitive === 'layer.clipping.release' ||
-      primitive === 'selection.save' ||
-      primitive === 'selection.all' ||
-      primitive === 'layer.fit' ||
-      primitive === 'layer.move_pixels' ||
-      primitive === 'layer.rotate' ||
-      primitive === 'layer.scale' ||
-      primitive === 'layer.flatten' ||
-      primitive === 'layer.merge_down' ||
-      primitive === 'layer.merge_visible' ||
-      primitive === 'adjustment.brightness_contrast' ||
-      primitive === 'adjustment.curves' ||
-      primitive === 'adjustment.exposure' ||
-      primitive === 'adjustment.hue_saturation' ||
-      primitive === 'adjustment.vibrance' ||
-      primitive === 'adjustment.gradient_map' ||
-      primitive === 'adjustment.lut' ||
-      primitive === 'adjustment.photo_filter' ||
-      primitive === 'adjustment.auto_contrast' ||
-      primitive === 'adjustment.auto_levels' ||
-      primitive === 'adjustment.desaturate' ||
-      primitive === 'adjustment.invert' ||
-      primitive === 'filter.gaussian_blur' ||
-      primitive === 'filter.high_pass' ||
-      primitive === 'filter.motion_blur' ||
-      primitive === 'filter.noise' ||
-      primitive === 'filter.sharpen' ||
-      primitive === 'filter.smart_blur' ||
-      primitive === 'text.fonts.list' ||
-      primitive === 'text.alignment.write' ||
-      primitive === 'text.color.write' ||
-      primitive === 'text.font.write' ||
-      primitive === 'text.content.write' ||
-      primitive === 'document.export' ||
-      primitive === 'action.play' ||
-      primitive === 'datasets.list' ||
-      primitive === 'datasets.import' ||
-      primitive === 'datasets.generate' ||
-      primitive === 'document.resize' ||
-      primitive === 'document.crop' ||
-      primitive === 'document.place' ||
-      primitive === 'guides.add' ||
-      primitive === 'guides.list' ||
-      primitive === 'guides.clear' ||
-      primitive === 'history.redo' ||
-      primitive === 'image.stack' ||
-      primitive === 'layer.style.apply' ||
-      primitive === 'layer.text.create' ||
-      primitive === 'layer.rasterize' ||
-      primitive === 'sky.replace' ||
-      primitive === 'smart_object.convert' ||
-      primitive === 'smart_object.copy' ||
-      primitive === 'smart_object.edit' ||
-      primitive === 'smart_object.replace' ||
-      primitive === 'painting.regions' ||
-      primitive === 'painting.strokes' ||
-      primitive === 'painting.dabs'
-    );
-  }
-
-  private async executeRecord(script: string, errorCode: string): Promise<Record<string, unknown>> {
-    if (!this.connection.getPhotoshopInfo()) {
-      await this.connection.getVersion();
-    }
-    const api = await new PhotoshopAPIFactory(this.connection).createAPI();
-    const raw = await api.executeScript(script);
-    return requireRecord(parseExtendScriptPayload(raw), errorCode);
-  }
-
-  async readState(): Promise<PhotoshopStateSnapshot> {
-    return requireState(
-      await this.executeRecord(ExtendScriptSnippets.getState(), 'extendscript_get_state_invalid_result'),
-      'extendscript_get_state_invalid_result'
-    );
-  }
-
-  async readDocumentInfo(): Promise<PhotoshopStateSnapshot> {
-    return requireState(
-      await this.executeRecord(
-        ExtendScriptSnippets.getDocumentInfo(),
-        'extendscript_get_document_info_invalid_result'
-      ),
-      'extendscript_get_document_info_invalid_result'
-    );
-  }
-
-  async listDocuments(): Promise<PhotoshopRecordResult> {
-    return this.executeRecord(
-      ExtendScriptSnippets.listDocuments(),
-      'extendscript_list_documents_invalid_result'
-    );
-  }
-
-  async readSelectionBounds(): Promise<PhotoshopRecordResult> {
-    return this.executeRecord(
-      ExtendScriptSnippets.getSelectionBounds(),
-      'extendscript_get_selection_bounds_invalid_result'
-    );
-  }
-
-  async listLayers(): Promise<PhotoshopRecordResult> {
-    return this.executeRecord(
-      ExtendScriptSnippets.getLayerNames(),
-      'extendscript_get_layers_invalid_result'
-    );
-  }
-
-  async listBrushPresets(query: string, limit: number): Promise<PhotoshopRecordResult> {
-    return this.executeRecord(
-      ExtendScriptSnippets.listBrushPresets(query, limit),
-      'extendscript_list_brush_presets_invalid_result'
-    );
-  }
-
-  async readBrushSettings(): Promise<PhotoshopRecordResult> {
-    return this.executeRecord(
-      ExtendScriptSnippets.getBrushSettings(),
-      'extendscript_get_brush_settings_invalid_result'
-    );
-  }
-
-  async capturePreview(request: PhotoshopPreviewRequest): Promise<PhotoshopPreviewCapture> {
-    if (request.focusRegion) {
-      const result = await this.executeRecord(
-        ExtendScriptSnippets.exportPreviewBundle(
-          request.maxDimension,
-          request.quality,
-          request.focusRegion.left,
-          request.focusRegion.top,
-          request.focusRegion.right,
-          request.focusRegion.bottom,
-          request.focusMaxDimension ?? 1200
-        ),
-        'extendscript_capture_preview_invalid_result'
-      );
-      return {
-        transport: 'extendscript',
-        whole: requirePreviewImage(
-          result.whole,
-          'extendscript_capture_preview_invalid_whole'
-        ),
-        focus: requirePreviewImage(
-          result.focus,
-          'extendscript_capture_preview_invalid_focus'
-        ),
-      };
-    }
-    const result = await this.executeRecord(
-      ExtendScriptSnippets.exportPreview(request.maxDimension, request.quality),
-      'extendscript_capture_preview_invalid_result'
-    );
-    return {
-      transport: 'extendscript',
-      whole: requirePreviewImage(result, 'extendscript_capture_preview_invalid_whole'),
-    };
-  }
-
-  async sampleColor(
-    x: number,
-    y: number,
-    radius: number
-  ): Promise<PhotoshopRecordResult> {
-    return this.executeRecord(
-      ExtendScriptSnippets.sampleColor(x, y, radius),
-      'extendscript_sample_color_invalid_result'
-    );
-  }
-
-  async sampleColors(points: PhotoshopColorSamplePoint[]): Promise<PhotoshopRecordResult> {
-    return this.executeRecord(
-      ExtendScriptSnippets.sampleColors(points),
-      'extendscript_sample_colors_invalid_result'
-    );
-  }
-
-  async readHistory(): Promise<PhotoshopRecordResult> {
-    return this.executeRecord(
-      ExtendScriptSnippets.getHistoryStates(),
-      'extendscript_get_history_invalid_result'
-    );
-  }
-}
-
 export class PhotoshopBackendRouter {
   private readonly backends: PhotoshopBackend[];
   private readonly routeTrace: (event: BackendRouteTraceInput) => void;
 
   constructor(
-    connection: PhotoshopConnection,
+    _connection: PhotoshopConnection,
     backends?: PhotoshopBackend[],
     routeTrace: (event: BackendRouteTraceInput) => void = recordBackendRouteSelection
   ) {
-    // UXP-first with a bounded, pre-dispatch ExtendScript/COM fallback.
-    // The chosen backend executes exactly once; callers must not catch an
-    // execution failure and replay the mutation through the other transport.
-    this.backends = backends ?? [
-      new UxpPhotoshopBackend(),
-      new ExtendScriptPhotoshopBackend(connection),
-    ];
+    // Production is UXP-only. Legacy backend instances may still appear in
+    // isolated historical/test fixtures, but router selection never considers
+    // them. Missing UXP readiness fails closed before semantic dispatch.
+    this.backends = backends ?? [new UxpPhotoshopBackend()];
     this.routeTrace = routeTrace;
   }
 
   async backendFor(primitive: PhotoshopPrimitive): Promise<PhotoshopBackend> {
     const uxp = this.backends.find((backend) => backend.kind === 'uxp' && backend.supports(primitive));
-    const legacy = this.backends.find(
-      (backend) => backend.kind === 'extendscript' && backend.supports(primitive)
-    );
     const uxpAvailable = uxp ? await uxp.isAvailable() : null;
     if (uxp && uxpAvailable) {
       this.routeTrace({
@@ -738,7 +484,7 @@ export class PhotoshopBackendRouter {
         selected_backend: 'uxp',
         uxp_supported: true,
         uxp_available: true,
-        legacy_supported: !!legacy,
+        legacy_supported: false,
         legacy_available: null,
         fallback_used: false,
         reason: 'uxp_available',
@@ -746,47 +492,29 @@ export class PhotoshopBackendRouter {
       return uxp;
     }
 
-    const legacyAvailable = legacy ? await legacy.isAvailable() : null;
-    if (legacy && legacyAvailable) {
-      this.routeTrace({
-        primitive,
-        selected_backend: 'extendscript',
-        uxp_supported: !!uxp,
-        uxp_available: uxpAvailable,
-        legacy_supported: true,
-        legacy_available: true,
-        fallback_used: !!uxp,
-        reason: uxp ? 'uxp_unavailable_pre_dispatch_fallback' : 'uxp_unsupported',
-      });
-      return legacy;
-    }
-
     this.routeTrace({
       primitive,
       selected_backend: null,
       uxp_supported: !!uxp,
       uxp_available: uxpAvailable,
-      legacy_supported: !!legacy,
-      legacy_available: legacyAvailable,
+      legacy_supported: false,
+      legacy_available: null,
       fallback_used: false,
-      reason: uxp ? 'no_available_backend' : 'primitive_unsupported',
+      reason: uxp ? 'uxp_unavailable_fail_closed' : 'primitive_unsupported',
     });
 
     if (uxp) {
       throw new Error(
-        `photoshop_backend_unavailable: ${primitive} has a UXP implementation, but neither UXP nor the pre-dispatch ExtendScript/COM fallback is available`
+        `uxp_bridge_unavailable: ${primitive} requires the Photoshop UXP companion`
       );
     }
     throw new Error(
-      `capability_unavailable: ${primitive} is unsupported by all configured Photoshop backends`
+      `capability_unavailable: ${primitive} is unsupported by the Photoshop UXP backend`
     );
   }
 
   async readState(): Promise<PhotoshopStateSnapshot> {
     const backend = await this.backendFor('state.read');
-    // Routing is complete before dispatch. Do not catch and replay through a
-    // different backend here; that rule becomes critical as mutating semantic
-    // primitives are added.
     return backend.readState();
   }
 

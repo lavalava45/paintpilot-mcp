@@ -3,7 +3,6 @@ import { readFile } from 'node:fs/promises';
 const skillPath = new URL('../docs/digital-painting-agent-skill.md', import.meta.url);
 const promptPath = new URL('../src/prompts/templates/digital-painting-control.ts', import.meta.url);
 const implementationPath = new URL('../docs/digital-painting.md', import.meta.url);
-const windowsExecutorPath = new URL('../src/platform/windows-executor.ts', import.meta.url);
 const connectionPath = new URL('../src/platform/connection.ts', import.meta.url);
 const backendRouterPath = new URL('../src/platform/photoshop-backend.ts', import.meta.url);
 const guardRuntimePath = new URL('../src/core/guard/runtime.ts', import.meta.url);
@@ -13,7 +12,6 @@ const [
   kernel,
   prompt,
   implementation,
-  windowsExecutor,
   connection,
   backendRouter,
   guardRuntime,
@@ -22,7 +20,6 @@ const [
   readFile(skillPath, 'utf8'),
   readFile(promptPath, 'utf8'),
   readFile(implementationPath, 'utf8'),
-  readFile(windowsExecutorPath, 'utf8'),
   readFile(connectionPath, 'utf8'),
   readFile(backendRouterPath, 'utf8'),
   readFile(guardRuntimePath, 'utf8'),
@@ -158,40 +155,24 @@ if (/### Live free-composition lessons/i.test(implementation)) {
   failures.push('digital-painting.md reintroduced a duplicate policy/lessons section');
 }
 
-if (!/GetObject\(,\s*["']Photoshop\.Application["']\)/i.test(windowsExecutor)) {
-  failures.push('Windows executor must attach to running Photoshop with GetObject in background-safe mode');
+if (!/Windows-only Photoshop discovery\/version facade/i.test(connection)) {
+  failures.push('PhotoshopConnection must remain the Windows-only discovery/version facade');
 }
-if (!/PHOTOSHOP_MCP_ALLOW_UI_ACTIVATION/i.test(windowsExecutor)) {
-  failures.push('Windows executor must gate CreateObject behind explicit UI-activation opt-in');
-}
-if (!/Refusing CreateObject because it may activate\/foreground Photoshop/i.test(windowsExecutor)) {
-  failures.push('Windows executor must refuse CreateObject by default to prevent foreground activation');
-}
-if (!/protectForeground\s*=\s*process\.env\.PHOTOSHOP_MCP_ALLOW_UI_ACTIVATION\s*!==\s*['"]1['"]/i.test(windowsExecutor)) {
-  failures.push('Windows executor must keep the foreground guard enabled unless UI activation is explicitly opted in');
-}
-if (!/createWindowsForegroundGuardPowerShell\(\)/.test(windowsExecutor) || !/windowsHide:\s*true/.test(windowsExecutor)) {
-  failures.push('Windows executor must run the no-focus-steal foreground guard hidden during legacy execution');
+if (/executeScript|ensurePhotoshopRunning|WindowsExecutor|MacOSExecutor|ScriptExecutor/.test(connection)) {
+  failures.push('PhotoshopConnection must not expose the retired legacy script transport');
 }
 
-if (!/Legacy external-script connection retained strictly as the pre-dispatch[\s\S]{0,300}fallback backend/i.test(connection)) {
-  failures.push('PhotoshopConnection must document legacy execution as pre-dispatch fallback only');
+if (!/Production is UXP-only[\s\S]{0,260}Missing UXP readiness fails closed before semantic dispatch/i.test(backendRouter)) {
+  failures.push('PhotoshopBackendRouter must declare UXP-only fail-closed production routing');
 }
-if (!/Callers must never catch a possibly-dispatched UXP command and replay it here/i.test(connection)) {
-  failures.push('PhotoshopConnection must explicitly forbid replaying possibly-dispatched UXP commands through legacy transport');
+if (!/this\.backends\s*=\s*backends\s*\?\?\s*\[new UxpPhotoshopBackend\(\)\]/.test(backendRouter)) {
+  failures.push('PhotoshopBackendRouter must configure only UXP by default');
 }
-
-if (!/UXP-first with a bounded, pre-dispatch ExtendScript\/COM fallback/i.test(backendRouter)) {
-  failures.push('PhotoshopBackendRouter must declare UXP-first bounded pre-dispatch fallback');
+if (/ExtendScriptPhotoshopBackend|legacyAvailable\s*=/.test(backendRouter)) {
+  failures.push('PhotoshopBackendRouter must not retain a production ExtendScript/COM fallback backend');
 }
-if (!/new UxpPhotoshopBackend\(\)[\s\S]{0,160}new ExtendScriptPhotoshopBackend\(connection\)/.test(backendRouter)) {
-  failures.push('PhotoshopBackendRouter must order UXP before ExtendScript/COM');
-}
-if (!/const uxpAvailable\s*=\s*uxp\s*\?\s*await uxp\.isAvailable\(\)\s*:\s*null;[\s\S]{0,1400}if \(uxp && uxpAvailable\)[\s\S]{0,1400}return uxp;[\s\S]{0,1400}const legacyAvailable\s*=\s*legacy\s*\?\s*await legacy\.isAvailable\(\)\s*:\s*null;[\s\S]{0,1400}if \(legacy && legacyAvailable\)[\s\S]{0,1400}return legacy;/.test(backendRouter)) {
-  failures.push('PhotoshopBackendRouter must select legacy only after UXP is unavailable before dispatch');
-}
-if (!/chosen backend executes exactly once[\s\S]{0,220}must not catch[\s\S]{0,220}replay/i.test(backendRouter)) {
-  failures.push('PhotoshopBackendRouter must preserve the no cross-backend replay contract after dispatch');
+if (!/uxp_bridge_unavailable:[^\n]+requires the Photoshop UXP companion/.test(backendRouter)) {
+  failures.push('PhotoshopBackendRouter must fail closed with uxp_bridge_unavailable when UXP readiness is absent');
 }
 
 for (const [name, text] of [['kernel', kernel], ['prompt', prompt], ['painting policy', skill]]) {

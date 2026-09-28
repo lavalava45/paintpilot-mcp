@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { ToolRegistry, type ToolDefinition } from '../src/core/tool-registry.js';
 import {
   paintingMethodCapabilities,
+  selectPaintingConstructionMethod,
   selectPaintingMethod,
 } from '../src/core/painting-method-palette.js';
 import { projectStyleMethodTraitEvidence } from '../src/core/style-contract-runtime.js';
@@ -36,7 +37,9 @@ function registryWithRuntimePalette(): ToolRegistry {
     'photoshop_apply_noise',
     'photoshop_adjust_curves',
     'photoshop_auto_levels',
-    'photoshop_recipe_dodge_burn',
+    'photoshop_create_layer',
+    'photoshop_fill_layer',
+    'photoshop_paint_color_gradient',
     'photoshop_set_layer_blend_mode',
     'photoshop_move_layer',
     'photoshop_scale_layer',
@@ -102,11 +105,40 @@ describe('painting method capability map', () => {
     expect(selectPaintingMethod(registry, 'painted-mass', 'construct').selected.id).toBe('installed-brush-preset');
     expect(selectPaintingMethod(registry, 'broken-mass', 'construct').selected.id).toBe('installed-brush-preset');
     expect(selectPaintingMethod(registry, 'smooth', 'transition').selected.id).toBe('smudge-shape');
+    expect(selectPaintingMethod(registry, 'continuous-field', 'construct').selected.id).toBe('continuous-color-field');
     expect(selectPaintingMethod(registry, 'sharpen', 'edge').selected.id).toBe('unsharp-sharpen');
     expect(selectPaintingMethod(registry, 'light-sculpt', 'tone').selected.id).toBe('dodge-burn-layer');
     expect(selectPaintingMethod(registry, 'tonal-contrast', 'tone').selected.id).toBe('curves-tone');
     expect(selectPaintingMethod(registry, 'move-scale-rotate', 'transform').selected.id).toBe('transform-layer');
     expect(selectPaintingMethod(registry, 'remove-distraction', 'cleanup').selected.id).toBe('content-aware-cleanup');
+  });
+
+  it('selects subject-agnostic construction roles before concrete Photoshop mechanisms', () => {
+    const registry = registryWithRuntimePalette();
+    // Unrelated fixtures: a wall light field, an organic smoke body, and aerial haze.
+    const wallField = selectPaintingConstructionMethod(registry, 'continuous-field', 'construct');
+    const smokeBody = selectPaintingConstructionMethod(registry, 'volumetric-soft-mass', 'construct');
+    const aerialHaze = selectPaintingConstructionMethod(registry, 'optical-veil', 'construct');
+
+    expect(wallField).toMatchObject({ constructionRole: 'continuous-field', visualIntent: 'continuous-field' });
+    expect(wallField.selected.id).toBe('continuous-color-field');
+    expect(smokeBody).toMatchObject({ constructionRole: 'volumetric-soft-mass', visualIntent: 'painted-mass' });
+    expect(smokeBody.selected.methodClass).not.toMatch(/blur|smudge/);
+    expect(aerialHaze).toMatchObject({ constructionRole: 'optical-veil', visualIntent: 'atmospheric-mass' });
+    expect(aerialHaze.selected.visualIntents).toContain('atmospheric-mass');
+    expect(aerialHaze.selected.id).not.toBe('soft-brush-build');
+  });
+
+  it('exposes construction-role selection through the planning tool without requiring a visual intent', async () => {
+    const registry = registryWithRuntimePalette();
+    const select = createMethodPaletteTools(registry).find(tool => tool.tool.name === 'photoshop_select_painting_method')!;
+    const result = await select.handler({ construction_role: 'continuous-field', impact_class: 'construct' });
+    const payload = JSON.parse(result.content[0]!.type === 'text' ? result.content[0]!.text : '{}');
+    expect(payload.selection).toMatchObject({
+      constructionRole: 'continuous-field',
+      visualIntent: 'continuous-field',
+      selected: { id: 'continuous-color-field' },
+    });
   });
 
   it('keeps verification expectations in the same authoritative intent-to-method map', () => {
@@ -140,6 +172,11 @@ describe('painting method capability map', () => {
       primaryTool: 'photoshop_apply_gradient_mask',
       preparationTools: ['photoshop_create_layer_mask'],
       availability: 'available',
+    });
+    expect(available('continuous-color-field')).toMatchObject({
+      primaryTool: 'photoshop_paint_color_gradient',
+      availability: 'available',
+      methodClass: 'gradient',
     });
     expect(available('blend-mode')).toMatchObject({
       primaryTool: 'photoshop_set_layer_blend_mode',

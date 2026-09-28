@@ -1,10 +1,10 @@
 /**
- * Server-level guidance for host LLMs (Cursor, Claude Desktop, standalone UI).
+ * Server-level guidance for MCP host LLMs (Chat On Steroids, Cursor, Claude Desktop, and peers).
  * Advertised on MCP `initialize` via ServerOptions.instructions.
  */
 export const PHOTOSHOP_MCP_INSTRUCTIONS = `
-Photoshop tools (photoshop-mcp server)
-=====================================
+Photoshop MCP — Digital Painting Edition
+========================================
 
 Session bootstrap
 - STICKY PHOTOSHOP ROUTE: once the user is working through this Photoshop/CoS MCP
@@ -18,7 +18,7 @@ Session bootstrap
   the Photoshop/CoS tools are genuinely unavailable, report the concrete connector or
   availability failure and stop Photoshop mutations; do not silently substitute another
   image engine.
-- This fork contains an embedded durable Photoshop Guard. When the MCP catalog exposes
+- This project contains an embedded durable Photoshop Guard. When the MCP catalog exposes
   \`photoshop_guard_*\`, prefer that native MCP surface instead of shelling through a
   separate controller. In Chat On Steroids the dedicated \`dist/cos-plugin.js\` entry
   enables \`PHOTOSHOP_GUARD_MODE=required\`: read-only tools remain directly callable,
@@ -28,12 +28,11 @@ Session bootstrap
   journal/barrier/checkpoint state without replaying prior work. Do not reconstruct
   progress from chat memory alone and never replay a successful mutation to repair
   attribution or recovery state.
-- \`scripts/photoshop-session.mjs\` remains a dev/debug/recovery compatibility CLI and
-  is not the preferred normal CoS transport; the embedded Guard route has completed its
-  dedicated live validation.
+- The retired external Core/controller/daemon provider chain has been removed. Recovery remains on
+  the embedded Guard status/resume/reconcile surfaces; do not recreate a parallel controller CLI.
 - In the current Chat On Steroids development setup, after rebuilding \`dist/cos-plugin.js\`
-  restart only the custom Photoshop MCP plugin from CoS Plugins → Photoshop MCP Digital
-  Painting Fork → … → Restart. Do not restart all of CoS or use old restart-helper scripts.
+  restart only this custom Photoshop MCP entry from CoS Plugins → the Digital Painting
+  Edition plugin → … → Restart. Do not restart all of CoS or use old restart-helper scripts.
   ChatGPT Settings → Plugins → Refresh refreshes the host schema but does not guarantee a
   running child process has reloaded new code. After changing \`uxp-plugin/main.js\`, reload
   only Photoshop MCP UXP Bridge in Adobe UXP Developer Tool; after manifest changes use
@@ -63,45 +62,29 @@ State before action
   require higher-frequency materialized process capture after each visual mutation while
   keeping full visual-reasoning previews on their own cadence.
 
-Recipe tools over atomic chains
-- When the user's request matches a recipe purpose ("remove background",
-  "cut out", "isolate subject", "enhance portrait", "smooth skin", "retouch",
-  "prepare for web", "export Instagram variants", "apply cinematic color grade",
-  "make it pop", "frequency separation", "replace mockup", "organize layers",
-  "replace sky", "fade into background", "gradient mask", "dodge and burn",
-  "remove that person", "erase distraction", "csv to cards", "batch cards",
-  "data-driven graphics"), prefer the matching
-  \`photoshop_recipe_*\` tool over composing 5+ atomic calls yourself. Recipes
-  are wrapped in a single history step and are deterministically reversible
-  with one undo.
-- Drop back to atomic \`photoshop_*\` tools only for fine-grained, novel
-  edits that no recipe covers.
-- For teaching step-by-step mask/composite workflows, call \`prompts/get\` on
-  a guide prompt (see Guide prompts below). Prefer the matching \`ps.*\`
-  **recipe** prompt when the user wants a one-undo outcome.
+Semantic tools and guide prompts
+- Compose supported semantic \`photoshop_*\` operations directly. The legacy
+  \`photoshop_recipe_*\` layer is removed; do not invent or request recipe tools.
+- For reusable multi-step guidance, call \`prompts/get\` on one of the guide
+  prompts below, then execute only semantic tools from the live catalog.
 
-Units & conventions
-- All numeric coordinates, widths, heights and bounds are pixels. The server
-  forces pixel/point units around every script — do not translate to inches/cm/percent.
-- Font sizes are points. Colors are 0–255 RGB triplets.
-- Output files default to \`~/.photoshop-mcp/exports[/<chat-id>]\`. Pass an absolute
-  path only when the user explicitly asks for one.
+Geometry, color and file arguments
+- Treat canvas positions, dimensions and bounds as pixel values. Text size remains points; RGB
+  channels use the 0–255 range. Preserve those contracts exactly rather than converting them into
+  physical units or percentages on the model side.
+- Save/export tools that expose a path parameter own their file-format semantics. Keep a caller's
+  explicit absolute path intact and do not infer a different destination merely to make a call pass.
 
-Error recovery contract
-- Tools return a structured envelope when something is wrong:
-  \`{ ok: false, code, message, suggested_next_tool?, suggested_args?, context? }\`
-  along with MCP's \`isError: true\`. When you see this, follow the
-  \`suggested_next_tool\` hint instead of guessing or retrying blindly.
-- Common codes you should be ready to handle without asking the user:
-  - \`document_not_found\` — the \`document_id\` you passed is not open;
-    call \`photoshop_list_documents\` and retry with a current id.
-  - \`no_active_document\` — call \`photoshop_open_image\` or
-    \`photoshop_create_document\` first.
-  - \`no_active_layer\` / \`layer_not_found\` — list layers with
-    \`photoshop_get_layers\`, then act on a specific name.
-  - \`selection_required\` — make a selection before reusing the failed tool.
-  - \`version_unsupported\` — use a supported deterministic alternative and tell the user
-    once which Photoshop feature is unavailable.
+Structured failure handling
+- A failed semantic call may return MCP \`isError: true\` plus an envelope shaped like
+  \`{ ok: false, code, message, suggested_next_tool?, suggested_args?, context? }\`.
+  Treat \`suggested_next_tool\` as the recovery continuation when it is present; never repair a
+  mutation error by blindly replaying the same operation through another route.
+- Interpret common codes by state transition: \`document_not_found\` means refresh the open-document
+  list and re-establish the intended id; \`no_active_document\` means open/create the intended file;
+  \`no_active_layer\` or \`layer_not_found\` means inspect \`photoshop_get_layers\` and retarget;
+  \`selection_required\` means establish the required selection first; \`version_unsupported\` means
+  choose only a currently supported deterministic alternative and report the unavailable capability.
 
 Healthy painting continuation
 - Read docs/digital-painting-agent-skill.md as the working kernel; detailed modules
@@ -173,6 +156,13 @@ Multi-step etiquette
   independent adjustment, masking, weakening, recoloring, protection or rollback.
   When that value is real, isolate it in one new/temporary logical layer; ordinary
   continuation and tiny low-value accents stay on the existing layer.
+- Non-trivial logical layers declare 'physical_role' + 'opacity_role' and optionally one
+  direct depth anchor. Opaque/support masses stay opaque; transmission/optical/atmosphere
+  remain distinct. Front/behind anchors must match explicit above/below stable layer ids.
+- Before VALUE or later, fresh non-trivial work needs current-frame
+  'physical_stack_check=pass' for depth/occlusion, opaque coverage, transparency intent and
+  layer order. Structural-owner changes stale it; new structural owners after SHAPE require
+  a real reset to SHAPE and a fresh check.
 - After an independently isolated feature is visually accepted, carry its stable id in
   subsequent \`protected_layer_ids\` whenever the current task must preserve it.
   \`protected_regions\` is descriptive only. Supported paint mutations must pin target
@@ -258,44 +248,22 @@ Multi-step etiquette
   barrier. If \`uxp_bridge_reachable=false\`, do not start another visual mutation; restore/reload the
   supported UXP bridge when possible, otherwise report the persistence block and stop. After recovery,
   retry only the save, verify the PSD, then resume; never replay the preceding painting mutation.
-- Group related atomic edits inside a recipe when possible. When you must
-  chain atomics, name layers (\`photoshop_rename_layer\`) so future turns can
+- Name important layers (\`photoshop_rename_layer\`) so future turns can
   re-target them deterministically.
 
 User intent glossary
-- Map colloquial phrases to the primary tool below.
-- bg.remove — "remove background", "cut out", "isolate subject", "transparent
-  background", "arka planı sil" → \`photoshop_recipe_remove_background\`
-- obj.remove — "remove that person", "erase distraction"
-  → \`photoshop_recipe_remove_distraction\` (content-aware) after manual selection
-- mask.gradient_fade — "fade into background", "gradient mask", "blend subject"
-  → \`photoshop_recipe_gradient_fade\`; guide \`ps.gradient_blend\` for atomic chain
-- sky.replace — "replace sky", "fix blown sky", "better clouds" →
-  \`photoshop_sky_replacement\` when \`sky_replacement_native\`; else
-  \`photoshop_recipe_sky_blend\`; guide \`ps.composite_blend\` for manual composite
-- portrait.enhance — "smooth skin", "retouch portrait", "fix blemishes" →
-  \`photoshop_recipe_enhance_portrait\`
-- portrait.freq_sep — "frequency separation", "split texture and color" →
-  \`photoshop_recipe_frequency_separation\`
-- color.correct — "make it pop", "S-curve", "fix flat image", "auto tone" →
-  \`photoshop_adjust_curves\`; fallback \`photoshop_auto_levels\` then
-  \`photoshop_adjust_brightness_contrast\`; guide \`ps.color_correct\`
-- color.grade — "cinematic", "teal orange", "moody grade" →
-  \`photoshop_recipe_apply_color_grade\`
-- light.dodge_burn — "dodge and burn", "sculpt light", "lighten face" →
-  \`photoshop_recipe_dodge_burn\`; guide \`ps.dodge_burn_guide\` for atomic setup
-- export.social — "for Instagram", "web export" →
-  \`photoshop_recipe_export_social_variants\` or \`photoshop_recipe_prepare_for_web\`
-- layers.organize — "organize layers", "rename mess" → \`photoshop_recipe_organize_layers\`
-- carousel.split — "seamless carousel", "split panorama", "swipe post", "slayt"
-  → \`photoshop_recipe_split_carousel\`
-- batch.watermark — "watermark these photos", "add logo to all", "toplu filigran"
-  → \`photoshop_recipe_batch_watermark\`
-- id.passport — "passport photo", "visa photo", "ID photo", "vesikalık", "biyometrik"
-  → \`photoshop_recipe_passport_photo\`
-- batch.csv_cards — "csv to cards", "batch cards", "data-driven graphics",
-  "mail merge for images", "name badges from spreadsheet", "sertifika bas"
-  → \`photoshop_recipe_csv_to_cards\`; prompt \`ps.csv_to_cards\`
+- Map colloquial phrases to supported semantic tools.
+- bg.remove — "remove background", "cut out", "isolate subject", "transparent background" → \`photoshop_select_subject\` + \`photoshop_create_layer_mask\`.
+- obj.remove — "remove that person", "erase distraction" → explicit selection + \`photoshop_content_aware_fill\`.
+- mask.gradient_fade — "fade into background", "gradient mask", "blend subject" → guide \`ps.gradient_blend\` + semantic mask tools.
+- sky.replace — "replace sky", "fix blown sky", "better clouds" → \`photoshop_sky_replacement\` when supported; else guide \`ps.composite_blend\`.
+- portrait.enhance — "smooth skin", "retouch portrait", "fix blemishes" → semantic adjustment/filter/mask tools.
+- portrait.freq_sep — "frequency separation", "split texture and color" → compose semantic layer/filter operations only when required primitives exist.
+- color.correct — "make it pop", "S-curve", "fix flat image", "auto tone" → \`photoshop_adjust_curves\`; fallback \`photoshop_auto_levels\` then \`photoshop_adjust_brightness_contrast\`; guide \`ps.color_correct\`.
+- color.grade — "cinematic", "teal orange", "moody grade" → \`photoshop_apply_lut\`, \`photoshop_adjust_curves\`, or other semantic adjustments.
+- light.dodge_burn — "dodge and burn", "sculpt light", "lighten face" → guide \`ps.dodge_burn_guide\` for semantic gray-layer setup.
+- export.web — "web export", "web-ready" → \`photoshop_resize_image\` + \`photoshop_export_as\`.
+- layers.organize — "organize layers", "rename mess" → semantic layer naming/order tools.
 - paint.draw — "draw", "paint", "sketch", "digital painting", "illustrate with brushes"
   → use the painting tools with guide prompt \`ps.digital_painting_control\`.
   The guide owns the executable painting-control policy (hierarchy, style/mode, hot loop,
@@ -303,39 +271,23 @@ User intent glossary
 - paint.sample_color — "pick this color", "sample from reference", "eyedropper", "what color is here"
   → \`photoshop_sample_color\`; use a small radius when a representative local average is preferable to one pixel.
 - paint.sample_colors — "sample many points", "reference value map", "palette grid"
-  → \`photoshop_sample_colors\` for efficient multi-point point sampling from one pinned reference; use the single-point sampler for averaged neighborhoods.
+  → \`photoshop_sample_colors\` for efficient multi-point point sampling from one pinned reference.
 
 Degrade paths
-- Distraction removal — prefer \`photoshop_recipe_remove_distraction\` or
-  \`photoshop_content_aware_fill\` after an explicit selection.
-- Sky replacement — prefer \`photoshop_sky_replacement\`; degrade:
-  \`photoshop_recipe_sky_blend\` when a sky file path is available;
-  otherwise \`photoshop_place_image\` + mask workflow or guide \`ps.composite_blend\`.
-- Neural skin / harmonize — \`photoshop_neural_filter\` when \`neural_filters\` is true;
-  else frequency separation / manual recipes.
-- Select Subject v2 missing — \`photoshop_recipe_remove_background\` returns
-  \`version_unsupported\` → manual selection tools + \`photoshop_create_layer_mask\`.
-- Curves unavailable — use \`photoshop_auto_levels\` then
-  \`photoshop_adjust_brightness_contrast\` before retrying stronger edits.
+- Distraction removal — use \`photoshop_content_aware_fill\` after an explicit selection.
+- Sky replacement — prefer \`photoshop_sky_replacement\`; degrade to \`photoshop_place_image\` + mask workflow or guide \`ps.composite_blend\`.
+- Neural skin / harmonize — \`photoshop_neural_filter\` when \`neural_filters\` is true; else semantic adjustment/filter/mask tools.
+- Select Subject unavailable — use manual selection tools + \`photoshop_create_layer_mask\`.
+- Curves unavailable — use \`photoshop_auto_levels\` then \`photoshop_adjust_brightness_contrast\` before retrying stronger edits.
 
 Disambiguation
-- "gradient" — prefer linear gradient **on a layer mask** (blend/fade); not a
-  Gradient Fill layer unless the user explicitly asks for a fill layer.
-- "remove" — prefer mask or content-aware inpainting; not deleting the layer
-  unless the user explicitly wants pixels destroyed.
-- "sharpen" — web export sharpen pass → \`photoshop_recipe_prepare_for_web\`;
-  single-layer sharpen → \`photoshop_apply_sharpen\`.
+- "gradient" — prefer linear gradient **on a layer mask** (blend/fade); not a Gradient Fill layer unless the user explicitly asks for a fill layer.
+- "remove" — prefer mask or content-aware inpainting; not deleting the layer unless the user explicitly wants pixels destroyed.
+- "sharpen" → \`photoshop_apply_sharpen\`; combine with resize/export explicitly for web output.
 
 Guide prompts (MCP prompts/get)
-- Prefer matching \`ps.*\` **recipe** prompt when the user wants a one-undo outcome;
-  use guide prompts for teaching atomic chains.
-- Recipe prompts (1:1 with \`photoshop_recipe_*\`): \`ps.remove_background\`,
-  \`ps.enhance_portrait\`, \`ps.prepare_for_web\`, \`ps.export_social_variants\`,
-  \`ps.apply_color_grade\`, \`ps.frequency_separation\`, \`ps.batch_mockup_replace\`,
-  \`ps.organize_layers\`, \`ps.gradient_fade\`, \`ps.sky_blend\`, \`ps.dodge_burn\`,
-  \`ps.remove_distraction\`, \`ps.split_carousel\`, \`ps.batch_watermark\`,
-  \`ps.passport_photo\`, \`ps.csv_to_cards\`
-- Guide prompts (no recipe pair): \`ps.gradient_blend\` — fade via mask gradient;
+- Guide prompts expand to semantic tool chains; no recipe prompt layer exists.
+- \`ps.gradient_blend\` — fade via mask gradient;
   \`ps.color_correct\` — tone / contrast fix chain; \`ps.dodge_burn_guide\` — 50% gray
   overlay setup; \`ps.composite_blend\` — place asset + mask + blend mode;
   \`ps.digital_painting_control\` — subject-agnostic brush-painting workflow built around composition → shape → value → form → edge → material → detail, multiscale error-driven local actions, visual checkpoints, rollback and Definition of Done.
