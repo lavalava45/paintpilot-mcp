@@ -19,18 +19,24 @@ Execute the remaining work in this order:
 1. **P1-B human/artistic acceptance:** Task 23 independent blinded labels → Task 22 final target
    fidelity → Task 15d.3 compositing/material/atmosphere artistic gain → Task 21 real-artwork
    current-vs-anchor preference.
-2. **P2 independent-product cutover:** **CLOSED (2026-09-28).**
+2. **P1-D host-neutral MCP + portable Agent Skills:** make the public project host-agnostic while
+   preserving the current local COS-first workflow as a local routing preference. Inventory existing
+   COS coupling → define the canonical host-neutral contract → extract portable skills → document
+   Codex / Claude Code / Cursor / generic MCP installation → keep COS as a supported adapter → prove
+   local COS preference and cross-host contract parity.
+3. **P2 independent-product cutover:** **CLOSED (2026-09-28).**
    - P2.4 fresh-origin release-autonomy proof passed from published `2be5260` in a completely new
      origin-only clone with no `upstream` remote;
    - P2.5–P2.8 remain closed and regression-protected;
-3. **P0-D human critic calibration**, when an independent human evaluator is available:
+4. **P0-D human critic calibration**, when an independent human evaluator is available:
    Tasks 8/8a → 8b, with Tasks 6, 11 and 13a.1A/13a.1C inheriting the same held-out evidence.
-4. **P0-E.7 supplied-pack live/human acceptance** when the user provides a real brush/stamp pack.
-5. **Conditional / optional work:** Task 10 only if Task 8/8a justifies it; Task 15c remains P3.
+5. **P0-E.7 supplied-pack live/human acceptance** when the user provides a real brush/stamp pack.
+6. **Conditional / optional work:** Task 10 only if Task 8/8a justifies it; Task 15c remains P3.
 
-External ChatGPT / Chat On Steroids host-routing, connector-attribution and sticky-tool-selection
-work is owned by the sibling `chat-on-steroids-FORK` project and is tracked in its
-`docs/COS-ROADMAP.md`. It is not a sequencing gate for this Photoshop roadmap.
+Host-specific ChatGPT / Chat On Steroids routing bugs, connector attribution and sticky-tool-selection
+remain owned by the sibling `chat-on-steroids-FORK` project and are tracked in its
+`docs/COS-ROADMAP.md`. The public host-neutral MCP/skills contract and installation surface for this
+Photoshop product are owned here under P1-D.
 
 ---
 
@@ -205,6 +211,100 @@ Acceptance:
 - preference is recorded by a human, not inferred from detail count, pixel delta or successful undo;
 - if the later state is judged weaker, use the existing Guard-owned anchor/restore path rather than
   silently finalizing it.
+
+---
+
+## P1-D — Host-neutral MCP + portable Agent Skills
+
+**Priority:** immediately after P1-B human/artistic acceptance.
+
+The public repository must expose a host-neutral Photoshop MCP product rather than encode Chat On
+Steroids as a product dependency. Our own local installation remains COS-first by local routing
+policy; that preference must not leak into the portable product contract.
+
+### P1-D.1 — Inventory host coupling
+
+Find every maintained reference to `Chat On Steroids`, `COS`, `Chat_On_Steroids_Core` and
+`Chat_On_Steroids_Plugins` and classify it as exactly one of:
+
+- canonical product requirement;
+- local routing preference;
+- host-specific documentation/example;
+- obsolete coupling to remove.
+
+Acceptance: no COS dependency remains hidden inside a supposedly portable painting/Guard contract.
+
+### P1-D.2 — Canonical host-neutral contract
+
+Define the public execution contract in terms of standard MCP capabilities and Photoshop/Guard tool
+semantics rather than a particular host namespace. Host discovery and namespace resolution must live
+outside painting correctness semantics.
+
+Acceptance:
+
+- no painting/Guard invariant requires COS;
+- tool schemas, state semantics, recovery, preview barriers and UXP dispatch remain unchanged across
+  supported hosts;
+- host-specific routing failure cannot silently change the canonical painting contract.
+
+### P1-D.3 — Portable Agent Skills
+
+Extract reusable agent workflow/policy into standard `SKILL.md` packages with bounded supporting
+references/scripts where appropriate. Skills describe how to use Photoshop MCP/Guard, not how to find
+COS-specific namespaces.
+
+At minimum cover:
+
+- digital-painting workflow;
+- Guard operation lifecycle and recovery;
+- multiscale visual review/final acceptance;
+- supplied brush/stamp-pack workflow where useful.
+
+Acceptance: the same core skill package can be consumed without semantic edits by multiple supported
+agent hosts.
+
+### P1-D.4 — Generic MCP installation and host guides
+
+Provide explicit installation/configuration paths for:
+
+- Codex;
+- Claude Code;
+- Cursor or another representative generic MCP client;
+- generic MCP stdio configuration;
+- Chat On Steroids as a supported host adapter, not the canonical dependency.
+
+Host guides may differ in configuration syntax, but they must point at the same canonical MCP server
+and the same portable skill/policy surface.
+
+### P1-D.5 — Preserve local COS-first routing
+
+Keep our current local behavior: for Photoshop tasks our own agent should still prefer Chat On
+Steroids, discover its Photoshop route and verify it with the existing ping/Guard-status checks before
+declaring the route unavailable.
+
+This local preference must stay in local/COS routing policy rather than the public host-neutral skill
+contract.
+
+Acceptance: our current COS-first workflow remains unchanged after the public portability refactor.
+
+### P1-D.6 — Cross-host parity smoke
+
+Validate that supported hosts observe the same canonical product surface:
+
+- equivalent MCP `tools/list` contract;
+- equivalent Guard tool schemas and lifecycle semantics;
+- equivalent portable skill workflow;
+- at least one Codex MCP startup/smoke path;
+- current COS startup/smoke path;
+- Claude Code configuration validation or smoke where the environment permits.
+
+Do not claim cross-host parity from configuration files alone when a runnable smoke is available.
+
+### P1-D completion gate
+
+Close P1-D only when the public repository is usable without COS-specific assumptions, portable skills
+and installation instructions are present, cross-host contract parity is demonstrated, and our local
+COS-first workflow still behaves as before.
 
 ---
 
