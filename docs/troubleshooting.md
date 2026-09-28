@@ -23,6 +23,23 @@ Common issues when connecting to or scripting Photoshop through the MCP server.
 2. Check that scripting is enabled in Photoshop preferences
 3. On Windows, verify COM automation is not blocked by security settings
 
+### Direct mutation returns `guard_required`
+
+**Symptom:** a direct mutating tool such as `photoshop_create_document` returns
+`guard_required` while using the Chat On Steroids entry point `dist/cos-plugin.js`.
+
+**Cause:** this is expected when the plugin runs with `PHOTOSHOP_GUARD_MODE=required`.
+Read-only Photoshop tools remain directly callable, but raw public mutations fail closed
+so they cannot bypass the embedded Guard workflow.
+
+**Fix:** do not retry the raw mutation and do not disable Guard. Submit the intended
+mutation through `photoshop_guard_cycle_auto` instead. The Guard performs its durable
+preflight and dispatches the underlying Photoshop mutation internally when the operation
+is admitted.
+
+See also [Photoshop Guard Architecture](photoshop-guard-architecture.md) and the
+canonical CoS workflow in [AGENTS.md](../AGENTS.md).
+
 ### Timeouts: Photoshop script vs MCP request
 
 There are two separate timeout layers:
