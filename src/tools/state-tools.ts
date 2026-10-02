@@ -32,7 +32,10 @@ const PREVIEW_INPUT: InputSchema = {
     max_dimension_px: { type: 'number', description: 'Maximum long edge in pixels (default 1024)', default: 1024 },
     quality: { type: 'number', description: 'JPEG quality 1–12 (default 8)', minimum: 1, maximum: 12, default: 8 },
     materialize_path: { type: 'string', description: 'Optional absolute path for persisting the whole preview JPEG.' },
-    include_image: { type: 'boolean', description: 'Include the base64 MCP image block; defaults to true.', default: true },
+    include_image: {
+      type: 'boolean',
+      description: 'Include the JPEG as an MCP image block. In Guard-required model-facing calls this defaults to false; pass true explicitly when image delivery is required.',
+    },
     focus_region: REGION_SCHEMA,
     focus_max_dimension_px: { type: 'number', description: 'Maximum long edge for focus_region (default 1200)', default: 1200 },
   },

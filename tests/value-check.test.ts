@@ -90,6 +90,15 @@ function directive(valueCheck: Record<string, unknown>) {
     strategy_validation_after_microplans: 2,
     strategy_validation: { status: 'pending' },
     composition_exploration: { hypotheses: [] },
+    perceptual_hierarchy: {
+      revision: 1,
+      mode: 'ranked',
+      zones: [
+        { id: 'face-zone', owner_ids: ['face-owner'], priority: 'primary', contrast_budget: 'high', detail_budget: 'high', edge_certainty: 'high', chroma_accent: 'allowed' },
+        { id: 'background-zone', owner_ids: ['background-owner'], priority: 'support', contrast_budget: 'low', detail_budget: 'low', edge_certainty: 'low', chroma_accent: 'restricted' },
+      ],
+      ordering: ['face-zone', 'background-zone'],
+    },
     assessment: assessment(),
     value_check: valueCheck,
     refinement_check: {
@@ -287,6 +296,28 @@ describe('stage-aware value gate', () => {
     expect(() => store.plannerGate(42, painterDetailRequest())).not.toThrow();
   });
 
+  it('uses criterion statuses as value-gate authority without requiring prose notes', () => {
+    const store = tempStore();
+    const evidence = seedValueEvidence(store);
+    const structuralCriteria = Object.fromEntries(
+      Object.keys(criteria()).map(key => [key, { status: 'pass' }])
+    );
+    store.setArtDirectorState({
+      document_id: 42,
+      action: 'review',
+      directive: directive({
+        status: 'pass',
+        observed: true,
+        preview_sha256: evidence.sourceSha,
+        evidence_operation_id: evidence.id,
+        confidence: 0.9,
+        limitations: [],
+        criteria: structuralCriteria,
+      }),
+    });
+    expect(() => store.plannerGate(42, painterDetailRequest())).not.toThrow();
+  });
+
   it('FAIL blocks detailing', () => {
     const store = tempStore();
     const evidence = seedValueEvidence(store);
@@ -310,14 +341,17 @@ describe('stage-aware value gate', () => {
       directive: directive({
         status: 'override', observed: true, preview_sha256: evidence.sourceSha, evidence_operation_id: evidence.id, confidence: 0.7,
         limitations: ['Color relationships are intentionally dominant in this stylized treatment.'],
-        override_reason: 'The requested style intentionally subordinates luminance separation to color-shape relationships.',
+        style_contract_basis: {
+          field: 'color_policy',
+          criterion: 'restrained warm/cool relationships',
+        },
         criteria: criteria({ silhouette_separation: 'uncertain' }),
       }),
     });
     expect(() => store.plannerGate(42, painterDetailRequest())).not.toThrow();
   });
 
-  it('style-not-applicable permits detailing only with an explicit applicability reason', () => {
+  it('value exceptions use exact durable style-contract basis instead of prose certification', () => {
     const store = tempStore();
     store.setArtDirectorState({
       document_id: 42,
@@ -325,7 +359,10 @@ describe('stage-aware value gate', () => {
       directive: directive({
         status: 'style-not-applicable',
         observed: false,
-        applicability_reason: 'The workflow is intentionally chromatic/graphic and luminance hierarchy is not the governing representation constraint.',
+        style_contract_basis: {
+          field: 'color_policy',
+          criterion: 'restrained warm/cool relationships',
+        },
         limitations: [],
       }),
     });
@@ -334,8 +371,18 @@ describe('stage-aware value gate', () => {
     expect(() => store.setArtDirectorState({
       document_id: 43,
       action: 'review',
-      directive: directive({ status: 'style-not-applicable', observed: false, applicability_reason: 'irrelevant' }),
-    })).toThrow(/applicability_reason/);
+      directive: directive({ status: 'style-not-applicable', observed: false, applicability_reason: 'prose alone is not authority' }),
+    })).toThrow(/style_contract_basis/);
+
+    expect(() => store.setArtDirectorState({
+      document_id: 43,
+      action: 'review',
+      directive: directive({
+        status: 'style-not-applicable',
+        observed: false,
+        style_contract_basis: { field: 'color_policy', criterion: 'a different policy' },
+      }),
+    })).toThrow(/exactly match/);
   });
 
   it('does not allow an unobserved PASS', () => {

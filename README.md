@@ -1,8 +1,10 @@
 # Photoshop MCP — Digital Painting Edition
 
+[Русский](README.ru.md)
+
 Independently maintained MCP system for AI-driven digital painting and evidence-bound Photoshop automation on Windows.
 
-**Project:** [lavalava45/photoshop-mcp-digital-painting](https://github.com/lavalava45/photoshop-mcp-digital-painting)<br>
+**Project:** [lavalava45/photoshop-mcp-digital-painting](https://github.com/lavalava45/paintpilot-mcp)<br>
 **Historical provenance:** [`NOTICE`](NOTICE)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -49,7 +51,7 @@ Digital Painting Edition combines broad Photoshop automation with a focused pain
 - a Photoshop-side UXP companion on localhost long-poll for Neural Filters, foreground-safe `asCopy` PSD/JPEG/PNG persistence, and low-latency fast-lane development/diagnostics;
 - an agent visual-control workflow with semantic passes, previews, measurement checkpoints, occlusion reasoning, cleanup, sticky Photoshop routing, and a state-based Definition of Done.
 
-The current build exposes **130 tools** (**130 atomic/non-recipe**) and **5 prompts**.
+The current build exposes **133 tools** (**133 atomic/non-recipe**) and **5 prompts**.
 
 The dedicated Chat On Steroids entry point is `dist/cos-plugin.js`. It starts the same MCP server with `PHOTOSHOP_GUARD_MODE=required`, so read-only tools remain directly callable while raw mutating tools fail closed and must be dispatched through `photoshop_guard_cycle_auto`. This native Plugins route has passed dedicated live acceptance and is the canonical Chat On Steroids path. The retired external Core/controller/daemon provider chain has been removed from the repository.
 
@@ -162,7 +164,7 @@ Requirements:
 Clone and build:
 
 ```bash
-git clone https://github.com/lavalava45/photoshop-mcp-digital-painting.git
+git clone https://github.com/lavalava45/paintpilot-mcp.git
 cd photoshop-mcp-digital-painting
 pnpm install --frozen-lockfile
 npm run build:server
@@ -250,7 +252,7 @@ npm run test:document-targeting-live
 The current verified tool-count result is:
 
 ```text
-catalog counts consistent: 130 = 130 atomic + 0 recipes; 14 Guard tools; 5 MCP prompt templates
+catalog counts consistent: 133 = 133 atomic + 0 recipes; 16 Guard tools; 5 MCP prompt templates
 ```
 
 The project has been live-tested primarily on **Photoshop 2026 for Windows**. During the current validation, 123 installed brush presets were enumerated and the painting smoke test completed with `PAINTING_TEST_OK`.

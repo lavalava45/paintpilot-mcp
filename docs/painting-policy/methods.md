@@ -85,7 +85,7 @@ AFTER verification remains qualitative rather than pretending to measure edge so
 
 #### Grayscale / Value Check
 
-For representational/realistic workflows, use `photoshop_analyze_value_structure` at structural gates rather than after every stroke. The tool produces a non-destructive grayscale preview plus descriptive luminance evidence. Inspect that image as Art Director and record `directive.value_check`; **unobserved visual analysis is never PASS**.
+For representational/realistic workflows, use `photoshop_analyze_value_structure` at structural gates rather than after every stroke. The tool produces a non-destructive grayscale preview plus descriptive luminance evidence. Inspect that image as Art Director and record `directive.value_check`; **unobserved visual analysis is never PASS**. A fresh blank nontrivial canvas is not a useful structural gate: make the first meaningful visual construction pass before the first value analysis.
 
 The value check covers five qualitative criteria: `large_value_grouping`, `focal_hierarchy`, `silhouette_separation`, `local_contrast_budget`, and `detail_before_form`. Each criterion records `pass|fail|uncertain|not-applicable` plus a concrete note. Overall status is `pass|fail|override|style-not-applicable`.
 
@@ -286,6 +286,16 @@ settings, make only necessary footprint probes, then call
 stroke execution remain fail-closed until that durable role map exists; region/fill
 operations and unrelated preparation do not. `simple_graphic` is only for deliberately
 flat/simple graphic work.
+
+On a fresh blank `nontrivial_painting` canvas, **first visible progress outranks speculative
+future-stage preparation**. Do not spend a standalone Guard cycle selecting/configuring a brush,
+creating helper layers, selections, guides or other preparation for a later pass before any visual
+frame exists. If preparation is causally required by the immediate first visual construction pass,
+place it inside that same `photoshop_execute_visual_microplan` transaction immediately before the
+mutation. Guard rejects standalone preparation on a blank non-trivial canvas with
+`premature_future_preparation`; document create/open remains exempt. Read-only discovery may still be
+used when necessary, but should not delay an available first construction mechanism that does not
+depend on it.
 
 In a non-trivial run, direct `photoshop_paint_strokes`, `photoshop_paint_dabs`
 and `photoshop_paint_regions` are not an escape hatch: route them through

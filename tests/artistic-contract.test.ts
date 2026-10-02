@@ -132,6 +132,51 @@ describe('artistic contract semantics', () => {
     expect(globalCompletionAllowed(assessment)).toBe(false);
   });
 
+  it('tracks hard-perceptual brief debt explicitly and blocks satisfied completion while hard debt remains', () => {
+    const active = contract({
+      brief_items: [
+        { item_id: 'guardian-lions', kind: 'hard_perceptual', requirement: 'Two guardian lion forms must read recognizably as lions.', provenance: 'user_brief:named required subjects' },
+        { item_id: 'extra-snow', kind: 'soft_preference', requirement: 'Additional fine snow texture is welcome if it does not obscure form.', provenance: 'user_brief:secondary preference' },
+      ],
+    });
+    const sha = 'd'.repeat(64);
+    expect(() => normalizeGlobalBriefAssessment({
+      outcome: 'satisfied', contract_id: active.contract_id, contract_revision: active.revision,
+      frame_sha256: sha, critic_authority: 'authorized', critic_result_id: 'critic-hard-debt',
+      brief_item_results: [
+        { item_id: 'guardian-lions', state: 'NOT_MET', reason: 'The crop remains an abstract symmetric stone mass.', evidence: ['OBJECT crop lacks a readable muzzle/body landmark pattern.'] },
+        { item_id: 'extra-snow', state: 'MET', reason: 'Fine snow texture is visible.' },
+      ],
+      reason: 'Attempted final review.',
+    }, { contract: active, frame: { sha256: sha } })).toThrow(/unresolved hard brief debt/);
+
+    const uncertain = normalizeGlobalBriefAssessment({
+      outcome: 'uncertain', contract_id: active.contract_id, contract_revision: active.revision,
+      frame_sha256: sha, critic_authority: 'authorized', critic_result_id: 'critic-hard-uncertain',
+      brief_item_results: [
+        { item_id: 'guardian-lions', state: 'UNCERTAIN', reason: 'Whole-frame read is ambiguous and needs an OBJECT crop.' },
+        { item_id: 'extra-snow', state: 'MET', reason: 'Fine snow texture is visible.' },
+      ],
+      reason: 'Named-object identity is not yet proven.',
+    }, { contract: active, frame: { sha256: sha } });
+    expect(uncertain.unresolved_hard_brief_debt).toEqual([
+      expect.objectContaining({ item_id: 'guardian-lions', state: 'UNCERTAIN', kind: 'hard_perceptual' }),
+    ]);
+    expect(globalCompletionAllowed(uncertain)).toBe(false);
+
+    const satisfied = normalizeGlobalBriefAssessment({
+      outcome: 'satisfied', contract_id: active.contract_id, contract_revision: active.revision,
+      frame_sha256: sha, critic_authority: 'authorized', critic_result_id: 'critic-hard-met',
+      brief_item_results: [
+        { item_id: 'guardian-lions', state: 'MET', reason: 'The held-out OBJECT crop visibly supports the required lion identity.' },
+        { item_id: 'extra-snow', state: 'UNASSESSED', reason: 'Optional snow polish is not required for completion.' },
+      ],
+      reason: 'All hard perceptual requirements are independently validated.',
+    }, { contract: active, frame: { sha256: sha } });
+    expect(satisfied.unresolved_hard_brief_debt).toEqual([]);
+    expect(globalCompletionAllowed(satisfied)).toBe(true);
+  });
+
   it('rewrites unsupported global claims as not independently validated', () => {
     const active = contract();
     const frame = { sha256: 'd'.repeat(64) };

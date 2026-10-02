@@ -1,14 +1,41 @@
-# Source-independence audit and rewrite plan
+# Source-independence audit and closure record
 
-Date: 2026-09-27
+Date: 2026-09-29
 
-This audit answers a narrower question than ordinary product ownership: how much of the current
-first-party tree still materially carries source text from `alisaitteke/photoshop-mcp`, and what must
-change before the project presents itself primarily as a standalone product rather than a fork.
+This audit records the transition from the historical `alisaitteke/photoshop-mcp` lineage to the
+independently maintained **Photoshop MCP — Digital Painting Edition** product. The current product is
+standalone in runtime, build, packaging and maintenance policy; historical origin remains documented
+for provenance and licensing rather than used as primary product identity.
 
-The comparison baseline is the actual fork baseline/common ancestor, upstream `v1.7.6`
+The comparison baseline is the historical common ancestor, upstream `v1.7.6`
 (`7b635963f87b5b8ff5380c3156841f5253ec8063`). A second comparison against the refreshed
 `upstream/master` gives essentially the same result.
+
+## Current closure — 2026-09-29
+
+P1-S residual source-independence hardening is complete. The reproducible production-runtime audit now
+reports **42,288 nonblank lines / 206 aligned exact lines = 0.4871% exact-line overlap** against the
+documented historical baseline. The stricter residual lists are all empty: **0 byte-identical production
+files, 0 same-path contiguous exact blocks >=12 lines, 0 cross-path contiguous clone blocks >=8 normalized
+lines, 0 production files >=50% exact similarity, 0 retired package entries, and 0 package-script dependency
+on an upstream checkout or remote**.
+
+The default canonical threshold in `scripts/verify-source-independence.mjs` is now **0.005 (0.50%)**, so
+this is a maintained release invariant rather than a one-time measurement. Cross-path detection now
+normalizes nonblank source lines and compares every maintained runtime file against every historical
+baseline path at an **8-line** minimum, so moving copied implementation into a new file can no longer hide
+it from the canonical gate. That pass independently rewrote the remaining Neural Filter request/result
+sequence, the UXP font-search loop, and four smaller moved blocks surfaced only after the stronger detector.
+The UXP bridge was intentionally not rewritten merely to chase a cosmetic 0% score; its remaining same-path
+matches are ordinary transport glue and stay governed by the no-block/no-high-similarity gates.
+
+This metric remains a **source-line overlap metric, not an authorship percentage**. `LICENSE` and `NOTICE`
+remain mandatory and retain the historical origin even though the current product is no longer maintained
+or presented as a fork.
+
+Final canonical verification on this closure is green: **75/75 Vitest files / 764/764 tests**, **151
+packed dist JS files**, lint **0 errors / 30 existing warnings**, **131 atomic tools / 15 Guard tools /
+5 prompts**, with product-identity, provenance, external-intake and live-evidence-ledger gates all passing.
 
 ## 1. Measured provenance snapshot
 
@@ -84,10 +111,11 @@ the adjacent original checkout by path.
 
 | Local surface | Finding | Runtime/build dependency on upstream author work? |
 | --- | --- | --- |
-| `.git/` | Contains normal fork ancestry and `upstream` remote refs | History/provenance only; not runtime |
-| `node_modules/` | Third-party package installation | Third-party dependencies, not the upstream author's source tree |
-| `.tmp-udt-asar/` | Extracted **Adobe UXP Developer Tool 1.1.0**, Apache-2.0 | No; Adobe tooling artifact |
-| `.tmp-udt/` | Empty temporary UDT location | No |
+| `.git/` | Retains historical ancestry; persistent historical `upstream` remote removed 2026-09-29 | History/provenance only; not runtime |
+| `node_modules/` | Recreated from the canonical pnpm lockfile; stale AI/Anthropic/SQLite/UI-era direct packages removed | Third-party dependencies only; no upstream-author source tree |
+| `pnpm-lock.yaml` | Canonical dependency lockfile, no longer ignored; importer matches `package.json` | Reproducible dependency graph for this project |
+| `.tmp-udt-asar/` | Removed 2026-09-29; it was an extracted **Adobe UXP Developer Tool 1.1.0** tree | No runtime dependency |
+| `.tmp-udt/` | Removed 2026-09-29 | No runtime dependency |
 | `.mcp-preview/` | Generated preview images | No |
 | `.photoshop-runtime/` | Guard/UXP receipts, previews and route traces | No source dependency |
 | `processes/` | Local experiment/evidence archive | No runtime dependency; contains historical archived docs that still mention upstream |
@@ -95,9 +123,9 @@ the adjacent original checkout by path.
 | `release/` | Generated MCPB build artifacts | Regenerated after Phase A; current bundle contains no retired UI/analytics/web payload |
 | `task8a-review-pack/`, `task23-review-pack/` | Project evaluation evidence | No |
 | `assets/` | Current project-owned presentation assets | No upstream-source dependency found |
-| sibling `../photoshop-mcp-alisaitteke/` | Separate local checkout of the original repository | **Reference copy exists, but no path/import/build/runtime reference from this project was found** |
-| sibling `../photoshop-mcp-digital-painting-backups/` | Local audit backup | No project reference found |
-| sibling `../photoshop-mcp-digital-painting-compact-verify/` | Local verification workspace | No project reference found |
+| sibling `../photoshop-mcp-alisaitteke/` | Removed 2026-09-29 after provenance audit | No project dependency |
+| sibling `../adobe-desktop-mcp/` / `../udt-runtime-extracted/` | Removed 2026-09-29 after external-artifact audit | No project dependency |
+| sibling proof clones / `../photoshop-mcp-digital-painting-backups/` / compact-verify workspace | Removed 2026-09-29 after verification evidence was consolidated | No project dependency |
 
 The only upstream material found under ignored local experiment storage is historical documentation
 copied into `processes/.../archive-*`; it is not imported or packaged as runtime source.
@@ -658,6 +686,11 @@ still shipped, preserve the upstream MIT copyright/license notice. After the ret
 has been independently replaced/removed, keep provenance in a concise `NOTICE`/`UPSTREAM.md` rather
 than repeatedly presenting the product itself as “a fork.” Do not rewrite Git history merely to hide
 origin; history is provenance, not a runtime dependency.
+
+That end-state has now been reached: the maintained source-independence gate reports no identical
+files, no substantial same-path copied blocks, no cross-path clone blocks and no high-similarity
+implementation files. The root MIT `LICENSE` therefore identifies the current PaintPilot project;
+the historical upstream author and repository remain in `NOTICE` as provenance.
 
 The intended final distinction is:
 

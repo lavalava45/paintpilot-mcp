@@ -152,6 +152,20 @@ function directive(refinementCheck: Record<string, unknown>) {
     strategy_validation_after_microplans: 2,
     strategy_validation: { status: 'pending' },
     composition_exploration: { hypotheses: [] },
+    perceptual_hierarchy: {
+      revision: 1,
+      mode: 'distributed',
+      zones: [{
+        id: 'whole-frame',
+        owner_ids: ['whole-frame'],
+        priority: 'distributed',
+        contrast_budget: 'medium',
+        detail_budget: 'medium',
+        edge_certainty: 'medium',
+        chroma_accent: 'restricted',
+      }],
+      ordering: [],
+    },
     assessment: {
       composition: 'Stable.',
       focal_hierarchy: 'Stable.',
@@ -172,6 +186,7 @@ function directive(refinementCheck: Record<string, unknown>) {
       status: 'style-not-applicable',
       observed: false,
       applicability_reason: 'Task 23 fixture isolates refinement-gate mechanics from the independent grayscale Value Gate.',
+      style_contract_basis: { field: 'detail_density', criterion: 'selective focal detail only after lower-frequency structure is resolved' },
       limitations: [],
     },
     refinement_check: refinementCheck,
@@ -357,7 +372,6 @@ describe('Task 23 progressive refinement contract', () => {
     const stylized = directive({
       status: 'style-not-applicable',
       observed: false,
-      applicability_reason: 'The declared flat graphic treatment intentionally preserves simplified planar representation.',
       style_contract_basis: {
         field: 'primitive_footprint_tolerance',
         criterion: 'intentional flat primitives are part of the final graphic language',
@@ -369,11 +383,17 @@ describe('Task 23 progressive refinement contract', () => {
       detail_density: 'minimal',
       primitive_footprint_tolerance: 'intentional flat primitives are part of the final graphic language',
     };
+    stylized.value_check.style_contract_basis = {
+      field: 'detail_density',
+      criterion: 'minimal',
+    };
     expect(() => s.setArtDirectorState({
       document_id: 42,
       action: 'review',
       directive: stylized,
     })).not.toThrow();
+    const state = s.paintingState().documents['42'];
+    expect(state.art_director.refinement_check.applicability_reason).toBeNull();
     expect(() => s.plannerGate(42, detailRequest())).not.toThrow();
   });
 

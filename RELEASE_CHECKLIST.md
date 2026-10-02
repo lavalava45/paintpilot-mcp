@@ -5,7 +5,10 @@ Use this checklist before publishing a tagged GitHub release.
 ## Repository
 
 - [ ] Project repository remote is configured as `origin`.
-- [ ] Any historical comparison remote is optional and does not participate in build/runtime/package steps.
+- [ ] Canonical release checkout has no persistent historical `upstream` remote; external comparisons,
+      when needed, use an exact URL/revision or a disposable checkout outside the project tree.
+- [ ] `pnpm-lock.yaml` is tracked, matches `package.json`, and a clean `pnpm install --frozen-lockfile`
+      reproduces the dependency tree without extraneous direct packages.
 - [ ] Working tree is clean.
 - [ ] Release branch contains the intended painting API and visual-control skill changes.
 - [ ] `README.md`, `INSTALL.md`, `CHANGELOG.md`, and painting docs describe the same feature set.

@@ -83,7 +83,7 @@ flowchart TB
 | --- | --- | --- |
 | MCP core | protocol, tool/prompt registry, session lifecycle | `src/core/` |
 | Embedded Guard | durable journal, barriers, jobs, recovery, artistic workflow state | `src/core/guard/`, `src/tools/guard-tools.ts` |
-| Semantic tools | 128 public non-recipe `photoshop_*` tools | `src/tools/`, core connection/Guard tools |
+| Semantic tools | 133 public non-recipe `photoshop_*` tools | `src/tools/`, core connection/Guard tools |
 | Backend router | production UXP-only semantic dispatch | `src/platform/photoshop-backend.ts` |
 | UXP bridge | Photoshop-side execution and exact outcomes | `src/platform/uxp-bridge-client.ts`, `uxp-plugin/` |
 | Prompt layer | server instructions and 5 MCP guide prompts | `src/prompts/` |
@@ -91,9 +91,10 @@ flowchart TB
 
 ## 3. MCP server and public surface
 
-`PhotoshopMCPServer` wires the official MCP SDK to:
+`PhotoshopMCPServer` is implemented in `src/core/photoshop-mcp-server.ts`; `src/core/server.ts` is the
+stable compatibility facade. The server wires the official MCP SDK to:
 
-- **129 semantic tools**, including 14 public Guard tools;
+- **133 semantic tools**, including 16 public Guard tools;
 - **5 MCP guide prompts**;
 - server-level instructions published during MCP initialization;
 - structured error wrapping with machine-readable error codes and suggested next actions;
@@ -105,11 +106,13 @@ semantic tools, Guard-owned compact passes and guide prompts rather than a paral
 
 ### Prompt layer
 
-`src/prompts/instructions.ts` supplies host-facing bootstrap guidance: session initialization,
+`src/prompts/host-guidance.ts` owns host-facing bootstrap guidance; `src/prompts/instructions.ts` is a
+compatibility facade. The guidance covers session initialization,
 semantic-tool selection, user-intent terminology, capability-aware fallback, disambiguation,
 guide-prompt discovery, export conventions and recovery behavior.
 
-Five templates are registered by `src/prompts/registry.ts`:
+Five templates are registered by the canonical `src/prompts/prompt-catalog.ts`; the historical
+`src/prompts/registry.ts` path remains a compatibility facade:
 
 | Prompt | Purpose |
 | --- | --- |
@@ -312,8 +315,24 @@ focus crop is additional evidence. Overview downscaling never changes the docume
 coordinates used for planning or verification.
 
 For terminal-oriented local tooling, `materialize_path` may write the generated JPEG to an
-absolute path and `include_image=false` may omit the large base64 block. Materialization is an
-evidence-delivery option, not another Photoshop export/save workflow.
+absolute path. In `PHOTOSHOP_GUARD_MODE=required`, model-facing
+`photoshop_get_preview` calls default to `include_image=false` and receive an automatic
+runtime materialization path; `include_image=true` is an explicit opt-in for direct image
+delivery. Materialization is an evidence-delivery option, not another Photoshop export/save
+workflow.
+
+The compact Guard hot loop is stricter: `photoshop_guard_cycle[_auto]` and
+`photoshop_guard_job_poll` return only SHA/path/dimensions/crop references and never embed
+review image bytes. A pending visual barrier is inspected explicitly with
+`photoshop_guard_review_image`, which verifies the durable file SHA and delivers only those
+exact bytes through MCP image content. Visual closure remains fail-closed until the required
+review roles have an explicit delivery receipt.
+
+At the final model-facing MCP boundary, textual/structured binary fields are semantically
+redacted (`base64`, image `data`, data-URLs and byte arrays). Guard results also expose
+`estimated_context_bytes`; responses above the context warning threshold include a
+`large_model_facing_response` warning. This boundary does not remove explicit MCP image
+content from `photoshop_guard_review_image`.
 
 ### Multiscale Guard review
 

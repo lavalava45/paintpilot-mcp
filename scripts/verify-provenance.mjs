@@ -1,4 +1,3 @@
-import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
@@ -10,20 +9,12 @@ function read(path) {
   return readFileSync(resolve(ROOT, path), 'utf8').replace(/\r\n/g, '\n');
 }
 
-function baseline(path) {
-  return execFileSync('git', ['show', `${BASELINE}:${path}`], {
-    cwd: ROOT,
-    encoding: 'utf8',
-  }).replace(/\r\n/g, '\n');
-}
-
 function normalized(text) {
   return text.replace(/\s+/g, ' ').trim();
 }
 
 const failures = [];
 const license = read('LICENSE');
-const upstreamLicense = baseline('LICENSE');
 const notice = read('NOTICE');
 const normalizedNotice = normalized(notice);
 const packageJson = JSON.parse(read('package.json'));
@@ -31,15 +22,20 @@ const manifest = JSON.parse(read('mcpb/manifest.json'));
 const buildMcpb = read('scripts/build-mcpb.ts');
 const contributing = read('CONTRIBUTING.md');
 
-if (license !== upstreamLicense) {
-  failures.push('LICENSE must preserve the upstream MIT notice byte-for-byte against the documented baseline');
+if (!license.startsWith('MIT License\n')) failures.push('LICENSE must remain an MIT license');
+if (!license.includes('Copyright (c) 2026 lavalava45 and PaintPilot contributors')) {
+  failures.push('LICENSE must identify the current PaintPilot project copyright');
+}
+if (license.includes('Ali Sait Teke')) {
+  failures.push('historical upstream authorship belongs in NOTICE, not as current LICENSE ownership');
 }
 
 const noticeMarkers = [
   'Historical origin',
   UPSTREAM_REPOSITORY,
   BASELINE,
-  'The upstream MIT copyright and permission notice are retained in LICENSE',
+  'historical upstream project was also MIT-licensed',
+  'source-independence gate',
   'Project-authored work',
   'Major architectural divergence',
   'embedded durable Photoshop Guard',
@@ -68,7 +64,7 @@ for (const marker of [
   'External/upstream source intake',
   'source repository and exact commit/tag/PR',
   'license/copyright/notice obligations',
-  'not obscure or replace the upstream MIT notice in `LICENSE`',
+  'Retain required third-party notices',
 ]) {
   if (!contributing.includes(marker)) failures.push(`CONTRIBUTING.md missing selective-port policy marker: ${marker}`);
 }
@@ -77,7 +73,9 @@ console.log(JSON.stringify({
   protocol: 'photoshop.provenance.v1',
   baseline: BASELINE,
   upstream_repository: UPSTREAM_REPOSITORY,
-  license_matches_baseline: license === upstreamLicense,
+  current_license_project_owned:
+    license.includes('Copyright (c) 2026 lavalava45 and PaintPilot contributors') &&
+    !license.includes('Ali Sait Teke'),
   package_includes_license: packageJson.files?.includes('LICENSE') === true,
   package_includes_notice: packageJson.files?.includes('NOTICE') === true,
   mcpb_license: manifest.license ?? null,

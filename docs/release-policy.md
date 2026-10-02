@@ -33,7 +33,11 @@ Release notes must describe the canonical Guard/UXP lane directly. Any breaking 
 
 ## External and upstream changes
 
-Upstream is an external source, not a synchronization authority. Candidate fixes/features are reviewed against the current architecture and selectively ported, cherry-picked, or reimplemented. They receive the same tests and acceptance requirements as project-owned changes and should retain appropriate attribution in commit/release notes.
+Historical upstream is an external source, not a synchronization authority or standing Git remote in
+the canonical checkout. Candidate fixes/features are reviewed against the current architecture and
+selectively ported, cherry-picked, or reimplemented from an exact external source/revision. They receive
+the same tests and acceptance requirements as project-owned changes and should retain appropriate
+attribution in commit/release notes.
 
 The maintained decision procedure is [`external-intake.md`](external-intake.md). An upstream tag,
 release, or branch advance does not establish a project release baseline. Release notes identify exact

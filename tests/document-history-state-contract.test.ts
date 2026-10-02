@@ -152,6 +152,40 @@ describe('document/history/state public contract', () => {
     ]);
   });
 
+  it('marks missing or ambiguous document activation as definitely not executed', async () => {
+    const { connection, router } = fixture();
+    const tools = createDocumentTools(connection, router);
+    const activate = tools.find((item) => item.tool.name === 'photoshop_set_active_document')!;
+
+    bridge.operation.mockResolvedValueOnce({
+      ok: true,
+      data: { ok: false, code: 'document_not_found', message: 'No open document with id 877' },
+    });
+    const missing = JSON.parse(textOf(await activate.handler({ document_id: 877 })));
+    expect(missing).toMatchObject({
+      ok: false,
+      code: 'document_not_found',
+      execution: 'not-executed',
+    });
+
+    bridge.operation.mockResolvedValueOnce({
+      ok: true,
+      data: {
+        ok: false,
+        code: 'ambiguous_name',
+        message: 'More than one document matched',
+        matching_document_ids: [42, 84],
+      },
+    });
+    const ambiguous = JSON.parse(textOf(await activate.handler({ document_name: 'Demo.psd' })));
+    expect(ambiguous).toMatchObject({
+      ok: false,
+      code: 'ambiguous_name',
+      execution: 'not-executed',
+      suggested_args: { matching_document_ids: [42, 84] },
+    });
+  });
+
   it('keeps document read/save result contracts and rejects ambiguous activation input before dispatch', async () => {
     const { connection, router, backendFor } = fixture();
     const tools = createDocumentTools(connection, router);

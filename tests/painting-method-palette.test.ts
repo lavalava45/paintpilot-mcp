@@ -116,10 +116,13 @@ describe('painting method capability map', () => {
   it('selects subject-agnostic construction roles before concrete Photoshop mechanisms', () => {
     const registry = registryWithRuntimePalette();
     // Unrelated fixtures: a wall light field, an organic smoke body, and aerial haze.
+    const structuredMass = selectPaintingConstructionMethod(registry, 'structured-mass', 'construct', [], { stage: 'GLOBAL_BLOCK_IN' });
     const wallField = selectPaintingConstructionMethod(registry, 'continuous-field', 'construct');
     const smokeBody = selectPaintingConstructionMethod(registry, 'volumetric-soft-mass', 'construct');
     const aerialHaze = selectPaintingConstructionMethod(registry, 'optical-veil', 'construct');
 
+    expect(structuredMass).toMatchObject({ constructionRole: 'structured-mass', visualIntent: 'mass' });
+    expect(structuredMass.selected.id).toBe('region-block-in');
     expect(wallField).toMatchObject({ constructionRole: 'continuous-field', visualIntent: 'continuous-field' });
     expect(wallField.selected.id).toBe('continuous-color-field');
     expect(smokeBody).toMatchObject({ constructionRole: 'volumetric-soft-mass', visualIntent: 'painted-mass' });

@@ -1,8 +1,8 @@
-Photoshop MCP — Digital Painting Edition
-Independent project notice and upstream provenance
+PaintPilot / Photoshop MCP — Digital Painting Edition
+Independent project notice and historical provenance
 
 This repository is independently maintained at:
-https://github.com/lavalava45/photoshop-mcp-digital-painting
+https://github.com/lavalava45/paintpilot-mcp
 
 The project is not affiliated with or endorsed by Adobe Inc. Adobe Photoshop is a product of
 Adobe Inc.; references to Photoshop describe interoperability with the locally installed product.
@@ -10,7 +10,7 @@ Adobe Inc.; references to Photoshop describe interoperability with the locally i
 Historical origin
 -----------------
 
-This codebase originated as a derivative of the open-source project "Photoshop MCP" by
+This project historically originated from the MIT-licensed open-source project "Photoshop MCP" by
 Ali Sait Teke:
 https://github.com/alisaitteke/photoshop-mcp
 
@@ -22,17 +22,23 @@ dependency.
 Licensing
 ---------
 
-The upstream MIT copyright and permission notice are retained in LICENSE and apply as required
-to upstream-derived portions of the repository. Independently authored additions and rewrites are
-distributed under the same repository MIT license unless a file states otherwise.
+The current production source is independently maintained and distributed under the repository MIT
+license in LICENSE unless a file states otherwise. The historical upstream project was also
+MIT-licensed; its authorship is retained here as provenance rather than represented as ownership of
+the current PaintPilot source tree.
+
+The repository's reproducible source-independence gate compares current production source against
+the frozen historical baseline. The maintained gate requires no identical files, no substantial
+same-path copied blocks, no cross-path clone blocks, and no high-similarity implementation files.
+Historical Git commits may contain earlier upstream-derived states; that history does not make the
+current independently rewritten source an upstream-owned codebase.
 
 Project-authored work
 ---------------------
 
-Independently authored additions, rewrites, tests, documentation and release engineering are
-maintained under this project's own repository identity. Project ownership metadata must supplement,
-not replace, the retained upstream MIT notice. Git history and project release notes remain the
-authoritative record of authorship for new work.
+Current source, rewrites, tests, documentation and release engineering are maintained under this
+project's own repository identity. Git history, the source-independence audit and project release
+notes remain the authoritative record of the transition and current authorship.
 
 Major architectural divergence
 ------------------------------
@@ -57,7 +63,7 @@ port, record enough provenance to identify the source repository and source revi
 pull request), the affected project paths, and any licensing/notice obligations. Prefer adaptation or
 independent reimplementation when the external change assumes architecture retired here. When source
 text is copied or substantially adapted, preserve all license/copyright notices required by that
-source and do not replace the upstream MIT notice retained in LICENSE.
+source and record the applicable third-party notice explicitly.
 
 Upstream distribution identifiers
 ---------------------------------

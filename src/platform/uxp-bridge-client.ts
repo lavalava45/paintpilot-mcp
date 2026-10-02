@@ -1,9 +1,8 @@
-/**
- * Client for the MCP-hosted UXP bridge (health check + neural filter invoke).
- */
+/** Client for the MCP-hosted UXP bridge transport and readiness contract. */
 import {
   cancelUxpBridgeCommandIfQueued,
   ensureUxpBridgeServer,
+  getUxpBridgeHealthSnapshot,
   getUxpBridgeCommandReceipt,
   invokeUxpBridge as invokeRawUxpBridge,
   probeUxpBridgeCommandReceipt,
@@ -13,7 +12,6 @@ import {
 import { UXP_BRIDGE_REVISION } from '../core/guard/protocol-version.js';
 import { bindPinnedDocumentId } from '../core/document-target.js';
 
-const HEALTH_TIMEOUT_MS = 800;
 const READINESS_CACHE_TTL_MS = 2_000;
 export const EXPECTED_UXP_BRIDGE_REVISION = UXP_BRIDGE_REVISION;
 
@@ -59,6 +57,14 @@ async function invokeUxpBridge(
     ? params
     : bindPinnedDocumentId(params);
   return invokeRawUxpBridge(action, dispatchParams, timeoutMs, options);
+}
+
+export async function invokeUxpBridgeCommand(
+  action: string,
+  params: Record<string, unknown>,
+  timeoutMs?: number
+) {
+  return invokeUxpBridge(action, params, timeoutMs);
 }
 
 function withReadinessCacheMeta(
@@ -107,9 +113,7 @@ export async function getUxpBridgeReadiness(
   };
 
   try {
-    const port = await ensureUxpBridgeServer();
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), HEALTH_TIMEOUT_MS);
+    await ensureUxpBridgeServer();
     let health: {
       ok?: boolean;
       plugin_connected?: boolean;
@@ -119,12 +123,7 @@ export async function getUxpBridgeReadiness(
       document_count?: number | null;
       active_document?: { id?: number; name?: string } | null;
     } = {};
-    try {
-      const res = await fetch(`http://127.0.0.1:${port}/health`, { signal: controller.signal });
-      if (res.ok) health = await res.json() as typeof health;
-    } finally {
-      clearTimeout(timer);
-    }
+    health = getUxpBridgeHealthSnapshot();
 
     if (health.ok !== true || health.plugin_connected !== true) {
       const announcedRevision = typeof health.bridge_revision === 'string' && health.bridge_revision
@@ -182,35 +181,13 @@ export async function getUxpBridgeReadiness(
 
 export async function isUxpBridgeReachable(): Promise<boolean> {
   try {
-    const port = await ensureUxpBridgeServer();
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), HEALTH_TIMEOUT_MS);
-    try {
-      const res = await fetch(`http://127.0.0.1:${port}/health`, { signal: controller.signal });
-      if (!res.ok) return false;
-      const body = await res.json() as {
-        ok?: boolean;
-        plugin_connected?: boolean;
-        bridge_revision?: string | null;
-      };
-      if (body.ok !== true || body.plugin_connected !== true) return false;
-      return body.bridge_revision === EXPECTED_UXP_BRIDGE_REVISION;
-    } finally {
-      clearTimeout(timer);
-    }
+    await ensureUxpBridgeServer();
+    const body = getUxpBridgeHealthSnapshot();
+    if (body.ok !== true || body.plugin_connected !== true) return false;
+    return body.bridge_revision === EXPECTED_UXP_BRIDGE_REVISION;
   } catch {
     return false;
   }
-}
-
-export type NeuralFilterKind =
-  'skin_smoothing' | 'harmonize' | 'depth_blur' | 'super_zoom' | 'colorize';
-
-export interface NeuralFilterParams {
-  smoothness?: number;
-  blur?: number;
-  reference_layer_id?: number;
-  document_id?: number;
 }
 
 export type UxpSaveFormat = 'PSD' | 'JPEG' | 'PNG';
@@ -1056,17 +1033,6 @@ export async function invokeUxpSampleColors(params: {
         ? (result.data as Record<string, unknown>)
         : undefined,
   };
-}
-
-export async function invokeNeuralFilter(
-  filter: NeuralFilterKind,
-  params: NeuralFilterParams = {}
-): Promise<{ ok: boolean; data?: unknown; error?: string }> {
-  const result = await invokeUxpBridge('neural_filter', { filter, ...params }, 90_000);
-  if (!result.ok) {
-    return { ok: false, error: result.error ?? 'neural_filter_failed' };
-  }
-  return { ok: true, data: result.data };
 }
 
 export async function invokeUxpSaveDocument(

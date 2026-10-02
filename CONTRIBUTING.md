@@ -19,7 +19,7 @@ Issues and review comments may be written in any language, but English is prefer
 
 ## Before you start
 
-1. Search [project issues](https://github.com/lavalava45/photoshop-mcp-digital-painting/issues) and [pull requests](https://github.com/lavalava45/photoshop-mcp-digital-painting/pulls) to avoid duplicate work. Check historical upstream separately when useful for provenance or comparison.
+1. Search [project issues](https://github.com/lavalava45/paintpilot-mcp/issues) and [pull requests](https://github.com/lavalava45/paintpilot-mcp/pulls) to avoid duplicate work. Check historical upstream separately when useful for provenance or comparison.
 2. For large or architectural changes, open an issue first to discuss the approach.
 3. For bug fixes and small improvements, a PR without a prior issue is fine.
 
@@ -34,7 +34,7 @@ Issues and review comments may be written in any language, but English is prefer
 ### Getting started
 
 ```bash
-git clone https://github.com/lavalava45/photoshop-mcp-digital-painting.git
+git clone https://github.com/lavalava45/paintpilot-mcp.git
 cd photoshop-mcp-digital-painting
 pnpm install --frozen-lockfile
 npm run build
@@ -43,7 +43,7 @@ npm run build
 ## Distribution and releases
 
 This project is source-distributed from
-[lavalava45/photoshop-mcp-digital-painting](https://github.com/lavalava45/photoshop-mcp-digital-painting)
+[lavalava45/photoshop-mcp-digital-painting](https://github.com/lavalava45/paintpilot-mcp)
 and is normally used through a local stdio build. It currently has **no public npm
 package, no MCP Registry entry, and no directory-listing release flow**.
 
@@ -56,7 +56,7 @@ For a source release of the project:
 1. Run the validation suite documented below.
 2. Update the project's changelog/version metadata if a tagged GitHub source release is desired.
 3. Keep `server.json`, `mcpb/manifest.json`, package metadata, links, and release notes
-   under the project's own `lavalava45/photoshop-mcp-digital-painting` identity.
+   under the project's own `lavalava45/paintpilot-mcp` repository identity.
 4. Create/push a Git tag or GitHub Release only under this repository. No external
    registry publication is implied by a GitHub tag.
 
@@ -95,11 +95,11 @@ PR/change evidence:
 - whether source text was copied, substantially adapted, or independently reimplemented;
 - any license/copyright/notice obligations that must travel with the change.
 
-Retain required third-party notices. Project ownership notices may be added for new work, but must
-not obscure or replace the upstream MIT notice in `LICENSE`. See [`NOTICE`](NOTICE) for the canonical
-provenance policy and [`docs/external-intake.md`](docs/external-intake.md) for the maintained intake
-decision workflow. An external release or upstream branch advance is not, by itself, a reason to
-merge, rebase, version-bump, or publish this project.
+Retain required third-party notices whenever future external source intake creates such an
+obligation. The root `LICENSE` describes the current independently maintained project; historical
+origin remains in [`NOTICE`](NOTICE). See [`docs/external-intake.md`](docs/external-intake.md) for
+the maintained intake decision workflow. An external release or upstream branch advance is not, by
+itself, a reason to merge, rebase, version-bump, or publish this project.
 
 ## Code style
 
@@ -151,7 +151,7 @@ A [pull request template](.github/pull_request_template.md) is provided automati
 
 ## Reporting bugs
 
-Open a [project GitHub Issue](https://github.com/lavalava45/photoshop-mcp-digital-painting/issues) and include:
+Open a [project GitHub Issue](https://github.com/lavalava45/paintpilot-mcp/issues) and include:
 
 - Windows version
 - Photoshop version

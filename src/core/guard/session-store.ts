@@ -26,6 +26,7 @@ import {
   normalizePhysicalStackCheck,
 } from '../physical-stack-check.js';
 import { PAINTING_VISUAL_INTENTS } from '../painting-method-palette.js';
+import { GEOMETRY_PREFLIGHT_PROTOCOL, runGeometryPreflight } from '../geometry-preflight.js';
 import {
   PAINTING_STAGE_RESET_REASONS,
   canonicalPaintingStage,
@@ -47,6 +48,7 @@ import {
   globalCompletionAllowed,
   normalizeArtisticEvaluationContract,
   normalizeGlobalBriefAssessment,
+  normalizePreFinalHostileReview,
 } from './artistic-contract.js';
 import {
   assertCurrentRuntimeRecord,
@@ -69,6 +71,13 @@ import {
   softDominanceContextForOperation,
   softDominanceRiskForOperation,
 } from './soft-dominance-review.js';
+import { normalizeSceneOwnershipPlan, sceneOwnershipOwnerIds } from '../scene-ownership-plan.js';
+import { normalizeSceneGeometryModel } from '../scene-geometry-model.js';
+import { lightingColorBindingStaleness, normalizeSceneLightingColorModel } from '../scene-lighting-color-model.js';
+import { cameraBindingStaleness, normalizeCameraBinding, normalizeSceneCameraImagingModel } from '../scene-camera-imaging-model.js';
+import { changedSceneGeometryDependencyIds, geometryBindingStaleness, normalizeGeometryBinding } from '../geometry-binding.js';
+import { normalizeMaterialResponsePlan } from '../material-response.js';
+import { attentionBindingStaleness, normalizeAttentionBinding, normalizePerceptualHierarchy } from '../perceptual-hierarchy.js';
 
 export const ROUTE = 'MCP host -> embedded Photoshop Guard -> project dist/index.js -> Photoshop';
 const READS = new Set([
@@ -79,7 +88,7 @@ const READS = new Set([
   'photoshop_get_brush_settings', 'photoshop_sample_color', 'photoshop_sample_colors',
   'photoshop_get_painting_method_capabilities', 'photoshop_select_painting_method',
   'photoshop_analyze_value_structure',
-  'photoshop_measure_points', 'photoshop_transform_landmarks', 'photoshop_compare_landmarks',
+  'photoshop_geometry_calculate', 'photoshop_measure_points', 'photoshop_transform_landmarks', 'photoshop_compare_landmarks',
   'photoshop_list_guides',
 ]);
 const PREPARATION = new Set([
@@ -170,6 +179,32 @@ const GLOBAL_CHANGE_DOMAINS = new Set([
   'likeness-main-shape',
   'background-scope',
 ]);
+const STRUCTURAL_MISMATCH_TERMS = [
+  'silhouette', 'topology', 'perspective', 'major proportion', 'proportion',
+  'occlusion', 'large mass', 'large-value mass', 'primitive scaffold', 'polygonal',
+  'negative space', 'negative-space',
+];
+const STRUCTURAL_REVIEW_FINDING_KINDS = new Set([
+  'composition_balance', 'global_depth_read', 'perspective_geometry', 'silhouette',
+  'proportion', 'contact_support', 'occlusion_depth', 'spatial_relation',
+  'transform_placement', 'mechanical_patterning',
+]);
+const COSMETIC_STRATEGY_TERMS = [
+  'cosmetic', 'texture', 'edge-noise', 'edge noise', 'blur', 'grain', 'stamp',
+  'microdetail', 'micro-detail', 'surface-breakup', 'surface breakup', 'surface-soften',
+  'surface soften', 'surface-mask', 'surface mask',
+];
+function hasStructuralMismatchEvidence(record) {
+  const mismatch = textOrUndefined(record?.verdict?.primary_mismatch)?.toLowerCase() ?? '';
+  return STRUCTURAL_MISMATCH_TERMS.some(term => mismatch.includes(term));
+}
+function isCosmeticCorrectiveAttempt(request) {
+  const family = textOrUndefined(request?.strategy_family)?.toLowerCase() ?? '';
+  const strategy = textOrUndefined(request?.causal_strategy_id)?.toLowerCase() ?? '';
+  const method = textOrUndefined(request?.args?.method_class)?.toLowerCase() ?? '';
+  const identity = `${family} ${strategy} ${method}`;
+  return COSMETIC_STRATEGY_TERMS.some(term => identity.includes(term));
+}
 const PAINTER_SCOPES = new Set(['local', 'medium']);
 const ART_RUN_COMMENTARY_MODES = new Set(['technical', 'artistic', 'mixed']);
 const ART_RUN_COMMENTARY_DETAILS = new Set(['short', 'normal', 'detailed']);
@@ -309,6 +344,52 @@ function parseBrushPreflight(raw) {
     const alternatives = Array.isArray(role.alternative_presets)
       ? [...new Set(role.alternative_presets.map(textOrUndefined).filter(Boolean))]
       : [];
+    const candidateEvidence = Array.isArray(role.candidate_evidence)
+      ? role.candidate_evidence.map((candidate, candidateIndex) => {
+        if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
+          throw new Error('brush_preflight role ' + roleId + '.candidate_evidence[' + candidateIndex + '] must be an object');
+        }
+        const presetName = textOrUndefined(candidate.preset_name);
+        const profileId = textOrUndefined(candidate.profile_id);
+        const score = Number(candidate.evidence_score);
+        const edgeBehavior = textOrUndefined(candidate.edge_behavior);
+        const buildupBehavior = textOrUndefined(candidate.buildup_behavior);
+        const pressure = textOrUndefined(candidate.pressure_policy)?.toLowerCase();
+        const dynamics = candidate.dynamics_capability;
+        const scale = candidate.useful_scale_range;
+        if (!presetName || !profileId || !Number.isFinite(score) || !edgeBehavior || !buildupBehavior
+          || !BRUSH_PRESSURE_POLICIES.has(pressure)
+          || !scale || typeof scale !== 'object' || Array.isArray(scale)
+          || !dynamics || typeof dynamics !== 'object' || Array.isArray(dynamics)
+          || !Number.isFinite(Number(scale.min_px)) || !Number.isFinite(Number(scale.max_px))) {
+          throw new Error('brush_preflight role ' + roleId + '.candidate_evidence[' + candidateIndex + '] is incomplete');
+        }
+        return {
+          preset_name: presetName,
+          profile_id: profileId,
+          evidence_score: score,
+          mark_character: Array.isArray(candidate.mark_character) ? candidate.mark_character.map(textOrUndefined).filter(Boolean) : [],
+          edge_behavior: edgeBehavior,
+          buildup_behavior: buildupBehavior,
+          useful_scale_range: { min_px: Number(scale.min_px), max_px: Number(scale.max_px) },
+          rotation_meaningful: candidate.rotation_meaningful === true,
+          pressure_policy: pressure,
+          dynamics_capability: {
+            native_pressure_size: dynamics.native_pressure_size === true,
+            native_pressure_opacity: dynamics.native_pressure_opacity === true,
+            simulated_pressure_size: dynamics.simulated_pressure_size === true,
+            simulated_pressure_opacity: dynamics.simulated_pressure_opacity === true,
+            rotation_meaningful: dynamics.rotation_meaningful === true,
+            spacing_tunable: dynamics.spacing_tunable === true,
+            opacity_tunable: dynamics.opacity_tunable === true,
+            flow_tunable: dynamics.flow_tunable === true,
+          },
+          effective_settings: candidate.effective_settings && typeof candidate.effective_settings === 'object' && !Array.isArray(candidate.effective_settings)
+            ? { ...candidate.effective_settings } : {},
+          caveats: Array.isArray(candidate.caveats) ? candidate.caveats.map(textOrUndefined).filter(Boolean) : [],
+        };
+      })
+      : [];
     const effective = role.effective_settings;
     if (!effective || typeof effective !== 'object' || Array.isArray(effective)) {
       throw new Error('brush_preflight role ' + roleId + ' requires effective_settings from Photoshop');
@@ -335,6 +416,7 @@ function parseBrushPreflight(raw) {
       visual_intents: visualIntents,
       preferred_preset: preferredPreset,
       alternative_presets: alternatives,
+      candidate_evidence: candidateEvidence,
       effective_settings: effectiveSettings,
       working_scale: workingScale,
       pressure_policy: pressurePolicy,
@@ -511,8 +593,12 @@ function validateBrushStrategyAgainstPreflight(artRun, request) {
   if (!visualIntent || !role.visual_intents?.includes(visualIntent)) {
     throw new Error(`brush_visual_intent_mismatch: visual_intent=${visualIntent ?? 'missing'} is not assigned to brush_role=${brushRole}`);
   }
-  if (pressurePolicy !== role.pressure_policy) {
-    throw new Error(`brush_pressure_policy_mismatch: brush_role=${brushRole} requires pressure_policy=${role.pressure_policy}, got ${pressurePolicy ?? 'missing'}`);
+  const selectedCandidate = presetName && Array.isArray(role.candidate_evidence)
+    ? role.candidate_evidence.find(candidate => candidate.preset_name === presetName)
+    : undefined;
+  const expectedPressurePolicy = selectedCandidate?.pressure_policy ?? role.pressure_policy;
+  if (pressurePolicy !== expectedPressurePolicy) {
+    throw new Error(`brush_pressure_policy_mismatch: brush_role=${brushRole} preset_name=${presetName ?? 'missing'} requires pressure_policy=${expectedPressurePolicy}, got ${pressurePolicy ?? 'missing'}`);
   }
   const acceptedPresets = new Set([role.preferred_preset, ...(role.alternative_presets ?? [])]);
   if (presetName && !acceptedPresets.has(presetName)) {
@@ -587,10 +673,23 @@ function parseValueCheck(raw) {
   if (confidence !== undefined && (!Number.isFinite(confidence) || confidence < 0 || confidence > 1)) {
     throw new Error('directive.value_check.confidence must be between 0 and 1');
   }
+  const rawStyleBasis = raw.style_contract_basis;
+  let styleContractBasis;
+  if (rawStyleBasis !== undefined) {
+    if (!rawStyleBasis || typeof rawStyleBasis !== 'object' || Array.isArray(rawStyleBasis)) {
+      throw new Error('directive.value_check.style_contract_basis must be an object');
+    }
+    const field = textOrUndefined(rawStyleBasis.field);
+    const criterion = textOrUndefined(rawStyleBasis.criterion);
+    if (!field || !STYLE_CONTRACT_FIELDS.includes(field) || !criterion) {
+      throw new Error('directive.value_check.style_contract_basis requires a valid style_contract field and exact criterion');
+    }
+    styleContractBasis = { field, criterion };
+  }
 
   if (status === 'style-not-applicable') {
     const reason = textOrUndefined(raw.applicability_reason);
-    if (!reason || reason.length < 12) throw new Error('style-not-applicable requires a concrete applicability_reason');
+    if (!styleContractBasis) throw new Error('value_check style-not-applicable requires style_contract_basis');
     return {
       status,
       observed,
@@ -598,8 +697,9 @@ function parseValueCheck(raw) {
       criteria: {},
       confidence: confidence ?? null,
       limitations,
-      applicability_reason: reason,
+      applicability_reason: reason ?? null,
       override_reason: null,
+      style_contract_basis: styleContractBasis,
     };
   }
 
@@ -621,8 +721,7 @@ function parseValueCheck(raw) {
     if (!VALUE_CRITERION_STATUSES.includes(criterionStatus)) {
       throw new Error(`directive.value_check.criteria.${key}.status must be one of ${VALUE_CRITERION_STATUSES.join(', ')}`);
     }
-    if (!note) throw new Error(`directive.value_check.criteria.${key}.note is required`);
-    criteria[key] = { status: criterionStatus, note };
+    criteria[key] = { status: criterionStatus, note: note ?? null };
   }
   if (status === 'pass' && Object.values(criteria).some(row => row.status === 'fail' || row.status === 'uncertain')) {
     throw new Error('value_check.status=pass is inconsistent with failed/uncertain criteria');
@@ -631,8 +730,8 @@ function parseValueCheck(raw) {
     throw new Error('value_check.status=fail requires at least one failed/uncertain criterion');
   }
   const overrideReason = status === 'override' ? textOrUndefined(raw.override_reason) : undefined;
-  if (status === 'override' && (!overrideReason || overrideReason.length < 12)) {
-    throw new Error('value_check.status=override requires a concrete override_reason');
+  if (status === 'override' && !styleContractBasis) {
+    throw new Error('value_check.status=override requires style_contract_basis');
   }
   return {
     status,
@@ -644,6 +743,7 @@ function parseValueCheck(raw) {
     limitations,
     applicability_reason: null,
     override_reason: overrideReason ?? null,
+    style_contract_basis: styleContractBasis ?? null,
   };
 }
 function normalizeScale(value) {
@@ -680,7 +780,7 @@ function visualContext(request) {
     failure_signals: Array.isArray(request?.failure_signals) ? request.failure_signals
       : Array.isArray(micro.failure_signals) ? micro.failure_signals : [],
     stage: textOrUndefined(request?.stage) ?? textOrUndefined(micro.stage),
-    ...(stageReset?.from_stage && stageReset?.to_stage && stageReset?.reason && stageReset?.detail
+    ...(stageReset?.from_stage && stageReset?.to_stage && stageReset?.reason
       ? { stage_reset: stageReset }
       : {}),
     scale: normalizeScale(request?.scale) ?? normalizeScale(micro.scale),
@@ -694,6 +794,9 @@ function visualContext(request) {
     addresses_primary_mismatch: micro.addresses_primary_mismatch === true || request?.addresses_primary_mismatch === true,
     independent_region: micro.independent_region === true || request?.independent_region === true,
     preservation_facts: declaredStringArray(micro.preservation_facts ?? request?.preservation_facts),
+    root_cause_classification: textOrUndefined(request?.root_cause_classification)?.toLowerCase(),
+    root_cause_reason: textOrUndefined(request?.root_cause_reason),
+    causal_level_change: request?.causal_level_change === true,
     change_domains: Array.isArray(micro.change_domains)
       ? [...new Set(micro.change_domains.map(value => textOrUndefined(value)?.toLowerCase()).filter(Boolean))]
       : Array.isArray(request?.change_domains)
@@ -812,6 +915,75 @@ export function paintingDevelopmentProvenance(records, documentId, currentFrameO
     blockin_primitive_dominance: regionConstructionOperations >= 2 && postBlockinMarkmakingOperations === 0,
   };
 }
+
+export function paintingMethodUsage(records, documentId) {
+  const completed = records.filter(record =>
+    record
+    && record.phase === 'completed'
+    && record.visual === true
+    && record.tool === 'photoshop_execute_visual_microplan'
+    && record.args?.document_id === documentId
+  );
+  const increment = (target, key) => {
+    if (!key) return;
+    target[key] = (target[key] ?? 0) + 1;
+  };
+  const toolUsage = {};
+  const methodClassUsage = {};
+  const methodIdUsage = {};
+  const brushRoleUsage = {};
+  const brushPresetUsage = {};
+  const stageUsage = {};
+  const problemUsage = {};
+  const outcomeUsage = {};
+  let mutationOperations = 0;
+  for (const record of completed) {
+    const micro = record.args && typeof record.args === 'object' && !Array.isArray(record.args)
+      ? record.args : {};
+    const steps = Array.isArray(micro.steps) ? micro.steps : [];
+    const mutationSteps = steps.filter(step => step?.tool && step.tool !== 'photoshop_get_preview');
+    if (mutationSteps.length) mutationOperations += 1;
+    for (const step of mutationSteps) {
+      increment(toolUsage, textOrUndefined(step.tool));
+      increment(methodIdUsage, textOrUndefined(step.method_id));
+    }
+    increment(methodClassUsage, textOrUndefined(micro.method_class)?.toLowerCase());
+    increment(brushRoleUsage, textOrUndefined(micro.paint_strategy?.brush_role));
+    increment(brushPresetUsage, textOrUndefined(micro.paint_strategy?.preset_name));
+    increment(stageUsage, canonicalPaintingStage(micro.stage) ?? textOrUndefined(micro.stage));
+    increment(problemUsage, problemIdentity(record));
+    const outcome = record.rolled_back === true
+      ? 'rolled-back'
+      : record.failed === true
+        ? 'failed'
+        : record.verdict?.disposition === 'accept'
+          ? 'accepted'
+          : record.verdict?.disposition === 'rollback'
+            ? 'rollback-required'
+            : record.verdict ? 'reviewed-other' : 'unreviewed';
+    increment(outcomeUsage, outcome);
+  }
+  const sorted = source => Object.fromEntries(
+    Object.entries(source).sort((a, b) => Number(b[1]) - Number(a[1]) || a[0].localeCompare(b[0]))
+  );
+  return {
+    visual_microplan_operations: completed.length,
+    mutation_operations: mutationOperations,
+    distinct_tools_used: Object.keys(toolUsage).length,
+    distinct_method_classes_used: Object.keys(methodClassUsage).length,
+    distinct_method_ids_used: Object.keys(methodIdUsage).length,
+    distinct_brush_roles_used: Object.keys(brushRoleUsage).length,
+    distinct_brush_presets_used: Object.keys(brushPresetUsage).length,
+    tool_usage: sorted(toolUsage),
+    method_class_usage: sorted(methodClassUsage),
+    method_id_usage: sorted(methodIdUsage),
+    brush_role_usage: sorted(brushRoleUsage),
+    brush_preset_usage: sorted(brushPresetUsage),
+    stage_usage: sorted(stageUsage),
+    problem_usage: sorted(problemUsage),
+    outcome_usage: sorted(outcomeUsage),
+  };
+}
 function strategyChanged(request, prior) {
   if (!prior) return true;
   return visualStrategyFingerprint(request) !== visualStrategyFingerprint(prior);
@@ -921,6 +1093,14 @@ function historyStepsInPayload(payload) {
   return 0;
 }
 function reportedHistorySteps(record) {
+  for (const body of parseTexts(record?.result)) {
+    const ownership = body?.pass_execution?.history_ownership;
+    if (ownership?.protocol !== 'photoshop.guard.semantic_pass_history_ownership.v1') continue;
+    if (ownership.status !== 'exact') return 0;
+    const owned = positiveHistoryStepCount(ownership.owned_history_steps);
+    if (owned > 0) return owned;
+    return 0;
+  }
   let reported = 0;
   for (const body of parseTexts(record?.result)) {
     reported = Math.max(reported, historyStepsInPayload(body));
@@ -1073,7 +1253,7 @@ function stageResetStatePatch(current, context, operationId, at) {
     from_stage: reset.from_stage,
     to_stage: reset.to_stage,
     reason: reset.reason,
-    detail: reset.detail,
+    ...(typeof reset.detail === 'string' && reset.detail.trim() ? { detail: reset.detail.trim() } : {}),
     at,
   };
   return {
@@ -1222,6 +1402,12 @@ function normalizeVisualObservations(value) {
     return { region, visible };
   });
 }
+function hasWholeFrameObservation(observations) {
+  return observations.some(observation => {
+    const region = String(observation?.region ?? '').trim().toLowerCase();
+    return region === 'whole frame' || region === 'whole-frame';
+  });
+}
 function goalAssessment(input) {
   const confirmed = input.target_resolved === 'yes'
     && input.verdict === 'improvement'
@@ -1294,6 +1480,36 @@ function elapsedMs(start, end) {
   const a = Date.parse(start ?? '');
   const b = Date.parse(end ?? '');
   return Number.isFinite(a) && Number.isFinite(b) ? Math.max(0, b - a) : null;
+}
+function continuationLatencySegments(record) {
+  const latency = record?.latency ?? {};
+  const timing = record?.continuation_timing ?? {};
+  const responseReadyAt = textOrUndefined(latency.response_ready_at);
+  const reviewRequestAt = textOrUndefined(timing.review_image_request_received_at);
+  const reviewReadyAt = textOrUndefined(timing.review_image_result_ready_at);
+  const reviewFinishedAt = textOrUndefined(timing.review_finished_marker_received_at);
+  const nextPassReadyAt = textOrUndefined(timing.next_pass_ready_marker_received_at);
+  const nextGuardAt = textOrUndefined(latency.next_cycle_received_at);
+  return {
+    guard_response_to_review_request_ms: responseReadyAt && reviewRequestAt
+      ? elapsedMs(responseReadyAt, reviewRequestAt)
+      : null,
+    review_image_service_ms: reviewRequestAt && reviewReadyAt
+      ? elapsedMs(reviewRequestAt, reviewReadyAt)
+      : null,
+    review_delivery_to_review_finished_marker_ms: reviewReadyAt && reviewFinishedAt
+      ? elapsedMs(reviewReadyAt, reviewFinishedAt)
+      : null,
+    review_finished_to_next_pass_ready_marker_ms: reviewFinishedAt && nextPassReadyAt
+      ? elapsedMs(reviewFinishedAt, nextPassReadyAt)
+      : null,
+    next_pass_ready_marker_to_guard_ms: nextPassReadyAt && nextGuardAt
+      ? elapsedMs(nextPassReadyAt, nextGuardAt)
+      : null,
+    review_delivery_to_next_guard_ms: reviewReadyAt && nextGuardAt
+      ? elapsedMs(reviewReadyAt, nextGuardAt)
+      : null,
+  };
 }
 function percentile(values, fraction) {
   const sorted = values.filter(value => typeof value === 'number' && Number.isFinite(value) && value >= 0).sort((a, b) => a - b);
@@ -1403,6 +1619,11 @@ export class SessionStore {
     return parseTexts(record.result).some(body => {
       if (body?.execution === 'not-executed') return true;
       if (body?.visual_mutation_started === false && guaranteedPreDispatchCodes.has(body?.code)) return true;
+      // Legacy explicit-document navigation failures predate the execution marker.
+      // UXP resolves document_not_found / ambiguous_name before activating any
+      // document, so these exact failures are terminal zero-side-effect outcomes.
+      if (failedResult && record.tool === 'photoshop_set_active_document'
+        && (body?.code === 'document_not_found' || body?.code === 'ambiguous_name')) return true;
       // Legacy parser/method rejections predate the explicit execution marker.
       // Those two codes were emitted before any mutation dispatch. Keep the
       // compatibility proof narrow and refuse it when any positive mutation
@@ -1598,12 +1819,9 @@ export class SessionStore {
       );
     }
     const transitionReason = textOrUndefined(input?.profile_transition_reason);
-    if (profileTransition.transition && (!transitionReason || transitionReason.length < 8)) {
-      throw new Error('simple_graphic -> nontrivial_painting requires a concrete profile_transition_reason');
-    }
     const transitionRecord = profileTransition.transition ? {
       ...profileTransition.transition,
-      reason: transitionReason,
+      ...(transitionReason ? { reason: transitionReason } : {}),
       at: new Date().toISOString(),
     } : undefined;
     const document = this.updatePaintingState(documentId, current => ({
@@ -1908,7 +2126,7 @@ export class SessionStore {
       if (!ART_DIRECTOR_INTERRUPT_REASONS.has(reason)) {
         throw new Error(`Art Director interrupt reason must be one of ${[...ART_DIRECTOR_INTERRUPT_REASONS].join(', ')}`);
       }
-      if (!detail || detail.length < 10) throw new Error('Art Director interrupt requires concrete detail');
+      if (detail !== undefined && detail.length < 10) throw new Error('Art Director interrupt detail must be concrete when supplied');
       return this.updatePaintingState(documentId, current => {
         const existing = current.art_director;
         if (!existing?.directive_id || existing.status === 'completed') {
@@ -1921,7 +2139,7 @@ export class SessionStore {
             status: 'interrupted',
             review_due: true,
             review_reason: `early_interrupt:${reason}`,
-            interrupt: { reason, detail, at: new Date().toISOString() },
+            interrupt: { reason, ...(detail ? { detail } : {}), at: new Date().toISOString() },
           },
         };
       });
@@ -1931,6 +2149,12 @@ export class SessionStore {
       return this.updatePaintingState(documentId, current => {
         const existing = current.art_director;
         if (!existing?.directive_id) throw new Error('No Art Director directive to complete');
+        const openMustFix = this.largestOpenMustFix(current.visual_problems);
+        if (openMustFix) {
+          throw new Error(
+            `Cannot complete Art Director directive while unresolved must-fix visual problem remains: ${openMustFix.problem_id}`
+          );
+        }
         const unfinished = (existing.tasks ?? []).filter(task => task.status !== 'completed');
         const comparison = input?.final_comparison;
         if (!comparison || typeof comparison !== 'object' || Array.isArray(comparison)) {
@@ -1996,16 +2220,16 @@ export class SessionStore {
           throw new Error(developmentGate.errors.join('; '));
         }
         const reason = textOrUndefined(comparison.reason);
-        if (!reason || reason.length < 12) throw new Error('final_comparison.reason must be concrete');
         const criteria = comparison.criteria;
-        if (!criteria || typeof criteria !== 'object' || Array.isArray(criteria)) {
-          throw new Error('final_comparison.criteria is required');
-        }
         const normalizedCriteria = {};
-        for (const field of FINAL_COMPARISON_CRITERIA) {
-          const value = textOrUndefined(criteria[field]);
-          if (!value) throw new Error(`final_comparison.criteria.${field} is required`);
-          normalizedCriteria[field] = value;
+        if (criteria !== undefined) {
+          if (!criteria || typeof criteria !== 'object' || Array.isArray(criteria)) {
+            throw new Error('final_comparison.criteria must be an object when supplied');
+          }
+          for (const field of FINAL_COMPARISON_CRITERIA) {
+            const value = textOrUndefined(criteria[field]);
+            if (value) normalizedCriteria[field] = value;
+          }
         }
         const primaryAnchor = current.primary_artistic_anchor;
         const alternativeAnchors = Array.isArray(current.alternative_artistic_anchors)
@@ -2052,6 +2276,25 @@ export class SessionStore {
             throw new Error('final_comparison requires durable whole-frame composition evidence for the current operation; local crop evidence is supplemental only');
           }
         }
+        const completionGlanceRecord = this.normalizeWholeImageGlance(
+          input?.whole_image_glance,
+          { directive_id: existing.directive_id, reviewed_at: new Date().toISOString() },
+          current
+        );
+        if (existing.whole_image_glance?.due === true && !completionGlanceRecord) {
+          throw new Error(
+            `Cannot complete Art Director directive while whole-image review is still due (${existing.whole_image_glance.reason ?? 'pending'}); supply the exact-current whole_image_glance with action=complete`
+          );
+        }
+        const completionWholeImageGlance = completionGlanceRecord ? {
+          due: false,
+          reason: null,
+          last_record: completionGlanceRecord,
+          history: [
+            ...(existing.whole_image_glance?.history ?? []),
+            completionGlanceRecord,
+          ].slice(-4),
+        } : existing.whole_image_glance;
         const finalFrame = current.current_frame
           ? {
               operation_id: current.current_frame.operation_id,
@@ -2074,27 +2317,76 @@ export class SessionStore {
             frame: current.current_frame,
           }
         );
+        this.validateNamedRecognitionBriefEvidence(
+          documentId,
+          globalBriefAssessment,
+          existing.artistic_evaluation_contract,
+          current.current_frame
+        );
         if (['unsatisfied', 'regression'].includes(globalBriefAssessment.outcome)) {
           throw new Error(
             `Cannot complete Art Director directive while global brief outcome is ${globalBriefAssessment.outcome}; `
             + 'relative-best/final-comparison preference is not global brief satisfaction'
           );
         }
+        const hasHardBriefItems = Array.isArray(existing.artistic_evaluation_contract?.brief_items)
+          && existing.artistic_evaluation_contract.brief_items.some(item => item?.kind === 'hard_perceptual');
+        if (hasHardBriefItems && !globalCompletionAllowed(globalBriefAssessment)) {
+          throw new Error('Cannot complete Art Director directive while hard brief debt is unresolved or the global brief is not independently satisfied');
+        }
+        const geometryCompletionDebt = this.geometryCompletionDebt(documentId);
+        if (geometryCompletionDebt.length) {
+          throw new Error(
+            `Cannot complete Art Director directive while E.18 geometry completion debt is unresolved: ${geometryCompletionDebt.map(item => `${item.owner_id ?? 'scene'}:${item.code}`).join(', ')}`
+          );
+        }
+        const physicalEffectCompletionDebt = this.physicalEffectCompletionDebt(documentId);
+        if (physicalEffectCompletionDebt.length) {
+          throw new Error(
+            `Cannot complete Art Director directive while E.17d/E.19 physical-effect debt is unresolved: ${physicalEffectCompletionDebt.map(item => `${item.owner_id ?? 'scene'}:${item.code}`).join(', ')}`
+          );
+        }
+        const preFinalHostileReview = normalizePreFinalHostileReview(
+          input?.pre_final_hostile_review,
+          {
+            contract: existing.artistic_evaluation_contract,
+            frame: current.current_frame,
+            globalAssessment: globalBriefAssessment,
+            geometryDebt: geometryCompletionDebt,
+            physicalEffectDebt: physicalEffectCompletionDebt,
+          }
+        );
+        if (preFinalHostileReview.completion_allowed !== true) {
+          const defects = Array.isArray(preFinalHostileReview.hard_defects)
+            ? preFinalHostileReview.hard_defects.map(defect => defect?.summary).filter(Boolean).join('; ')
+            : '';
+          throw new Error(
+            `Cannot complete Art Director directive while pre-final hostile review has hard defects${defects ? `: ${defects}` : ''}`
+          );
+        }
+        const completionBriefDebtOverrides = { ...(current.brief_debt_overrides ?? {}) };
+        for (const row of Array.isArray(globalBriefAssessment.brief_item_results) ? globalBriefAssessment.brief_item_results : []) {
+          if (row?.kind !== 'hard_perceptual' || !row?.item_id) continue;
+          if (row.state === 'MET') delete completionBriefDebtOverrides[row.item_id];
+          else completionBriefDebtOverrides[row.item_id] = structuredClone(row);
+        }
         return {
           ...current,
           ...(finalFrame ? { final_artistic_frame: finalFrame } : {}),
           global_brief_assessment: globalBriefAssessment,
           global_brief_outcome: globalBriefAssessment.outcome,
+          brief_debt_overrides: completionBriefDebtOverrides,
           art_director: {
             ...existing,
             status: 'completed',
             review_due: false,
             review_reason: null,
+            whole_image_glance: completionWholeImageGlance,
             final_comparison: {
               scope,
               preferred,
-              reason,
-              criteria: normalizedCriteria,
+              ...(reason ? { reason } : {}),
+              ...(Object.keys(normalizedCriteria).length ? { criteria: normalizedCriteria } : {}),
               evidence_contract: 'composition-whole-frame',
               ...(exactPrimaryRestore ? { restored_primary_anchor: true } : {}),
               ...(textOrUndefined(comparison.current_operation_id) ? { current_operation_id: comparison.current_operation_id.trim() } : {}),
@@ -2103,6 +2395,7 @@ export class SessionStore {
             },
             global_brief_assessment: globalBriefAssessment,
             global_brief_completion_allowed: globalCompletionAllowed(globalBriefAssessment),
+            pre_final_hostile_review: preFinalHostileReview,
             visual_development_gate: {
               ...developmentGate,
               provenance: developmentProvenance,
@@ -2159,9 +2452,6 @@ export class SessionStore {
     if (!chosenRenderingStrategy || chosenRenderingStrategy.length < 12) {
       throw new Error('prompt_conflict_preflight.chosen_rendering_strategy must define the structural rendering approach');
     }
-    if (!resolutionRationale || resolutionRationale.length < 12) {
-      throw new Error('prompt_conflict_preflight.resolution_rationale must explain why the strategy serves the dominant objective');
-    }
     if (!PROMPT_CONFLICT_RESOLUTION_MODES.has(resolutionMode)) {
       throw new Error('prompt_conflict_preflight.resolution_mode must be none|declared-interpretation|user-confirmed');
     }
@@ -2216,7 +2506,7 @@ export class SessionStore {
       conflicts,
       resolution_mode: resolutionMode,
       chosen_rendering_strategy: chosenRenderingStrategy,
-      resolution_rationale: resolutionRationale,
+      ...(resolutionRationale ? { resolution_rationale: resolutionRationale } : {}),
       first_pass_strategy: firstPassStrategy,
       ...(userConfirmation ? { user_confirmation: userConfirmation } : {}),
     };
@@ -2273,9 +2563,6 @@ export class SessionStore {
       if (!selectedId || !hypotheses.some(hypothesis => hypothesis.id === selectedId)) {
         throw new Error('composition_freedom=free selected_id must reference one declared hypothesis');
       }
-      if (!selectionReason || selectionReason.length < 12) {
-        throw new Error('composition_freedom=free requires a concrete selection_reason');
-      }
     }
     if (compositionFreedom === 'constrained' && materialChoiceUnresolved) {
       if (hypotheses.length < 2 || hypotheses.length > 4) {
@@ -2284,9 +2571,6 @@ export class SessionStore {
       if (!selectedId || !hypotheses.some(hypothesis => hypothesis.id === selectedId)) {
         throw new Error('constrained material composition choice requires selected_id from the bounded hypotheses');
       }
-      if (!selectionReason || selectionReason.length < 12) {
-        throw new Error('constrained material composition choice requires a concrete selection_reason');
-      }
     }
     const compositionExploration = {
       hypotheses,
@@ -2294,6 +2578,7 @@ export class SessionStore {
       selection_reason: selectionReason ?? null,
       material_choice_unresolved: materialChoiceUnresolved,
     };
+    const perceptualHierarchy = normalizePerceptualHierarchy(directive.perceptual_hierarchy);
     const physicalStackCheck = normalizePhysicalStackCheck(
       directive.physical_stack_check ?? { status: 'pending', observed: false }
     );
@@ -2313,6 +2598,15 @@ export class SessionStore {
       }
     }
     const valueCheck = parseValueCheck(directive.value_check);
+    if (['override', 'style-not-applicable'].includes(valueCheck.status)) {
+      const basis = valueCheck.style_contract_basis;
+      const declared = basis ? styleContract[basis.field] : undefined;
+      if (!basis || declared !== basis.criterion) {
+        throw new Error(
+          'value_check exception requires style_contract_basis to exactly match a declared style_contract field'
+        );
+      }
+    }
     if (valueCheck.status !== 'style-not-applicable') {
       this.validateValueCheckEvidence(documentId, valueCheck);
     }
@@ -2367,18 +2661,55 @@ export class SessionStore {
       for (const domain of allowedGlobalChanges) {
         if (!GLOBAL_CHANGE_DOMAINS.has(domain)) throw new Error(`Unknown allowed_global_changes domain ${domain}`);
       }
+      const perceptualZoneIds = Array.isArray(task.perceptual_zone_ids)
+        ? [...new Set(task.perceptual_zone_ids.map(value => textOrUndefined(value)).filter(Boolean))]
+        : [];
+      const knownPerceptualZoneIds = new Set(perceptualHierarchy.zones.map(zone => zone.id));
+      for (const zoneId of perceptualZoneIds) {
+        if (!knownPerceptualZoneIds.has(zoneId)) throw new Error(`directive.tasks[${index}].perceptual_zone_ids contains unknown zone ${zoneId}`);
+      }
+      let constructionPlan;
+      if (task.construction_plan !== undefined) {
+        if (!task.construction_plan || typeof task.construction_plan !== 'object' || Array.isArray(task.construction_plan)) {
+          throw new Error(`directive.tasks[${index}].construction_plan must be an object`);
+        }
+        const plan = task.construction_plan;
+        const representationStrategy = textOrUndefined(plan.representation_strategy);
+        const structuralFeatures = Array.isArray(plan.structural_features)
+          ? [...new Set(plan.structural_features.map(value => textOrUndefined(value)).filter(Boolean))]
+          : [];
+        const stageExitCondition = textOrUndefined(plan.stage_exit_condition);
+        if (!representationStrategy || structuralFeatures.length < 2 || !stageExitCondition) {
+          throw new Error(`directive.tasks[${index}].construction_plan requires representation_strategy, at least two structural_features, and stage_exit_condition`);
+        }
+        const compactList = (value) => Array.isArray(value)
+          ? [...new Set(value.map(item => textOrUndefined(item)).filter(Boolean))]
+          : [];
+        constructionPlan = {
+          representation_strategy: representationStrategy,
+          structural_features: structuralFeatures,
+          recognition_features: compactList(plan.recognition_features),
+          negative_spaces: compactList(plan.negative_spaces),
+          occlusions: compactList(plan.occlusions),
+          ...(textOrUndefined(plan.perspective_or_flow) ? { perspective_or_flow: plan.perspective_or_flow.trim() } : {}),
+          primitive_risks: compactList(plan.primitive_risks),
+          stage_exit_condition: stageExitCondition,
+        };
+      }
       return {
         task_id: taskId,
         summary,
         ...(textOrUndefined(task.region) ? { region: task.region.trim() } : {}),
         allowed_scales: allowedScales,
         allowed_global_changes: allowedGlobalChanges,
+        ...(perceptualZoneIds.length ? { perceptual_zone_ids: perceptualZoneIds } : {}),
         ...(Array.isArray(task.affected_relations) ? {
           affected_relations: [...new Set(task.affected_relations.map(value => textOrUndefined(value)).filter(Boolean))],
         } : {}),
         ...(Array.isArray(task.affected_qualities) ? {
           affected_qualities: [...new Set(task.affected_qualities.map(value => textOrUndefined(value)).filter(Boolean))],
         } : {}),
+        ...(constructionPlan ? { construction_plan: constructionPlan } : {}),
         successful_microplans: 0,
         status: index === 0 ? 'active' : 'pending',
       };
@@ -2423,8 +2754,8 @@ export class SessionStore {
         if (!evidenceOperationId || evidenceOperationId !== current.current_frame?.operation_id) {
           throw new Error('strategy_validation.evidence_operation_id must reference the exact current artistic frame');
         }
-        if (!dominantObjectiveRead || !strategyFit || !validationReason || validationReason.length < 12) {
-          throw new Error('due strategy validation requires dominant_objective_read, strategy_fit and a concrete reason');
+        if (!dominantObjectiveRead || !strategyFit) {
+          throw new Error('due strategy validation requires dominant_objective_read and strategy_fit');
         }
         if (strategyValidationStatus === 'replan') {
           const strategyChanged = chosenRenderingStrategy !== previous.prompt_conflict_preflight?.chosen_rendering_strategy
@@ -2440,7 +2771,7 @@ export class SessionStore {
           evidence_operation_id: evidenceOperationId,
           dominant_objective_read: dominantObjectiveRead,
           strategy_fit: strategyFit,
-          reason: validationReason,
+          ...(validationReason ? { reason: validationReason } : {}),
           validated_at: new Date().toISOString(),
         };
       } else {
@@ -2455,6 +2786,20 @@ export class SessionStore {
         contract: artisticEvaluationContract,
         frame: current.current_frame,
       });
+      this.validateNamedRecognitionBriefEvidence(
+        documentId,
+        globalBriefAssessment,
+        artisticEvaluationContract,
+        current.current_frame
+      );
+      const briefDebtOverrides = { ...(current.brief_debt_overrides ?? {}) };
+      if (Array.isArray(globalBriefAssessment.brief_item_results)) {
+        for (const row of globalBriefAssessment.brief_item_results) {
+          if (row?.kind !== 'hard_perceptual' || !row?.item_id) continue;
+          if (row.state === 'MET') delete briefDebtOverrides[row.item_id];
+          else briefDebtOverrides[row.item_id] = structuredClone(row);
+        }
+      }
       const anchorState = this.applyArtisticAnchorDecision(current, input?.anchor_decision, {
         directive_id: directiveId,
         reviewed_at: now,
@@ -2482,11 +2827,22 @@ export class SessionStore {
         last_record: glanceRecord,
         history: [...(previousGlance.history ?? []), glanceRecord].slice(-4),
       } : previousGlance;
+      const previousHierarchy = previous?.perceptual_hierarchy;
+      const hierarchyChanged = previousHierarchy
+        && JSON.stringify(previousHierarchy) !== JSON.stringify(perceptualHierarchy);
+      if (previousHierarchy && hierarchyChanged && perceptualHierarchy.revision <= Number(previousHierarchy.revision ?? 0)) {
+        throw new Error('directive.perceptual_hierarchy revision must increase when focal ordering or zone budgets change');
+      }
+      const hierarchyHistory = [
+        ...(Array.isArray(previous?.perceptual_hierarchy_history) ? previous.perceptual_hierarchy_history : []),
+        ...(previousHierarchy && hierarchyChanged ? [previousHierarchy] : []),
+      ].slice(-6);
       return {
         ...current,
         ...anchorState,
         global_brief_assessment: globalBriefAssessment,
         global_brief_outcome: globalBriefAssessment.outcome,
+        brief_debt_overrides: briefDebtOverrides,
         art_director: {
           directive_id: directiveId,
           revision,
@@ -2503,6 +2859,8 @@ export class SessionStore {
           global_brief_assessment: globalBriefAssessment,
           composition_freedom: compositionFreedom,
           composition_exploration: compositionExploration,
+          perceptual_hierarchy: perceptualHierarchy,
+          perceptual_hierarchy_history: hierarchyHistory,
           assessment: normalizedAssessment,
           physical_stack_check: physicalStackCheck,
           value_check: valueCheck,
@@ -2537,10 +2895,7 @@ export class SessionStore {
     if (!['promote_primary', 'retain_primary', 'preserve_alternative'].includes(action)) {
       throw new Error('anchor_decision.action must be promote_primary|retain_primary|preserve_alternative');
     }
-    const rationale = textOrUndefined(rawDecision.rationale);
-    if (!rationale || rationale.length < 12) {
-      throw new Error('anchor_decision.rationale must be a concrete whole-image review reason');
-    }
+    const rationale = textOrUndefined(rawDecision.rationale) ?? null;
     const primary = current.primary_artistic_anchor ?? null;
     const alternatives = Array.isArray(current.alternative_artistic_anchors)
       ? current.alternative_artistic_anchors.filter(Boolean)
@@ -3185,13 +3540,13 @@ export class SessionStore {
     const taskReviewAfter = Number(art.task_review_after_microplans ?? Math.min(reviewAfter || 3, 3));
     const taskSuccessfulMicroplans = Number(task.successful_microplans ?? 0);
     const cadenceDue = !taskResolved && taskReviewAfter > 0 && taskSuccessfulMicroplans >= taskReviewAfter;
-    const strategyValidation = art.strategy_validation ?? { status: 'pending', due_after_microplans: art.strategy_validation_after_microplans ?? 1 };
-    const strategyValidationAfter = Number(strategyValidation.due_after_microplans ?? art.strategy_validation_after_microplans ?? 1);
     const strategyMeaningfulMicroplans = Number(art.strategy_meaningful_microplans ?? 0)
       + (record.significance?.execution_effect === 'meaningful' ? 1 : 0);
-    const strategyValidationDue = strategyValidation.status === 'pending'
-      && Number.isSafeInteger(strategyValidationAfter)
-      && strategyMeaningfulMicroplans >= strategyValidationAfter;
+    // E.7c: strategy-validation cadence is artistic guidance, not execution
+    // authority. Keep the configured cadence and meaningful-pass counter as
+    // durable telemetry, but do not turn the threshold itself into a review
+    // barrier. Observed failure/uncertainty/protected-quality loss and the
+    // ordinary task review cadence below remain real review triggers.
     let nextTask;
     if (taskResolved) {
       nextTask = tasks.find(row => row.status === 'pending');
@@ -3264,10 +3619,6 @@ export class SessionStore {
       status = 'review_due';
       reviewDue = true;
       reviewReason = `protected_quality_loss:${task.task_id}`;
-    } else if (strategyValidationDue) {
-      status = 'review_due';
-      reviewDue = true;
-      reviewReason = `strategy_validation:${strategyMeaningfulMicroplans}_meaningful_microplans`;
     } else if (allCompleted) {
       status = 'review_due';
       reviewDue = true;
@@ -3319,6 +3670,7 @@ export class SessionStore {
     if (!Number.isSafeInteger(documentId) || documentId <= 0) throw new Error('priority state requires a positive document_id');
     if (!Array.isArray(input?.problems)) throw new Error('priority state requires problems[]');
     const currentStage = canonicalPaintingStage(textOrUndefined(input.current_stage));
+    const evidenceOperationId = textOrUndefined(input.evidence_operation_id);
     const requested = {};
     for (const problem of input.problems) {
       const problemId = textOrUndefined(problem?.problem_id);
@@ -3361,6 +3713,45 @@ export class SessionStore {
           || normalizeSeverity(prior.severity) !== normalizeSeverity(merged.severity)
           || (textOrUndefined(prior.region) ?? null) !== (textOrUndefined(merged.region) ?? null)
         );
+        const perceptualReclassification = reclassified && (
+          prior.status !== merged.status
+          || normalizeScale(prior.scale) !== normalizeScale(merged.scale)
+          || normalizeSeverity(prior.severity) !== normalizeSeverity(merged.severity)
+        );
+        if (perceptualReclassification && prior.status !== 'resolved') {
+          if (!evidenceOperationId) {
+            throw new Error(
+              `priority_reclassification_evidence_required: changing current perceptual status/scale/severity for ${problemId} requires evidence_operation_id from an exact-current visual verdict`
+            );
+          }
+          const evidence = this.currentDocumentRecords(documentId, this.records())
+            .find(record => record.id === evidenceOperationId);
+          if (!evidence || !evidence.visual || !evidence.verdict) {
+            throw new Error(
+              `priority_reclassification_evidence_invalid: evidence_operation_id=${evidenceOperationId} must identify a visual operation with a completed verdict on document ${documentId}`
+            );
+          }
+          const documentRecords = this.currentDocumentRecords(documentId, this.records());
+          if (!this.recordHasCurrentFrameAuthority(evidence, current, documentRecords)) {
+            throw new Error(
+              `priority_reclassification_evidence_stale: evidence_operation_id=${evidenceOperationId} no longer has current-frame authority`
+            );
+          }
+          const latestVisualSequence = Math.max(
+            0,
+            ...documentRecords
+              .filter(record => record.visual && record.verdict
+                && this.recordHasCurrentFrameAuthority(record, current, documentRecords))
+              .map(record => Number.isSafeInteger(record.sequence) ? record.sequence : 0)
+          );
+          if ((Number(evidence.sequence) || 0) !== latestVisualSequence) {
+            throw new Error(
+              `priority_reclassification_evidence_not_current: evidence_operation_id=${evidenceOperationId} is not the latest authoritative visual verdict`
+            );
+          }
+          merged.reclassification_evidence_operation_id = evidenceOperationId;
+          merged.reclassification_evidence_sequence = Number(evidence.sequence) || latestVisualSequence;
+        }
         if (isTrend && reclassified) {
           merged.resolution_epoch = Number(prior.resolution_epoch ?? 0) + 1;
           merged.resolution_cutoff_sequence = latestClassifiedSequence;
@@ -3397,26 +3788,86 @@ export class SessionStore {
     return eligible[0];
   }
   largestOpenMustFix(problems) {
-    const mustFix = Object.fromEntries(Object.entries(problems ?? {}).filter(([, problem]) => problem?.severity === 'must-fix'));
-    return this.primaryBlockingProblem(mustFix);
+    const byId = problems ?? {};
+    const mustFixRoots = Object.values(byId)
+      .filter(problem => problem?.status !== 'resolved' && problem?.severity === 'must-fix' && normalizeScale(problem?.scale));
+    mustFixRoots.sort((a, b) =>
+      SCALE_RANK[normalizeScale(a.scale)] - SCALE_RANK[normalizeScale(b.scale)]
+      || Number(a.priority_order ?? Number.MAX_SAFE_INTEGER) - Number(b.priority_order ?? Number.MAX_SAFE_INTEGER)
+      || String(a.problem_id).localeCompare(String(b.problem_id))
+    );
+
+    const actionableDependency = (problem, visiting = new Set()) => {
+      const problemId = String(problem?.problem_id ?? '');
+      if (!problemId || visiting.has(problemId)) return undefined;
+      const nextVisiting = new Set(visiting);
+      nextVisiting.add(problemId);
+      const unresolvedDependencies = (Array.isArray(problem.depends_on_problem_ids) ? problem.depends_on_problem_ids : [])
+        .map(id => byId[id])
+        .filter(dependency => dependency && dependency.status !== 'resolved');
+      if (!unresolvedDependencies.length) return problem;
+      for (const dependency of unresolvedDependencies) {
+        const actionable = actionableDependency(dependency, nextVisiting);
+        if (actionable) return actionable;
+      }
+      return undefined;
+    };
+
+    for (const root of mustFixRoots) {
+      const actionable = actionableDependency(root);
+      if (actionable) return actionable;
+    }
+    return undefined;
   }
   priorityGate(documentId, request, projectionContext) {
     if (!isVisual(request.tool)) return null;
     const context = visualContext(request);
     const requestScale = normalizeScale(context.scale);
-    const doc = (projectionContext ? projectionContext.paintingState : this.paintingState()).documents?.[String(documentId)];
+    const rawDoc = (projectionContext ? projectionContext.paintingState : this.paintingState()).documents?.[String(documentId)];
+    const lineageRecords = projectionContext?.records ?? this.records();
+    const reconciledDoc = this.reconcileDerivedProblemEvidenceToCurrentFrame(
+      this.reconcileTrendEvidenceToCurrentFrame(rawDoc ?? {}, lineageRecords),
+      lineageRecords
+    );
+    // Reconciled lineage is durable semantic state, not merely a preflight
+    // view. Persist pruning/retirement so restart/status cannot resurrect stale
+    // blockers from painting-state. Supplied projection contexts stay pure.
+    let doc = reconciledDoc;
+    if (!projectionContext && rawDoc && JSON.stringify(reconciledDoc) !== JSON.stringify(rawDoc)) {
+      doc = this.updatePaintingState(documentId, () => reconciledDoc) ?? reconciledDoc;
+    }
     const blocker = this.largestOpenMustFix(doc?.visual_problems);
     if (!blocker) return null;
+    if (blocker.structural_review === true) {
+      const addressesBlocker = context.problem_id === blocker.problem_id
+        || context.addresses_problem_id === blocker.problem_id;
+      if (!addressesBlocker) {
+        if (!(context.independent_region && context.preservation_facts.length > 0)) {
+          throw new Error(
+            `primary_blocker_unresolved: visual mutation must address unresolved structural must-fix "${blocker.problem_id}" or declare independent_region=true with preservation_facts`
+          );
+        }
+      }
+      if (addressesBlocker && isCosmeticCorrectiveAttempt(request)) {
+        throw new Error(
+          `structural_debt_requires_structural_correction: must-fix "${blocker.problem_id}" came from structural whole-frame review; cosmetic/detail masking is blocked until a structural correction resolves or reclassifies it`
+        );
+      }
+    }
     if (!requestScale) throw new Error(`stage_priority_gate: visual mutation must declare scale=global|medium|small while unresolved must-fix "${blocker.problem_id}" is open`);
     const blockerScale = normalizeScale(blocker.scale);
     if (SCALE_RANK[requestScale] <= SCALE_RANK[blockerScale]) return null;
     throw new Error(`stage_priority_gate: ${requestScale} mutation blocked by unresolved ${blockerScale} must-fix "${blocker.problem_id}". Resolve or reclassify the larger problem before finer work.`);
   }
   cumulativeTrendState(documentId, suppliedRecords) {
-    const records = this.currentDocumentRecords(documentId, suppliedRecords ?? this.records())
-      .filter(r => r.visual && r.verdict)
-      .slice(-TREND_SIGNAL_WINDOW);
+    const documentRecords = this.currentDocumentRecords(documentId, suppliedRecords ?? this.records());
     const documentState = this.paintingState().documents?.[String(documentId)];
+    const records = documentRecords
+      // A rolled-back branch remains durable history, but it is no longer evidence
+      // about the pixels in the current accepted frame.  Keeping it in the trend
+      // window made discarded regressions continue to promote/block current work.
+      .filter(r => r.visual && r.verdict && this.recordHasCurrentFrameAuthority(r, documentState, documentRecords))
+      .slice(-TREND_SIGNAL_WINDOW);
     const supportsBySignal = new Map();
     for (const record of records) {
       const signals = new Set((record.verdict?.trend_signals ?? []).map(normalizeTrendSignal).filter(Boolean));
@@ -3584,6 +4035,12 @@ export class SessionStore {
       photoshop_dispatch_wall_ms: null,
       photoshop_reported_execution_ms: reportedToolExecutionMs(record),
       preview_capture_materialization_ms: null,
+      guard_response_to_review_request_ms: null,
+      review_image_service_ms: null,
+      review_delivery_to_review_finished_marker_ms: null,
+      review_finished_to_next_pass_ready_marker_ms: null,
+      next_pass_ready_marker_to_guard_ms: null,
+      review_delivery_to_next_guard_ms: null,
       visual_evaluation_verdict_gap_ms: null,
       report_ack_closure_ms: null,
       recovery_reconciliation_ms: null,
@@ -3596,8 +4053,71 @@ export class SessionStore {
       ...patch,
       unknown_components: unknownComponents,
     };
+    Object.assign(record.latency, continuationLatencySegments(record));
     this.write(record);
     return record.latency;
+  }
+  abandonClosedDocument(documentId, evidence = {}) {
+    if (!Number.isSafeInteger(documentId) || documentId <= 0) {
+      return { abandoned: false, reason: 'invalid_document_id', document_id: documentId ?? null };
+    }
+    const state = this.paintingState();
+    const current = state.documents?.[String(documentId)] ?? { document_id: documentId };
+    const expectedWitness = normalizeDocumentInstanceWitness(current.document_instance?.host_witness);
+    const observedWitness = normalizeDocumentInstanceWitness(evidence.document_instance_witness);
+    if (expectedWitness && observedWitness && !sameDocumentInstanceWitness(expectedWitness, observedWitness)) {
+      return {
+        abandoned: false,
+        reason: 'stale_document_close_event',
+        document_id: documentId,
+      };
+    }
+    const at = textOrUndefined(evidence.observed_at) ?? new Date().toISOString();
+    const records = this.currentDocumentRecords(documentId, this.records());
+    const abandonedOperations = [];
+    for (const record of records) {
+      if (isAbandonedRecovery(record) || record.execution === 'not-executed') continue;
+      const hasClosureDebt = record.phase !== 'completed'
+        || !record.report
+        || (record.operation_receipt && !record.operation_ack)
+        || (record.visual && !record.verdict);
+      if (!hasClosureDebt) continue;
+      record.resolved = {
+        outcome: 'abandoned',
+        evidence_mode: textOrUndefined(evidence.evidence_mode) ?? 'uxp_document_close_notification',
+        target_document_id: documentId,
+        source: textOrUndefined(evidence.source) ?? 'photoshop_document_close',
+        ...(textOrUndefined(evidence.command_id) ? { command_id: evidence.command_id } : {}),
+        at,
+      };
+      record.guard_ack_required = false;
+      this.write(record);
+      abandonedOperations.push(record.id);
+    }
+    this.clearVisualBarrier(documentId);
+    this.updatePaintingState(documentId, documentState => ({
+      ...documentState,
+      pending_rollback: undefined,
+      priority_review_required: false,
+      workflow_lifecycle: {
+        status: 'stopped',
+        reason: 'abandoned_document_absent',
+        ...(abandonedOperations.length ? { operation_id: abandonedOperations.at(-1) } : {}),
+        at,
+      },
+      document_close: {
+        observed_at: at,
+        evidence_mode: textOrUndefined(evidence.evidence_mode) ?? 'uxp_document_close_notification',
+        source: textOrUndefined(evidence.source) ?? 'photoshop_document_close',
+        ...(observedWitness ? { document_instance_witness: observedWitness } : {}),
+      },
+    }));
+    return {
+      abandoned: true,
+      document_id: documentId,
+      abandoned_operations: abandonedOperations,
+      workflow_stopped: true,
+    };
   }
   closeLatency(id, cycleReceivedAt, closureGuardMs, closureRequestJsonBytes) {
     const record = this.read(id);
@@ -3640,6 +4160,12 @@ export class SessionStore {
       'photoshop_dispatch_wall_ms',
       'photoshop_reported_execution_ms',
       'preview_capture_materialization_ms',
+      'guard_response_to_review_request_ms',
+      'review_image_service_ms',
+      'review_delivery_to_review_finished_marker_ms',
+      'review_finished_to_next_pass_ready_marker_ms',
+      'next_pass_ready_marker_to_guard_ms',
+      'review_delivery_to_next_guard_ms',
       'visual_evaluation_verdict_gap_ms',
       'report_ack_closure_ms',
       'recovery_reconciliation_ms',
@@ -3663,6 +4189,68 @@ export class SessionStore {
       visual_components: summarize(visualRecords),
     };
   }
+  continuationTimelineExport(documentId, suppliedRecords, projectionContext) {
+    if (!Number.isSafeInteger(documentId) || documentId <= 0) {
+      return { protocol: 'photoshop.guard.continuation_timeline_export.v1', document_id: null, document_incarnation: null, operations: [] };
+    }
+    const all = suppliedRecords ?? projectionContext?.records ?? this.records();
+    const records = this.currentDocumentRecords(documentId, all, projectionContext);
+    const documentIncarnation = this.currentDocumentIncarnationId(documentId, projectionContext) ?? null;
+    const operations = records
+      .filter(record => record?.latency && (record.visual || record.latency?.response_ready_at || record.latency?.next_cycle_received_at))
+      .map(record => {
+        const latency = record.latency ?? {};
+        const responseReadyAt = textOrUndefined(latency.response_ready_at);
+        const nextGuardAt = textOrUndefined(latency.next_cycle_received_at);
+        const continuationTiming = record.continuation_timing ?? {};
+        const reviewRequestAt = textOrUndefined(continuationTiming.review_image_request_received_at);
+        const reviewReadyAt = textOrUndefined(continuationTiming.review_image_result_ready_at);
+        const reviewFinishedAt = textOrUndefined(continuationTiming.review_finished_marker_received_at);
+        const nextPassReadyAt = textOrUndefined(continuationTiming.next_pass_ready_marker_received_at);
+        return {
+          operation_id: record.id,
+          visual: !!record.visual,
+          join_key: { document_id: documentId, document_incarnation: documentIncarnation, operation_id: record.id },
+          boundary_events: [
+            ...(responseReadyAt ? [{ kind: 'guard_response_ready', at: responseReadyAt }] : []),
+            ...(reviewRequestAt ? [{ kind: 'review_image_request_received', at: reviewRequestAt }] : []),
+            ...(reviewReadyAt ? [{ kind: 'review_image_result_ready', at: reviewReadyAt }] : []),
+            ...(reviewFinishedAt ? [{ kind: 'review_finished_marker_received', at: reviewFinishedAt }] : []),
+            ...(nextPassReadyAt ? [{ kind: 'next_pass_ready_marker_received', at: nextPassReadyAt }] : []),
+            ...(nextGuardAt ? [{ kind: 'next_guard_continuation_received', at: nextGuardAt }] : []),
+          ],
+          inter_call_interval: responseReadyAt && nextGuardAt ? {
+            start_at: responseReadyAt,
+            end_at: nextGuardAt,
+            duration_ms: elapsedMs(responseReadyAt, nextGuardAt),
+            classification: 'unattributed_until_host_join',
+          } : null,
+          diagnostic_partition: {
+            marker_semantics: 'server_observed_diagnostic_boundaries_not_pure_model_reasoning_time',
+            guard_response_to_review_request_ms: latency.guard_response_to_review_request_ms ?? null,
+            review_image_service_ms: latency.review_image_service_ms ?? null,
+            review_delivery_to_review_finished_marker_ms: latency.review_delivery_to_review_finished_marker_ms ?? null,
+            review_finished_to_next_pass_ready_marker_ms: latency.review_finished_to_next_pass_ready_marker_ms ?? null,
+            next_pass_ready_marker_to_guard_ms: latency.next_pass_ready_marker_to_guard_ms ?? null,
+            review_delivery_to_next_guard_ms: latency.review_delivery_to_next_guard_ms ?? null,
+          },
+          guard_latency: latency,
+        };
+      });
+    return {
+      protocol: 'photoshop.guard.continuation_timeline_export.v1',
+      document_id: documentId,
+      document_incarnation: documentIncarnation,
+      host_join_contract: {
+        key: ['document_id', 'document_incarnation', 'operation_id'],
+        inter_call_interval_semantics: 'unattributed_until_host_join',
+        guard_latency_protocol: 'photoshop.guard.cycle_latency.v1',
+        diagnostic_marker_protocol: 'photoshop.guard.continuation_timing.v1',
+        rule: 'Host continuation evidence and opt-in diagnostic markers may partition the inter-call interval; marker intervals are server-observed boundaries, not pure model-reasoning time. Unobserved time stays unattributed and Guard/Photoshop timing fields remain authoritative here.',
+      },
+      operations,
+    };
+  }
   recordArtisticThroughputEvent(documentId, event = {}) {
     if (!Number.isSafeInteger(documentId) || documentId <= 0) return undefined;
     return this.updatePaintingState(documentId, current => {
@@ -3673,6 +4261,18 @@ export class SessionStore {
       const semanticActions = Number.isFinite(Number(event.semantic_actions))
         ? Math.max(0, Math.trunc(Number(event.semantic_actions)))
         : 0;
+      const autoRepairCount = Number.isFinite(Number(event.auto_repair_count))
+        ? Math.max(0, Math.trunc(Number(event.auto_repair_count)))
+        : 0;
+      const autoSplitCount = Number.isFinite(Number(event.auto_split_count))
+        ? Math.max(0, Math.trunc(Number(event.auto_split_count)))
+        : 0;
+      const semanticAmbiguityCount = Number.isFinite(Number(event.model_semantic_ambiguity_count))
+        ? Math.max(0, Math.trunc(Number(event.model_semantic_ambiguity_count)))
+        : 0;
+      const exposedRejectionCount = Number.isFinite(Number(event.preflight_rejection_exposed_to_model_count))
+        ? Math.max(0, Math.trunc(Number(event.preflight_rejection_exposed_to_model_count)))
+        : 0;
       const kind = textOrUndefined(event.kind) ?? 'bookkeeping';
       const totals = {
         model_visible_guard_round_trips: Number(existing.model_visible_guard_round_trips ?? 0) + (modelVisible ? 1 : 0),
@@ -3681,6 +4281,10 @@ export class SessionStore {
         recovery_only_round_trips: Number(existing.recovery_only_round_trips ?? 0) + (modelVisible && kind === 'recovery' ? 1 : 0),
         rejected_before_dispatch_round_trips: Number(existing.rejected_before_dispatch_round_trips ?? 0) + (modelVisible && kind === 'rejected' ? 1 : 0),
         semantic_artistic_actions_dispatched: Number(existing.semantic_artistic_actions_dispatched ?? 0) + semanticActions,
+        auto_repair_count: Number(existing.auto_repair_count ?? 0) + autoRepairCount,
+        auto_split_count: Number(existing.auto_split_count ?? 0) + autoSplitCount,
+        model_semantic_ambiguity_count: Number(existing.model_semantic_ambiguity_count ?? 0) + semanticAmbiguityCount,
+        preflight_rejection_exposed_to_model_count: Number(existing.preflight_rejection_exposed_to_model_count ?? 0) + exposedRejectionCount,
       };
       const ratio = totals.model_visible_guard_round_trips > 0
         ? totals.semantic_artistic_actions_dispatched / totals.model_visible_guard_round_trips
@@ -3692,6 +4296,10 @@ export class SessionStore {
           kind,
           model_visible: modelVisible,
           semantic_actions: semanticActions,
+          auto_repair_count: autoRepairCount,
+          auto_split_count: autoSplitCount,
+          model_semantic_ambiguity_count: semanticAmbiguityCount,
+          preflight_rejection_exposed_to_model_count: exposedRejectionCount,
           ...(textOrUndefined(event.operation_id) ? { operation_id: textOrUndefined(event.operation_id) } : {}),
           ...(textOrUndefined(event.job_id) ? { job_id: textOrUndefined(event.job_id) } : {}),
         },
@@ -3704,6 +4312,54 @@ export class SessionStore {
           artistic_actions_per_model_visible_guard_round_trip: Number(ratio.toFixed(3)),
           recent_events: recentEvents,
           note: 'Diagnostic only. Do not maximize this ratio by bundling unrelated work or weakening review/recovery.',
+        },
+      };
+    });
+  }
+  recordCompilerAttemptAudit(documentId, event = {}) {
+    if (!Number.isSafeInteger(documentId) || documentId <= 0) return undefined;
+    return this.updatePaintingState(documentId, current => {
+      const existing = current.compiler_attempt_audit && typeof current.compiler_attempt_audit === 'object'
+        ? current.compiler_attempt_audit
+        : {};
+      const recent = Array.isArray(existing.recent_attempts) ? existing.recent_attempts : [];
+      const problemId = textOrUndefined(event.problem_id);
+      const previousRejected = problemId
+        ? [...recent].reverse().find(item =>
+            item?.outcome === 'rejected'
+            && textOrUndefined(item?.problem_id) === problemId
+            && textOrUndefined(item?.rejection_fingerprint))
+        : undefined;
+      const outcome = event.outcome === 'rejected'
+        ? 'rejected'
+        : event.outcome === 'accepted' ? 'accepted' : 'dispatched';
+      const attempt = {
+        at: new Date().toISOString(),
+        outcome,
+        ...(textOrUndefined(event.request_key) ? { request_key: textOrUndefined(event.request_key) } : {}),
+        ...(problemId ? { problem_id: problemId } : {}),
+        ...(textOrUndefined(event.operation_id) ? { operation_id: textOrUndefined(event.operation_id) } : {}),
+        ...(textOrUndefined(event.cycle_fingerprint) ? { cycle_fingerprint: textOrUndefined(event.cycle_fingerprint) } : {}),
+        ...(textOrUndefined(event.rejection_fingerprint) ? { rejection_fingerprint: textOrUndefined(event.rejection_fingerprint) } : {}),
+        ...(Array.isArray(event.error_codes) ? { error_codes: [...event.error_codes] } : {}),
+        ...(event.repair_recipe && typeof event.repair_recipe === 'object' && !Array.isArray(event.repair_recipe)
+          ? { repair_recipe: structuredClone(event.repair_recipe) }
+          : {}),
+        ...(event.compiler_repair_audit && typeof event.compiler_repair_audit === 'object' && !Array.isArray(event.compiler_repair_audit)
+          ? { compiler_repair_audit: structuredClone(event.compiler_repair_audit) }
+          : {}),
+        ...(outcome === 'dispatched' && previousRejected
+          ? { corrects_rejection_fingerprint: previousRejected.rejection_fingerprint }
+          : {}),
+      };
+      return {
+        ...current,
+        compiler_attempt_audit: {
+          protocol: 'photoshop.guard.compiler_attempt_audit.v1',
+          rejected_attempts: Number(existing.rejected_attempts ?? 0) + (outcome === 'rejected' ? 1 : 0),
+          accepted_attempts: Number(existing.accepted_attempts ?? 0) + (outcome === 'accepted' ? 1 : 0),
+          dispatched_attempts: Number(existing.dispatched_attempts ?? 0) + (outcome === 'dispatched' ? 1 : 0),
+          recent_attempts: [...recent, attempt].slice(-64),
         },
       };
     });
@@ -3744,6 +4400,10 @@ export class SessionStore {
       recovery_only_round_trips: Number(stored.recovery_only_round_trips ?? 0),
       rejected_before_dispatch_round_trips: Number(stored.rejected_before_dispatch_round_trips ?? 0),
       semantic_artistic_actions_dispatched: Number(stored.semantic_artistic_actions_dispatched ?? 0),
+      auto_repair_count: Number(stored.auto_repair_count ?? 0),
+      auto_split_count: Number(stored.auto_split_count ?? 0),
+      model_semantic_ambiguity_count: Number(stored.model_semantic_ambiguity_count ?? 0),
+      preflight_rejection_exposed_to_model_count: Number(stored.preflight_rejection_exposed_to_model_count ?? 0),
       artistic_actions_per_model_visible_guard_round_trip: Number(stored.artistic_actions_per_model_visible_guard_round_trip ?? 0),
       timing: {
         guard_bookkeeping_ms_observed: guardBookkeepingMs,
@@ -3942,7 +4602,7 @@ export class SessionStore {
       )
       .map(record => Number(record.sequence ?? 0))
       .sort((a, b) => b - a)[0] ?? 0;
-    const attempts = records
+    const attemptRecords = records
       .filter(record => record.visual && record.verdict && problemIdentity(record) === problemId)
       .filter(record => Number(record.sequence ?? 0) > lastResolvedSequence)
       .filter(record =>
@@ -3950,8 +4610,9 @@ export class SessionStore {
         || record.verdict?.verdict === 'regression'
         || record.verdict?.significance?.execution_effect === 'insufficient'
       )
-      .map(record => ({
-        strategy_id: visualStrategyFingerprint(record),
+      ;
+    const attempts = attemptRecords.map(record => ({
+        strategy_id: textOrUndefined(record.causal_strategy_id) ?? visualStrategyFingerprint(record),
         method_class: textOrUndefined(record.args?.method_class),
         materially_corrected: significanceHasDetectedChange(record.verdict?.significance),
         useful_partial_work: record.verdict?.verdict === 'improvement'
@@ -3960,12 +4621,61 @@ export class SessionStore {
       }));
     if (!attempts.length) return null;
     const context = visualContext(request ?? {});
-    return this.artisticRecoveryResolution(documentId, {
+    const resolution = this.artisticRecoveryResolution(documentId, {
       kind: 'artistic_unresolved',
       attempts,
       dependent_work_remaining: true,
       independent_tasks_available: context.independent_region === true && context.preservation_facts.length > 0,
     }, projectionContext);
+    const methodsTried = [...new Set(attemptRecords.map(record =>
+      textOrUndefined(record.args?.method_class)
+      ?? textOrUndefined(record.args?.steps?.find?.(step => step?.tool !== 'photoshop_get_preview')?.method_id)
+    ).filter(Boolean))];
+    const strategyFamiliesTried = [...new Set(attemptRecords.map(record =>
+      textOrUndefined(record.strategy_family)
+      ?? textOrUndefined(record.causal_strategy_id)
+      ?? textOrUndefined(record.args?.method_class)
+      ?? visualStrategyFingerprint(record)
+    ).filter(Boolean))];
+    const regressionCount = attemptRecords.filter(record => record.verdict?.verdict === 'regression').length;
+    const rollbackCount = attemptRecords.filter(record => record.verdict?.disposition === 'rollback').length;
+    const strongestKnown = [...records].reverse().find(record =>
+      record.visual
+      && record.verdict
+      && problemIdentity(record) === problemId
+      && Number(record.sequence ?? 0) > lastResolvedSequence
+      && (record.verdict?.verdict === 'improvement' || record.verdict?.disposition === 'accept')
+    );
+    const currentEscalationLevel = Math.max(0, ...attemptRecords.map(record => {
+      const explicit = Number(record.causal_escalation_level);
+      if (Number.isInteger(explicit) && explicit >= 0 && explicit <= 4) return explicit;
+      if (record.causal_level_change === true) return 2;
+      return 0;
+    }));
+    const minimumRequiredNextLevel = resolution.decision === 'retry_same_strategy_once'
+      ? currentEscalationLevel
+      : resolution.decision === 'require_distinct_strategy'
+        ? Math.min(4, currentEscalationLevel + 1)
+        : resolution.decision === 'block_dependent_problem'
+          ? Math.min(4, Math.max(2, currentEscalationLevel + 1))
+          : currentEscalationLevel;
+    return {
+      ...resolution,
+      failed_attempt_count: attempts.length,
+      attempt_count: attemptRecords.length,
+      consecutive_unresolved: attemptRecords.length,
+      same_primary_mismatch_count: attemptRecords.length,
+      methods_tried: methodsTried,
+      strategy_families_tried: strategyFamiliesTried,
+      regression_count: regressionCount,
+      rollback_count: rollbackCount,
+      strongest_known_frame: strongestKnown?.preview?.sha256 ? {
+        operation_id: strongestKnown.id,
+        sha256: strongestKnown.preview.sha256,
+      } : null,
+      current_escalation_level: currentEscalationLevel,
+      minimum_required_next_level: minimumRequiredNextLevel,
+    };
   }
 
   recognitionMetrics(documentId, suppliedRecords, projectionContext) {
@@ -4284,6 +4994,10 @@ export class SessionStore {
         + ' + previous_observation'
         + '; include next_pass to continue or omit it to finalize the last pass';
     }
+    if (state.workflow_lifecycle?.status === 'stopped'
+      && state.workflow_lifecycle?.reason === 'abandoned_document_absent') {
+      return 'ready';
+    }
     if (state.pending_rollback) {
       const remaining = positiveHistoryStepCount(state.pending_rollback.remaining_undo_steps)
         || positiveHistoryStepCount(state.pending_rollback.required_undo_steps)
@@ -4364,6 +5078,7 @@ export class SessionStore {
     const add = (message) => { if (message) errors.push(message); };
     const projectionContext = options.projectionContext;
     const stateOnly = options.stateOnly === true;
+    const compilerDeferredFromOperationId = textOrUndefined(options.compilerDeferredFromOperationId);
     const allowed = new Set([
       'id', 'tool', 'args', 'summary', 'purpose', 'replan', 'timeout_ms',
       'problem_id', 'region', 'hypothesis', 'failure_signals', 'significance_mode',
@@ -4372,6 +5087,9 @@ export class SessionStore {
       'affected_relations', 'affected_qualities', 'preservation_facts',
       'independent_region', 'addresses_primary_mismatch', 'addresses_problem_id',
       'preview_args', 'visual_review_profile', 'artistic_commentary', 'accepted_anchor_restore',
+      'root_cause_classification', 'root_cause_reason', 'causal_level_change', 'correction_scope',
+      'causal_strategy_id', 'strategy_family', 'causal_escalation_level',
+      'scene_ownership_plan', 'scene_geometry_model', 'scene_lighting_color_model', 'scene_camera_imaging_model', 'color_gradient_preflight', 'imaging_preflight', 'geometry_preflight', 'cross_layer_correction',
     ]);
 
     if (!stateOnly) {
@@ -4390,6 +5108,10 @@ export class SessionStore {
       }
       // Legacy replan text is accepted for compatibility but is not a gate.
       // Strategy changes are verified structurally below from the executable request.
+      // E.7c: causal escalation is optional artistic/recovery annotation, not
+      // execution authority. Admission is determined from observed failure
+      // history and the executable candidate below, so even stale/legacy label
+      // values must not veto an otherwise safe mutation.
     }
     const significanceMode = significanceModeOf(request ?? {});
     if (!stateOnly) {
@@ -4419,18 +5141,19 @@ export class SessionStore {
       const context = visualContext(request ?? {});
       const durableStage = canonicalPaintingStage(documentState?.current_stage);
       const requestedStage = canonicalPaintingStage(context.stage);
-      if (requestedStage && paintingStageRank(requestedStage) === undefined) {
-        add(`painting_stage_unknown: ${requestedStage} cannot replace durable stage ${durableStage ?? 'none'}`);
-      } else if (durableStage && requestedStage && isBackwardPaintingStageTransition(durableStage, requestedStage)) {
+      // E.7c: stage is artistic guidance/telemetry, not execution authority.
+      // A stale, unknown, or backward label must not veto an otherwise safe
+      // visual mutation. Only an explicit, well-formed stage_reset may mutate
+      // durable stage state backwards; persistence below ignores label-only
+      // regressions.
+      if (durableStage && requestedStage && isBackwardPaintingStageTransition(durableStage, requestedStage)) {
         const reset = context.stage_reset;
         const validReset = !!reset
           && canonicalPaintingStage(reset.from_stage) === durableStage
           && canonicalPaintingStage(reset.to_stage) === requestedStage
-          && PAINTING_STAGE_RESET_REASONS.includes(reset.reason)
-          && typeof reset.detail === 'string'
-          && reset.detail.trim().length >= 12;
-        if (!validReset) {
-          add(`painting_stage_regression_requires_reset: durable stage ${durableStage} cannot move backward to ${requestedStage} without the exact Guard-compiled stage_reset tuple`);
+          && PAINTING_STAGE_RESET_REASONS.includes(reset.reason);
+        if (reset && !validReset) {
+          add(`painting_stage_reset_invalid: explicit stage_reset must match durable stage ${durableStage}, requested stage ${requestedStage}, and an allowed reason`);
         }
       } else if (context.stage_reset) {
         add(`painting_stage_reset_not_applicable: stage_reset is valid only for a backward transition from the durable stage`);
@@ -4472,14 +5195,9 @@ export class SessionStore {
           capture(() => validateBrushStrategyAgainstPreflight(artRun, request));
         }
       }
-      if (
-        artRun?.process_dir
-        && isVisual(request?.tool)
-        && (artRun.commentary_mode === 'artistic' || artRun.commentary_mode === 'mixed')
-        && !textOrUndefined(request?.artistic_commentary)
-      ) {
-        add('artistic_commentary is required for visual operations in artistic/mixed art-run mode; it must match the ordinary user-visible pre-operation artistic message');
-      }
+      // Commentary is presentation metadata, not execution authority. Artistic/mixed
+      // runs may retain it for process-video/reporting surfaces, but a missing prose
+      // narration must never veto an otherwise safe visual mutation (E.7c).
       if (artRun?.process_dir && (request?.tool === 'photoshop_save_document' || request?.tool === 'photoshop_export_as')) {
         capture(() => this.assertProjectSavePath(documentId, args.path));
       }
@@ -4562,6 +5280,20 @@ export class SessionStore {
       }
     });
     if (isVisual(request?.tool) && !rollbackMutation && problemId) {
+      const deferredSource = compilerDeferredFromOperationId
+        ? this.read(compilerDeferredFromOperationId)
+        : undefined;
+      const deferredPass = compilerDeferredFromOperationId
+        ? this.compilerDeferredNextPass(compilerDeferredFromOperationId)
+        : undefined;
+      const compilerDeferredContinuation = !!(
+        deferredSource
+        && deferredPass
+        && Number(deferredPass.document_id) === documentId
+        && textOrUndefined(deferredPass.problem_id) === problemId
+        && deferredSource.current_frame_authority !== false
+        && deferredSource.rolled_back !== true
+      );
       const recovery = this.artisticRecoveryForProblem(
         documentId,
         problemId,
@@ -4569,19 +5301,62 @@ export class SessionStore {
         currentDocumentRecords,
         projectionContext
       );
+      const recoveryContext = visualContext(request);
+      const documentState = (projectionContext ? projectionContext.paintingState : this.paintingState())
+        .documents?.[String(documentId)];
+      const activeTask = recoveryContext.planner_task_id
+        ? documentState?.art_director?.tasks?.find(task => task?.task_id === recoveryContext.planner_task_id)
+        : undefined;
+      const stageExitCondition = textOrUndefined(activeTask?.construction_plan?.stage_exit_condition);
+      if (
+        recovery
+        && stageExitCondition
+        && recovery.same_primary_mismatch_count >= 2
+        && recoveryContext.independent_region !== true
+        && isCosmeticCorrectiveAttempt(request)
+      ) {
+        add(
+          `causal_strategy_exhausted: problem "${problemId}" remains unresolved against construction_plan.stage_exit_condition="${stageExitCondition}" after ${recovery.same_primary_mismatch_count} same-problem attempts; attempted strategy families=${recovery.strategy_families_tried.join(', ') || 'unknown'}; revise the construction plan, structurally rebuild, or rollback/replan instead of adding dependent cosmetic/detail work`
+        );
+      }
       const latestSameProblem = currentDocumentRecords
         .filter(record => record.visual && problemIdentity(record) === problemId)
         .at(-1);
-      if (recovery?.decision === 'require_distinct_strategy'
+      const unresolvedSameProblem = currentDocumentRecords
+        .filter(record => record.visual && record.verdict && problemIdentity(record) === problemId)
+        .filter(record => record.verdict?.target_resolved === 'no' || record.verdict?.verdict === 'regression');
+      const structuralMismatchPersists = unresolvedSameProblem.some(hasStructuralMismatchEvidence);
+      const cosmeticExploratoryAttempts = unresolvedSameProblem.filter(record =>
+        hasStructuralMismatchEvidence(record) && isCosmeticCorrectiveAttempt(record)
+      ).length;
+      if (
+        structuralMismatchPersists
+        && cosmeticExploratoryAttempts >= 1
+        && isCosmeticCorrectiveAttempt(request)
+      ) {
+        add(
+          `causal_strategy_exhausted: structural mismatch for problem "${problemId}" already consumed its one bounded cosmetic exploratory correction; use a causally distinct structural rebuild or rollback/replan instead of texture, edge noise, blur, grain, stamps, microdetail, or another surface-masking variant`
+        );
+      }
+      if (!compilerDeferredContinuation && recovery?.decision === 'require_distinct_strategy'
         && !strategyChanged(request, latestSameProblem)) {
         add(`artistic_recovery: problem "${problemId}" requires a causally distinct structural strategy; color/opacity/count/preset variants do not qualify`);
-      } else if (recovery?.decision === 'block_dependent_problem') {
+      } else if (!compilerDeferredContinuation && recovery?.decision === 'block_dependent_problem') {
         const requestFingerprint = visualStrategyFingerprint(request);
         const exhausted = new Set(recovery.exhausted_strategy_ids ?? []);
-        if (exhausted.has(requestFingerprint)) {
-          add(`artistic_recovery: problem "${problemId}" cannot reuse an exhausted causal strategy; choose a currently available distinct method class or return to Art Director`);
+        const declaredStrategy = textOrUndefined(request?.causal_strategy_id);
+        const distinctCandidate = strategyChanged(request, latestSameProblem)
+          || (declaredStrategy !== undefined
+            && !recovery.strategy_families_tried.includes(declaredStrategy));
+        const declaredStrategyExhausted = declaredStrategy !== undefined
+          && recovery.strategy_families_tried.includes(declaredStrategy);
+        const reusesExhaustedStrategy = declaredStrategy !== undefined
+          ? declaredStrategyExhausted
+          : exhausted.has(requestFingerprint);
+        if (reusesExhaustedStrategy || !distinctCandidate) {
+          add(`artistic_recovery: problem "${problemId}" cannot reuse an exhausted causal strategy; choose a genuinely distinct visual strategy, rollback/replan, or continue independent work`);
         }
-      } else if (recovery?.decision === 'continue_independent_work') {
+      } else if (!compilerDeferredContinuation && recovery?.decision === 'continue_independent_work') {
         const context = visualContext(request);
         if (!(context.independent_region && context.preservation_facts.length > 0)) {
           add(`artistic_recovery: dependent problem "${problemId}" is exhausted; only explicitly independent work with preservation_facts may continue`);
@@ -4589,7 +5364,7 @@ export class SessionStore {
       }
     }
     const checkpoint = this.checkpointState(documentId, records, projectionContext);
-    if (isVisual(request?.tool) && !rollbackMutation && checkpoint.due) {
+    if (isVisual(request?.tool) && !rollbackMutation && checkpoint.due && options.deferCheckpointDebt !== true) {
       add('Checkpoint due: save a pinned layered PSD before another visual mutation');
     }
 
@@ -4597,7 +5372,11 @@ export class SessionStore {
   }
   begin(request, options = {}) {
     const projectionContext = options.projectionContext;
-    const preflightErrors = this.collectPreflightErrors(request, { projectionContext });
+    const compilerDeferredFromOperationId = textOrUndefined(options.compilerDeferredFromOperationId);
+    const preflightErrors = this.collectPreflightErrors(request, {
+      projectionContext,
+      ...(compilerDeferredFromOperationId ? { compilerDeferredFromOperationId } : {}),
+    });
     if (preflightErrors.length) throw new Error(preflightErrors[0]);
     const significanceMode = significanceModeOf(request);
     const documentId = request.args?.document_id;
@@ -4712,7 +5491,14 @@ export class SessionStore {
       }
     }
     const documentId = record.args?.document_id;
+    if (!failed && updated.phase === 'completed'
+      && record.tool === 'photoshop_close_document'
+      && Number.isSafeInteger(documentId) && documentId > 0) {
+      this.clearVisualBarrier(documentId);
+      this.setWorkflowLifecycle(documentId, 'stopped', 'controlled_document_close', record.id);
+    }
     if (!failed && isRollbackMutation(record) && Number.isSafeInteger(documentId) && documentId > 0) {
+      const pendingBeforeRollback = this.paintingState().documents?.[String(documentId)]?.pending_rollback;
       this.updatePaintingState(documentId, current => {
         const pending = current.pending_rollback;
         if (!pending) return current;
@@ -4721,7 +5507,7 @@ export class SessionStore {
           const remainingBefore = positiveHistoryStepCount(pending.remaining_undo_steps) || required;
           const applied = positiveHistoryStepCount(record.args?.steps) || 1;
           if (applied !== remainingBefore) return current;
-          return {
+          return this.retireRolledBackTrendEvidence({
             ...current,
             pending_rollback: undefined,
             last_rollback: {
@@ -4730,9 +5516,9 @@ export class SessionStore {
               source_operation_id: pending.operation_id,
               required_undo_steps: required,
             },
-          };
+          }, pending.operation_id, record.id, updated.completed_at);
         }
-        return {
+        return this.retireRolledBackTrendEvidence({
           ...current,
           pending_rollback: undefined,
           last_rollback: {
@@ -4741,8 +5527,19 @@ export class SessionStore {
             source_operation_id: pending.operation_id,
             mode: 'explicit_visual_microplan_rollback',
           },
-        };
+        }, pending.operation_id, record.id, updated.completed_at);
       });
+      if (pendingBeforeRollback?.operation_id) {
+        const sourceRecord = this.read(pendingBeforeRollback.operation_id);
+        if (sourceRecord) {
+          sourceRecord.rollback = {
+            completed: true,
+            rollback_operation_id: record.id,
+            completed_at: updated.completed_at,
+          };
+          this.write(sourceRecord);
+        }
+      }
     }
     if (notExecuted && Number.isSafeInteger(documentId) && documentId > 0) {
       const barrier = this.visualBarrier(documentId);
@@ -4771,7 +5568,13 @@ export class SessionStore {
           at: updated.completed_at,
           accepted: false,
         },
-        ...(context.stage ? { current_stage: context.stage } : {}),
+        ...(() => {
+          const durableStage = canonicalPaintingStage(current.current_stage);
+          const requestedStage = canonicalPaintingStage(context.stage);
+          if (!requestedStage || paintingStageRank(requestedStage) === undefined) return {};
+          if (durableStage && isBackwardPaintingStageTransition(durableStage, requestedStage) && !context.stage_reset) return {};
+          return { current_stage: requestedStage };
+        })(),
         ...(context.scale ? { active_scale: context.scale } : {}),
         visual_problems: context.problem_id ? {
           ...(current.visual_problems ?? {}),
@@ -5047,6 +5850,10 @@ export class SessionStore {
       }
       const kind = textOrUndefined(finding.kind);
       if (!kind || !allowed.has(kind)) throw new Error(`review_findings[${index}].kind is unsupported`);
+      const problemId = textOrUndefined(finding.problem_id);
+      if (problemId && !idPattern.test(problemId)) {
+        throw new Error(`review_findings[${index}].problem_id must be a stable 1-80 character id`);
+      }
       const level = reviewLevelForFinding(kind);
       const severity = textOrUndefined(finding.severity) ?? 'should-fix';
       if (!(severity in severityRank)) {
@@ -5066,12 +5873,22 @@ export class SessionStore {
       if (Array.isArray(finding.trend_signals) && finding.trend_signals.some(signal => !normalizeTrendSignal(signal))) {
         throw new Error(`review_findings[${index}].trend_signals must contain only non-empty stable signal strings`);
       }
+      const briefItemId = textOrUndefined(finding.brief_item_id);
+      const briefState = textOrUndefined(finding.brief_state)?.toUpperCase();
+      if ((briefItemId && !briefState) || (!briefItemId && briefState)) {
+        throw new Error(`review_findings[${index}] brief_item_id and brief_state must be supplied together`);
+      }
+      if (briefState && !['NOT_MET', 'UNCERTAIN'].includes(briefState)) {
+        throw new Error(`review_findings[${index}].brief_state must be NOT_MET|UNCERTAIN`);
+      }
       return {
         kind,
         level,
         severity,
+        ...(problemId ? { problem_id: problemId } : {}),
         ...(requestedRegion ? { requested_region: requestedRegion } : {}),
         ...(trendSignals.length ? { trend_signals: trendSignals } : {}),
+        ...(briefItemId ? { brief_item_id: briefItemId, brief_state: briefState } : {}),
         source_index: index,
       };
     });
@@ -5130,8 +5947,71 @@ export class SessionStore {
       recorded_at: new Date().toISOString(),
       guarantee: 'mcp_image_content_delivery_to_model_facing_tool_result',
     };
+    const deliveryTiming = delivery?.timing && typeof delivery.timing === 'object'
+      ? delivery.timing
+      : null;
+    const reviewRequestAt = textOrUndefined(deliveryTiming?.request_received_at);
+    const reviewReadyAt = textOrUndefined(deliveryTiming?.result_ready_at);
+    if (reviewRequestAt && reviewReadyAt) {
+      record.continuation_timing = {
+        protocol: 'photoshop.guard.continuation_timing.v1',
+        ...(record.continuation_timing ?? {}),
+        review_image_request_received_at: reviewRequestAt,
+        review_image_result_ready_at: reviewReadyAt,
+        review_image_delivery_complete: complete,
+      };
+      if (record.latency) Object.assign(record.latency, continuationLatencySegments(record));
+    }
     this.write(record);
     return record.visual_delivery;
+  }
+  recordContinuationMarker(id, phase, at = new Date().toISOString()) {
+    const record = this.read(id);
+    if (!record) throw new Error(`Unknown visual operation for continuation marker: ${id}`);
+    if (!record.visual || !record.preview?.sha256) {
+      throw new Error(`Continuation marker requires a visual operation with a durable preview: ${id}`);
+    }
+    if (!['review_finished', 'next_pass_ready'].includes(phase)) {
+      throw new Error(`Unsupported continuation marker phase: ${phase}`);
+    }
+    const timing = record.continuation_timing ?? {};
+    const reviewReadyAt = textOrUndefined(timing.review_image_result_ready_at);
+    if (!reviewReadyAt || record.visual_delivery?.delivery_complete !== true) {
+      throw new Error(`Continuation marker ${phase} requires completed explicit review-image delivery for ${id}`);
+    }
+    if (phase === 'review_finished') {
+      if (elapsedMs(reviewReadyAt, at) === null || Date.parse(at) < Date.parse(reviewReadyAt)) {
+        throw new Error('review_finished marker cannot precede review-image delivery');
+      }
+      record.continuation_timing = {
+        protocol: 'photoshop.guard.continuation_timing.v1',
+        ...timing,
+        review_finished_marker_received_at: at,
+      };
+    } else {
+      const reviewFinishedAt = textOrUndefined(timing.review_finished_marker_received_at);
+      if (!reviewFinishedAt) {
+        throw new Error('next_pass_ready marker requires an earlier review_finished marker');
+      }
+      if (elapsedMs(reviewFinishedAt, at) === null || Date.parse(at) < Date.parse(reviewFinishedAt)) {
+        throw new Error('next_pass_ready marker cannot precede review_finished marker');
+      }
+      record.continuation_timing = {
+        protocol: 'photoshop.guard.continuation_timing.v1',
+        ...timing,
+        next_pass_ready_marker_received_at: at,
+      };
+    }
+    if (record.latency) Object.assign(record.latency, continuationLatencySegments(record));
+    this.write(record);
+    return {
+      operation_id: id,
+      phase,
+      marker_received_at: at,
+      protocol: 'photoshop.guard.continuation_timing.v1',
+      marker_semantics: 'server_observed_diagnostic_boundary',
+      segments: continuationLatencySegments(record),
+    };
   }
   visualDeliveryDebt(record) {
     if (!record?.visual || !record?.preview?.sha256) return null;
@@ -5423,14 +6303,16 @@ export class SessionStore {
     if (!Number.isFinite(canvasWidth) || canvasWidth <= 0 || !Number.isFinite(canvasHeight) || canvasHeight <= 0) {
       throw new Error('Review evidence requires positive source canvas_width/canvas_height provenance');
     }
-    const evidence = {
+      const evidence = {
       source_operation_id: id,
       requirement_id: capture.requirement_id,
       capture_id: capture.capture_id,
       capture_sequence: capture.capture_sequence,
       role: capture.role,
-      finding_kind: capture.kind,
-      severity: capture.severity,
+        finding_kind: capture.kind,
+        ...(capture.brief_item_id ? { brief_item_id: capture.brief_item_id } : {}),
+        ...(capture.brief_state ? { brief_state: capture.brief_state } : {}),
+        severity: capture.severity,
       review_level: capture.level,
       requested_region: normalizeRegion(capture.requested_region),
       effective_region: actual,
@@ -5514,16 +6396,57 @@ export class SessionStore {
       } : {}),
     };
   }
-  compactPassContext(documentId) {
+  compactPassContext(documentId, projectionContext = undefined) {
     if (!Number.isSafeInteger(documentId) || documentId <= 0) return {};
-    const state = this.paintingState().documents?.[String(documentId)] ?? {};
+    const paintingState = projectionContext ? projectionContext.paintingState : this.paintingState();
+    const records = projectionContext?.records ?? this.records();
+    const state = paintingState.documents?.[String(documentId)] ?? {};
     const brush = state.brush_preflight;
     const art = state.art_director;
-    const logicalLayerOwners = this.semanticLayerOwners(documentId);
+    const logicalLayerOwners = this.semanticLayerOwners(documentId, records, projectionContext);
+    const sceneOwnershipPlan = this.sceneOwnershipPlan(documentId, records, projectionContext);
+    const sceneGeometryModel = this.sceneGeometryModel(documentId, records, projectionContext);
+    const sceneLightingColorModel = this.sceneLightingColorModel(documentId, records, projectionContext);
+    const sceneCameraImagingModel = this.sceneCameraImagingModel(documentId, records, projectionContext);
+    const geometryPreflight = this.geometryPreflight(documentId, records, projectionContext);
+    const recentBrushByProblem = new Map();
+    const recentBrushUsage = [];
+    for (const record of this.currentDocumentRecords(documentId, records, projectionContext)) {
+      if (record?.phase !== 'completed' || record?.tool !== 'photoshop_execute_visual_microplan') continue;
+      const problemId = problemIdentity(record);
+      const presetName = textOrUndefined(record?.args?.paint_strategy?.preset_name);
+      if (!problemId || !presetName) continue;
+      const outcome = record.rolled_back === true
+        ? 'rolled-back'
+        : record.failed === true
+          ? 'failed'
+          : record.verdict?.disposition === 'rollback'
+            ? 'rollback-required'
+            : record.verdict?.disposition === 'accept' ? 'accepted' : 'other';
+      const materialRole = textOrUndefined(record?.args?.paint_strategy?.material_role);
+      const brushRole = textOrUndefined(record?.args?.paint_strategy?.brush_role);
+      recentBrushByProblem.set(problemId, {
+        problem_id: problemId,
+        preset_name: presetName,
+        outcome,
+        operation_id: record.id,
+        sequence: record.sequence ?? null,
+      });
+      recentBrushUsage.push({
+        problem_id: problemId,
+        preset_name: presetName,
+        material_role: materialRole ?? null,
+        brush_role: brushRole ?? null,
+        outcome,
+        operation_id: record.id,
+        sequence: record.sequence ?? null,
+      });
+    }
     return {
       stage: textOrUndefined(state.current_stage),
       scale: textOrUndefined(state.active_scale),
       painting_profile: textOrUndefined(state.painting_profile),
+      has_visual_frame: !!state.current_frame?.operation_id,
       active_problem_id: textOrUndefined(state.active_problem?.problem_id),
       active_problem_scale: textOrUndefined(state.active_problem?.scale),
       brush_roles: Array.isArray(brush?.roles)
@@ -5533,6 +6456,7 @@ export class SessionStore {
             visual_intents: Array.isArray(role.visual_intents) ? [...role.visual_intents] : [],
             preferred_preset: role.preferred_preset,
             alternative_presets: Array.isArray(role.alternative_presets) ? [...role.alternative_presets] : [],
+            candidate_evidence: Array.isArray(role.candidate_evidence) ? structuredClone(role.candidate_evidence) : [],
             working_scale: role.working_scale,
             pressure_policy: role.pressure_policy,
             probe_status: role.probe_status,
@@ -5540,24 +6464,181 @@ export class SessionStore {
           }))
         : [],
       brush_inventory_scope: brush?.inventory_scope ?? null,
+      recent_brush_problem_usage: [...recentBrushByProblem.values()].slice(-24),
+      recent_brush_usage: recentBrushUsage.slice(-48),
       logical_layer_owners: logicalLayerOwners,
+      scene_ownership_plan: sceneOwnershipPlan,
+      scene_geometry_model: sceneGeometryModel,
+      scene_lighting_color_model: sceneLightingColorModel,
+      scene_camera_imaging_model: sceneCameraImagingModel,
+      geometry_preflight: geometryPreflight,
+      geometry_binding_states: this.geometryBindingStates(documentId, records, projectionContext),
+      geometry_completion_debt: this.geometryCompletionDebt(documentId, records, projectionContext),
+      lighting_color_binding_states: this.lightingColorBindingStates(documentId, records, projectionContext),
+      physical_effect_completion_debt: this.physicalEffectCompletionDebt(documentId, records, projectionContext),
+      camera_binding_states: this.cameraBindingStates(documentId, records, projectionContext),
+      attention_binding_states: this.attentionBindingStates(documentId, records, projectionContext),
+      document_incarnation_id: this.currentDocumentIncarnationId(documentId, projectionContext),
       brush_pack_policy: state.brush_pack_policy ?? null,
-        art_director: art?.directive_id ? {
+      art_director: art?.directive_id ? {
         directive_id: art.directive_id,
         current_task_id: art.current_task_id ?? null,
         status: art.status ?? null,
         review_due: !!art.review_due,
           brush_pack_scene_plan: art.brush_pack_scene_plan ?? null,
           style_contract: art.style_contract ?? null,
+          perceptual_hierarchy: art.perceptual_hierarchy ?? null,
+          unresolved_hard_brief_debt: this.unresolvedHardBriefDebt(documentId, projectionContext),
         tasks: Array.isArray(art.tasks)
           ? art.tasks.map(task => ({
               task_id: task.task_id,
+              summary: task.summary,
               status: task.status,
               allowed_scales: Array.isArray(task.allowed_scales) ? [...task.allowed_scales] : [],
+              allowed_global_changes: Array.isArray(task.allowed_global_changes) ? [...task.allowed_global_changes] : [],
+              ...(Array.isArray(task.affected_relations) && task.affected_relations.length
+                ? { affected_relations: [...task.affected_relations] }
+                : {}),
+              ...(Array.isArray(task.affected_qualities) && task.affected_qualities.length
+                ? { affected_qualities: [...task.affected_qualities] }
+                : {}),
+              ...(Array.isArray(task.perceptual_zone_ids) ? { perceptual_zone_ids: [...task.perceptual_zone_ids] } : {}),
+              ...(task.construction_plan ? { construction_plan: structuredClone(task.construction_plan) } : {}),
             }))
           : [],
       } : null,
     };
+  }
+  artisticContinuationContext(documentId) {
+    if (!Number.isSafeInteger(documentId) || documentId <= 0) return {};
+    const state = this.paintingState().documents?.[String(documentId)] ?? {};
+    const art = state.art_director;
+    const tasks = Array.isArray(art?.tasks) ? art.tasks : [];
+    const currentTaskId = textOrUndefined(art?.current_task_id);
+    const currentTask = currentTaskId
+      ? tasks.find(task => textOrUndefined(task?.task_id) === currentTaskId)
+      : undefined;
+    const nextTask = tasks.find(task => task !== currentTask && task?.status === 'pending');
+    const activeProblem = state.active_problem?.status === 'resolved' ? undefined : state.active_problem;
+    const protectedQualities = Array.isArray(art?.artistic_evaluation_contract?.protected_qualities)
+      ? art.artistic_evaluation_contract.protected_qualities.map(value => textOrUndefined(value)).filter(Boolean)
+      : [];
+    const hierarchyZones = Array.isArray(art?.perceptual_hierarchy?.zones)
+      ? art.perceptual_hierarchy.zones
+      : [];
+    const ownerIdsForTask = task => {
+      if (!task || !Array.isArray(task.perceptual_zone_ids)) return [];
+      const zoneIds = new Set(task.perceptual_zone_ids.map(value => textOrUndefined(value)).filter(Boolean));
+      return [...new Set(hierarchyZones
+        .filter(zone => zoneIds.has(textOrUndefined(zone?.id)))
+        .flatMap(zone => Array.isArray(zone?.owner_ids) ? zone.owner_ids : [])
+        .map(value => textOrUndefined(value))
+        .filter(Boolean))];
+    };
+    const projectTask = task => {
+      if (!task) return null;
+      const taskId = textOrUndefined(task.task_id);
+      if (!taskId) return null;
+      const ownerIds = ownerIdsForTask(task);
+      return {
+        directive_id: textOrUndefined(art?.directive_id) ?? null,
+        task_id: taskId,
+        summary: textOrUndefined(task.summary) ?? null,
+        allowed_scales: Array.isArray(task.allowed_scales) ? [...task.allowed_scales] : [],
+        allowed_global_changes: Array.isArray(task.allowed_global_changes) ? [...task.allowed_global_changes] : [],
+        ...(Array.isArray(task.affected_relations) && task.affected_relations.length
+          ? { affected_relations: [...task.affected_relations] }
+          : {}),
+        ...(Array.isArray(task.affected_qualities) && task.affected_qualities.length
+          ? { affected_qualities: [...task.affected_qualities] }
+          : {}),
+        ...(ownerIds.length ? { owner_ids: ownerIds } : {}),
+      };
+    };
+    const owners = this.semanticLayerOwners(documentId).map(owner => ({
+      owner_id: owner.hypothesis_id,
+      ...(textOrUndefined(owner.physical_role) ? { role: owner.physical_role } : {}),
+      ...(Number.isSafeInteger(owner.layer_id) && owner.layer_id > 0 ? { layer_id: owner.layer_id } : {}),
+    }));
+    const nextCandidates = [];
+    const currentRecords = this.currentDocumentRecords(documentId, this.records())
+      .filter(record => record?.phase === 'completed' && record?.current_frame_authority !== false && record?.rolled_back !== true)
+      .sort((a, b) => Number(a?.sequence ?? 0) - Number(b?.sequence ?? 0));
+    const deferredRecord = [...currentRecords].reverse().find(record => {
+      const deferred = record?.latency?.compiler_repair_audit?.deferred_next_pass;
+      return deferred && typeof deferred === 'object' && !Array.isArray(deferred);
+    });
+    const deferredPass = deferredRecord?.latency?.compiler_repair_audit?.deferred_next_pass;
+    const projectedCurrentTask = projectTask(currentTask);
+    if (projectedCurrentTask) {
+      nextCandidates.push({
+        candidate_id: 'A',
+        kind: 'continue-current-task',
+        ...projectedCurrentTask,
+        ...(textOrUndefined(activeProblem?.problem_id) ? { problem_id: activeProblem.problem_id } : {}),
+      });
+    }
+    const projectedNextTask = projectTask(nextTask);
+    if (projectedNextTask) {
+      nextCandidates.push({
+        candidate_id: 'B',
+        kind: 'next-planner-task',
+        ...projectedNextTask,
+      });
+    }
+    if (textOrUndefined(activeProblem?.problem_id)) {
+      nextCandidates.push({
+        candidate_id: 'C',
+        kind: 'correct-current-problem',
+        problem_id: activeProblem.problem_id,
+        ...(textOrUndefined(activeProblem.scale) ? { scale: activeProblem.scale } : {}),
+        ...(textOrUndefined(activeProblem.severity) ? { severity: activeProblem.severity } : {}),
+        ...(textOrUndefined(activeProblem.stage) ? { stage: activeProblem.stage } : {}),
+      });
+    }
+    if (deferredPass && typeof deferredPass === 'object' && !Array.isArray(deferredPass)) {
+      const deferredLogicalLayer = deferredPass.logical_layer && typeof deferredPass.logical_layer === 'object'
+        && !Array.isArray(deferredPass.logical_layer)
+        ? deferredPass.logical_layer
+        : undefined;
+      nextCandidates.push({
+        candidate_id: 'D',
+        kind: 'compiler-deferred-sub-pass',
+        deferred_from_operation_id: deferredRecord.id,
+        problem_id: textOrUndefined(deferredPass.problem_id) ?? null,
+        goal: textOrUndefined(deferredPass.goal) ?? null,
+        visual_intent: textOrUndefined(deferredPass.visual_intent) ?? null,
+        action_class: textOrUndefined(deferredPass.action_class) ?? null,
+        action_count: Array.isArray(deferredPass.actions) ? deferredPass.actions.length : 0,
+        ...(textOrUndefined(deferredLogicalLayer?.hypothesis_id)
+          ? { target_owner_id: textOrUndefined(deferredLogicalLayer.hypothesis_id) }
+          : {}),
+        requires_post_review_confirmation: true,
+      });
+    }
+    return {
+      document_id: documentId,
+      current_stage: textOrUndefined(state.current_stage),
+      active_scale: textOrUndefined(state.active_scale),
+      current_problem: activeProblem && textOrUndefined(activeProblem.problem_id) ? {
+        problem_id: activeProblem.problem_id,
+        ...(textOrUndefined(activeProblem.scale) ? { scale: activeProblem.scale } : {}),
+        ...(textOrUndefined(activeProblem.severity) ? { severity: activeProblem.severity } : {}),
+      } : null,
+      owners,
+      current_task: projectedCurrentTask,
+      next_candidates: nextCandidates,
+      protected_qualities: protectedQualities,
+    };
+  }
+  compilerDeferredNextPass(operationId) {
+    const id = textOrUndefined(operationId);
+    if (!id) return undefined;
+    const record = this.read(id);
+    const deferred = record?.latency?.compiler_repair_audit?.deferred_next_pass;
+    return deferred && typeof deferred === 'object' && !Array.isArray(deferred)
+      ? structuredClone(deferred)
+      : undefined;
   }
   semanticLayerOwners(documentId, suppliedRecords = undefined, projectionContext = undefined) {
     if (!Number.isSafeInteger(documentId) || documentId <= 0) return [];
@@ -5572,11 +6653,51 @@ export class SessionStore {
     const removeLayer = layerId => {
       if (!Number.isSafeInteger(layerId) || layerId <= 0) return;
       for (const [hypothesisId, owner] of byHypothesis.entries()) {
-        if (owner.layer_id === layerId) byHypothesis.delete(hypothesisId);
+        const stack = Array.isArray(owner.physical_layer_ids)
+          ? owner.physical_layer_ids.filter(id => Number.isSafeInteger(id) && id > 0 && id !== layerId)
+          : (owner.layer_id === layerId ? [] : [owner.layer_id].filter(id => Number.isSafeInteger(id) && id > 0));
+        if (!stack.length) {
+          byHypothesis.delete(hypothesisId);
+          continue;
+        }
+        if (owner.layer_id === layerId) owner.layer_id = stack[stack.length - 1];
+        owner.physical_layer_ids = stack;
+      }
+    };
+
+    const reconcileObservedLayers = record => {
+      if (record.phase !== 'completed' || record.failed || record.tool !== 'photoshop_get_layers') return;
+      const bodies = parseTexts(record.result);
+      const body = bodies.find(item => item && typeof item === 'object' && !Array.isArray(item));
+      if (!body || !Array.isArray(body.layers)) return;
+      const observed = new Set();
+      const visit = rows => {
+        for (const row of rows) {
+          const id = Number(row?.id ?? row?.layer_id);
+          if (Number.isSafeInteger(id) && id > 0) observed.add(id);
+          const children = Array.isArray(row?.layers) ? row.layers : Array.isArray(row?.children) ? row.children : [];
+          visit(children);
+        }
+      };
+      visit(body.layers);
+      for (const owner of byHypothesis.values()) {
+        const stack = (Array.isArray(owner.physical_layer_ids) ? owner.physical_layer_ids : [owner.layer_id])
+          .filter(id => Number.isSafeInteger(id) && id > 0 && observed.has(id));
+        if (!stack.length) {
+          byHypothesis.delete(owner.hypothesis_id);
+          continue;
+        }
+        if (!observed.has(owner.layer_id)) owner.layer_id = stack[stack.length - 1];
+        owner.physical_layer_ids = stack;
       }
     };
 
     for (const record of records) {
+      // Rolled-back visual operations are historical evidence, not current-frame
+      // ownership authority. In particular, a rolled-back cross-layer migration
+      // must not move the authoritative semantic binding on resume/restart.
+      if (record.rolled_back === true || record.current_frame_authority === false) continue;
+      reconcileObservedLayers(record);
       if (record.phase === 'completed' && !record.failed && record.tool === 'photoshop_delete_layer') {
         removeLayer(Number(record.args?.layer_id));
         continue;
@@ -5586,6 +6707,20 @@ export class SessionStore {
         continue;
       }
       if (record.execution === 'not-executed') continue;
+      const crossLayerCorrection = record?.cross_layer_correction;
+      if (record.phase === 'completed' && !record.failed
+        && crossLayerCorrection?.mode === 'migration') {
+        const hypothesisId = Array.isArray(record?.correction_scope?.semantic_owner_ids)
+          ? textOrUndefined(record.correction_scope.semantic_owner_ids[0])
+          : undefined;
+        const postLayerId = Number(crossLayerCorrection.post_authoritative_layer_id);
+        const owner = hypothesisId ? byHypothesis.get(hypothesisId) : undefined;
+        if (owner && Number.isSafeInteger(postLayerId) && postLayerId > 0
+          && Array.isArray(owner.physical_layer_ids) && owner.physical_layer_ids.includes(postLayerId)) {
+          owner.layer_id = postLayerId;
+          owner.source_operation_id = record.id;
+        }
+      }
       for (const body of parseTexts(record.result)) {
         const rows = Array.isArray(body?.continuation_layers) ? body.continuation_layers : [];
         for (const row of rows) {
@@ -5593,6 +6728,11 @@ export class SessionStore {
           const layerId = Number(row?.layer_id);
           if (!hypothesisId || !Number.isSafeInteger(layerId) || layerId <= 0) continue;
           const prior = byHypothesis.get(hypothesisId);
+          const physicalLayerIds = [
+            ...(Array.isArray(prior?.physical_layer_ids) ? prior.physical_layer_ids : []),
+            ...(Number.isSafeInteger(prior?.layer_id) && prior.layer_id > 0 ? [prior.layer_id] : []),
+            layerId,
+          ].filter((id, index, all) => Number.isSafeInteger(id) && id > 0 && all.indexOf(id) === index);
           const temporary = typeof row?.temporary === 'boolean'
             ? row.temporary
             : prior?.temporary === true;
@@ -5608,6 +6748,7 @@ export class SessionStore {
           byHypothesis.set(hypothesisId, {
             hypothesis_id: hypothesisId,
             layer_id: layerId,
+            physical_layer_ids: physicalLayerIds,
             ...(textOrUndefined(row?.layer_name) ? { layer_name: row.layer_name.trim() } : {}),
             ...(textOrUndefined(row?.hypothesis) ? { hypothesis: row.hypothesis.trim() } : {}),
             ...(textOrUndefined(row?.rollback_value) ? { rollback_value: row.rollback_value.trim() } : {}),
@@ -5625,6 +6766,15 @@ export class SessionStore {
             ...(row?.surface_frame && typeof row.surface_frame === 'object' && !Array.isArray(row.surface_frame)
               ? { surface_frame: structuredClone(row.surface_frame) }
               : prior?.surface_frame ? { surface_frame: structuredClone(prior.surface_frame) } : {}),
+            ...(row?.geometry_binding && typeof row.geometry_binding === 'object' && !Array.isArray(row.geometry_binding)
+              ? { geometry_binding: structuredClone(row.geometry_binding) }
+              : prior?.geometry_binding ? { geometry_binding: structuredClone(prior.geometry_binding) } : {}),
+            ...(row?.camera_binding && typeof row.camera_binding === 'object' && !Array.isArray(row.camera_binding)
+              ? { camera_binding: structuredClone(row.camera_binding) }
+              : prior?.camera_binding ? { camera_binding: structuredClone(prior.camera_binding) } : {}),
+            ...(row?.attention_binding && typeof row.attention_binding === 'object' && !Array.isArray(row.attention_binding)
+              ? { attention_binding: structuredClone(row.attention_binding) }
+              : prior?.attention_binding ? { attention_binding: structuredClone(prior.attention_binding) } : {}),
             ...(textOrUndefined(structuralRevision) ? { construction_revision: structuralRevision } : {}),
             ...(Array.isArray(row?.depth_relations) ? {
               depth_relations: row.depth_relations
@@ -5643,6 +6793,702 @@ export class SessionStore {
       }
     }
     return [...byHypothesis.values()].sort((a, b) => a.hypothesis_id.localeCompare(b.hypothesis_id));
+  }
+  frameParentOperationId(record) {
+    return textOrUndefined(record?.verdict?.recovery?.anchor_operation_id)
+      ?? textOrUndefined(record?.frame_parent_operation_id)
+      ?? textOrUndefined(record?.baseline_preview_source_operation_id);
+  }
+  currentFrameAncestry(current, records = this.records()) {
+    const headId = textOrUndefined(current?.current_frame?.operation_id);
+    if (!headId) return null;
+    const byId = new Map(records.map(record => [record.id, record]));
+    if (!byId.has(headId)) return null;
+    const ancestry = new Set();
+    let cursor = headId;
+    while (cursor && !ancestry.has(cursor)) {
+      ancestry.add(cursor);
+      const record = byId.get(cursor);
+      if (!record) break;
+      cursor = this.frameParentOperationId(record);
+    }
+    return ancestry;
+  }
+  recordHasCurrentFrameAuthority(record, current = undefined, records = undefined) {
+    if (!record
+      || record.rollback?.completed === true
+      || record.rolled_back === true
+      || record.current_frame_authority === false) return false;
+    if (!current) return true;
+    const ancestry = this.currentFrameAncestry(current, records ?? this.records());
+    // Legacy journals may not have a resolvable current-frame head. Preserve
+    // their explicit authority semantics rather than guessing ancestry.
+    if (!ancestry) return true;
+    // Records that predate durable frame-parent capture also remain legacy.
+    // Once a record participates in the lineage graph, however, it must be an
+    // ancestor of the exact current frame to retain perceptual authority.
+    const participatesInLineage = ancestry.has(record.id)
+      || !!this.frameParentOperationId(record)
+      || [...ancestry].some(id => this.frameParentOperationId((records ?? this.records()).find(row => row.id === id)) === record.id);
+    return !participatesInLineage || ancestry.has(record.id);
+  }
+  reconcileTrendEvidenceToCurrentFrame(current, records = this.records()) {
+    const problems = { ...(current.visual_problems ?? {}) };
+    const recordsById = new Map(records.map(record => [record.id, record]));
+    let changed = false;
+    for (const [problemId, problem] of Object.entries(problems)) {
+      if (!problemId.startsWith('cumulative-trend-') || !problem || typeof problem !== 'object') continue;
+      const sources = Array.isArray(problem.source_operations) ? problem.source_operations : [];
+      const liveSources = sources.filter(id => this.recordHasCurrentFrameAuthority(recordsById.get(id), current, records));
+      if (liveSources.length === sources.length) continue;
+      const live = new Set(liveSources);
+      const supportingEvidence = Array.isArray(problem.supporting_evidence)
+        ? problem.supporting_evidence.filter(row => live.has(row?.operation_id)) : [];
+      const supportingRegions = Array.isArray(problem.supporting_regions)
+        ? problem.supporting_regions.filter(row => live.has(row?.operation_id)) : [];
+      const supports = liveSources.map(id => recordsById.get(id)).filter(Boolean)
+        .map(record => trendSupportForRecord(record, problem.trend_signal));
+      const stillSupported = liveSources.length >= trendRepeatLimit(problem.trend_signal, supports);
+      problems[problemId] = {
+        ...problem,
+        source_operations: liveSources,
+        supporting_evidence: supportingEvidence,
+        supporting_regions: supportingRegions,
+        trend_count: liveSources.length,
+        ...(stillSupported ? {} : {
+          status: 'resolved',
+          resolution_epoch: Number(problem.resolution_epoch ?? 0) + 1,
+          resolution_at: new Date().toISOString(),
+          resolution_reason: 'source_evidence_non_ancestral',
+        }),
+      };
+      changed = true;
+    }
+    if (!changed) return current;
+    const primaryBlocker = this.primaryBlockingProblem(problems);
+    return {
+      ...current,
+      visual_problems: problems,
+      active_problem: primaryBlocker ?? undefined,
+      priority_review_required: false,
+    };
+  }
+  reconcileDerivedProblemEvidenceToCurrentFrame(current, records = this.records()) {
+    const problems = { ...(current.visual_problems ?? {}) };
+    const recordsById = new Map(records.map(record => [record.id, record]));
+    let changed = false;
+    for (const [problemId, problem] of Object.entries(problems)) {
+      if (problemId.startsWith('cumulative-trend-') || !problem || typeof problem !== 'object') continue;
+      const sourceIds = [
+        ...(Array.isArray(problem.source_operations) ? problem.source_operations : []),
+        ...(typeof problem.source_operation_id === 'string' ? [problem.source_operation_id] : []),
+        ...(typeof problem.observed?.operation_id === 'string' ? [problem.observed.operation_id] : []),
+      ].filter((id, index, all) => typeof id === 'string' && all.indexOf(id) === index);
+      if (!sourceIds.length) continue;
+      const liveSources = sourceIds.filter(id => this.recordHasCurrentFrameAuthority(recordsById.get(id), current, records));
+      if (liveSources.length === sourceIds.length) continue;
+      const live = new Set(liveSources);
+      const supportingEvidence = Array.isArray(problem.supporting_evidence)
+        ? problem.supporting_evidence.filter(row => live.has(row?.operation_id)) : problem.supporting_evidence;
+      const supportingRegions = Array.isArray(problem.supporting_regions)
+        ? problem.supporting_regions.filter(row => live.has(row?.operation_id)) : problem.supporting_regions;
+      const hasIndependentLiveSupport = liveSources.length > 0;
+      problems[problemId] = {
+        ...problem,
+        ...(Array.isArray(problem.source_operations) ? { source_operations: liveSources } : {}),
+        ...(problem.source_operation_id && !live.has(problem.source_operation_id) ? { source_operation_id: undefined } : {}),
+        ...(supportingEvidence ? { supporting_evidence: supportingEvidence } : {}),
+        ...(supportingRegions ? { supporting_regions: supportingRegions } : {}),
+        ...(!hasIndependentLiveSupport && problem.status !== 'resolved' ? {
+          status: 'resolved',
+          resolution_epoch: Number(problem.resolution_epoch ?? 0) + 1,
+          resolution_at: new Date().toISOString(),
+          resolution_reason: 'source_evidence_non_ancestral',
+        } : {}),
+      };
+      changed = true;
+    }
+    if (!changed) return current;
+    const primaryBlocker = this.primaryBlockingProblem(problems);
+    return {
+      ...current,
+      visual_problems: problems,
+      active_problem: primaryBlocker ?? undefined,
+      priority_review_required: false,
+    };
+  }
+  currentDocumentIncarnationId(documentId, projectionContext = undefined) {
+    const state = projectionContext ? projectionContext.paintingState : this.paintingState();
+    const instance = state.documents?.[String(documentId)]?.document_instance;
+    const witness = normalizeDocumentInstanceWitness(instance?.host_witness);
+    return textOrUndefined(witness?.token) ?? textOrUndefined(instance?.bootstrap_operation_id) ?? null;
+  }
+  sceneGeometryModel(documentId, suppliedRecords = undefined, projectionContext = undefined) {
+    if (!Number.isSafeInteger(documentId) || documentId <= 0) return null;
+    const records = this.currentDocumentRecords(
+      documentId,
+      suppliedRecords ?? projectionContext?.records ?? this.records(),
+      projectionContext
+    ).sort((a, b) => Number(a.sequence ?? 0) - Number(b.sequence ?? 0));
+    let current = null;
+    for (const record of records) {
+      if (!record?.scene_geometry_model) continue;
+      try {
+        const model = normalizeSceneGeometryModel(record.scene_geometry_model);
+        const incarnation = this.currentDocumentIncarnationId(documentId, projectionContext);
+        if (model.source_frame.document_id !== documentId) continue;
+        if (!incarnation || model.source_frame.document_incarnation !== incarnation) continue;
+        if (current) {
+          if (model.model_id !== current.model_id || model.revision <= current.revision) continue;
+        }
+        current = {
+          ...model,
+          source_operation_id: record.id,
+          source_sequence: record.sequence ?? null,
+        };
+      } catch {
+        continue;
+      }
+    }
+    return current;
+  }
+  sceneLightingColorModel(documentId, suppliedRecords = undefined, projectionContext = undefined) {
+    if (!Number.isSafeInteger(documentId) || documentId <= 0) return null;
+    const records = this.currentDocumentRecords(
+      documentId,
+      suppliedRecords ?? projectionContext?.records ?? this.records(),
+      projectionContext
+    ).sort((a, b) => Number(a.sequence ?? 0) - Number(b.sequence ?? 0));
+    const incarnation = this.currentDocumentIncarnationId(documentId, projectionContext);
+    let current = null;
+    for (const record of records) {
+      if (!record?.scene_lighting_color_model) continue;
+      try {
+        const model = normalizeSceneLightingColorModel(record.scene_lighting_color_model);
+        if (model.source_frame.document_id !== documentId) continue;
+        if (!incarnation || model.source_frame.document_incarnation !== incarnation) continue;
+        if (current && (model.model_id !== current.model_id || model.revision <= current.revision)) continue;
+        current = { ...model, source_operation_id: record.id, source_sequence: record.sequence ?? null };
+      } catch {
+        continue;
+      }
+    }
+    return current;
+  }
+  sceneCameraImagingModel(documentId, suppliedRecords = undefined, projectionContext = undefined) {
+    if (!Number.isSafeInteger(documentId) || documentId <= 0) return null;
+    const records = this.currentDocumentRecords(
+      documentId,
+      suppliedRecords ?? projectionContext?.records ?? this.records(),
+      projectionContext
+    ).sort((a, b) => Number(a.sequence ?? 0) - Number(b.sequence ?? 0));
+    const incarnation = this.currentDocumentIncarnationId(documentId, projectionContext);
+    let current = null;
+    for (const record of records) {
+      if (!record?.scene_camera_imaging_model) continue;
+      try {
+        const model = normalizeSceneCameraImagingModel(record.scene_camera_imaging_model);
+        if (model.source_frame.document_id !== documentId) continue;
+        if (!incarnation || model.source_frame.document_incarnation !== incarnation) continue;
+        if (current && (model.model_id !== current.model_id || model.revision <= current.revision)) continue;
+        current = { ...model, source_operation_id: record.id, source_sequence: record.sequence ?? null };
+      } catch {
+        continue;
+      }
+    }
+    return current;
+  }
+  sceneCameraImagingModelRevision(documentId, modelId, revision, suppliedRecords = undefined, projectionContext = undefined) {
+    if (!Number.isSafeInteger(documentId) || documentId <= 0 || !modelId || !Number.isSafeInteger(revision) || revision <= 0) return null;
+    const records = this.currentDocumentRecords(
+      documentId,
+      suppliedRecords ?? projectionContext?.records ?? this.records(),
+      projectionContext
+    ).sort((a, b) => Number(a.sequence ?? 0) - Number(b.sequence ?? 0));
+    const incarnation = this.currentDocumentIncarnationId(documentId, projectionContext);
+    let match = null;
+    for (const record of records) {
+      if (!record?.scene_camera_imaging_model) continue;
+      try {
+        const model = normalizeSceneCameraImagingModel(record.scene_camera_imaging_model);
+        if (model.source_frame.document_id !== documentId) continue;
+        if (!incarnation || model.source_frame.document_incarnation !== incarnation) continue;
+        if (model.model_id !== modelId || model.revision !== revision) continue;
+        match = model;
+      } catch {
+        continue;
+      }
+    }
+    return match;
+  }
+  cameraBindingStates(documentId, suppliedRecords = undefined, projectionContext = undefined) {
+    const records = suppliedRecords ?? projectionContext?.records ?? this.records();
+    const current = this.sceneCameraImagingModel(documentId, records, projectionContext);
+    if (!current) return [];
+    const geometryStates = new Map(
+      this.geometryBindingStates(documentId, records, projectionContext).map(state => [state.owner_id, state])
+    );
+    return this.semanticLayerOwners(documentId, records, projectionContext)
+      .filter(owner => owner?.camera_binding && typeof owner.camera_binding === 'object' && !Array.isArray(owner.camera_binding))
+      .map(owner => {
+        try {
+          const binding = normalizeCameraBinding(owner.camera_binding);
+          const source = binding.sceneCameraRevision === current.revision
+            ? current
+            : this.sceneCameraImagingModelRevision(documentId, binding.sceneCameraModelId, binding.sceneCameraRevision, records, projectionContext);
+          const cameraState = cameraBindingStaleness(binding, current, source);
+          const geometryState = binding.geometryBindingOwnerId ? geometryStates.get(binding.geometryBindingOwnerId) : undefined;
+          const geometryStale = binding.geometryBindingOwnerId ? geometryState?.stale !== false : false;
+          const changed = [...new Set([
+            ...cameraState.changed_dependency_ids,
+            ...(geometryStale ? ['geometry'] : []),
+          ])].sort();
+          return {
+            owner_id: owner.hypothesis_id,
+            binding_revision: binding.sceneCameraRevision,
+            current_revision: current.revision,
+            stale: cameraState.stale || geometryStale,
+            reason: cameraState.stale ? cameraState.reason : geometryStale ? 'geometry_dependency_stale' : 'current',
+            changed_dependency_ids: changed,
+          };
+        } catch (error) {
+          return {
+            owner_id: owner.hypothesis_id,
+            binding_revision: null,
+            current_revision: current.revision,
+            stale: true,
+            reason: 'invalid_binding',
+            changed_dependency_ids: [],
+            error: error instanceof Error ? error.message : String(error),
+          };
+        }
+      })
+      .sort((a, b) => String(a.owner_id).localeCompare(String(b.owner_id)));
+  }
+  attentionBindingStates(documentId, suppliedRecords = undefined, projectionContext = undefined) {
+    const paintingState = projectionContext ? projectionContext.paintingState : this.paintingState();
+    const art = paintingState.documents?.[String(documentId)]?.art_director;
+    if (!art?.perceptual_hierarchy) return [];
+    let current;
+    try {
+      current = normalizePerceptualHierarchy(art.perceptual_hierarchy);
+    } catch {
+      return [];
+    }
+    const history = Array.isArray(art.perceptual_hierarchy_history)
+      ? art.perceptual_hierarchy_history.map(entry => {
+          try { return normalizePerceptualHierarchy(entry); } catch { return null; }
+        }).filter(Boolean)
+      : [];
+    return this.semanticLayerOwners(documentId, suppliedRecords, projectionContext)
+      .filter(owner => owner?.attention_binding && typeof owner.attention_binding === 'object' && !Array.isArray(owner.attention_binding))
+      .map(owner => {
+        try {
+          const binding = normalizeAttentionBinding(owner.attention_binding);
+          const source = binding.hierarchyRevision === current.revision
+            ? current
+            : history.find(item => item.revision === binding.hierarchyRevision) ?? null;
+          const state = attentionBindingStaleness(binding, current, source);
+          const currentZone = current.zones.find(zone => zone.id === binding.zoneId);
+          const ownerStillInZone = !!currentZone?.owner_ids?.includes(owner.hypothesis_id);
+          return {
+            owner_id: owner.hypothesis_id,
+            zone_id: binding.zoneId,
+            binding_revision: binding.hierarchyRevision,
+            current_revision: current.revision,
+            stale: state.stale || !ownerStillInZone,
+            reason: state.stale ? state.reason : ownerStillInZone ? 'current' : 'zone_owner_allocation_changed',
+            changed_dependency_ids: state.stale
+              ? state.changed_dependency_ids
+              : ownerStillInZone ? [] : [`zone:${binding.zoneId}`],
+          };
+        } catch (error) {
+          return {
+            owner_id: owner.hypothesis_id,
+            zone_id: null,
+            binding_revision: null,
+            current_revision: current.revision,
+            stale: true,
+            reason: 'invalid_binding',
+            changed_dependency_ids: [],
+            error: error instanceof Error ? error.message : String(error),
+          };
+        }
+      })
+      .sort((a, b) => String(a.owner_id).localeCompare(String(b.owner_id)));
+  }
+  sceneLightingColorModelRevision(documentId, modelId, revision, suppliedRecords = undefined, projectionContext = undefined) {
+    if (!Number.isSafeInteger(documentId) || documentId <= 0 || !modelId || !Number.isSafeInteger(revision) || revision <= 0) return null;
+    const records = this.currentDocumentRecords(
+      documentId,
+      suppliedRecords ?? projectionContext?.records ?? this.records(),
+      projectionContext
+    ).sort((a, b) => Number(a.sequence ?? 0) - Number(b.sequence ?? 0));
+    const incarnation = this.currentDocumentIncarnationId(documentId, projectionContext);
+    let match = null;
+    for (const record of records) {
+      if (!record?.scene_lighting_color_model) continue;
+      try {
+        const model = normalizeSceneLightingColorModel(record.scene_lighting_color_model);
+        if (model.source_frame.document_id !== documentId) continue;
+        if (!incarnation || model.source_frame.document_incarnation !== incarnation) continue;
+        if (model.model_id !== modelId || model.revision !== revision) continue;
+        match = model;
+      } catch {
+        continue;
+      }
+    }
+    return match;
+  }
+  lightingColorBindingStates(documentId, suppliedRecords = undefined, projectionContext = undefined) {
+    const records = this.currentDocumentRecords(
+      documentId,
+      suppliedRecords ?? projectionContext?.records ?? this.records(),
+      projectionContext
+    ).sort((a, b) => Number(a.sequence ?? 0) - Number(b.sequence ?? 0));
+    const current = this.sceneLightingColorModel(documentId, records, projectionContext);
+    if (!current) return [];
+    const currentGeometry = this.sceneGeometryModel(documentId, records, projectionContext);
+    const byOwner = new Map();
+    for (const record of records) {
+      if (record?.rolled_back === true || record?.current_frame_authority === false) continue;
+      if (record?.phase !== 'completed' || record?.failed || record?.tool !== 'photoshop_execute_visual_microplan') continue;
+      const ownerId = textOrUndefined(record?.args?.logical_layer?.hypothesis_id);
+      const rawMaterial = record?.args?.material_response;
+      if (!ownerId || !rawMaterial) continue;
+      try {
+        const binding = normalizeMaterialResponsePlan(rawMaterial).lightingColorBinding;
+        if (binding) byOwner.set(ownerId, binding);
+      } catch {
+        // Invalid historical material evidence cannot become current binding authority.
+      }
+    }
+    return [...byOwner.entries()].map(([ownerId, binding]) => {
+      const source = binding.sceneModelRevision === current.revision
+        ? current
+        : this.sceneLightingColorModelRevision(documentId, binding.sceneModelId, binding.sceneModelRevision, records, projectionContext);
+      const lightingState = lightingColorBindingStaleness(binding, current, source);
+      const spatial = binding.spatialRelation;
+      if (!spatial) {
+        return {
+          owner_id: ownerId,
+          binding_revision: binding.sceneModelRevision,
+          current_revision: current.revision,
+          ...lightingState,
+        };
+      }
+      let spatialChanged = [];
+      let spatialReason = 'current';
+      if (!currentGeometry || spatial.sceneGeometryModelId !== currentGeometry.model_id) {
+        spatialReason = 'model_identity_changed';
+        spatialChanged = ['__projection__'];
+      } else if (spatial.sceneGeometryRevision !== currentGeometry.revision) {
+        const sourceGeometry = this.sceneGeometryModelRevision(
+          documentId,
+          spatial.sceneGeometryModelId,
+          spatial.sceneGeometryRevision,
+          records,
+          projectionContext
+        );
+        if (!sourceGeometry) {
+          spatialReason = 'source_revision_unavailable';
+        } else {
+          const changed = changedSceneGeometryDependencyIds(sourceGeometry, currentGeometry);
+          const dependencies = new Set(spatial.dependencyIds);
+          spatialChanged = changed.filter(id => id === '__projection__' || dependencies.has(id));
+          if (spatialChanged.length) spatialReason = 'dependency_changed';
+        }
+      }
+      const stale = lightingState.stale || spatialReason !== 'current';
+      const changedDependencyIds = [...new Set([
+        ...lightingState.changed_dependency_ids,
+        ...spatialChanged,
+      ])].sort();
+      return {
+        owner_id: ownerId,
+        binding_revision: binding.sceneModelRevision,
+        current_revision: current.revision,
+        stale,
+        reason: lightingState.stale ? lightingState.reason : spatialReason,
+        changed_dependency_ids: changedDependencyIds,
+        spatial_relation: {
+          binding_geometry_revision: spatial.sceneGeometryRevision,
+          current_geometry_revision: currentGeometry?.revision ?? null,
+          stale: spatialReason !== 'current',
+          reason: spatialReason,
+          changed_dependency_ids: spatialChanged,
+        },
+      };
+    }).sort((a, b) => String(a.owner_id).localeCompare(String(b.owner_id)));
+  }
+  sceneGeometryModelRevision(documentId, modelId, revision, suppliedRecords = undefined, projectionContext = undefined) {
+    if (!Number.isSafeInteger(documentId) || documentId <= 0 || !modelId || !Number.isSafeInteger(revision) || revision <= 0) return null;
+    const records = this.currentDocumentRecords(
+      documentId,
+      suppliedRecords ?? projectionContext?.records ?? this.records(),
+      projectionContext
+    ).sort((a, b) => Number(a.sequence ?? 0) - Number(b.sequence ?? 0));
+    const incarnation = this.currentDocumentIncarnationId(documentId, projectionContext);
+    let match = null;
+    for (const record of records) {
+      if (!record?.scene_geometry_model) continue;
+      try {
+        const model = normalizeSceneGeometryModel(record.scene_geometry_model);
+        if (model.source_frame.document_id !== documentId) continue;
+        if (!incarnation || model.source_frame.document_incarnation !== incarnation) continue;
+        if (model.model_id !== modelId || model.revision !== revision) continue;
+        match = model;
+      } catch {
+        continue;
+      }
+    }
+    return match;
+  }
+  geometryBindingStates(documentId, suppliedRecords = undefined, projectionContext = undefined) {
+    const records = suppliedRecords ?? projectionContext?.records ?? this.records();
+    const current = this.sceneGeometryModel(documentId, records, projectionContext);
+    if (!current) return [];
+    return this.semanticLayerOwners(documentId, records, projectionContext)
+      .filter(owner => owner?.geometry_binding && typeof owner.geometry_binding === 'object' && !Array.isArray(owner.geometry_binding))
+      .map(owner => {
+        try {
+          const binding = normalizeGeometryBinding(owner.geometry_binding);
+          const source = binding.scene_geometry_revision === current.revision
+            ? current
+            : this.sceneGeometryModelRevision(documentId, binding.scene_geometry_model_id, binding.scene_geometry_revision, records, projectionContext);
+          return {
+            owner_id: owner.hypothesis_id,
+            binding_revision: binding.scene_geometry_revision,
+            current_revision: current.revision,
+            exact_geometry_completion_relevant: binding.exact_geometry_completion_relevant,
+            ...geometryBindingStaleness(binding, current, source),
+          };
+        } catch (error) {
+          return {
+            owner_id: owner.hypothesis_id,
+            binding_revision: null,
+            current_revision: current.revision,
+            stale: true,
+            reason: 'invalid_binding',
+            changed_dependency_ids: [],
+            error: error instanceof Error ? error.message : String(error),
+          };
+        }
+      })
+      .sort((a, b) => String(a.owner_id).localeCompare(String(b.owner_id)));
+  }
+  geometryCompletionDebt(documentId, suppliedRecords = undefined, projectionContext = undefined) {
+    const records = suppliedRecords ?? projectionContext?.records ?? this.records();
+    const scene = this.sceneGeometryModel(documentId, records, projectionContext);
+    if (!scene) return [];
+    if (scene.applicability === 'insufficient_evidence') {
+      return [{
+        code: 'scene_geometry_insufficient_evidence',
+        owner_id: null,
+        scene_geometry_model_id: scene.model_id,
+        scene_geometry_revision: scene.revision,
+        reason: 'Scene Geometry Model still reports insufficient evidence for committed completion.',
+      }];
+    }
+    if (scene.applicability !== 'coherent_3d') return [];
+    const stateByOwner = new Map(this.geometryBindingStates(documentId, records, projectionContext).map(state => [state.owner_id, state]));
+    return this.semanticLayerOwners(documentId, records, projectionContext).flatMap(owner => {
+      if (!owner?.geometry_binding || typeof owner.geometry_binding !== 'object' || Array.isArray(owner.geometry_binding)) return [];
+      try {
+        const binding = normalizeGeometryBinding(owner.geometry_binding);
+        if (!binding.exact_geometry_completion_relevant) return [];
+        const state = stateByOwner.get(owner.hypothesis_id);
+        if (!state || state.stale) {
+          return [{
+            code: 'geometry_completion_binding_stale',
+            owner_id: owner.hypothesis_id,
+            scene_geometry_model_id: scene.model_id,
+            scene_geometry_revision: scene.revision,
+            reason: state?.reason ?? 'binding_state_missing',
+            changed_dependency_ids: state?.changed_dependency_ids ?? [],
+          }];
+        }
+        const preflight = runGeometryPreflight(binding, scene);
+        const blockingIssues = preflight.issues.filter(issue =>
+          issue.code === 'geometry_exact_evidence_required'
+          || issue.code === 'geometry_exact_evidence_source_mismatch'
+          || issue.code === 'geometry_dependency_stale'
+        );
+        return blockingIssues.length ? [{
+          code: 'geometry_completion_preflight_failed',
+          owner_id: owner.hypothesis_id,
+          scene_geometry_model_id: scene.model_id,
+          scene_geometry_revision: scene.revision,
+          reason: blockingIssues.map(issue => issue.message).join('; '),
+          issue_codes: blockingIssues.map(issue => issue.code),
+        }] : [];
+      } catch (error) {
+        return [{
+          code: 'geometry_completion_binding_invalid',
+          owner_id: owner.hypothesis_id,
+          scene_geometry_model_id: scene.model_id,
+          scene_geometry_revision: scene.revision,
+          reason: error instanceof Error ? error.message : String(error),
+        }];
+      }
+    });
+  }
+  physicalEffectCompletionDebt(documentId, suppliedRecords = undefined, projectionContext = undefined) {
+    const records = suppliedRecords ?? projectionContext?.records ?? this.records();
+    const owners = this.semanticLayerOwners(documentId, records, projectionContext);
+    const sceneLighting = this.sceneLightingColorModel(documentId, records, projectionContext);
+    const lightingStates = new Map(
+      this.lightingColorBindingStates(documentId, records, projectionContext).map(state => [state.owner_id, state])
+    );
+    const translucentOpacity = new Set(['transmissive', 'transparent-overlay', 'effect-only']);
+    const effectRoles = new Set(['transmissive-surface', 'cast-shadow', 'surface-condition', 'optical-effect', 'atmosphere', 'camera-post', 'other']);
+    const lightingCausalRoles = new Set(['transmissive-surface', 'cast-shadow', 'surface-condition', 'optical-effect', 'atmosphere']);
+    return owners.flatMap(owner => {
+      const physicalRole = textOrUndefined(owner?.physical_role)?.toLowerCase();
+      const opacityRole = textOrUndefined(owner?.opacity_role)?.toLowerCase();
+      const materiallyTranslucent = translucentOpacity.has(opacityRole) || effectRoles.has(physicalRole);
+      if (!materiallyTranslucent) return [];
+      if (!physicalRole || physicalRole === 'other') {
+        return [{
+          code: 'physical_effect_role_unexplained', owner_id: owner.hypothesis_id,
+          physical_role: physicalRole ?? null, opacity_role: opacityRole ?? null,
+          reason: 'Persistent translucent/effect owner lacks a concrete physical or perceptual role.',
+        }];
+      }
+      if (translucentOpacity.has(opacityRole) && ['opaque-mass', 'support-surface'].includes(physicalRole)) {
+        return [{
+          code: 'physical_effect_opacity_role_conflict', owner_id: owner.hypothesis_id,
+          physical_role: physicalRole, opacity_role: opacityRole,
+          reason: 'A persistent translucent/effect opacity cannot masquerade as an opaque/support mass at completion.',
+        }];
+      }
+      if (sceneLighting && lightingCausalRoles.has(physicalRole)) {
+        const state = lightingStates.get(owner.hypothesis_id);
+        if (!state) {
+          return [{
+            code: 'physical_effect_lighting_binding_missing', owner_id: owner.hypothesis_id,
+            physical_role: physicalRole, opacity_role: opacityRole ?? null,
+            reason: `Physical role ${physicalRole} is lighting/material-causal but has no current E.19 binding.`,
+          }];
+        }
+        if (state.stale) {
+          return [{
+            code: 'physical_effect_lighting_binding_stale', owner_id: owner.hypothesis_id,
+            physical_role: physicalRole, opacity_role: opacityRole ?? null,
+            reason: state.reason,
+            changed_dependency_ids: state.changed_dependency_ids ?? [],
+          }];
+        }
+      }
+      return [];
+    });
+  }
+  geometryPreflight(documentId, suppliedRecords = undefined, projectionContext = undefined) {
+    if (!Number.isSafeInteger(documentId) || documentId <= 0) return null;
+    const scene = this.sceneGeometryModel(documentId, suppliedRecords, projectionContext);
+    if (!scene) return null;
+    const records = this.currentDocumentRecords(
+      documentId,
+      suppliedRecords ?? projectionContext?.records ?? this.records(),
+      projectionContext
+    ).sort((a, b) => Number(a.sequence ?? 0) - Number(b.sequence ?? 0));
+    let current = null;
+    for (const record of records) {
+      const raw = record?.geometry_preflight;
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
+      if (raw.protocol !== GEOMETRY_PREFLIGHT_PROTOCOL) continue;
+      if (raw.scene_geometry_model_id !== scene.model_id || raw.scene_geometry_revision !== scene.revision) continue;
+      if (raw.source_frame?.document_id !== documentId) continue;
+      if (raw.source_frame?.document_incarnation !== scene.source_frame.document_incarnation) continue;
+      current = {
+        ...structuredClone(raw),
+        source_operation_id: record.id,
+        source_sequence: record.sequence ?? null,
+      };
+    }
+    return current;
+  }
+  sceneOwnershipPlan(documentId, suppliedRecords = undefined, projectionContext = undefined) {
+    if (!Number.isSafeInteger(documentId) || documentId <= 0) return null;
+    const records = this.currentDocumentRecords(
+      documentId,
+      suppliedRecords ?? projectionContext?.records ?? this.records(),
+      projectionContext
+    ).sort((a, b) => Number(a.sequence ?? 0) - Number(b.sequence ?? 0));
+    for (const record of records) {
+      if (!record?.scene_ownership_plan) continue;
+      try {
+        return {
+          ...normalizeSceneOwnershipPlan(record.scene_ownership_plan),
+          source_operation_id: record.id,
+          source_sequence: record.sequence ?? null,
+        };
+      } catch {
+        // A malformed historical record must not be reinterpreted as a valid
+        // ownership plan. Compiler/status will continue fail-closed as if no
+        // durable plan exists rather than inventing semantic ownership.
+        return null;
+      }
+    }
+    return null;
+  }
+  retireRolledBackTrendEvidence(current, sourceOperationId, rollbackOperationId, completedAt) {
+    const problems = { ...(current.visual_problems ?? {}) };
+    let changed = false;
+    let survivingTrendProblem;
+    for (const [problemId, problem] of Object.entries(problems)) {
+      if (!problemId.startsWith('cumulative-trend-') || !problem || typeof problem !== 'object') continue;
+      const sources = Array.isArray(problem.source_operations) ? problem.source_operations : [];
+      if (!sources.includes(sourceOperationId)) continue;
+      const remainingSources = sources.filter(id => id !== sourceOperationId);
+      const remainingEvidence = Array.isArray(problem.supporting_evidence)
+        ? problem.supporting_evidence.filter(row => row?.operation_id !== sourceOperationId)
+        : [];
+      const remainingRegions = Array.isArray(problem.supporting_regions)
+        ? problem.supporting_regions.filter(row => row?.operation_id !== sourceOperationId)
+        : [];
+      const requiredSupportCount = problem.promotion_reason === 'whole_frame_global_evidence'
+        ? 1
+        : TREND_SIGNAL_REPEAT_LIMIT;
+      const stillSupported = remainingSources.length >= requiredSupportCount;
+      problems[problemId] = {
+        ...problem,
+        source_operations: remainingSources,
+        supporting_evidence: remainingEvidence,
+        supporting_regions: remainingRegions,
+        trend_count: remainingSources.length,
+        ...(stillSupported ? {} : {
+          status: 'resolved',
+          resolution_epoch: Number(problem.resolution_epoch ?? 0) + 1,
+          resolution_at: completedAt,
+          resolution_reason: 'source_evidence_rolled_back',
+          retired_source_operation_id: sourceOperationId,
+          retired_by_rollback_operation_id: rollbackOperationId,
+        }),
+      };
+      if (stillSupported) survivingTrendProblem = problems[problemId];
+      changed = true;
+    }
+    if (!changed) return current;
+    const primaryBlocker = this.primaryBlockingProblem(problems);
+    return {
+      ...current,
+      visual_problems: problems,
+      active_problem: primaryBlocker ?? undefined,
+      priority_review_required: false,
+      cumulative_trend_guard: {
+        ...(current.cumulative_trend_guard ?? {}),
+        triggered: !!survivingTrendProblem,
+        ...(survivingTrendProblem ? {
+          problem_id: survivingTrendProblem.problem_id,
+          signal: survivingTrendProblem.trend_signal,
+          count: survivingTrendProblem.trend_count,
+          source_operations: survivingTrendProblem.source_operations,
+        } : {}),
+        retired_source_operation_id: sourceOperationId,
+        retired_by_rollback_operation_id: rollbackOperationId,
+      },
+    };
   }
   physicalStackOwnerSignature(documentId, suppliedRecords = undefined, projectionContext = undefined) {
     const owners = this.semanticLayerOwners(documentId, suppliedRecords, projectionContext)
@@ -5682,8 +7528,31 @@ export class SessionStore {
     if (!Number.isSafeInteger(layerId) || layerId <= 0) {
       throw new Error('semantic layer keep requires a positive layer_id');
     }
-    if (!rationale || rationale.length < 12) {
-      throw new Error('semantic layer keep requires a concrete rationale of at least 12 characters');
+
+    const durableScenePlan = this.sceneOwnershipPlan(documentId);
+    const suppliedScenePlan = input?.scene_ownership_plan === undefined
+      ? undefined
+      : normalizeSceneOwnershipPlan(input.scene_ownership_plan);
+    if (durableScenePlan && suppliedScenePlan) {
+      const durableCanonical = normalizeSceneOwnershipPlan(durableScenePlan);
+      if (JSON.stringify(durableCanonical) !== JSON.stringify(suppliedScenePlan)) {
+        throw new Error(
+          `scene_ownership_plan_conflict: document already owns durable plan ${durableCanonical.plan_id}; do not replace it while keeping ${hypothesisId}`
+        );
+      }
+    }
+    const scenePlan = durableScenePlan
+      ? normalizeSceneOwnershipPlan(durableScenePlan)
+      : suppliedScenePlan;
+    if (!scenePlan) {
+      throw new Error(
+        `scene_ownership_plan_required: keeping temporary owner ${hypothesisId} commits it to the scene; supply the durable ownership plan before promotion`
+      );
+    }
+    if (!sceneOwnershipOwnerIds(scenePlan).includes(hypothesisId)) {
+      throw new Error(
+        `scene_ownership_owner_unplanned: temporary owner ${hypothesisId} is not predeclared by scene_ownership_plan=${scenePlan.plan_id}`
+      );
     }
 
     const existingRequest = this.read(requestKey);
@@ -5718,7 +7587,7 @@ export class SessionStore {
       action: 'keep',
       hypothesis_id: hypothesisId,
       layer_id: layerId,
-      rationale,
+      ...(rationale ? { rationale } : {}),
       at,
     };
     const resultBody = {
@@ -5742,10 +7611,11 @@ export class SessionStore {
         document_id: documentId,
         hypothesis_id: hypothesisId,
         layer_id: layerId,
-        rationale,
+        ...(rationale ? { rationale } : {}),
       },
       summary: `Keep semantic layer owner ${hypothesisId} on layer ${layerId}`,
       purpose: 'Resolve one temporary logical-layer hypothesis without a Photoshop pixel mutation.',
+      ...(!durableScenePlan && suppliedScenePlan ? { scene_ownership_plan: suppliedScenePlan } : {}),
     };
     const record = {
       ...request,
@@ -5759,7 +7629,7 @@ export class SessionStore {
       result: { content: [{ type: 'text', text: JSON.stringify(resultBody) }] },
       report: {
         did: `Kept semantic owner ${hypothesisId} on existing layer ${layerId}`,
-        why: rationale,
+        ...(rationale ? { why: rationale } : {}),
         result: 'Temporary semantic ownership was promoted in Guard metadata only; Photoshop pixels/layers were not mutated.',
         at,
         internal_guard_lifecycle: true,
@@ -6266,6 +8136,16 @@ export class SessionStore {
     if (input.sha256 !== preview.sha256 || fingerprintFile(preview.materialized_path) !== input.sha256) throw new Error('Preview SHA mismatch');
     if (!['improvement', 'neutral', 'regression'].includes(input.verdict)) throw new Error('Visual verdict required');
     if (!['accept', 'correct', 'rollback'].includes(input.disposition)) throw new Error('Visual disposition accept|correct|rollback required');
+    if (input.disposition === 'rollback') {
+      const semanticOwnership = parseTexts(record?.result)
+        .map(body => body?.pass_execution?.history_ownership)
+        .find(ownership => ownership?.protocol === 'photoshop.guard.semantic_pass_history_ownership.v1');
+      if (semanticOwnership && semanticOwnership.status !== 'exact') {
+        throw new Error(
+          `semantic_pass_rollback_unproven: pass history ownership is ${semanticOwnership.status ?? 'unknown'}; reconcile the partial/uncertain execution or restore an exact accepted anchor instead of issuing an unbounded Photoshop undo`
+        );
+      }
+    }
     if (typeof input.observed_change !== 'string' || input.observed_change.trim().length < 10) throw new Error('Concrete observed_change required');
     const observations = normalizeVisualObservations(input.observations);
     const primaryMismatch = textOrUndefined(input.primary_mismatch);
@@ -6356,6 +8236,11 @@ export class SessionStore {
       mode: significanceModeOf(record),
     });
     const executionChanged = significanceHasDetectedChange(significance);
+    if (significance.execution_effect === 'meaningful' && !hasWholeFrameObservation(observations)) {
+      throw new Error(
+        'whole_frame_review_required: every meaningful visual pass must include an observation with region="whole frame" before verdict closure'
+      );
+    }
     const comparisonBefore = record.before_preview ?? record.baseline_preview;
     const comparisonProvenanceMatched = comparisonBefore?.document_id === record.args?.document_id
       && preview?.document_id === record.args?.document_id;
@@ -6455,6 +8340,7 @@ export class SessionStore {
     const submittedReviewFindings = Array.isArray(input.review_findings)
       ? input.review_findings
       : [];
+    const normalizedReviewFindings = this.normalizeReviewFindings(submittedReviewFindings);
     const syntheticSoftFinding = softnessReview?.status === 'fail'
       ? [{
           kind: 'soft_dominance',
@@ -6515,6 +8401,51 @@ export class SessionStore {
         goal_confirmation: assessment.status,
       };
       const problems = { ...(current.visual_problems ?? {}) };
+      const briefDebtOverrides = { ...(current.brief_debt_overrides ?? {}) };
+      const activeBriefItems = Array.isArray(current.art_director?.artistic_evaluation_contract?.brief_items)
+        ? current.art_director.artistic_evaluation_contract.brief_items
+        : [];
+      for (const finding of normalizedReviewFindings) {
+        if (!finding.brief_item_id) continue;
+        const briefItem = activeBriefItems.find(item => item.item_id === finding.brief_item_id);
+        if (!briefItem) throw new Error(`review finding references unknown active brief item ${finding.brief_item_id}`);
+        if (briefItem.kind !== 'hard_perceptual') {
+          throw new Error(`review finding brief_item_id=${finding.brief_item_id} must reference a hard_perceptual item to create blocking debt`);
+        }
+        briefDebtOverrides[finding.brief_item_id] = {
+          item_id: briefItem.item_id,
+          kind: 'hard_perceptual',
+          requirement: briefItem.requirement,
+          state: finding.brief_state,
+          reason: `Current-frame ${finding.severity} review finding (${finding.kind}) establishes prompt-relevant debt.`,
+          evidence: [`operation:${record.id}`, `preview_sha256:${preview.sha256}`],
+          source_operation_id: record.id,
+          source_sequence: record.sequence ?? null,
+        };
+      }
+      for (const finding of normalizedReviewFindings) {
+        if (finding.severity !== 'must-fix') continue;
+        const problemId = textOrUndefined(finding.problem_id) ?? `review-${finding.kind}`;
+        const priorProblem = problems[problemId];
+        const findingScale = finding.level === 'composition'
+          ? 'global'
+          : finding.level === 'object' ? 'medium' : 'small';
+        problems[problemId] = {
+          ...(priorProblem ?? {}),
+          problem_id: problemId,
+          scale: findingScale,
+          severity: 'must-fix',
+          status: 'open',
+          region: finding.level === 'composition' ? 'whole-frame' : (context.region ?? 'review-region'),
+          hypothesis: `Current-frame must-fix ${finding.kind} review finding requires correction before dependent work.`,
+          source_operation_id: record.id,
+          evidence_sha256: preview.sha256,
+          source_review_kind: finding.kind,
+          source_review_level: finding.level,
+          structural_review: STRUCTURAL_REVIEW_FINDING_KINDS.has(finding.kind),
+          ...(finding.requested_region ? { review_region_bounds: finding.requested_region } : {}),
+        };
+      }
       if (softnessReview?.status === 'fail') {
         const problemId = 'soft-dominance';
         const priorSoftProblem = problems[problemId];
@@ -6584,6 +8515,17 @@ export class SessionStore {
             requested_at: record.verdict.at,
             required_undo_steps: reportedHistorySteps(record),
             remaining_undo_steps: reportedHistorySteps(record),
+            ...(parseTexts(record?.result).map(body => body?.pass_execution?.history_ownership).find(ownership =>
+              ownership?.protocol === 'photoshop.guard.semantic_pass_history_ownership.v1'
+              && ownership?.status === 'exact'
+            ) ? {
+              rollback_handle: {
+                protocol: 'photoshop.guard.semantic_pass_rollback_handle.v1',
+                operation_id: record.id,
+                history_ownership_protocol: 'photoshop.guard.semantic_pass_history_ownership.v1',
+                owned_history_steps: reportedHistorySteps(record),
+              },
+            } : {}),
           },
         } : {}),
         current_frame: classifiedFrame,
@@ -6604,6 +8546,7 @@ export class SessionStore {
           },
         } : {}),
         visual_problems: problems,
+        brief_debt_overrides: briefDebtOverrides,
         active_problem: primaryBlocker ?? undefined,
         priority_review_required: !!nextMustFix && !!context.scale && SCALE_RANK[normalizeScale(context.scale)] > SCALE_RANK[normalizeScale(nextMustFix.scale)],
         last_critique: {
@@ -6827,6 +8770,7 @@ export class SessionStore {
       workflow_metrics: workflowMetrics,
       recognition_metrics: recognitionMetrics,
       latency_summary: this.latencySummary(undefined, all, projectionContext),
+      continuation_timeline_exports: Object.fromEntries(documentIds.map(id => [String(id), this.continuationTimelineExport(id, all, projectionContext)])),
       visual_cadence: visualCadence,
       continuation_watch: continuationWatch,
       document_next_required_actions: Object.fromEntries(Object.entries(continuation.documents).map(([id, doc]) => [id, doc.next_required_action])),
@@ -6951,15 +8895,31 @@ export class SessionStore {
         current_stage: doc.current_stage ?? null,
         last_stage_reset: doc.last_stage_reset ?? null,
         logical_layer_owners: this.semanticLayerOwners(id, all, projectionContext),
+        scene_ownership_plan: this.sceneOwnershipPlan(id, all, projectionContext),
+        scene_geometry_model: this.sceneGeometryModel(id, all, projectionContext),
+        scene_lighting_color_model: this.sceneLightingColorModel(id, all, projectionContext),
+        scene_camera_imaging_model: this.sceneCameraImagingModel(id, all, projectionContext),
+        geometry_preflight: this.geometryPreflight(id, all, projectionContext),
+        geometry_binding_states: this.geometryBindingStates(id, all, projectionContext),
+        geometry_completion_debt: this.geometryCompletionDebt(id, all, projectionContext),
+        lighting_color_binding_states: this.lightingColorBindingStates(id, all, projectionContext),
+        physical_effect_completion_debt: this.physicalEffectCompletionDebt(id, all, projectionContext),
+        camera_binding_states: this.cameraBindingStates(id, all, projectionContext),
+        attention_binding_states: this.attentionBindingStates(id, all, projectionContext),
         active_scale: doc.active_scale ?? null,
         workflow_lifecycle: cadence.workflow_lifecycle,
+        checkpoint_due_before_next_visual_mutation: cadence.checkpoint.due,
+        checkpoint_due_reason: cadence.checkpoint.reason,
+        checkpoint_state: cadence.checkpoint,
         painting_profile: doc.painting_profile ?? (doc.process_dir ? 'nontrivial_painting' : null),
+        process_dir: doc.process_dir ?? null,
         profile_transition: doc.profile_transition ?? null,
         global_brief_outcome: doc.global_brief_outcome ?? doc.global_brief_assessment?.outcome ?? 'not-evaluated',
         global_brief_assessment: doc.global_brief_assessment ?? {
           outcome: 'not-evaluated',
           validation: 'not-independently-validated',
         },
+        unresolved_hard_brief_debt: this.unresolvedHardBriefDebt(id, projectionContext),
         brush_preflight: doc.brush_preflight ? {
           completed: !!doc.brush_preflight.completed,
           inventory_observed: !!doc.brush_preflight.inventory_observed,
@@ -6996,6 +8956,7 @@ export class SessionStore {
               : {}),
           } : null,
           brush_pack_scene_plan: doc.art_director.brush_pack_scene_plan ?? null,
+          perceptual_hierarchy: doc.art_director.perceptual_hierarchy ?? null,
           priorities: doc.art_director.priorities ?? [],
           current_task_id: doc.art_director.current_task_id ?? null,
           review_after_microplans: doc.art_director.review_after_microplans,
@@ -7026,6 +8987,9 @@ export class SessionStore {
             region: task.region ?? null,
             allowed_scales: task.allowed_scales ?? [],
             allowed_global_changes: task.allowed_global_changes ?? [],
+            ...(Array.isArray(task.perceptual_zone_ids) && task.perceptual_zone_ids.length
+              ? { perceptual_zone_ids: task.perceptual_zone_ids }
+              : {}),
             ...(Array.isArray(task.affected_relations) && task.affected_relations.length
               ? { affected_relations: task.affected_relations }
               : {}),
@@ -7100,6 +9064,7 @@ export class SessionStore {
         seconds_since_last_meaningful_visual_change: metrics.seconds_since_last_meaningful_visual_change,
         artistic_throughput: metrics.artistic_throughput,
         recognition_metrics: recognition,
+        method_usage: paintingMethodUsage(all, id),
         latency_summary: this.latencySummary(id, all, projectionContext),
         visual_cadence: cadence,
         continuation_watch: continuationWatch,
@@ -7158,6 +9123,8 @@ export class SessionStore {
         const input = JSON.parse(fs.readFileSync(job.files.input, 'utf8'));
         const operation = input?.next_operation;
         if (Number.isSafeInteger(documentId) && documentId > 0 && operation?.args?.document_id !== documentId) continue;
+        const operationRecord = typeof operation?.id === 'string' ? this.read(operation.id) : undefined;
+        if (isAbandonedRecovery(operationRecord)) continue;
         jobs.push({
           job_id: name,
           state: job.state,
@@ -7284,6 +9251,9 @@ export class SessionStore {
       } : null,
       active_job: activeJob,
       continuation_watch: document?.continuation_watch ?? null,
+      checkpoint_due_before_next_visual_mutation: document?.checkpoint_due_before_next_visual_mutation ?? false,
+      checkpoint_due_reason: document?.checkpoint_due_reason ?? null,
+      checkpoint_state: document?.checkpoint_state ?? null,
       unresolved_visual_basis: document?.unresolved_visual_basis ?? null,
       resume_summary: resumeSummary,
       last_operation: latest ? {
@@ -7299,6 +9269,204 @@ export class SessionStore {
         ? activeJob.poll_command
         : 'photoshop_guard_cycle_auto',
     };
+  }
+  unresolvedHardBriefDebt(documentId, projectionContext = undefined) {
+    const paintingState = projectionContext ? projectionContext.paintingState : this.paintingState();
+    const doc = paintingState.documents?.[String(documentId)] ?? {};
+    const items = doc.art_director?.artistic_evaluation_contract?.brief_items;
+    if (!Array.isArray(items)) return [];
+    const resultRows = Array.isArray(doc.global_brief_assessment?.brief_item_results)
+      ? doc.global_brief_assessment.brief_item_results
+      : [];
+    const resultById = new Map(resultRows.map(row => [row.item_id, row]));
+    const overrides = doc.brief_debt_overrides && typeof doc.brief_debt_overrides === 'object'
+      ? doc.brief_debt_overrides
+      : {};
+    const currentRecords = this.currentDocumentRecords(
+      documentId,
+      projectionContext?.records ?? this.records(),
+      projectionContext
+    );
+    const currentRecordIds = new Set(currentRecords.map(record => record.id));
+    return items.filter(item => item?.kind === 'hard_perceptual').flatMap(item => {
+      const override = overrides[item.item_id];
+      if (override) {
+        const sourceOperationId = textOrUndefined(override.source_operation_id);
+        const sourceRecord = sourceOperationId ? this.read(sourceOperationId) : undefined;
+        const sourceStillAuthoritative = !sourceOperationId || !!(
+          sourceRecord
+          && currentRecordIds.has(sourceOperationId)
+          && sourceRecord.rolled_back !== true
+          && sourceRecord.current_frame_authority !== false
+          && sourceRecord.rollback?.completed !== true
+        );
+        if (sourceStillAuthoritative) return [structuredClone(override)];
+      }
+      const assessed = resultById.get(item.item_id);
+      if (assessed?.state === 'MET') return [];
+      if (assessed) return [structuredClone(assessed)];
+      return [{
+        item_id: item.item_id,
+        kind: 'hard_perceptual',
+        requirement: item.requirement,
+        state: 'UNASSESSED',
+        reason: 'No independently validated current-frame brief assessment has resolved this hard perceptual requirement yet.',
+        evidence: [],
+      }];
+    });
+  }
+  validateNamedRecognitionBriefEvidence(documentId, assessment, contract, frame, projectionContext = undefined) {
+    const items = Array.isArray(contract?.brief_items) ? contract.brief_items : [];
+    const recognitionItems = items.filter(item => item?.kind === 'hard_perceptual' && textOrUndefined(item?.recognition_target));
+    if (!recognitionItems.length) return;
+    const rows = Array.isArray(assessment?.brief_item_results) ? assessment.brief_item_results : [];
+    const byId = new Map(rows.map(row => [row?.item_id, row]));
+    const records = this.currentDocumentRecords(
+      documentId,
+      projectionContext?.records ?? this.records(),
+      projectionContext
+    );
+    const currentOperationId = textOrUndefined(frame?.operation_id);
+    const currentSha = textOrUndefined(frame?.sha256)?.toLowerCase();
+    const currentRecord = currentOperationId ? records.find(record => record.id === currentOperationId) : undefined;
+    const artifacts = Array.isArray(currentRecord?.review_evidence) ? currentRecord.review_evidence : [];
+    for (const item of recognitionItems) {
+      const row = byId.get(item.item_id);
+      if (row?.state !== 'MET') continue;
+      const refs = Array.isArray(row.evidence)
+        ? row.evidence.map(value => textOrUndefined(value)).filter(Boolean)
+        : [];
+      const requestedArtifactIds = refs
+        .filter(value => value.startsWith('review_artifact:'))
+        .map(value => value.slice('review_artifact:'.length));
+      const matching = artifacts.find(evidence =>
+        requestedArtifactIds.includes(evidence?.artifact_id)
+        && evidence?.brief_item_id === item.item_id
+        && ['object', 'micro'].includes(textOrUndefined(evidence?.review_level)?.toLowerCase())
+        && textOrUndefined(evidence?.bound_whole_sha256)?.toLowerCase() === currentSha
+        && evidence?.source_operation_id === currentOperationId
+        && materializedEvidenceMatches(evidence)
+      );
+      if (!matching) {
+        throw new Error(
+          `hard recognition brief item ${item.item_id} (${item.recognition_target}) cannot be MET without a materialized current-frame OBJECT/MICRO review artifact bound to that brief item`
+        );
+      }
+    }
+  }
+  continuationCheckpoint(documentId) {
+    const resumed = this.resume(documentId);
+    const selectedId = Number(resumed.document_id);
+    if (!Number.isSafeInteger(selectedId) || selectedId <= 0 || !resumed.document) {
+      throw new Error('continuation_checkpoint_document_required');
+    }
+    const document = resumed.document;
+    const pending = resumed.pending_visual_verdict;
+    const currentFrame = document.current_frame ?? null;
+    const acceptedFrame = document.accepted_frame ?? null;
+    const artisticAnchor = document.primary_artistic_anchor ?? null;
+    const artDirector = document.art_director ?? null;
+    return {
+      protocol: 'photoshop.guard.continuation-checkpoint.v1',
+      captured_at: new Date().toISOString(),
+      document: { id: selectedId, incarnation: this.currentDocumentIncarnationId(selectedId) ?? null },
+      current_operation_id: pending?.operation_id ?? currentFrame?.operation_id ?? resumed.last_operation?.id ?? null,
+      delivered_preview: pending ? {
+        operation_id: pending.operation_id,
+        sha256: pending.sha256,
+        materialized_path: pending.materialized_path,
+        canvas: pending.canvas ?? null,
+        crop: pending.crop ?? null,
+      } : currentFrame ? {
+        operation_id: currentFrame.operation_id,
+        sha256: currentFrame.sha256,
+        materialized_path: currentFrame.path,
+        canvas: null,
+        crop: null,
+      } : null,
+      visual_verdict_pending: !!pending,
+      active_problem: document.active_problem ? {
+        id: document.active_problem,
+        stage: document.current_stage ?? null,
+        scale: document.active_scale ?? null,
+        severity: document.largest_open_must_fix?.severity ?? null,
+      } : null,
+      accepted_anchor: artisticAnchor ?? acceptedFrame,
+      last_checkpoint: resumed.last_checkpoint ?? null,
+      next_required_action: resumed.next_required_action,
+      canonical_next_command: resumed.canonical_next_command,
+      art_run: document.process_dir ?? null,
+      planner: artDirector?.directive_id ? {
+        directive_id: artDirector.directive_id,
+        task_id: artDirector.current_task_id ?? null,
+      } : null,
+    };
+  }
+  persistContinuationCheckpoint(documentId) {
+    const checkpoint = this.continuationCheckpoint(documentId);
+    const file = path.join(this.directory, 'continuation-checkpoint.json');
+    atomicJson(file, checkpoint);
+    return { file, checkpoint };
+  }
+  verifyContinuationCheckpoint(checkpoint) {
+    if (!checkpoint || checkpoint.protocol !== 'photoshop.guard.continuation-checkpoint.v1') {
+      return { ok: false, reason: 'continuation_checkpoint_protocol_mismatch' };
+    }
+    const documentId = Number(checkpoint.document?.id);
+    if (!Number.isSafeInteger(documentId) || documentId <= 0) {
+      return { ok: false, reason: 'continuation_checkpoint_document_required' };
+    }
+    let current;
+    try {
+      current = this.continuationCheckpoint(documentId);
+    } catch {
+      return { ok: false, reason: 'continuation_checkpoint_document_unavailable' };
+    }
+    const mismatch = (field, expected, actual) => ({
+      ok: false,
+      reason: 'continuation_checkpoint_stale',
+      mismatch: { field, expected: expected ?? null, actual: actual ?? null },
+    });
+    if (checkpoint.document?.incarnation !== current.document?.incarnation) {
+      return mismatch('document.incarnation', checkpoint.document?.incarnation, current.document?.incarnation);
+    }
+    if (checkpoint.current_operation_id !== current.current_operation_id) {
+      return mismatch('current_operation_id', checkpoint.current_operation_id, current.current_operation_id);
+    }
+    if (!!checkpoint.visual_verdict_pending !== !!current.visual_verdict_pending) {
+      return mismatch('visual_verdict_pending', !!checkpoint.visual_verdict_pending, !!current.visual_verdict_pending);
+    }
+    const expectedPreview = checkpoint.delivered_preview ?? null;
+    const actualPreview = current.delivered_preview ?? null;
+    for (const field of ['operation_id', 'sha256', 'materialized_path']) {
+      if ((expectedPreview?.[field] ?? null) !== (actualPreview?.[field] ?? null)) {
+        return mismatch(`delivered_preview.${field}`, expectedPreview?.[field], actualPreview?.[field]);
+      }
+    }
+    if ((checkpoint.art_run ?? null) !== (current.art_run ?? null)) {
+      return mismatch('art_run', checkpoint.art_run, current.art_run);
+    }
+    return {
+      ok: true,
+      protocol: 'photoshop.guard.continuation-verification.v1',
+      document: current.document,
+      operation_id: current.current_operation_id,
+      delivered_preview: current.delivered_preview,
+      visual_verdict_pending: current.visual_verdict_pending,
+      next_required_action: current.next_required_action,
+      canonical_next_command: current.canonical_next_command,
+    };
+  }
+  loadAndVerifyContinuationCheckpoint() {
+    const file = path.join(this.directory, 'continuation-checkpoint.json');
+    if (!fs.existsSync(file)) return { ok: false, reason: 'continuation_checkpoint_missing', file };
+    let checkpoint;
+    try {
+      checkpoint = JSON.parse(fs.readFileSync(file, 'utf8'));
+    } catch {
+      return { ok: false, reason: 'continuation_checkpoint_invalid_json', file };
+    }
+    return { ...this.verifyContinuationCheckpoint(checkpoint), file };
   }
 }
 function fingerprintFile(file) { return createHash('sha256').update(fs.readFileSync(file)).digest('hex'); }

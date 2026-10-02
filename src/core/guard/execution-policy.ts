@@ -22,6 +22,7 @@ const READ_ONLY_TOOLS = new Set([
   'photoshop_list_documents',
   'photoshop_list_fonts',
   'photoshop_list_guides',
+  'photoshop_geometry_calculate',
   'photoshop_measure_points',
   'photoshop_ping',
   'photoshop_sample_color',

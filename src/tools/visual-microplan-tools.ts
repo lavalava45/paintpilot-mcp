@@ -47,6 +47,7 @@ import {
   currentToolExecutionContext,
   withToolExecutionStepContext,
 } from '../core/execution-context.js';
+import { guardExecutionClass } from '../core/guard/execution-policy.js';
 import {
   compileVisualMicroPlan,
   VISUAL_MICROPLAN_STAGES,
@@ -57,6 +58,7 @@ interface StepStatus {
   id: string;
   tool: string;
   ok: boolean;
+  execution?: 'completed' | 'not-executed' | 'failed-or-uncertain';
 }
 
 function normalizedFailureCode(value: unknown): string | undefined {
@@ -85,11 +87,13 @@ function passActionOutcomes(
     // BEFORE/AFTER previews are evidence boundaries, not artistic sub-actions.
     if (index === plan.captureIndex || index === plan.beforeCaptureIndex) return [];
     const status = statusById.get(step.id);
-    const state: PassActionExecutionState = status?.ok
-      ? 'completed'
-      : status?.ok === false || step.id === failedOrUncertainStep
-        ? 'failed-or-uncertain'
-        : 'not-started';
+    const state: PassActionExecutionState = status?.execution === 'not-executed'
+      ? 'not-started'
+      : status?.ok
+        ? 'completed'
+        : status?.ok === false || step.id === failedOrUncertainStep
+          ? 'failed-or-uncertain'
+          : 'not-started';
     return [{
       step_id: step.id,
       tool: step.tool,
@@ -103,12 +107,51 @@ function passExecutionProjection(
   plan: VisualMicroPlan,
   statuses: StepStatus[],
   state: PassActionExecutionState,
-  failedOrUncertainStep?: string
+  failedOrUncertainStep?: string,
+  results?: Record<string, unknown>
 ) {
+  const actions = passActionOutcomes(plan, statuses, failedOrUncertainStep);
+  const completedMutationIds = actions
+    .filter(action => action.kind === 'visual-mutation' && action.state === 'completed')
+    .map(action => action.step_id);
+  const explicitHistorySteps = (value: unknown): number | undefined => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+    const row = value as Record<string, unknown>;
+    for (const candidate of [row.history_steps, (row.details as Record<string, unknown> | undefined)?.history_steps]) {
+      if (typeof candidate === 'number' && Number.isSafeInteger(candidate) && candidate > 0) return candidate;
+    }
+    return undefined;
+  };
+  const ownedActions = completedMutationIds.map(stepId => ({
+    step_id: stepId,
+    history_steps: results ? explicitHistorySteps(results[stepId]) : undefined,
+  }));
+  const historyProven = ownedActions.length > 0 && ownedActions.every(action => action.history_steps !== undefined);
+  const uncertainMutation = actions.some(action => action.kind === 'visual-mutation' && action.state === 'failed-or-uncertain');
   return {
     pass_id: plan.planId,
     state,
-    actions: passActionOutcomes(plan, statuses, failedOrUncertainStep),
+    actions,
+    history_ownership: {
+      protocol: 'photoshop.guard.semantic_pass_history_ownership.v1',
+      status: completedMutationIds.length === 0 && !uncertainMutation
+        ? 'not-started'
+        : uncertainMutation
+          ? 'partial-or-uncertain'
+          : historyProven ? 'exact' : 'unproven',
+      completed_mutation_count: completedMutationIds.length,
+      uncertain_mutation_present: uncertainMutation,
+      ...(historyProven ? {
+        owned_history_steps: ownedActions.reduce((sum, action) => sum + Number(action.history_steps), 0),
+        actions: ownedActions,
+      } : completedMutationIds.length ? {
+        actions: ownedActions.map(action => ({
+          step_id: action.step_id,
+          ...(action.history_steps === undefined ? { history_steps: null } : { history_steps: action.history_steps }),
+        })),
+        reason: 'Exact rollback span is not proven until every completed visual mutation reports an explicit positive history_steps count.',
+      } : {}),
+    },
   };
 }
 
@@ -376,6 +419,15 @@ const STEP_RESULT_PLACEHOLDER_RE = /^\$steps\.[^.]+(?:\..+)?$/;
 
 function isDeferredStepPlaceholder(value: unknown): value is string {
   return typeof value === 'string' && STEP_RESULT_PLACEHOLDER_RE.test(value);
+}
+
+function containsDeferredStepPlaceholder(value: unknown): boolean {
+  if (isDeferredStepPlaceholder(value)) return true;
+  if (Array.isArray(value)) return value.some(containsDeferredStepPlaceholder);
+  if (value && typeof value === 'object') {
+    return Object.values(value as Record<string, unknown>).some(containsDeferredStepPlaceholder);
+  }
+  return false;
 }
 
 function schemaValidationError(
@@ -1048,6 +1100,119 @@ function protectedMutationError(
   return null;
 }
 
+function staticMutationProtectionError(
+  plan: VisualMicroPlan,
+  registry: ToolRegistry
+): { step: VisualMicroPlanStep; message: string } | null {
+  for (const mutationIndex of plan.mutationIndexes) {
+    const step = plan.steps[mutationIndex]!;
+    if (containsDeferredStepPlaceholder(step.args)) continue;
+    try {
+      const pinned = withPinnedDocumentId(registry, step, step.args, plan.documentId);
+      const message = protectedMutationError(plan, step, pinned);
+      if (message) return { step, message };
+    } catch (error) {
+      return { step, message: error instanceof Error ? error.message : String(error) };
+    }
+  }
+  return null;
+}
+
+function compileEdgeStrategies(
+  plan: VisualMicroPlan,
+  registry: ToolRegistry
+): { strategies: Array<Record<string, unknown>>; error?: string } {
+  const strategies: Array<Record<string, unknown>> = [];
+  try {
+    for (const edge of plan.edges) {
+      const boundSteps = plan.mutationIndexes
+        .map(index => plan.steps[index]!)
+        .filter(step => (step.edgeBoundaryIds ?? []).includes(edge.boundaryId));
+      const executions = boundSteps.map(step => {
+        const selection = selectEdgeMethod(registry, edge.edgeClass, {
+          preferredMethodId: step.methodId ?? edge.preferredMethodId,
+        });
+        if (!step.methodId || selection.selected.id !== step.methodId) {
+          throw new Error(
+            `edge ${edge.boundaryId} step ${step.id} method_id=${step.methodId ?? 'missing'} is not executable for edge_class=${edge.edgeClass}; selected=${selection.selected.id}`
+          );
+        }
+        if (selection.selected.methodClass !== plan.methodClass) {
+          throw new Error(
+            `edge ${edge.boundaryId} method ${selection.selected.id} uses method_class=${selection.selected.methodClass}, incompatible with micro-plan method_class=${plan.methodClass}`
+          );
+        }
+        return {
+          step_id: step.id,
+          method_id: selection.selected.id,
+          tool: selection.selected.primaryTool,
+          execution_hints: selection.selected.executionHints ?? {},
+          fallback_method_ids: selection.fallbacks.map(item => item.id),
+        };
+      });
+      strategies.push({
+        boundary_id: edge.boundaryId,
+        region_a: edge.regionA,
+        region_b: edge.regionB,
+        class: edge.edgeClass,
+        expected_behavior: edge.expectedBehavior,
+        executions,
+      });
+    }
+    return { strategies };
+  } catch (error) {
+    return { strategies: [], error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+function normalizedResultRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
+function preparationFailureOutcome(input: {
+  step: VisualMicroPlanStep;
+  normalizedResult?: unknown;
+  invoked: boolean;
+  priorSideEffectingPreparationCompleted: boolean;
+}) {
+  const executionClass = guardExecutionClass(input.step.tool);
+  const child = normalizedResultRecord(input.normalizedResult);
+  const childNotExecuted = child?.execution === 'not-executed';
+  const currentStepSideEffectFree = !input.invoked
+    || executionClass === 'read-only'
+    || childNotExecuted;
+  const exactNotExecuted = !input.priorSideEffectingPreparationCompleted && currentStepSideEffectFree;
+  return {
+    ...(exactNotExecuted ? { execution: 'not-executed' as const, terminal: true } : {}),
+    preparation_execution: {
+      failed_step_class: executionClass,
+      failed_step_invoked: input.invoked,
+      failed_step_execution: childNotExecuted
+        ? 'not-executed'
+        : input.invoked
+          ? 'failed-or-uncertain'
+          : 'not-dispatched',
+      prior_side_effecting_preparation_completed: input.priorSideEffectingPreparationCompleted,
+      side_effects_possible: !exactNotExecuted,
+      ...(child?.execution_proof ? { failed_step_execution_proof: child.execution_proof } : {}),
+    },
+  };
+}
+
+function preVisualDispatchFailureOutcome(priorSideEffectingPreparationCompleted: boolean) {
+  return {
+    ...(!priorSideEffectingPreparationCompleted
+      ? { execution: 'not-executed' as const, terminal: true }
+      : {}),
+    preparation_execution: {
+      prior_side_effecting_preparation_completed: priorSideEffectingPreparationCompleted,
+      side_effects_possible: priorSideEffectingPreparationCompleted,
+    },
+  };
+}
+
 function methodExecutionError(plan: VisualMicroPlan, registry: ToolRegistry): string | null {
   const capabilities = new Map(
     paintingMethodCapabilities(registry).map(capability => [capability.id, capability])
@@ -1253,10 +1418,15 @@ function visualMicroPlanToolSchema(): Tool {
             },
             fallback_reason: {
               type: 'string',
-              description: 'Concrete capability/fit reason for the fallback. Required together with fallback_from_method_id.',
+              description: 'Optional capability/fit audit guidance for the fallback; fallback_from_method_id carries executable routing authority.',
             },
             brush_role: { type: 'string' },
             preset_name: { type: 'string' },
+            selection_reason: {
+              type: 'string',
+              minLength: 12,
+              description: 'Concrete evidence-fit reason for choosing this preset from a multi-candidate brush role (mark topology/edge/buildup/scale/dynamics), not a generic preference label.',
+            },
             brush_pack_id: { type: 'string' },
             stamp_profile_id: { type: 'string' },
             pressure_policy: { type: 'string', enum: [...VISUAL_MICROPLAN_PRESSURE_POLICIES] },
@@ -1350,10 +1520,9 @@ function visualMicroPlanToolSchema(): Tool {
             },
             reasons: {
               type: 'array',
-              minItems: 1,
               items: { type: 'string' },
               description:
-                'Concrete artistic reasons for separating or deliberately keeping the pass on the current logical layer.',
+                'Optional artistic/audit guidance for separating or deliberately keeping the pass on the current logical layer.',
             },
           },
           required: [
@@ -1361,7 +1530,6 @@ function visualMicroPlanToolSchema(): Tool {
             'substantial',
             'rollback_value',
             'independent_adjustment_expected',
-            'reasons',
           ],
           additionalProperties: false,
           description:
@@ -1375,7 +1543,7 @@ function visualMicroPlanToolSchema(): Tool {
             hypothesis: { type: 'string' },
             rollback_value: { type: 'string', enum: [...VISUAL_MICROPLAN_ROLLBACK_VALUES] },
             expected_independent_rollback: { type: 'boolean' },
-            separation_reasons: { type: 'array', items: { type: 'string' } },
+            separation_reasons: { type: 'array', items: { type: 'string' }, description: 'Optional audit/artistic guidance. Isolation authority comes from the structured Layer Separation Check plus rollback semantics.' },
             layer_id: { type: 'number', minimum: 1 },
             layer_name: { type: 'string' },
             merge_target_layer_id: { type: 'number', minimum: 1 },
@@ -1404,6 +1572,43 @@ function visualMicroPlanToolSchema(): Tool {
             construction_change: {
               type: 'boolean',
               description: 'True only when this pass structurally revises the owner so dependent construction must be reconsidered; ordinary tone/texture continuation leaves the construction revision stable.',
+            },
+            geometry_binding: {
+              type: 'object',
+              description: 'Guard-normalized durable binding from this semantic owner to the exact accepted scene-geometry model revision and its support/family/dependency structure.',
+            },
+            camera_binding: {
+              type: 'object',
+              description: 'Durable E.20 focus/depth binding to the exact active camera model revision and either this owner\'s accepted E.18 geometry or an explicit approximate-depth rationale.',
+              properties: {
+                scene_camera_model_id: { type: 'string' },
+                scene_camera_revision: { type: 'integer', minimum: 1 },
+                geometry_binding_owner_id: { type: 'string' },
+                depth_role: { type: 'string', enum: ['near', 'focal', 'mid', 'far'] },
+                expected_focus_role: { type: 'string', enum: ['sharp', 'moderately_soft', 'soft', 'lost'] },
+                dependency_domains: {
+                  type: 'array', minItems: 1, maxItems: 4,
+                  items: { type: 'string', enum: ['focus', 'motion', 'optical-response', 'capture-finish'] },
+                },
+                local_exception: { type: 'string' },
+                approximate_depth_rationale: { type: 'string' },
+              },
+              required: ['scene_camera_model_id', 'scene_camera_revision', 'depth_role', 'expected_focus_role'],
+              additionalProperties: false,
+            },
+            attention_binding: {
+              type: 'object',
+              description: 'Durable binding from this semantic owner to one Art Director perceptual-hierarchy zone and the attention dimensions this pass consumes.',
+              properties: {
+                hierarchy_revision: { type: 'integer', minimum: 1 },
+                zone_id: { type: 'string' },
+                dimensions: {
+                  type: 'array', minItems: 1, maxItems: 4,
+                  items: { type: 'string', enum: ['contrast', 'detail', 'edge', 'chroma'] },
+                },
+              },
+              required: ['hierarchy_revision', 'zone_id', 'dimensions'],
+              additionalProperties: false,
             },
             negative_space: {
               type: 'object',
@@ -1458,6 +1663,14 @@ function visualMicroPlanToolSchema(): Tool {
                   properties: { x: { type: 'number' }, y: { type: 'number' } },
                   required: ['x', 'y'], additionalProperties: false,
                 },
+                scene_vanishing_family_ids: {
+                  type: 'array', maxItems: 8, items: { type: 'string' },
+                  description: 'Optional explicit references to Scene Geometry Model vanishing families inherited by this local surface frame.',
+                },
+                scene_support_plane_id: {
+                  type: 'string',
+                  description: 'Optional explicit reference to the owner Scene Geometry Binding support plane.',
+                },
                 depth_progression: {
                   type: 'object',
                   properties: {
@@ -1495,11 +1708,23 @@ function visualMicroPlanToolSchema(): Tool {
             'hypothesis',
             'rollback_value',
             'expected_independent_rollback',
-            'separation_reasons',
           ],
           additionalProperties: false,
           description:
             'Rollback-semantic layer contract. create-new/temporary-hypothesis must create exactly one layer and target it; continue-logical-layer/adjust must reuse one stable layer_id. keep/discard/merge are lifecycle decisions handled separately.',
+        },
+        cross_layer_correction: {
+          type: 'object',
+          properties: {
+            mode: { type: 'string', enum: ['correction', 'migration'] },
+            current_layer_id: { type: 'number', minimum: 1 },
+            target_layer_ids: { type: 'array', minItems: 1, items: { type: 'number', minimum: 1 } },
+            post_authoritative_layer_id: { type: 'number', minimum: 1 },
+            reason: { type: 'string' },
+          },
+          required: ['mode', 'current_layer_id', 'target_layer_ids', 'post_authoritative_layer_id'],
+          additionalProperties: false,
+          description: 'Guard-validated authorization for intentionally mutating a historical physical binding of the same semantic owner.',
         },
         problem_id: {
           type: 'string',
@@ -1800,6 +2025,41 @@ export function createVisualMicroPlanTools(registry: ToolRegistry, barrierDirect
           }, true);
         }
 
+        const staticProtectionError = staticMutationProtectionError(plan, registry);
+        if (staticProtectionError) {
+          return jsonResult({
+            ok: false,
+            code: 'protected_layer_violation',
+            execution: 'not-executed',
+            terminal: true,
+            message: staticProtectionError.message,
+            plan_id: plan.planId,
+            document_id: plan.documentId,
+            failed_step: staticProtectionError.step.id,
+            protected_layer_ids: plan.protectedLayerIds,
+            replace_protected_layer_ids: plan.replaceProtectedLayerIds,
+            visual_mutation_started: false,
+          }, true);
+        }
+
+        const edgePreflight = compileEdgeStrategies(plan, registry);
+        if (edgePreflight.error) {
+          return jsonResult({
+            ok: false,
+            code: 'edge_control_preflight_failed',
+            execution: 'not-executed',
+            terminal: true,
+            message: edgePreflight.error,
+            plan_id: plan.planId,
+            document_id: plan.documentId,
+            pass_execution: passExecutionProjection(plan, statuses, 'not-started'),
+            visual_mutation_started: false,
+          }, true);
+        }
+        const edgeStrategies = edgePreflight.strategies;
+
+        let sideEffectingPreparationCompleted = false;
+
         const executeStep = async (step: VisualMicroPlanStep): Promise<ToolResult> => {
           const definition = registry.get(step.tool);
           if (!definition) throw new Error(`tool not found: ${step.tool}`);
@@ -1825,6 +2085,7 @@ export function createVisualMicroPlanTools(registry: ToolRegistry, barrierDirect
 
         for (let index = 0; index < plan.mutationIndex; index++) {
           const step = plan.steps[index]!;
+          let stepInvoked = false;
           try {
             const resolvedPreparationArgs = resolveVisualMicroPlanArgs(step.args, results);
             if (!resolvedPreparationArgs || typeof resolvedPreparationArgs !== 'object' || Array.isArray(resolvedPreparationArgs)) {
@@ -1843,7 +2104,7 @@ export function createVisualMicroPlanTools(registry: ToolRegistry, barrierDirect
                 const event = { reason: 'hit' as const, tool: step.tool, step_id: step.id };
                 diagnostic(registry, event);
                 preparationCacheEvents.push(event);
-                statuses.push({ id: step.id, tool: step.tool, ok: true });
+                statuses.push({ id: step.id, tool: step.tool, ok: true, execution: 'completed' });
                 results[step.id] = structuredClone(cached.result);
                 continue;
               }
@@ -1859,10 +2120,17 @@ export function createVisualMicroPlanTools(registry: ToolRegistry, barrierDirect
                 preparationCacheEvents.push({ reason: 'invalidate_preparation_mutation', tool: step.tool, step_id: step.id });
               }
             }
+            stepInvoked = true;
             const result = await executeStep(step);
             const ok = result.isError !== true;
-            statuses.push({ id: step.id, tool: step.tool, ok });
             results[step.id] = normalizeToolResultForPlaceholders(result);
+            const exactChildNotExecuted = normalizedResultRecord(results[step.id])?.execution === 'not-executed';
+            statuses.push({
+              id: step.id,
+              tool: step.tool,
+              ok,
+              execution: ok ? 'completed' : exactChildNotExecuted ? 'not-executed' : 'failed-or-uncertain',
+            });
             if (ok && preparationCache.reusable && CACHEABLE_PREPARATION_TOOLS.has(step.tool)) {
               preparationCache.cache.facts.set(step.tool, {
                 signature,
@@ -1871,12 +2139,22 @@ export function createVisualMicroPlanTools(registry: ToolRegistry, barrierDirect
               });
             }
             if (index === plan.beforeCaptureIndex) beforeCaptureResult = result;
+            if (ok && guardExecutionClass(step.tool) === 'preparation-only') {
+              sideEffectingPreparationCompleted = true;
+            }
             if (!ok) {
               const failureCategory = normalizedFailureCode(results[step.id]);
+              const outcome = preparationFailureOutcome({
+                step,
+                normalizedResult: results[step.id],
+                invoked: true,
+                priorSideEffectingPreparationCompleted: sideEffectingPreparationCompleted,
+              });
               return jsonResult(
                 {
                   ok: false,
                   code: 'microplan_prepare_failed',
+                  ...outcome,
                   ...(failureCategory ? { failure_category: failureCategory } : {}),
                   message: `preparation step "${step.id}" failed before any visual mutation`,
                   plan_id: plan.planId,
@@ -1892,10 +2170,16 @@ export function createVisualMicroPlanTools(registry: ToolRegistry, barrierDirect
               );
             }
           } catch (error) {
+            const outcome = preparationFailureOutcome({
+              step,
+              invoked: stepInvoked,
+              priorSideEffectingPreparationCompleted: sideEffectingPreparationCompleted,
+            });
             return jsonResult(
               {
                 ok: false,
                 code: 'microplan_prepare_failed',
+                ...outcome,
                 message: error instanceof Error ? error.message : String(error),
                 plan_id: plan.planId,
                 document_id: plan.documentId,
@@ -1915,64 +2199,47 @@ export function createVisualMicroPlanTools(registry: ToolRegistry, barrierDirect
           step: VisualMicroPlanStep;
           args: Record<string, unknown>;
         }> = [];
-        const edgeStrategies: Array<Record<string, unknown>> = [];
-        if (plan.edges.length) {
-          try {
-            for (const edge of plan.edges) {
-              const boundSteps = plan.mutationIndexes
-                .map(index => plan.steps[index]!)
-                .filter(step => (step.edgeBoundaryIds ?? []).includes(edge.boundaryId));
-              const compiledForSteps = boundSteps.map(step => {
-                const selection = selectEdgeMethod(registry, edge.edgeClass, {
-                  preferredMethodId: step.methodId ?? edge.preferredMethodId,
-                });
-                if (!step.methodId || selection.selected.id !== step.methodId) {
-                  throw new Error(
-                    `edge ${edge.boundaryId} step ${step.id} method_id=${step.methodId ?? 'missing'} is not executable for edge_class=${edge.edgeClass}; selected=${selection.selected.id}`
-                  );
-                }
-                if (selection.selected.methodClass !== plan.methodClass) {
-                  throw new Error(
-                    `edge ${edge.boundaryId} method ${selection.selected.id} uses method_class=${selection.selected.methodClass}, incompatible with micro-plan method_class=${plan.methodClass}`
-                  );
-                }
-                return {
-                  step_id: step.id,
-                  method_id: selection.selected.id,
-                  tool: selection.selected.primaryTool,
-                  execution_hints: selection.selected.executionHints ?? {},
-                  fallback_method_ids: selection.fallbacks.map(item => item.id),
-                };
-              });
-              edgeStrategies.push({
-                boundary_id: edge.boundaryId,
-                region_a: edge.regionA,
-                region_b: edge.regionB,
-                class: edge.edgeClass,
-                expected_behavior: edge.expectedBehavior,
-                executions: compiledForSteps,
-              });
-            }
-          } catch (error) {
-            return jsonResult({
-              ok: false,
-              code: 'edge_control_preflight_failed',
-              message: error instanceof Error ? error.message : String(error),
-              plan_id: plan.planId,
-              document_id: plan.documentId,
-              pass_execution: passExecutionProjection(plan, statuses, 'not-started'),
-              visual_mutation_started: false,
-            }, true);
-          }
-        }
         for (const mutationIndex of plan.mutationIndexes) {
           const mutationStep = plan.steps[mutationIndex]!;
+          let resolved: unknown;
           try {
-            const resolved = resolveVisualMicroPlanArgs(mutationStep.args, results);
-            if (!resolved || typeof resolved !== 'object' || Array.isArray(resolved)) {
-              throw new Error(`step "${mutationStep.id}" resolved args must be an object`);
-            }
-            const resolvedMutationArgs = withPinnedDocumentId(
+            resolved = resolveVisualMicroPlanArgs(mutationStep.args, results);
+          } catch (error) {
+            return jsonResult(
+              {
+                ok: false,
+                code: 'mutation_argument_resolution_failed',
+                ...preVisualDispatchFailureOutcome(sideEffectingPreparationCompleted),
+                message: error instanceof Error ? error.message : String(error),
+                plan_id: plan.planId,
+                document_id: plan.documentId,
+                failed_step: mutationStep.id,
+                pass_execution: passExecutionProjection(plan, statuses, 'not-started'),
+                visual_mutation_started: false,
+              },
+              true
+            );
+          }
+          if (!resolved || typeof resolved !== 'object' || Array.isArray(resolved)) {
+            return jsonResult(
+              {
+                ok: false,
+                code: 'mutation_argument_resolution_failed',
+                ...preVisualDispatchFailureOutcome(sideEffectingPreparationCompleted),
+                message: `step "${mutationStep.id}" resolved args must be an object`,
+                plan_id: plan.planId,
+                document_id: plan.documentId,
+                failed_step: mutationStep.id,
+                pass_execution: passExecutionProjection(plan, statuses, 'not-started'),
+                visual_mutation_started: false,
+              },
+              true
+            );
+          }
+
+          let resolvedMutationArgs: Record<string, unknown>;
+          try {
+            resolvedMutationArgs = withPinnedDocumentId(
               registry,
               mutationStep,
               resolved as Record<string, unknown>,
@@ -1987,15 +2254,31 @@ export function createVisualMicroPlanTools(registry: ToolRegistry, barrierDirect
               false
             );
             if (validationError) throw new Error(validationError);
-            const protectionError = protectedMutationError(plan, mutationStep, resolvedMutationArgs);
-            if (protectionError) throw new Error(protectionError);
-            resolvedMutations.push({ step: mutationStep, args: resolvedMutationArgs });
           } catch (error) {
             return jsonResult(
               {
                 ok: false,
-                code: 'protected_layer_violation',
+                code: 'mutation_argument_validation_failed',
+                ...preVisualDispatchFailureOutcome(sideEffectingPreparationCompleted),
                 message: error instanceof Error ? error.message : String(error),
+                plan_id: plan.planId,
+                document_id: plan.documentId,
+                failed_step: mutationStep.id,
+                pass_execution: passExecutionProjection(plan, statuses, 'not-started'),
+                visual_mutation_started: false,
+              },
+              true
+            );
+          }
+
+          const protectionError = protectedMutationError(plan, mutationStep, resolvedMutationArgs);
+          if (protectionError) {
+            return jsonResult(
+              {
+                ok: false,
+                code: 'protected_layer_violation',
+                ...preVisualDispatchFailureOutcome(sideEffectingPreparationCompleted),
+                message: protectionError,
                 plan_id: plan.planId,
                 document_id: plan.documentId,
                 failed_step: mutationStep.id,
@@ -2007,6 +2290,7 @@ export function createVisualMicroPlanTools(registry: ToolRegistry, barrierDirect
               true
             );
           }
+          resolvedMutations.push({ step: mutationStep, args: resolvedMutationArgs });
         }
 
         // Write BEFORE the first dispatch: interruption must not erase the inspection obligation.
@@ -2097,7 +2381,8 @@ export function createVisualMicroPlanTools(registry: ToolRegistry, barrierDirect
                 plan,
                 statuses,
                 mutationOk ? 'completed' : 'failed-or-uncertain',
-                mutationFailureStep
+                mutationFailureStep,
+                results
               ),
               steps: statuses,
               barrier: {
@@ -2178,6 +2463,22 @@ export function createVisualMicroPlanTools(registry: ToolRegistry, barrierDirect
             ...(plan.logicalLayer.parentHypothesisId ? { parent_hypothesis_id: plan.logicalLayer.parentHypothesisId } : {}),
             ...(plan.logicalLayer.parentConstructionRevision ? { parent_construction_revision: plan.logicalLayer.parentConstructionRevision } : {}),
             ...(plan.logicalLayer.constructionChange ? { construction_change: true } : {}),
+            ...(plan.logicalLayer.geometryBinding ? { geometry_binding: structuredClone(plan.logicalLayer.geometryBinding) } : {}),
+            ...(plan.logicalLayer.cameraBinding ? { camera_binding: {
+              scene_camera_model_id: plan.logicalLayer.cameraBinding.sceneCameraModelId,
+              scene_camera_revision: plan.logicalLayer.cameraBinding.sceneCameraRevision,
+              ...(plan.logicalLayer.cameraBinding.geometryBindingOwnerId ? { geometry_binding_owner_id: plan.logicalLayer.cameraBinding.geometryBindingOwnerId } : {}),
+              depth_role: plan.logicalLayer.cameraBinding.depthRole,
+              expected_focus_role: plan.logicalLayer.cameraBinding.expectedFocusRole,
+              dependency_domains: plan.logicalLayer.cameraBinding.dependencyDomains,
+              ...(plan.logicalLayer.cameraBinding.localException ? { local_exception: plan.logicalLayer.cameraBinding.localException } : {}),
+              ...(plan.logicalLayer.cameraBinding.approximateDepthRationale ? { approximate_depth_rationale: plan.logicalLayer.cameraBinding.approximateDepthRationale } : {}),
+            } } : {}),
+            ...(plan.logicalLayer.attentionBinding ? { attention_binding: {
+              hierarchy_revision: plan.logicalLayer.attentionBinding.hierarchyRevision,
+              zone_id: plan.logicalLayer.attentionBinding.zoneId,
+              dimensions: plan.logicalLayer.attentionBinding.dimensions,
+            } } : {}),
             ...(plan.logicalLayer.negativeSpace ? { negative_space: {
               relation: plan.logicalLayer.negativeSpace.relation,
               parent_hypothesis_id: plan.logicalLayer.negativeSpace.parentHypothesisId,
@@ -2197,6 +2498,8 @@ export function createVisualMicroPlanTools(registry: ToolRegistry, barrierDirect
             ...(plan.logicalLayer.surfaceFrame ? { surface_frame: {
               axes: plan.logicalLayer.surfaceFrame.axes.map(axis => ({ id: axis.id, angle_degrees: axis.angleDegrees, weight: axis.weight })),
               ...(plan.logicalLayer.surfaceFrame.convergenceAnchor ? { convergence_anchor: plan.logicalLayer.surfaceFrame.convergenceAnchor } : {}),
+              ...(plan.logicalLayer.surfaceFrame.sceneVanishingFamilyIds?.length ? { scene_vanishing_family_ids: plan.logicalLayer.surfaceFrame.sceneVanishingFamilyIds } : {}),
+              ...(plan.logicalLayer.surfaceFrame.sceneSupportPlaneId ? { scene_support_plane_id: plan.logicalLayer.surfaceFrame.sceneSupportPlaneId } : {}),
               ...(plan.logicalLayer.surfaceFrame.depthProgression ? { depth_progression: {
                 near_scale: plan.logicalLayer.surfaceFrame.depthProgression.nearScale,
                 far_scale: plan.logicalLayer.surfaceFrame.depthProgression.farScale,
@@ -2232,6 +2535,22 @@ export function createVisualMicroPlanTools(registry: ToolRegistry, barrierDirect
             ...(plan.logicalLayer.parentHypothesisId ? { parent_hypothesis_id: plan.logicalLayer.parentHypothesisId } : {}),
             ...(plan.logicalLayer.parentConstructionRevision ? { parent_construction_revision: plan.logicalLayer.parentConstructionRevision } : {}),
             ...(plan.logicalLayer.constructionChange ? { construction_change: true } : {}),
+            ...(plan.logicalLayer.geometryBinding ? { geometry_binding: structuredClone(plan.logicalLayer.geometryBinding) } : {}),
+            ...(plan.logicalLayer.cameraBinding ? { camera_binding: {
+              scene_camera_model_id: plan.logicalLayer.cameraBinding.sceneCameraModelId,
+              scene_camera_revision: plan.logicalLayer.cameraBinding.sceneCameraRevision,
+              ...(plan.logicalLayer.cameraBinding.geometryBindingOwnerId ? { geometry_binding_owner_id: plan.logicalLayer.cameraBinding.geometryBindingOwnerId } : {}),
+              depth_role: plan.logicalLayer.cameraBinding.depthRole,
+              expected_focus_role: plan.logicalLayer.cameraBinding.expectedFocusRole,
+              dependency_domains: plan.logicalLayer.cameraBinding.dependencyDomains,
+              ...(plan.logicalLayer.cameraBinding.localException ? { local_exception: plan.logicalLayer.cameraBinding.localException } : {}),
+              ...(plan.logicalLayer.cameraBinding.approximateDepthRationale ? { approximate_depth_rationale: plan.logicalLayer.cameraBinding.approximateDepthRationale } : {}),
+            } } : {}),
+            ...(plan.logicalLayer.attentionBinding ? { attention_binding: {
+              hierarchy_revision: plan.logicalLayer.attentionBinding.hierarchyRevision,
+              zone_id: plan.logicalLayer.attentionBinding.zoneId,
+              dimensions: plan.logicalLayer.attentionBinding.dimensions,
+            } } : {}),
             ...(plan.logicalLayer.negativeSpace ? { negative_space: {
               relation: plan.logicalLayer.negativeSpace.relation,
               parent_hypothesis_id: plan.logicalLayer.negativeSpace.parentHypothesisId,
@@ -2251,6 +2570,8 @@ export function createVisualMicroPlanTools(registry: ToolRegistry, barrierDirect
             ...(plan.logicalLayer.surfaceFrame ? { surface_frame: {
               axes: plan.logicalLayer.surfaceFrame.axes.map(axis => ({ id: axis.id, angle_degrees: axis.angleDegrees, weight: axis.weight })),
               ...(plan.logicalLayer.surfaceFrame.convergenceAnchor ? { convergence_anchor: plan.logicalLayer.surfaceFrame.convergenceAnchor } : {}),
+              ...(plan.logicalLayer.surfaceFrame.sceneVanishingFamilyIds?.length ? { scene_vanishing_family_ids: plan.logicalLayer.surfaceFrame.sceneVanishingFamilyIds } : {}),
+              ...(plan.logicalLayer.surfaceFrame.sceneSupportPlaneId ? { scene_support_plane_id: plan.logicalLayer.surfaceFrame.sceneSupportPlaneId } : {}),
               ...(plan.logicalLayer.surfaceFrame.depthProgression ? { depth_progression: {
                 near_scale: plan.logicalLayer.surfaceFrame.depthProgression.nearScale,
                 far_scale: plan.logicalLayer.surfaceFrame.depthProgression.farScale,
@@ -2320,6 +2641,22 @@ export function createVisualMicroPlanTools(registry: ToolRegistry, barrierDirect
               ...(plan.logicalLayer.parentHypothesisId ? { parent_hypothesis_id: plan.logicalLayer.parentHypothesisId } : {}),
               ...(plan.logicalLayer.parentConstructionRevision ? { parent_construction_revision: plan.logicalLayer.parentConstructionRevision } : {}),
               ...(plan.logicalLayer.constructionChange ? { construction_change: true } : {}),
+              ...(plan.logicalLayer.geometryBinding ? { geometry_binding: structuredClone(plan.logicalLayer.geometryBinding) } : {}),
+              ...(plan.logicalLayer.cameraBinding ? { camera_binding: {
+                scene_camera_model_id: plan.logicalLayer.cameraBinding.sceneCameraModelId,
+                scene_camera_revision: plan.logicalLayer.cameraBinding.sceneCameraRevision,
+                ...(plan.logicalLayer.cameraBinding.geometryBindingOwnerId ? { geometry_binding_owner_id: plan.logicalLayer.cameraBinding.geometryBindingOwnerId } : {}),
+                depth_role: plan.logicalLayer.cameraBinding.depthRole,
+                expected_focus_role: plan.logicalLayer.cameraBinding.expectedFocusRole,
+                dependency_domains: plan.logicalLayer.cameraBinding.dependencyDomains,
+                ...(plan.logicalLayer.cameraBinding.localException ? { local_exception: plan.logicalLayer.cameraBinding.localException } : {}),
+                ...(plan.logicalLayer.cameraBinding.approximateDepthRationale ? { approximate_depth_rationale: plan.logicalLayer.cameraBinding.approximateDepthRationale } : {}),
+              } } : {}),
+              ...(plan.logicalLayer.attentionBinding ? { attention_binding: {
+                hierarchy_revision: plan.logicalLayer.attentionBinding.hierarchyRevision,
+                zone_id: plan.logicalLayer.attentionBinding.zoneId,
+                dimensions: plan.logicalLayer.attentionBinding.dimensions,
+              } } : {}),
               ...(plan.logicalLayer.negativeSpace ? { negative_space: {
                 relation: plan.logicalLayer.negativeSpace.relation,
                 parent_hypothesis_id: plan.logicalLayer.negativeSpace.parentHypothesisId,
@@ -2340,6 +2677,8 @@ export function createVisualMicroPlanTools(registry: ToolRegistry, barrierDirect
               ...(plan.logicalLayer.surfaceFrame ? { surface_frame: {
                 axes: plan.logicalLayer.surfaceFrame.axes.map(axis => ({ id: axis.id, angle_degrees: axis.angleDegrees, weight: axis.weight })),
                 ...(plan.logicalLayer.surfaceFrame.convergenceAnchor ? { convergence_anchor: plan.logicalLayer.surfaceFrame.convergenceAnchor } : {}),
+                ...(plan.logicalLayer.surfaceFrame.sceneVanishingFamilyIds?.length ? { scene_vanishing_family_ids: plan.logicalLayer.surfaceFrame.sceneVanishingFamilyIds } : {}),
+                ...(plan.logicalLayer.surfaceFrame.sceneSupportPlaneId ? { scene_support_plane_id: plan.logicalLayer.surfaceFrame.sceneSupportPlaneId } : {}),
                 ...(plan.logicalLayer.surfaceFrame.depthProgression ? { depth_progression: {
                   near_scale: plan.logicalLayer.surfaceFrame.depthProgression.nearScale,
                   far_scale: plan.logicalLayer.surfaceFrame.depthProgression.farScale,
@@ -2386,7 +2725,8 @@ export function createVisualMicroPlanTools(registry: ToolRegistry, barrierDirect
             plan,
             statuses,
             mutationOk ? 'completed' : 'failed-or-uncertain',
-            mutationFailureStep
+            mutationFailureStep,
+            results
           ),
           ...(semanticContinuationLayers.length ? {
             continuation_layers: semanticContinuationLayers,

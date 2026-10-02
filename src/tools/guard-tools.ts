@@ -8,6 +8,7 @@ import {
   UXP_BRIDGE_REVISION,
   guardProtocolVersionError,
 } from '../core/guard/protocol-version.js';
+import { visualReviewPackage } from '../core/guard/cycle.js';
 import { PAINTING_CONSTRUCTION_ROLES, PAINTING_VISUAL_INTENTS } from '../core/painting-method-palette.js';
 import { PAINTING_STAGE_RESET_REASONS } from '../core/painting-stage-policy.js';
 import {
@@ -18,6 +19,7 @@ import {
 } from '../core/brush-pack-profile.js';
 import {
   VISUAL_MICROPLAN_ACTION_CLASSES,
+  VISUAL_MICROPLAN_CONSTRUCTION_TIERS,
   VISUAL_MICROPLAN_LAYER_CHANGE_KINDS,
   VISUAL_MICROPLAN_LOGICAL_LAYER_DECISIONS,
   VISUAL_MICROPLAN_PHYSICAL_ROLES,
@@ -56,6 +58,12 @@ import {
   PHYSICAL_STACK_CRITERIA,
   PHYSICAL_STACK_CRITERION_STATUSES,
 } from '../core/physical-stack-check.js';
+import { SCENE_OWNERSHIP_EDITABILITY } from '../core/scene-ownership-plan.js';
+import {
+  PAINTING_INTENT_ACTIONS,
+  PAINTING_INTENT_SCALES,
+  PAINTING_INTENT_VISUAL_INTENTS,
+} from '../core/guard/painting-intent.js';
 
 const REVIEW_IMAGE_MAX_BLOCKS = 4;
 const REVIEW_RESPONSE_MAX_BYTES = 6 * 1024 * 1024;
@@ -66,129 +74,272 @@ function base64EncodedBytes(rawBytes: number): number {
   return 4 * Math.ceil(rawBytes / 3);
 }
 
-function reviewPackageOf(value: any): any | undefined {
-  if (!value || typeof value !== 'object') return undefined;
-  if (value.visual_review && typeof value.visual_review === 'object') return value.visual_review;
-  if (value.result && typeof value.result === 'object' && value.result.visual_review) return value.result.visual_review;
+interface ReviewFrameReference {
+  role?: string;
+  sha256?: string;
+  materialized_path?: string;
+  mime_type?: string;
+  width?: number | null;
+  height?: number | null;
+  region?: unknown;
+  crop?: ReviewFrameReference;
+}
+
+interface GuardReviewPackage {
+  operation_id?: string;
+  after?: ReviewFrameReference | null;
+  before?: ReviewFrameReference | null;
+  review_evidence?: ReviewFrameReference[];
+  delivery_policy?: { preferred_content_order?: unknown };
+  delivery?: Record<string, unknown>;
+}
+
+function recordValue(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
+function reviewPackageOf(value: unknown): GuardReviewPackage | undefined {
+  const root = recordValue(value);
+  if (!root) return undefined;
+  const direct = recordValue(root.visual_review);
+  if (direct) return direct as GuardReviewPackage;
+  const result = recordValue(root.result);
+  const nested = result ? recordValue(result.visual_review) : undefined;
+  if (nested) return nested as GuardReviewPackage;
   return undefined;
 }
 
+function reviewRequestedRoles(review: GuardReviewPackage): string[] {
+  return Array.isArray(review?.delivery_policy?.preferred_content_order)
+    ? review.delivery_policy.preferred_content_order.filter((role: unknown): role is string => typeof role === 'string')
+    : (review?.after ? ['after'] : []);
+}
+
+function reviewRoleFrame(review: GuardReviewPackage, role: string): ReviewFrameReference | undefined {
+  return role === 'after' ? review.after ?? undefined
+    : role === 'after_crop' ? review.after?.crop ?? undefined
+      : role === 'before_crop' ? review.before?.crop ?? undefined
+        : role === 'before' ? review.before ?? undefined
+          : Array.isArray(review.review_evidence)
+            ? review.review_evidence.find(frame => frame?.role === role)
+            : undefined;
+}
+
+function referenceOnlyReviewDelivery(review: GuardReviewPackage, runtime?: EmbeddedGuardRuntime): Record<string, unknown> {
+  const requestedRoles = reviewRequestedRoles(review);
+  const references: Array<Record<string, unknown>> = [];
+  const omitted: Array<Record<string, unknown>> = [];
+  for (const role of requestedRoles) {
+    const frame = reviewRoleFrame(review, role);
+    const file = frame?.materialized_path;
+    const expectedSha = frame?.sha256;
+    if (!frame || typeof file !== 'string' || typeof expectedSha !== 'string' || !existsSync(file)) {
+      omitted.push({ role, reason: 'materialized_reference_unavailable' });
+      continue;
+    }
+    try {
+      if (!statSync(file).isFile()) {
+        omitted.push({ role, reason: 'materialized_reference_not_file' });
+        continue;
+      }
+    } catch {
+      omitted.push({ role, reason: 'materialized_reference_stat_failed' });
+      continue;
+    }
+    references.push({
+      role,
+      sha256: expectedSha,
+      materialized_path: file,
+      ...(typeof frame.mime_type === 'string' ? { mime_type: frame.mime_type } : {}),
+      ...(Number.isFinite(frame.width) ? { width: frame.width } : {}),
+      ...(Number.isFinite(frame.height) ? { height: frame.height } : {}),
+      ...(frame.region ? { region: frame.region } : {}),
+    });
+  }
+  const delivery: Record<string, unknown> = {
+    transport: 'materialized_reference',
+    references,
+    delivered: [],
+    omitted,
+    raw_image_bytes: 0,
+    encoded_image_bytes: 0,
+    max_blocks: REVIEW_IMAGE_MAX_BLOCKS,
+    max_total_bytes: REVIEW_RESPONSE_MAX_BYTES,
+    max_encoded_image_bytes: REVIEW_IMAGE_MAX_ENCODED_BYTES,
+    metadata_reserve_bytes: REVIEW_METADATA_RESERVE_BYTES,
+    delivery_complete: requestedRoles.length === 0,
+    expected_roles: requestedRoles,
+    undelivered_roles: [...requestedRoles],
+    explicit_review_tool: 'photoshop_guard_review_image',
+    note: 'Guard hot-loop responses are reference-only. Call photoshop_guard_review_image explicitly to deliver exact review bytes through MCP image content.',
+  };
+  const operationId = typeof review.operation_id === 'string' ? review.operation_id : undefined;
+  if (runtime && operationId && runtime.store.read(operationId)) {
+    const receipt = runtime.store.recordVisualDeliveryReceipt(operationId, delivery);
+    delivery.delivered = receipt.delivered ?? [];
+    delivery.delivery_complete = receipt.delivery_complete === true;
+    delivery.undelivered_roles = receipt.undelivered_roles ?? requestedRoles;
+  }
+  return delivery;
+}
+
 function json(value: unknown, isError = false, runtime?: EmbeddedGuardRuntime): ToolResult {
-  const output: any = value && typeof value === 'object' ? structuredClone(value) : value;
+  const output = value && typeof value === 'object' ? structuredClone(value) : value;
   const review = reviewPackageOf(output);
-  const images: Array<{ type: 'image'; data: string; mimeType: string }> = [];
   if (review) {
-    const requestedRoles = Array.isArray(review.delivery_policy?.preferred_content_order)
-      ? review.delivery_policy.preferred_content_order.filter((role: unknown) => typeof role === 'string')
-      : (review.after ? ['after'] : []);
-    const roleFrame = (role: string) => role === 'after' ? review.after
-      : role === 'after_crop' ? review.after?.crop
-        : role === 'before_crop' ? review.before?.crop
-          : role === 'before' ? review.before
-            : Array.isArray(review.review_evidence)
-              ? review.review_evidence.find((frame: any) => frame?.role === role)
-              : undefined;
-    const candidates = requestedRoles.map((role: string) => ({ role, frame: roleFrame(role) }));
-    const delivered: Array<{ role: string; sha256: string; bytes: number; encoded_bytes: number; content_index: number; image_delivered_for_review: boolean }> = [];
-    const omitted: Array<{ role: string; reason: string; bytes?: number; encoded_bytes?: number; max_total_bytes?: number }> = [];
-    let totalBytes = 0;
-    let totalEncodedBytes = 0;
-    for (const candidate of candidates) {
-      if (images.length >= REVIEW_IMAGE_MAX_BLOCKS) {
-        omitted.push({ role: candidate.role, reason: 'image_block_limit' });
-        continue;
-      }
-      const file = candidate.frame?.materialized_path;
-      const expectedSha = candidate.frame?.sha256;
-      if (typeof file !== 'string' || typeof expectedSha !== 'string' || !existsSync(file)) {
-        omitted.push({ role: candidate.role, reason: 'materialized_image_unavailable' });
-        continue;
-      }
-      let size: number;
-      try {
-        const stat = statSync(file);
-        if (!stat.isFile()) {
-          omitted.push({ role: candidate.role, reason: 'materialized_image_not_file' });
-          continue;
-        }
-        size = stat.size;
-      } catch {
-        omitted.push({ role: candidate.role, reason: 'materialized_image_stat_failed' });
-        continue;
-      }
-      const estimatedEncodedBytes = base64EncodedBytes(size);
-      if (totalEncodedBytes + estimatedEncodedBytes > REVIEW_IMAGE_MAX_ENCODED_BYTES) {
-        omitted.push({
-          role: candidate.role,
-          reason: 'response_byte_budget',
-          bytes: size,
-          encoded_bytes: estimatedEncodedBytes,
-          max_total_bytes: REVIEW_RESPONSE_MAX_BYTES,
-        });
-        continue;
-      }
-      let bytes: Buffer;
-      try {
-        bytes = readFileSync(file);
-      } catch {
-        omitted.push({ role: candidate.role, reason: 'materialized_image_read_failed' });
-        continue;
-      }
-      const actualSha = createHash('sha256').update(bytes).digest('hex');
-      if (actualSha !== expectedSha) {
-        omitted.push({ role: candidate.role, reason: 'sha256_mismatch' });
-        continue;
-      }
-      const encodedBytes = base64EncodedBytes(bytes.byteLength);
-      if (totalEncodedBytes + encodedBytes > REVIEW_IMAGE_MAX_ENCODED_BYTES) {
-        omitted.push({
-          role: candidate.role,
-          reason: 'response_byte_budget',
-          bytes: bytes.byteLength,
-          encoded_bytes: encodedBytes,
-          max_total_bytes: REVIEW_RESPONSE_MAX_BYTES,
-        });
-        continue;
-      }
-      const mimeType = typeof candidate.frame.mime_type === 'string' ? candidate.frame.mime_type : 'image/jpeg';
-      images.push({ type: 'image', data: bytes.toString('base64'), mimeType });
-      delivered.push({
-        role: candidate.role,
-        sha256: actualSha,
-        bytes: bytes.byteLength,
-        encoded_bytes: encodedBytes,
-        content_index: images.length,
-        image_delivered_for_review: true,
-      });
-      totalBytes += bytes.byteLength;
-      totalEncodedBytes += encodedBytes;
-    }
-    const deliveredRoles = new Set(delivered.map(item => item.role));
-    const deliveryComplete = requestedRoles.length > 0
-      && requestedRoles.every((role: string) => deliveredRoles.has(role));
-    review.delivery = {
-      transport: delivered.length ? 'mcp_image_content' : 'metadata_only',
-      delivered,
-      omitted,
-      raw_image_bytes: totalBytes,
-      encoded_image_bytes: totalEncodedBytes,
-      max_blocks: REVIEW_IMAGE_MAX_BLOCKS,
-      max_total_bytes: REVIEW_RESPONSE_MAX_BYTES,
-      max_encoded_image_bytes: REVIEW_IMAGE_MAX_ENCODED_BYTES,
-      metadata_reserve_bytes: REVIEW_METADATA_RESERVE_BYTES,
-      delivery_complete: deliveryComplete,
-      expected_roles: requestedRoles,
-      undelivered_roles: requestedRoles.filter((role: string) => !deliveredRoles.has(role)),
-      note: 'Delivery + SHA establish frame identity only; visual interpretation remains the critic responsibility.',
-    };
-    const operationId = typeof review.operation_id === 'string' ? review.operation_id : undefined;
-    if (runtime && operationId && runtime.store.read(operationId)) {
-      runtime.store.recordVisualDeliveryReceipt(operationId, review.delivery);
-    }
+    review.delivery = referenceOnlyReviewDelivery(review, runtime);
   }
   return {
-    content: [{ type: 'text', text: JSON.stringify(output, null, 2) }, ...images],
+    content: [{ type: 'text', text: JSON.stringify(output, null, 2) }],
     ...(isError ? { isError: true } : {}),
+  };
+}
+
+function explicitReviewImageResult(
+  runtime: EmbeddedGuardRuntime,
+  operationId: string,
+  requestedRoles?: string[]
+): ToolResult {
+  const record = runtime.store.read(operationId);
+  if (!record?.visual || !record.preview) {
+    return json({
+      ok: false,
+      code: 'guard_review_image_unavailable',
+      message: `Visual operation ${operationId} does not have a durable review preview.`,
+    }, true);
+  }
+  const review = visualReviewPackage(record, runtime.store.visualSignificance(operationId));
+  if (!review) {
+    return json({
+      ok: false,
+      code: 'guard_review_image_unavailable',
+      message: `Visual operation ${operationId} does not have review metadata.`,
+    }, true);
+  }
+  const expectedRoles = reviewRequestedRoles(review);
+  const roles = requestedRoles?.length ? requestedRoles : expectedRoles;
+  const invalidRoles = roles.filter(role => !expectedRoles.includes(role));
+  if (invalidRoles.length) {
+    return json({
+      ok: false,
+      code: 'guard_review_role_invalid',
+      message: `Requested review roles are not available for ${operationId}: ${invalidRoles.join(', ')}`,
+      available_roles: expectedRoles,
+    }, true);
+  }
+  const reviewRequestReceivedAt = new Date().toISOString();
+
+  const images: Array<{ type: 'image'; data: string; mimeType: string }> = [];
+  const delivered: Array<Record<string, unknown>> = [];
+  const omitted: Array<Record<string, unknown>> = [];
+  let totalBytes = 0;
+  let totalEncodedBytes = 0;
+  for (const role of roles) {
+    if (images.length >= REVIEW_IMAGE_MAX_BLOCKS) {
+      omitted.push({ role, reason: 'image_block_limit' });
+      continue;
+    }
+    const frame = reviewRoleFrame(review, role);
+    const file = frame?.materialized_path;
+    const expectedSha = frame?.sha256;
+    if (!frame || typeof file !== 'string' || typeof expectedSha !== 'string' || !existsSync(file)) {
+      omitted.push({ role, reason: 'materialized_image_unavailable' });
+      continue;
+    }
+    let size: number;
+    try {
+      const stat = statSync(file);
+      if (!stat.isFile()) {
+        omitted.push({ role, reason: 'materialized_image_not_file' });
+        continue;
+      }
+      size = stat.size;
+    } catch {
+      omitted.push({ role, reason: 'materialized_image_stat_failed' });
+      continue;
+    }
+    const estimatedEncodedBytes = base64EncodedBytes(size);
+    if (totalEncodedBytes + estimatedEncodedBytes > REVIEW_IMAGE_MAX_ENCODED_BYTES) {
+      omitted.push({ role, reason: 'response_byte_budget', bytes: size, encoded_bytes: estimatedEncodedBytes, max_total_bytes: REVIEW_RESPONSE_MAX_BYTES });
+      continue;
+    }
+    let bytes: Buffer;
+    try {
+      bytes = readFileSync(file);
+    } catch {
+      omitted.push({ role, reason: 'materialized_image_read_failed' });
+      continue;
+    }
+    const actualSha = createHash('sha256').update(bytes).digest('hex');
+    if (actualSha !== expectedSha) {
+      omitted.push({ role, reason: 'sha256_mismatch' });
+      continue;
+    }
+    const encodedBytes = base64EncodedBytes(bytes.byteLength);
+    if (totalEncodedBytes + encodedBytes > REVIEW_IMAGE_MAX_ENCODED_BYTES) {
+      omitted.push({ role, reason: 'response_byte_budget', bytes: bytes.byteLength, encoded_bytes: encodedBytes, max_total_bytes: REVIEW_RESPONSE_MAX_BYTES });
+      continue;
+    }
+    const mimeType = typeof frame.mime_type === 'string' ? frame.mime_type : 'image/jpeg';
+    images.push({ type: 'image', data: bytes.toString('base64'), mimeType });
+    delivered.push({
+      role,
+      sha256: actualSha,
+      bytes: bytes.byteLength,
+      encoded_bytes: encodedBytes,
+      content_index: images.length,
+      image_delivered_for_review: true,
+    });
+    totalBytes += bytes.byteLength;
+    totalEncodedBytes += encodedBytes;
+  }
+
+  const reviewResultReadyAt = new Date().toISOString();
+  const delivery = {
+    transport: images.length ? 'mcp_image_content_explicit_review' : 'metadata_only',
+    delivered,
+    omitted,
+    raw_image_bytes: totalBytes,
+    encoded_image_bytes: totalEncodedBytes,
+    max_blocks: REVIEW_IMAGE_MAX_BLOCKS,
+    max_total_bytes: REVIEW_RESPONSE_MAX_BYTES,
+    max_encoded_image_bytes: REVIEW_IMAGE_MAX_ENCODED_BYTES,
+    metadata_reserve_bytes: REVIEW_METADATA_RESERVE_BYTES,
+    expected_roles: expectedRoles,
+    undelivered_roles: expectedRoles.filter(role => !new Set(delivered.map(item => item.role)).has(role)),
+    timing: {
+      protocol: 'photoshop.guard.continuation_timing.v1',
+      request_received_at: reviewRequestReceivedAt,
+      result_ready_at: reviewResultReadyAt,
+      semantics: 'server_observed_review_image_tool_boundaries',
+    },
+  };
+  const receipt = runtime.store.recordVisualDeliveryReceipt(operationId, delivery);
+  const documentId = Number(record.args?.document_id);
+  const artisticContinuation = Number.isSafeInteger(documentId) && documentId > 0
+    ? runtime.store.artisticContinuationContext(documentId)
+    : null;
+  return {
+    content: [{
+      type: 'text',
+      text: JSON.stringify({
+        ok: receipt.delivery_complete === true,
+        operation_id: operationId,
+        delivery: {
+          ...delivery,
+          delivered: receipt.delivered,
+          delivery_complete: receipt.delivery_complete,
+          undelivered_roles: receipt.undelivered_roles,
+        },
+        ...(artisticContinuation ? { artistic_continuation: artisticContinuation } : {}),
+        next_required_action: receipt.delivery_complete
+          ? 'Inspect the delivered image blocks, select/adapt the compact artistic continuation candidate when useful, then continue with previous_operation_id + previous_observation plus painting_intent or next_pass.'
+          : 'Some required review roles were not delivered. Request the remaining roles before visual verdict closure.',
+      }, null, 2),
+    }, ...images],
+    ...(receipt.delivery_complete ? {} : { isError: true }),
   };
 }
 
@@ -262,11 +413,10 @@ function compactPassSchema(): Record<string, unknown> {
           reason: { type: 'string', enum: [...PAINTING_STAGE_RESET_REASONS] },
           detail: {
             type: 'string',
-            minLength: 12,
-            description: 'Concrete reason the established later-stage basis is invalid and structural rework is required.',
+            description: 'Optional audit guidance describing why the established later-stage basis is invalid and structural rework is required.',
           },
         },
-        required: ['reason', 'detail'],
+        required: ['reason'],
         additionalProperties: false,
       },
       layer_separation_check: {
@@ -277,9 +427,266 @@ function compactPassSchema(): Record<string, unknown> {
           substantial: { type: 'boolean' },
           rollback_value: { type: 'string', enum: [...VISUAL_MICROPLAN_ROLLBACK_VALUES] },
           independent_adjustment_expected: { type: 'boolean' },
-          reasons: { type: 'array', minItems: 1, items: { type: 'string' } },
+          reasons: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Optional artistic/audit guidance for the structural layer-separation decision.',
+          },
         },
-        required: ['change_kind', 'substantial', 'rollback_value', 'independent_adjustment_expected', 'reasons'],
+        required: ['change_kind', 'substantial', 'rollback_value', 'independent_adjustment_expected'],
+        additionalProperties: false,
+      },
+      cross_layer_correction: {
+        type: 'object',
+        description: 'Explicit fail-closed authorization for intentionally targeting a historical physical binding of the declared semantic owner. Ordinary correction preserves the current authoritative binding; migration deliberately moves it.',
+        properties: {
+          mode: { type: 'string', enum: ['correction', 'migration'] },
+          current_layer_id: { type: 'number', minimum: 1 },
+          target_layer_ids: { type: 'array', minItems: 1, maxItems: 8, uniqueItems: true, items: { type: 'number', minimum: 1 } },
+          post_authoritative_layer_id: { type: 'number', minimum: 1 },
+          reason: { type: 'string', description: 'Optional audit guidance for why the cross-layer correction or migration is being performed.' },
+        },
+        required: ['mode', 'current_layer_id', 'target_layer_ids', 'post_authoritative_layer_id'],
+        additionalProperties: false,
+      },
+      scene_ownership_plan: {
+        type: 'object',
+        description: 'Durable scene-level ownership plan declared before the first committed semantic owner is constructed. semantic_id names the visual concern; owner_id is the stable future logical_layer.hypothesis_id. Multiple semantic units may share one owner only through explicit shared-owner justification.',
+        properties: {
+          plan_id: { type: 'string' },
+          units: {
+            type: 'array',
+            minItems: 1,
+            maxItems: 32,
+            items: {
+              type: 'object',
+              properties: {
+                semantic_id: { type: 'string' },
+                owner_id: { type: 'string' },
+                role: { type: 'string', minLength: 4 },
+                editability: { type: 'string', enum: [...SCENE_OWNERSHIP_EDITABILITY] },
+                rationale: { type: 'string', description: 'Optional audit/artistic guidance for this semantic ownership assignment.' },
+              },
+              required: ['semantic_id', 'owner_id', 'role', 'editability'],
+              additionalProperties: false,
+            },
+          },
+          shared_owner_justifications: {
+            type: 'array',
+            maxItems: 16,
+            items: {
+              type: 'object',
+              properties: {
+                owner_id: { type: 'string' },
+                semantic_ids: { type: 'array', minItems: 2, items: { type: 'string' } },
+                rationale: { type: 'string', description: 'Optional audit/artistic guidance for why these semantic ids intentionally share one owner.' },
+              },
+              required: ['owner_id', 'semantic_ids'],
+              additionalProperties: false,
+            },
+          },
+        },
+        required: ['plan_id', 'units'],
+        additionalProperties: false,
+      },
+      scene_geometry_model: {
+        type: 'object',
+        description: 'Durable document-incarnation-bound scene geometry/projection model. A later structural revision must preserve model_id and increase revision.',
+        properties: {
+          model_id: { type: 'string' },
+          revision: { type: 'number', minimum: 1 },
+          applicability: { type: 'string', enum: ['coherent_3d', 'orthographic_or_diagrammatic', 'flat_or_collage', 'intentional_non_euclidean', 'insufficient_evidence'] },
+          applicability_rationale: { type: 'string' },
+          source_frame: {
+            type: 'object',
+            properties: {
+              document_id: { type: 'number', minimum: 1 },
+              document_incarnation: { type: 'string' },
+              width: { type: 'number', minimum: 1 },
+              height: { type: 'number', minimum: 1 },
+              operation_id: { type: 'string' },
+              preview_sha256: { type: 'string' },
+            },
+            required: ['document_id', 'document_incarnation', 'width', 'height'],
+            additionalProperties: false,
+          },
+          projection: {
+            type: 'object',
+            properties: {
+              kind: { type: 'string', enum: ['one_point', 'two_point', 'three_point', 'weak_perspective', 'orthographic', 'custom'] },
+              horizon: { type: 'object' },
+              vanishing_points: { type: 'array', maxItems: 8, items: { type: 'object' } },
+            },
+            required: ['kind', 'vanishing_points'],
+            additionalProperties: false,
+          },
+          line_families: { type: 'array', maxItems: 16, items: { type: 'object' } },
+          support_planes: { type: 'array', maxItems: 16, items: { type: 'object' } },
+          scale_anchors: { type: 'array', maxItems: 24, items: { type: 'object' } },
+        },
+        required: ['model_id', 'revision', 'applicability', 'source_frame', 'projection'],
+        additionalProperties: false,
+      },
+      scene_lighting_color_model: {
+        type: 'object',
+        description: 'Durable document-incarnation-bound lighting/color model used by broad color, atmosphere, relighting, and material-response preflights. A later revision must preserve model_id and increase revision.',
+        properties: {
+          model_id: { type: 'string' },
+          revision: { type: 'number', minimum: 1 },
+          source_frame: {
+            type: 'object',
+            properties: {
+              document_id: { type: 'number', minimum: 1 },
+              document_incarnation: { type: 'string' },
+              operation_id: { type: 'string' },
+              preview_sha256: { type: 'string' },
+            },
+            required: ['document_id', 'document_incarnation'],
+            additionalProperties: false,
+          },
+          global_value_structure: {
+            type: 'object',
+            properties: {
+              key: { type: 'string', enum: ['low', 'mid', 'high', 'mixed'] },
+              local_value_anchor: { type: 'string' },
+              atmospheric_lift: { type: 'string' },
+            },
+            required: ['key'],
+            additionalProperties: false,
+          },
+          ambient_environment: {
+            type: 'object',
+            properties: {
+              id: { type: 'string' },
+              role: { type: 'string' },
+              family: { type: 'string' },
+              provenance: { type: 'string', enum: ['user-or-prompt', 'reference-sample', 'accepted-frame', 'deterministic-derivation', 'artist-selected'] },
+              sample: {
+                type: 'object',
+                properties: {
+                  rgb: { type: 'array', minItems: 3, maxItems: 3, items: { type: 'integer', minimum: 0, maximum: 255 } },
+                  source: { type: 'string' },
+                },
+                required: ['rgb', 'source'],
+                additionalProperties: false,
+              },
+              chroma: { type: 'string', enum: ['low', 'medium', 'high'] },
+              value_role: { type: 'string' },
+            },
+            required: ['id', 'role', 'family', 'provenance', 'chroma', 'value_role'],
+            additionalProperties: false,
+          },
+          emitters: {
+            type: 'array',
+            maxItems: 16,
+            items: {
+              type: 'object',
+              properties: {
+                id: { type: 'string' },
+                role: { type: 'string' },
+                family: { type: 'string' },
+                provenance: { type: 'string', enum: ['user-or-prompt', 'reference-sample', 'accepted-frame', 'deterministic-derivation', 'artist-selected'] },
+                sample: {
+                  type: 'object',
+                  properties: {
+                    rgb: { type: 'array', minItems: 3, maxItems: 3, items: { type: 'integer', minimum: 0, maximum: 255 } },
+                    source: { type: 'string' },
+                  },
+                  required: ['rgb', 'source'],
+                  additionalProperties: false,
+                },
+                light_role: { type: 'string' },
+              },
+              required: ['id', 'role', 'family', 'provenance', 'light_role'],
+              additionalProperties: false,
+            },
+          },
+          atmosphere: {
+            type: 'object',
+            properties: {
+              id: { type: 'string' },
+              density_role: { type: 'string' },
+              color_bias: { type: 'string' },
+              contrast_effect: { type: 'string' },
+              provenance: { type: 'string', enum: ['user-or-prompt', 'reference-sample', 'accepted-frame', 'deterministic-derivation', 'artist-selected'] },
+            },
+            required: ['id', 'density_role', 'color_bias', 'contrast_effect', 'provenance'],
+            additionalProperties: false,
+          },
+          palette_relations: { type: 'array', maxItems: 32, items: { type: 'string' } },
+          sampled_anchors: {
+            type: 'array',
+            maxItems: 24,
+            items: {
+              type: 'object',
+              properties: {
+                id: { type: 'string' },
+                role: { type: 'string' },
+                family: { type: 'string' },
+                provenance: { type: 'string', enum: ['reference-sample', 'accepted-frame'] },
+                sample: {
+                  type: 'object',
+                  properties: {
+                    rgb: { type: 'array', minItems: 3, maxItems: 3, items: { type: 'integer', minimum: 0, maximum: 255 } },
+                    source: { type: 'string' },
+                  },
+                  required: ['rgb', 'source'],
+                  additionalProperties: false,
+                },
+              },
+              required: ['id', 'role', 'family', 'provenance'],
+              additionalProperties: false,
+            },
+          },
+          intentional_exceptions: {
+            type: 'array',
+            maxItems: 16,
+            items: {
+              type: 'object',
+              properties: {
+                id: { type: 'string' },
+                relation: { type: 'string' },
+                rationale: { type: 'string' },
+              },
+              required: ['id', 'relation', 'rationale'],
+              additionalProperties: false,
+            },
+          },
+        },
+        required: ['model_id', 'revision', 'source_frame', 'global_value_structure', 'emitters', 'palette_relations', 'sampled_anchors', 'intentional_exceptions'],
+        additionalProperties: false,
+      },
+      color_gradient_preflight: {
+        type: 'object',
+        description: 'Required semantic color/gradient receipt for broad color-field, relighting, atmosphere, and major optical-effect passes. Must reference the exact active scene_lighting_color_model revision.',
+        properties: {
+          scene_model_id: { type: 'string' },
+          scene_model_revision: { type: 'number', minimum: 1 },
+          field_role: { type: 'string' },
+          interaction: { type: 'string' },
+          stops: {
+            type: 'array',
+            minItems: 1,
+            maxItems: 16,
+            items: {
+              type: 'object',
+              properties: {
+                id: { type: 'string' },
+                role: { type: 'string' },
+                family: { type: 'string' },
+                provenance: { type: 'string', enum: ['user-or-prompt', 'reference-sample', 'accepted-frame', 'deterministic-derivation', 'artist-selected'] },
+                rgb: { type: 'array', minItems: 3, maxItems: 3, items: { type: 'integer', minimum: 0, maximum: 255 } },
+                source_anchor_id: { type: 'string' },
+                artistic_choice: { type: 'string' },
+              },
+              required: ['id', 'role', 'family', 'provenance'],
+              additionalProperties: false,
+            },
+          },
+          required_relations: { type: 'array', maxItems: 24, items: { type: 'string' } },
+          artistic_choices: { type: 'array', maxItems: 24, items: { type: 'string' } },
+        },
+        required: ['scene_model_id', 'scene_model_revision', 'field_role', 'interaction', 'stops'],
         additionalProperties: false,
       },
       logical_layer: {
@@ -291,11 +698,23 @@ function compactPassSchema(): Record<string, unknown> {
           hypothesis: { type: 'string' },
           rollback_value: { type: 'string', enum: [...VISUAL_MICROPLAN_ROLLBACK_VALUES] },
           expected_independent_rollback: { type: 'boolean' },
-          separation_reasons: { type: 'array', items: { type: 'string' } },
+          separation_reasons: { type: 'array', items: { type: 'string' }, description: 'Optional audit/artistic guidance. Isolation authority comes from the structured Layer Separation Check plus rollback semantics.' },
           layer_id: { type: 'number', minimum: 1 },
           layer_name: { type: 'string' },
+          merge_target_layer_id: { type: 'number', minimum: 1 },
           physical_role: { type: 'string', enum: [...VISUAL_MICROPLAN_PHYSICAL_ROLES] },
           opacity_role: { type: 'string', enum: [...VISUAL_MICROPLAN_OPACITY_ROLES] },
+          construction_tier: { type: 'string', enum: [...VISUAL_MICROPLAN_CONSTRUCTION_TIERS] },
+          parent_hypothesis_id: { type: 'string' },
+          parent_construction_revision: { type: 'string' },
+          construction_change: {
+            type: 'boolean',
+            description: 'True only when this pass structurally revises the owner; structural revisions require current scene-geometry classification.',
+          },
+          geometry_binding: {
+            type: 'object',
+            description: 'Durable relational binding from this semantic owner to the exact scene_geometry_model revision. Required for committed owner-bearing structured construction in coherent_3d scenes.',
+          },
           depth_relations: {
             type: 'array',
             maxItems: 1,
@@ -341,8 +760,11 @@ function compactPassSchema(): Record<string, unknown> {
             type: 'array', items: { type: 'string' },
             description: 'Opening owners explicitly reviewed/preserved while mutating their parent semantic owner.',
           },
+          surface_frame: { type: 'object' },
+          camera_binding: { type: 'object' },
+          attention_binding: { type: 'object' },
         },
-        required: ['decision', 'hypothesis_id', 'hypothesis', 'rollback_value', 'expected_independent_rollback', 'separation_reasons'],
+        required: ['decision', 'hypothesis_id', 'hypothesis', 'rollback_value', 'expected_independent_rollback'],
         additionalProperties: false,
       },
       scale: {
@@ -360,7 +782,7 @@ function compactPassSchema(): Record<string, unknown> {
       construction_role: {
         type: 'string',
         enum: [...PAINTING_CONSTRUCTION_ROLES],
-        description: 'Subject-agnostic construction role fixed before mechanism selection for broad continuous/soft/environmental work.',
+        description: 'Subject-agnostic construction role fixed before mechanism selection for broad nontrivial construction. structured-mass preserves legitimate early closed-mass block-in; continuous/soft/environmental roles route to their dedicated mechanisms.',
       },
       material_response: {
         type: 'object',
@@ -432,7 +854,32 @@ function compactPassSchema(): Record<string, unknown> {
         description: 'True only when this pass is independent of the currently unresolved primary mismatch; preservation_facts must explain why.',
       },
       addresses_primary_mismatch: { type: 'boolean' },
+      deferred_from_operation_id: {
+        type: 'string',
+        description:
+          'Explicit post-review selection of a compiler-owned deferred sub-pass from a prior safe SPLIT_DEFER. Do not combine with actions; Guard reloads the durable deferred action geometry and revalidates it against current state.',
+      },
       addresses_problem_id: { type: 'string' },
+      causal_strategy_id: { type: 'string' },
+      strategy_family: { type: 'string' },
+      causal_escalation_level: { type: 'integer', minimum: 0, maximum: 4 },
+      root_cause_classification: {
+        type: 'string',
+        enum: ['wrong-owner-layer', 'wrong-representation', 'wrong-scale', 'wrong-method-family', 'wrong-silhouette-negative-space', 'wrong-value-form', 'wrong-brush-vocabulary', 'insufficient-evidence'],
+        description: 'Required after two failed strategies for the same problem before the single causal-level escalation attempt.',
+      },
+      brush_preset_choice_reason: {
+        type: 'string',
+        minLength: 12,
+        description: 'Evidence-fit reason for the selected preset when a brush role has multiple viable candidates. State the relevant observed mark behavior rather than familiarity or generic preference.',
+      },
+      brush_retry_reason: {
+        type: 'string',
+        minLength: 12,
+        description: 'Required when retrying the same preset after that preset failed or was rolled back for the same problem while viable alternatives exist. Explain why the failure was not caused by mark fit and why reuse remains causal rather than habitual.',
+      },
+      root_cause_reason: { type: 'string', minLength: 12 },
+      causal_level_change: { type: 'boolean' },
       pattern_intent: {
         type: 'string',
         enum: ['organic_instances', 'intentional_regular'],
@@ -482,6 +929,85 @@ function compactPassSchema(): Record<string, unknown> {
       },
     },
       required: ['request_key', 'goal'],
+    additionalProperties: false,
+  };
+}
+
+function paintingIntentSchema(): Record<string, unknown> {
+  return {
+    type: 'object',
+    description:
+      'Compact artistic decision for the hot loop. Guard derives stable protocol facts from durable state and keeps the existing next_pass validator authoritative. Concrete Photoshop action geometry remains explicit when it cannot be derived uniquely.',
+    properties: {
+      request_key: { type: 'string' },
+      problem_id: { type: 'string' },
+      document_id: { type: 'number', minimum: 1 },
+      goal: { type: 'string' },
+      target_owner_id: {
+        type: 'string',
+        description: 'Existing or predeclared semantic owner. Guard resolves the current physical layer and durable bindings.',
+      },
+      region: { type: 'string' },
+      region_bounds: {
+        type: 'object',
+        properties: {
+          left: { type: 'number' },
+          top: { type: 'number' },
+          right: { type: 'number' },
+          bottom: { type: 'number' },
+        },
+        required: ['left', 'top', 'right', 'bottom'],
+        additionalProperties: false,
+      },
+      action: { type: 'string', enum: [...PAINTING_INTENT_ACTIONS] },
+      scale: { type: 'string', enum: [...PAINTING_INTENT_SCALES] },
+      visual_intent: { type: 'string', enum: [...PAINTING_INTENT_VISUAL_INTENTS] },
+      material_role: { type: 'string' },
+      preferred_method_id: { type: 'string' },
+      preferred_brush_role: { type: 'string' },
+      preserve: { type: 'array', items: { type: 'string' } },
+      addresses_primary_mismatch: { type: 'boolean' },
+      actions: {
+        type: 'array',
+        minItems: 1,
+        maxItems: 32,
+        description:
+          'Bounded concrete Photoshop actions only when visible geometry/color/tool parameters are not uniquely derivable. Guard injects durable owner/layer/planner/verification protocol around them.',
+        items: {
+          type: 'object',
+          properties: {
+            id: { type: 'string' },
+            tool: { type: 'string' },
+            args: { type: 'object', additionalProperties: true },
+            description: { type: 'string' },
+            method_id: { type: 'string' },
+            edge_boundary_ids: { type: 'array', items: { type: 'string' } },
+          },
+          required: ['id', 'tool'],
+          additionalProperties: false,
+        },
+      },
+      stage: {
+        type: 'string',
+        description: 'Advanced override only when changing stage is itself part of the artistic decision; otherwise inherited.',
+      },
+      stage_reset: {
+        type: 'object',
+        properties: {
+          reason: { type: 'string', enum: [...PAINTING_STAGE_RESET_REASONS] },
+          detail: { type: 'string' },
+        },
+        required: ['reason'],
+        additionalProperties: false,
+      },
+      impact_class: {
+        type: 'string',
+        enum: ['construct', 'subtract', 'edge', 'tone', 'texture', 'transition', 'transform', 'isolate', 'composite', 'cleanup'],
+      },
+      construction_role: { type: 'string', enum: [...PAINTING_CONSTRUCTION_ROLES] },
+      material_response: { type: 'object', additionalProperties: true },
+    },
+    required: ['request_key', 'problem_id', 'document_id', 'goal', 'action', 'visual_intent'],
     additionalProperties: false,
   };
 }
@@ -597,6 +1123,7 @@ function compactObservationSchema(): Record<string, unknown> {
           type: 'object',
           properties: {
             kind: { type: 'string', enum: [...VISUAL_REVIEW_FINDING_KINDS] },
+            problem_id: { type: 'string', description: 'Optional stable problem id. Omit to use Guard\'s stable review-<kind> id.' },
             region_bounds: {
               type: 'object',
               properties: {
@@ -613,6 +1140,14 @@ function compactObservationSchema(): Record<string, unknown> {
               type: 'array',
               items: { type: 'string' },
               description: 'Optional explicit binding from this spatial finding to one or more cumulative trend signals. Unrelated findings are never borrowed as spatial evidence for another signal.',
+            },
+            brief_item_id: {
+              type: 'string',
+              description: 'Optional active brief item id when this visible finding directly establishes prompt-relevant debt.',
+            },
+            brief_state: {
+              type: 'string', enum: ['NOT_MET', 'UNCERTAIN'],
+              description: 'Evidence-bound hard-brief debt state established by this finding. Only valid with brief_item_id.',
             },
           },
           required: ['kind'],
@@ -635,6 +1170,7 @@ function compactObservationSchema(): Record<string, unknown> {
         type: 'array',
         minItems: 1,
         maxItems: 6,
+        description: 'Visible observations from delivered review evidence. Every meaningful visual pass must include region="whole frame".',
         items: {
           type: 'object',
           properties: {
@@ -681,6 +1217,7 @@ function cycleTool(name: string, description: string): Tool {
         },
         previous_operation_id: { type: 'string' },
         previous_observation: compactObservationSchema(),
+        painting_intent: paintingIntentSchema(),
         next_pass: compactPassSchema(),
       },
       additionalProperties: false,
@@ -893,7 +1430,7 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
             },
             profile_transition_reason: {
               type: 'string',
-              description: 'Concrete user/task reason for an in-place simple_graphic -> nontrivial_painting upgrade.',
+              description: 'Optional audit/artistic context for an in-place simple_graphic -> nontrivial_painting upgrade. The stronger profile obligations, not prose, authorize the transition.',
             },
             brush_preflight: {
               type: 'object',
@@ -921,6 +1458,48 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
                       },
                       preferred_preset: { type: 'string' },
                       alternative_presets: { type: 'array', items: { type: 'string' } },
+                      candidate_evidence: {
+                        type: 'array',
+                        description: 'Evidence-ranked viable presets for this role. Keeps observed mark behavior available to planning instead of reducing the role to one preferred name.',
+                        items: {
+                          type: 'object',
+                          properties: {
+                            preset_name: { type: 'string' },
+                            profile_id: { type: 'string' },
+                            evidence_score: { type: 'number' },
+                            mark_character: { type: 'array', items: { type: 'string' } },
+                            edge_behavior: { type: 'string' },
+                            buildup_behavior: { type: 'string' },
+                            useful_scale_range: {
+                              type: 'object',
+                              properties: { min_px: { type: 'number' }, max_px: { type: 'number' } },
+                              required: ['min_px', 'max_px'], additionalProperties: false,
+                            },
+                            rotation_meaningful: { type: 'boolean' },
+                            pressure_policy: { type: 'string', enum: ['none', 'native-preset', 'simulated-size', 'simulated-opacity', 'simulated-size-opacity'] },
+                            dynamics_capability: {
+                              type: 'object',
+                              description: 'Probe/profile-backed pressure and stroke-dynamics capabilities available for causal mark planning.',
+                              properties: {
+                                native_pressure_size: { type: 'boolean' },
+                                native_pressure_opacity: { type: 'boolean' },
+                                simulated_pressure_size: { type: 'boolean' },
+                                simulated_pressure_opacity: { type: 'boolean' },
+                                rotation_meaningful: { type: 'boolean' },
+                                spacing_tunable: { type: 'boolean' },
+                                opacity_tunable: { type: 'boolean' },
+                                flow_tunable: { type: 'boolean' },
+                              },
+                              required: ['native_pressure_size', 'native_pressure_opacity', 'simulated_pressure_size', 'simulated_pressure_opacity', 'rotation_meaningful', 'spacing_tunable', 'opacity_tunable', 'flow_tunable'],
+                              additionalProperties: false,
+                            },
+                            effective_settings: { type: 'object', additionalProperties: true },
+                            caveats: { type: 'array', items: { type: 'string' } },
+                          },
+                          required: ['preset_name', 'profile_id', 'evidence_score', 'mark_character', 'edge_behavior', 'buildup_behavior', 'useful_scale_range', 'rotation_meaningful', 'pressure_policy', 'dynamics_capability'],
+                          additionalProperties: false,
+                        },
+                      },
                       effective_settings: {
                         type: 'object',
                         properties: {
@@ -986,10 +1565,62 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
     {
       tool: {
         name: 'photoshop_guard_status',
-        description: 'Read compact durable continuation state plus paint_readiness for an established local Photoshop workflow. paint_readiness reports document/art-run/brush-preflight status and distinguishes brush-independent from brush-dependent visual readiness instead of treating missing brush preflight as a global paint blocker. Use after host/tool interruption before concluding the Photoshop/CoS route is unavailable. Includes recoverable exact pending receipt tokens and preview SHA/path needed after a lost async poll result; never replay a prior mutation to recover state.',
-        inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+        description: 'Read compact durable Guard state and paint readiness for the established local Photoshop workflow. Optional next_pass runs read-only lint. diagnostic_timing_marker is benchmark-only; do not add marker calls to normal painting. Use after interruption before declaring the route is unavailable; never replay prior mutations.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            next_pass: compactPassSchema(),
+            diagnostic_timing_marker: {
+              type: 'object',
+              properties: {
+                operation_id: { type: 'string' },
+                phase: { type: 'string', enum: ['review_finished', 'next_pass_ready'] },
+              },
+              required: ['operation_id', 'phase'],
+              additionalProperties: false,
+            },
+          },
+          additionalProperties: false,
+        },
       },
-      handler: async () => json(await runtime.statusWithCapabilitySnapshots()),
+      handler: async (args) => {
+        const marker = args.diagnostic_timing_marker
+          && typeof args.diagnostic_timing_marker === 'object'
+          && !Array.isArray(args.diagnostic_timing_marker)
+          ? args.diagnostic_timing_marker as Record<string, unknown>
+          : undefined;
+        if (marker) {
+          try {
+            const recorded = runtime.store.recordContinuationMarker(
+              String(marker.operation_id ?? ''),
+              String(marker.phase ?? '')
+            );
+            return json({
+              ok: true,
+              mode: 'diagnostic-continuation-timing-marker',
+              diagnostic_timing_marker: recorded,
+              ...(args.next_pass && typeof args.next_pass === 'object' && !Array.isArray(args.next_pass)
+                ? { next_pass_lint: await runtime.lintNextPass(args.next_pass as Record<string, unknown>) }
+                : {}),
+              next_required_action: marker.phase === 'review_finished'
+                ? 'Prepare the next bounded artistic pass; optionally record next_pass_ready immediately before the continuation call.'
+                : 'Call photoshop_guard_cycle_auto with previous_operation_id + previous_observation and the prepared next_pass.',
+            });
+          } catch (error) {
+            return json({
+              ok: false,
+              code: 'diagnostic_continuation_timing_marker_rejected',
+              message: error instanceof Error ? error.message : String(error),
+            }, true);
+          }
+        }
+        return json({
+          ...(await runtime.statusWithCapabilitySnapshots()),
+          ...(args.next_pass && typeof args.next_pass === 'object' && !Array.isArray(args.next_pass)
+            ? { next_pass_lint: await runtime.lintNextPass(args.next_pass as Record<string, unknown>) }
+            : {}),
+        });
+      },
     },
     {
       tool: {
@@ -1003,9 +1634,46 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
             document_id: { type: 'number', minimum: 1 },
             hypothesis_id: { type: 'string' },
             layer_id: { type: 'number', minimum: 1 },
-            rationale: { type: 'string', minLength: 12 },
+            rationale: { type: 'string', description: 'Optional audit/artistic guidance for why this already-bound temporary owner is being promoted.' },
+            scene_ownership_plan: {
+              type: 'object',
+              description: 'Required when this temporary owner is the first committed owner and no durable scene ownership plan exists yet. Must predeclare the owner being kept; later keep calls reuse the durable plan.',
+              properties: {
+                plan_id: { type: 'string' },
+                units: {
+                  type: 'array', minItems: 1, maxItems: 32,
+                  items: {
+                    type: 'object',
+                    properties: {
+                      semantic_id: { type: 'string' },
+                      owner_id: { type: 'string' },
+                      role: { type: 'string', minLength: 4 },
+                      editability: { type: 'string', enum: [...SCENE_OWNERSHIP_EDITABILITY] },
+                      rationale: { type: 'string', description: 'Optional audit/artistic guidance for this semantic ownership assignment.' },
+                    },
+                    required: ['semantic_id', 'owner_id', 'role', 'editability'],
+                    additionalProperties: false,
+                  },
+                },
+                shared_owner_justifications: {
+                  type: 'array', maxItems: 16,
+                  items: {
+                    type: 'object',
+                    properties: {
+                      owner_id: { type: 'string' },
+                      semantic_ids: { type: 'array', minItems: 2, items: { type: 'string' } },
+                      rationale: { type: 'string', description: 'Optional audit/artistic guidance for why these semantic ids intentionally share one owner.' },
+                    },
+                    required: ['owner_id', 'semantic_ids'],
+                    additionalProperties: false,
+                  },
+                },
+              },
+              required: ['plan_id', 'units'],
+              additionalProperties: false,
+            },
           },
-          required: ['request_key', 'document_id', 'hypothesis_id', 'layer_id', 'rationale'],
+          required: ['request_key', 'document_id', 'hypothesis_id', 'layer_id'],
           additionalProperties: false,
         },
       },
@@ -1023,7 +1691,7 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
     {
       tool: {
         name: 'photoshop_guard_resume',
-        description: 'Resume one established local Photoshop workflow from durable Guard state after interruption, without replaying any prior mutation. Drawing/image continuation remains bound to the local Photoshop document unless the user explicitly changes execution mode. Returns the exact pending receipt token and visual preview SHA/path when recovery must continue after a lost async poll result.',
+        description: 'Resume one established local Photoshop workflow after interruption without replaying any prior mutation. With no document_id, consume and verify the persisted continuation checkpoint first: an exact match returns the already-delivered frame/operation and bounded next action; a stale checkpoint fails closed into one bounded status/recovery verification. Pass document_id only for an explicit workflow selection. Drawing/image continuation remains bound to the local Photoshop document unless the user explicitly changes execution mode.',
         inputSchema: {
           type: 'object',
           properties: { document_id: { type: 'number', minimum: 1 } },
@@ -1033,19 +1701,35 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
       handler: async (args) => json(runtime.resume(typeof args.document_id === 'number' ? args.document_id : undefined)),
     },
     {
+      tool: {
+        name: 'photoshop_guard_lint_next_pass',
+        description: 'Read-only deterministic validation for one proposed compact next_pass against current durable Guard state.',
+        inputSchema: {
+          type: 'object',
+          properties: { next_pass: compactPassSchema() },
+          required: ['next_pass'],
+          additionalProperties: false,
+        },
+      },
+      handler: async (args) => {
+        try { return json(await runtime.lintNextPass(args.next_pass as Record<string, unknown>)); }
+        catch (error) { return json({ ok: false, code: 'guard_next_pass_lint_failed', execution: 'not-executed', message: error instanceof Error ? error.message : String(error) }, true); }
+      },
+    },
+    {
       tool: cycleTool(
         'photoshop_guard_cycle',
         'Run one durable compact Photoshop cycle inside the embedded Guard. Start with next_pass; after inspecting the returned frame, continue or finalize with previous_operation_id + previous_observation and optionally another next_pass. Technical report/receipt/verdict closure is derived internally.'
       ),
       handler: async (args) => {
-        try { return json(await runtime.cycle(compactCycleArgs(args))); }
+        try { return json(await runtime.cycle(compactCycleArgs(args)), false, runtime); }
         catch (error) { return json({ ok: false, code: guardRuntimeErrorCode(error, 'guard_cycle_rejected'), message: error instanceof Error ? error.message : String(error) }, true); }
       },
     },
     {
       tool: cycleTool(
         'photoshop_guard_cycle_auto',
-        'Preferred normal entry point for local Photoshop creation/editing/painting/continuation and accepted-anchor recovery. In an established workflow stay on this route unless the user explicitly changes execution mode. One Guard pass is NOT an entire artistic stage: a whole-canvas/recognition block-in may require several sequential passes. request_key identifies the unique execution attempt; problem_id identifies the stable artistic problem across attempts. Guard derives technical method/preview requirements from the actual actions. Start ordinary work with next_pass={request_key,problem_id?,document_id,goal,region/protection,action_class?,actions}. To restore a registered accepted anchor, send next_pass={request_key,document_id,goal,restore_anchor_operation_id} with no actions; Guard computes bounded history internally and closes recovery only after exact preview/state parity. After inspecting ordinary returned frames continue/finalize with previous_operation_id + previous_observation and optionally another next_pass. Guard derives technical report, exact receipt acknowledgement and internal visual closure. Short work runs synchronously; longer work returns a durable job_id for photoshop_guard_job_poll.'
+        'Preferred normal entry point for local Photoshop creation/editing/painting/continuation and accepted-anchor recovery. In an established workflow stay on this route unless the user explicitly changes execution mode. One Guard pass is NOT an entire artistic stage: a whole-canvas/recognition block-in may require several sequential passes. request_key identifies the unique execution attempt; problem_id identifies the stable artistic problem across attempts. Guard derives technical method/preview requirements from the actual actions. Start ordinary work with next_pass={request_key,problem_id?,document_id,goal,region/protection,action_class?,actions}. To restore a registered accepted anchor, send next_pass={request_key,document_id,goal,restore_anchor_operation_id} with no actions; Guard computes bounded history internally and closes recovery only after exact preview/state parity. Visual cycle results are reference-only: call photoshop_guard_review_image for the returned operation before submitting previous_observation. Guard derives technical report, exact receipt acknowledgement and internal visual closure. Short work runs synchronously; longer work returns a durable job_id for photoshop_guard_job_poll.'
       ),
       handler: async (args) => {
         try { return json(await runtime.cycleAuto(compactCycleArgs(args)), false, runtime); }
@@ -1054,8 +1738,35 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
     },
     {
       tool: {
+        name: 'photoshop_guard_review_image',
+        description:
+          'Explicitly deliver the exact durable image bytes for a pending Guard visual review. Guard cycle/poll responses are reference-only; call this after receiving a visual_review operation_id, inspect the returned MCP image blocks, then submit previous_observation. The tool never replays or mutates Photoshop.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            operation_id: { type: 'string' },
+            roles: {
+              type: 'array',
+              minItems: 1,
+              maxItems: REVIEW_IMAGE_MAX_BLOCKS,
+              items: { type: 'string' },
+              description: 'Optional subset of exact review roles such as after or after_crop. Omit to deliver every role required by the Guard review package.',
+            },
+          },
+          required: ['operation_id'],
+          additionalProperties: false,
+        },
+      },
+      handler: async (args) => explicitReviewImageResult(
+        runtime,
+        String(args.operation_id ?? ''),
+        Array.isArray(args.roles) ? args.roles.filter((role): role is string => typeof role === 'string') : undefined
+      ),
+    },
+    {
+      tool: {
         name: 'photoshop_guard_job_poll',
-        description: 'Poll a durable embedded-Guard background job. Running/uncertain jobs must not be replaced by a second mutation.',
+        description: 'Poll a durable embedded-Guard background job. Completed visual jobs return reference-only review metadata; use photoshop_guard_review_image for exact image delivery. Running/uncertain jobs must not be replaced by a second mutation.',
         inputSchema: {
           type: 'object',
           properties: { job_id: { type: 'string' } },
@@ -1101,6 +1812,7 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
           properties: {
             document_id: { type: 'number', minimum: 1 },
             current_stage: { type: 'string' },
+            evidence_operation_id: { type: 'string', description: 'Exact-current visual operation with a completed verdict. Required when changing the status, scale, or severity of an existing open perceptual problem; prevents arbitrary blocker dismissal/reclassification.' },
             problems: {
               type: 'array',
               items: {
@@ -1145,7 +1857,7 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
                 'unsafe_to_execute_directive',
               ],
             },
-            detail: { type: 'string' },
+            detail: { type: 'string', description: 'Optional audit/artistic guidance for an interrupt. The enumerated reason is the structural interrupt authority.' },
             final_comparison: {
               type: 'object',
               description: 'Required for action=complete. Compare the current state with the strongest previous accepted state before declaring the directive finished.',
@@ -1164,11 +1876,10 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
                     rhythm: { type: 'string' },
                     detail_selectivity: { type: 'string' },
                   },
-                  required: ['coherence', 'expressiveness', 'color', 'rhythm', 'detail_selectivity'],
                   additionalProperties: false,
                 },
               },
-              required: ['scope', 'preferred', 'reason', 'criteria'],
+              required: ['scope', 'preferred'],
               additionalProperties: false,
             },
             directive: {
@@ -1228,7 +1939,7 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
                     first_pass_strategy: { type: 'array', minItems: 1, maxItems: 3, items: { type: 'string' } },
                     user_confirmation: { type: 'string' },
                   },
-                  required: ['dominant_objective', 'conflicts', 'resolution_mode', 'chosen_rendering_strategy', 'resolution_rationale', 'first_pass_strategy'],
+                  required: ['dominant_objective', 'conflicts', 'resolution_mode', 'chosen_rendering_strategy', 'first_pass_strategy'],
                   additionalProperties: false,
                 },
                 strategy_validation_after_microplans: {
@@ -1302,6 +2013,53 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
                   },
                   additionalProperties: false,
                 },
+                perceptual_hierarchy: {
+                  type: 'object',
+                  description: 'Durable shared Art Director attention allocation. Ranked mode defines relative focal ordering; distributed mode is an explicit flat/all-over attention contract.',
+                  properties: {
+                    revision: { type: 'integer', minimum: 1 },
+                    mode: { type: 'string', enum: ['ranked', 'distributed'] },
+                    distributed_attention_rationale: { type: 'string', description: 'Optional artistic/audit guidance for why attention is intentionally distributed. Distributed mode is authorized structurally by mode=distributed plus distributed zone priorities.' },
+                    zones: {
+                      type: 'array', minItems: 1, maxItems: 24,
+                      items: {
+                        type: 'object',
+                        properties: {
+                          id: { type: 'string' },
+                          owner_ids: { type: 'array', minItems: 1, maxItems: 24, items: { type: 'string' } },
+                          priority: { type: 'string', enum: ['primary', 'secondary', 'support', 'distributed'] },
+                          contrast_budget: { type: 'string', enum: ['none', 'low', 'medium', 'high'] },
+                          detail_budget: { type: 'string', enum: ['none', 'low', 'medium', 'high'] },
+                          edge_certainty: { type: 'string', enum: ['none', 'low', 'medium', 'high'] },
+                          chroma_accent: { type: 'string', enum: ['none', 'restricted', 'allowed'] },
+                        },
+                        required: ['id', 'owner_ids', 'priority', 'contrast_budget', 'detail_budget', 'edge_certainty', 'chroma_accent'],
+                        additionalProperties: false,
+                      },
+                    },
+                    brief_items: {
+                      type: 'array', maxItems: 24,
+                      items: {
+                        type: 'object',
+                        properties: {
+                          item_id: { type: 'string' },
+                          kind: { type: 'string', enum: ['hard_perceptual', 'soft_preference', 'technical_non_visual'] },
+                          requirement: { type: 'string' },
+                          provenance: { type: 'string' },
+                          recognition_target: {
+                            type: 'string',
+                            description: 'Optional named-object/subject identity that must be supported by current-frame OBJECT/MICRO crop evidence before this hard item can be MET.',
+                          },
+                        },
+                        required: ['item_id', 'kind', 'requirement', 'provenance'],
+                        additionalProperties: false,
+                      },
+                    },
+                    ordering: { type: 'array', items: { type: 'string' } },
+                  },
+                  required: ['revision', 'mode', 'zones', 'ordering'],
+                  additionalProperties: false,
+                },
                 assessment: {
                   type: 'object',
                   properties: {
@@ -1357,7 +2115,7 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
                 },
                 value_check: {
                   type: 'object',
-                  description: 'Observed grayscale/value review for representational workflows. DETAIL is blocked when this status is fail or when observed evidence is missing. style-not-applicable and override require explicit reasons.',
+                  description: 'Observed grayscale/value review for representational workflows. DETAIL is blocked when this status is fail or when observed evidence is missing. style-not-applicable and override require an exact durable style-contract basis; prose reasons are optional audit guidance.',
                   properties: {
                     status: { type: 'string', enum: ['pass', 'fail', 'override', 'style-not-applicable'] },
                     observed: { type: 'boolean' },
@@ -1370,33 +2128,43 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
                     limitations: { type: 'array', items: { type: 'string' } },
                     applicability_reason: { type: 'string' },
                     override_reason: { type: 'string' },
+                    style_contract_basis: {
+                      type: 'object',
+                      description: 'Required structural authority for override/style-not-applicable. criterion must exactly match the named durable style_contract field.',
+                      properties: {
+                        field: { type: 'string', enum: ['realism_level', 'shape_language', 'composition_bias', 'edge_policy', 'contour_role', 'mark_visibility', 'value_policy', 'color_policy', 'spatial_treatment', 'material_treatment', 'detail_density', 'texture_policy', 'primitive_footprint_tolerance', 'layer_or_mask_bias', 'finish_criteria'] },
+                        criterion: { type: 'string' },
+                      },
+                      required: ['field', 'criterion'],
+                      additionalProperties: false,
+                    },
                     criteria: {
                       type: 'object',
                       properties: {
                         large_value_grouping: {
                           type: 'object',
                           properties: { status: { type: 'string', enum: ['pass', 'fail', 'uncertain', 'not-applicable'] }, note: { type: 'string' } },
-                          required: ['status', 'note'], additionalProperties: false,
+                          required: ['status'], additionalProperties: false,
                         },
                         focal_hierarchy: {
                           type: 'object',
                           properties: { status: { type: 'string', enum: ['pass', 'fail', 'uncertain', 'not-applicable'] }, note: { type: 'string' } },
-                          required: ['status', 'note'], additionalProperties: false,
+                          required: ['status'], additionalProperties: false,
                         },
                         silhouette_separation: {
                           type: 'object',
                           properties: { status: { type: 'string', enum: ['pass', 'fail', 'uncertain', 'not-applicable'] }, note: { type: 'string' } },
-                          required: ['status', 'note'], additionalProperties: false,
+                          required: ['status'], additionalProperties: false,
                         },
                         local_contrast_budget: {
                           type: 'object',
                           properties: { status: { type: 'string', enum: ['pass', 'fail', 'uncertain', 'not-applicable'] }, note: { type: 'string' } },
-                          required: ['status', 'note'], additionalProperties: false,
+                          required: ['status'], additionalProperties: false,
                         },
                         detail_before_form: {
                           type: 'object',
                           properties: { status: { type: 'string', enum: ['pass', 'fail', 'uncertain', 'not-applicable'] }, note: { type: 'string' } },
-                          required: ['status', 'note'], additionalProperties: false,
+                          required: ['status'], additionalProperties: false,
                         },
                       },
                       additionalProperties: false,
@@ -1573,6 +2341,26 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
                       },
                       affected_relations: { type: 'array', items: { type: 'string' } },
                       affected_qualities: { type: 'array', items: { type: 'string' } },
+                      perceptual_zone_ids: {
+                        type: 'array', maxItems: 8, items: { type: 'string' },
+                        description: 'Attention zones this bounded Painter task is authorized to consume when it changes local contrast/detail/edge/chroma emphasis.',
+                      },
+                      construction_plan: {
+                        type: 'object',
+                        description: 'Deep-local construction plan for the active representational task. It defines the form transition before detail instead of treating a generic broad mass as sufficient.',
+                        properties: {
+                          representation_strategy: { type: 'string' },
+                          structural_features: { type: 'array', minItems: 2, maxItems: 12, items: { type: 'string' } },
+                          recognition_features: { type: 'array', maxItems: 12, items: { type: 'string' } },
+                          negative_spaces: { type: 'array', maxItems: 12, items: { type: 'string' } },
+                          occlusions: { type: 'array', maxItems: 12, items: { type: 'string' } },
+                          perspective_or_flow: { type: 'string' },
+                          primitive_risks: { type: 'array', maxItems: 12, items: { type: 'string' } },
+                          stage_exit_condition: { type: 'string' },
+                        },
+                        required: ['representation_strategy', 'structural_features', 'stage_exit_condition'],
+                        additionalProperties: false,
+                      },
                     },
                     required: ['task_id', 'summary'],
                     additionalProperties: false,
@@ -1599,9 +2387,66 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
                 critic_authority: { type: 'string', enum: ['authorized', 'shadow'] },
                 critic_result_id: { type: 'string' },
                 criteria: { type: 'array', items: { type: 'string' } },
+                brief_item_results: {
+                  type: 'array', maxItems: 24,
+                  items: {
+                    type: 'object',
+                    properties: {
+                      item_id: { type: 'string' },
+                      state: { type: 'string', enum: ['UNASSESSED', 'MET', 'NOT_MET', 'UNCERTAIN'] },
+                      reason: { type: 'string' },
+                      evidence: { type: 'array', maxItems: 8, items: { type: 'string' } },
+                    },
+                    required: ['item_id', 'state'],
+                    additionalProperties: false,
+                  },
+                },
                 reason: { type: 'string' },
               },
               required: ['outcome'],
+              additionalProperties: false,
+            },
+            pre_final_hostile_review: {
+              type: 'object',
+              description: 'Required for action=complete. Exact-current adversarial review; any hard defect blocks completion.',
+              properties: {
+                contract_id: { type: 'string' },
+                contract_revision: { type: 'number', minimum: 1 },
+                frame_sha256: { type: 'string', pattern: '^[0-9a-fA-F]{64}$' },
+                checks: {
+                  type: 'array', minItems: 6, maxItems: 6,
+                  items: {
+                    type: 'object',
+                    properties: {
+                      area: {
+                        type: 'string',
+                        enum: [
+                          'whole_frame_brief', 'named_subject_recognition', 'geometry_completion',
+                          'physical_effect_accountability', 'material_differentiation', 'style_realism',
+                        ],
+                      },
+                      status: { type: 'string', enum: ['clear', 'defect', 'not_applicable'] },
+                      reason: { type: 'string' },
+                    },
+                    required: ['area', 'status'],
+                    additionalProperties: false,
+                  },
+                },
+                major_defects: {
+                  type: 'array', maxItems: 12,
+                  items: {
+                    type: 'object',
+                    properties: {
+                      summary: { type: 'string' },
+                      debt_class: { type: 'string', enum: ['hard', 'soft'] },
+                      brief_item_id: { type: 'string' },
+                    },
+                    required: ['summary', 'debt_class'],
+                    additionalProperties: false,
+                  },
+                },
+              },
+              required: ['contract_id', 'contract_revision', 'frame_sha256', 'checks', 'major_defects'],
               additionalProperties: false,
             },
             anchor_decision: {
@@ -1617,7 +2462,7 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
                   description: 'When true on promote_primary/preserve_alternative, Guard records pinned layer/active-layer/selection state for later one-action exact anchor recovery.',
                 },
               },
-              required: ['action', 'rationale'],
+              required: ['action'],
               additionalProperties: false,
             },
             incomplete_hypothesis: {

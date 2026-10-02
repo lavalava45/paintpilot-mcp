@@ -205,6 +205,58 @@ describe('edge intent schema and method routing', () => {
     expect(body.edge_control[0].executions[0].method_id).toBe('pencil-line');
   });
 
+  it('rejects pure edge-method incompatibility before any state-changing preparation runs', async () => {
+    const r = registry();
+    let prepCalls = 0;
+    let paintCalls = 0;
+    r.register('photoshop_set_foreground_color', {
+      tool: { name: 'photoshop_set_foreground_color', description: 'foreground', inputSchema: { type: 'object', properties: {} } },
+      handler: async () => {
+        prepCalls++;
+        return { content: [{ type: 'text', text: JSON.stringify({ ok: true }) }] };
+      },
+    });
+    r.register('photoshop_get_preview', {
+      tool: { name: 'photoshop_get_preview', description: 'preview', inputSchema: { type: 'object', properties: {} } },
+      handler: async () => ({ content: [{ type: 'text', text: JSON.stringify({ ok: true, sha256: 'never' }) }] }),
+    });
+    r.register('photoshop_paint_strokes', {
+      tool: { name: 'photoshop_paint_strokes', description: 'paint', inputSchema: { type: 'object', properties: {} } },
+      handler: async () => {
+        paintCalls++;
+        return { content: [{ type: 'text', text: JSON.stringify({ ok: true }) }] };
+      },
+    });
+
+    const result = await createVisualMicroPlanTools(r)[0]!.handler(basePlan({
+      plan_id: 'edge-preflight-before-preparation',
+      edges: [{ boundary_id: 'cheek-bg', region_a: 'cheek', region_b: 'background', class: 'soft' }],
+      steps: [
+        { id: 'foreground', tool: 'photoshop_set_foreground_color', args: {} },
+        {
+          id: 'edge',
+          tool: 'photoshop_paint_strokes',
+          method_id: 'pencil-line',
+          edge_boundary_ids: ['cheek-bg'],
+          args: { strokes: [{ tool: 'PENCIL', points: [{ x: 1, y: 1 }, { x: 20, y: 20 }] }] },
+        },
+        { id: 'preview', tool: 'photoshop_get_preview', args: {} },
+      ],
+    }));
+
+    expect(result.isError).toBe(true);
+    const text = result.content.find(item => item.type === 'text');
+    const body = JSON.parse(text && 'text' in text ? text.text : '{}');
+    expect(body).toMatchObject({
+      code: 'edge_control_preflight_failed',
+      execution: 'not-executed',
+      terminal: true,
+      visual_mutation_started: false,
+    });
+    expect(prepCalls).toBe(0);
+    expect(paintCalls).toBe(0);
+  });
+
   it('rejects hard-brush-line when the declared method is executed through paint_dabs', async () => {
     const r = registry();
     let brushCalls = 0;

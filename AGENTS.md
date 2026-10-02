@@ -27,6 +27,49 @@ goal. It must not complete the active Planner task by implication. Use explicit
 Planner task. Standalone report/ack/verdict providers are retired; after an actual
 interruption use only the supported compact recovery/status surfaces as documented.
 
+### Compact MCP mode — mandatory for PaintPilot chat context
+
+Treat chat-context budget as a production resource. Keep full technical evidence on
+disk in `.photoshop-runtime/` and process-run artifacts; bring only the minimum
+decision-relevant projection into the model conversation.
+
+- Never stringify, print, forward, or otherwise place preview image bytes/base64 in
+  text context. For `photoshop_get_preview` and any tool result carrying image
+  content, keep only small metadata in text: operation id, SHA-256, materialized path,
+  canvas/crop bounds, and the fields needed for the next Guard decision. Inspect the
+  image through the image/view path instead of serializing the enclosing result.
+- Never dump a complete `photoshop_guard_status` payload when a small projection is
+  sufficient. Extract only the fields needed for the current decision, normally
+  `next_required_action`, pending barrier/verdict ids, current/accepted frame SHA,
+  checkpoint debt/state, active problem/blocker, and the immediately relevant
+  rollback/recovery state.
+- Never print full MCP tool schemas or large `ALL_TOOLS` discovery results. Discover
+  by exact/specific name and emit only matching names or the small schema fragment
+  required to construct the next call.
+- Read Guard journals surgically: use exact-key search or bounded line ranges around
+  `result`, `preview`, `verdict`, `rollback`, `failed_step`, `error`,
+  `latency`, or another explicitly needed field. Do not reread an entire operation
+  journal once its relevant state is known.
+- After a rejected pass is fully rolled back, retain only a compact failure note in
+  working context: operation id, why it failed artistically, exact accepted SHA after
+  rollback, and any resulting strategy constraint. The durable journal remains the
+  source of detailed history.
+- Prefer one combined tool call that extracts several small read-only facts over a
+  sequence of calls that each return large overlapping state objects.
+- For long painting sessions maintain a compact running state containing only:
+  active document id, accepted frame SHA, latest checkpoint path, active visual
+  problem, current temporary hypothesis/layer if any, pending Guard obligation, and
+  the next planned artistic experiment.
+- If a tool returns unexpectedly large text/image data, summarize/projection-filter
+  it before any subsequent model-visible emission. Do not repeat the raw payload.
+- Exceptions are allowed only when the exact full payload is necessary to diagnose a
+  concrete failure that cannot be localized by search/projection. Even then, prefer a
+  bounded excerpt and record the full evidence on disk rather than in chat.
+
+The purpose of Compact MCP mode is not to weaken Guard, visual review, recovery, or
+auditability. Guard remains fail-closed and all durable evidence remains available;
+only redundant transport into the conversation is reduced.
+
 ### Mandatory prompt-conflict and strategy preflight
 
 Before the first Painter mutation, every Art Director directive must record a
@@ -54,7 +97,7 @@ replan starts a fresh early strategy-validation window.
 Do not create a second controller CLI, persistent MCP daemon, ad-hoc MCP REPL, or parallel
 recovery transport. Diagnostics and recovery stay on the embedded Guard surfaces.
 
-### Current architecture decision — keep Photoshop safety out of the COS fork
+### Current architecture decision — host-independent Photoshop safety ownership
 
 Read [docs/architecture.md](docs/architecture.md)
 before changing controller/host integration.
@@ -165,7 +208,14 @@ Strokes/dabs must retrieve the created path through `doc.pathItems.getByName(pat
 calling `strokePath`; do not assume `pathItems.add()` returns a directly usable PathItem in
 this host.
 
-The current bridge source revision is `compact-v2-20260926-brush-profile`.
+For a fresh blank `nontrivial_painting` document, make the first meaningful visual construction
+before standalone future-stage setup. A brush preset/configuration, helper layer, selection or other
+preparation needed only later must not consume its own Guard cycle while no visual frame exists.
+Preparation genuinely required by the immediate first pass belongs inside that same VisualMicroPlan.
+Guard enforces this with `premature_future_preparation` (document create/open are exempt), complementing
+the existing `premature_value_analysis` blank-canvas gate.
+
+The current bridge source revision is `compact-v2-20261002-video-trace-readiness`.
 Document create/open use UXP exact-outcome receipts. The remaining catalog migration work is
 implemented under the same UXP-only/fail-closed contract.
 The rebuilt child/current companion load-and-revision preflight is live-accepted; the final
@@ -434,6 +484,16 @@ form a causal replan and return to the next visual pass. A second diagnostic pas
 is allowed only when the first produced no actionable cause. Do not turn an
 ordinary visual verdict into open-ended source/schema/state/status/grep analysis.
 
+For a deterministic Guard preflight rejection with `visual_mutation_started=false`
+and a returned `compact_correction_recipe`, use a payload-only fast path: apply the
+listed violations directly to the rejected cycle and immediately resubmit the same
+semantic cycle. Do **not** inspect repository source, schemas, tests, status/state,
+or extra previews before that first corrected resubmission when the validation
+message already names the actionable problem. Investigate implementation details
+only if the corrected resubmission repeats the same rejection without an actionable
+field-level cause, or the rejection explicitly reports a systemic runtime/tool
+defect.
+
 When a controller checkpoint becomes due, treat it as a technical barrier:
 save/verify the pinned layered PSD, then continue the next planned visual cycle.
 Do not restart whole-image analysis merely because a checkpoint was written.
@@ -495,7 +555,7 @@ roughness/PBR/material-quality scores.
 > Start with [README.md](README.md), [INSTALL.md](INSTALL.md), or [llms.txt](llms.txt).
 >
 > **Project identity:** this repository is the independently maintained
-> [Photoshop MCP — Digital Painting Edition](https://github.com/lavalava45/photoshop-mcp-digital-painting).
+> [Photoshop MCP — Digital Painting Edition](https://github.com/lavalava45/paintpilot-mcp).
 > Historical origin, upstream identifiers and retained licensing attribution are centralized in
 > [`NOTICE`](NOTICE); those historical identifiers do not distribute this project's maintained surface.
 
@@ -542,10 +602,10 @@ Agent routing rules:
 
 - **Canonical:** `Chat_On_Steroids_Plugins` → this project's `dist/cos-plugin.js` → embedded Guard → internal `ToolRegistry` → Photoshop.
 - **Removed:** the former external Core/controller/daemon provider chain is not a supported or recoverable route.
-- The current compact-only native catalog is 130 tools / 14 public Guard tools. Do not interpret a stale legacy connector snapshot as a server limitation.
+- The current compact-only native catalog is 133 tools / 16 public Guard tools. Do not interpret a stale legacy connector snapshot as a server limitation.
 - If the native Plugins route is genuinely absent/stale, inspect its discovery/readiness state and repair that route. Do not silently create or switch to a parallel controller path.
 - `Chat_On_Steroids_Desktop` is for read-only desktop/UI inspection when useful, not the Photoshop MCP transport.
-- The Adobe UXP bridge in `uxp-plugin/` is a separate Photoshop-side runtime; it is not the Chat On Steroids Plugins route. Production semantic Photoshop dispatch is UXP-only and fail-closed for every migrated Photoshop primitive. Raw `photoshop_execute_script` and the production ExtendScript/COM fallback are removed; Guard keeps only negative tombstones for stale callers. The current readiness target is bridge revision `compact-v2-20260926-brush-profile`.
+- The Adobe UXP bridge in `uxp-plugin/` is a separate Photoshop-side runtime; it is not the Chat On Steroids Plugins route. Production semantic Photoshop dispatch is UXP-only and fail-closed for every migrated Photoshop primitive. Raw `photoshop_execute_script` and the production ExtendScript/COM fallback are removed; Guard keeps only negative tombstones for stale callers. The current readiness target is bridge revision `compact-v2-20261002-video-trace-readiness`.
 
 **Prerequisites:** Photoshop running on Windows 10/11, Node.js 18+. This project intentionally supports Windows only. This is unofficial and not affiliated with Adobe.
 
@@ -560,7 +620,7 @@ per-tool transport/access status. Do not infer roadmap state from old chat summa
 dated handoff files.
 
 In particular, the recognition-first block-in, `photoshop_paint_regions`,
-automatic first visual baseline, recognition/TTFR journal metrics, compact normal cycle
+first meaningful visual-frame tracking without a blank-canvas value-check round, recognition/TTFR journal metrics, compact normal cycle
 envelope, live DPI 72/144/300 validation, live relative layer-placement validation and
 the first executable stable-layer protection stage are implemented. VisualMicroPlan now
 supports `protected_layer_ids` with fail-closed target pinning and narrow explicit
@@ -593,7 +653,7 @@ PhotoshopMCPServer (Node.js)
 Adobe Photoshop
 
 Primary production lane: UXP bridge plugin (`uxp-plugin/`) on 127.0.0.1:38452 using localhost
-long-poll. Current source/readiness revision is `compact-v2-20260926-brush-profile`.
+long-poll. Current source/readiness revision is `compact-v2-20261002-video-trace-readiness`.
 Production semantic dispatch is UXP-only / fail-closed for the current catalog; retained legacy
 platform executors are not selectable semantic backends. Repository migration acceptance is green;
 the acceptance matrix remains authoritative for any outstanding real-Photoshop retest.
@@ -704,7 +764,7 @@ More: [docs/development.md](docs/development.md#8-troubleshooting).
 
 | Channel | Identifier |
 | ------- | ---------- |
-| Project source | https://github.com/lavalava45/photoshop-mcp-digital-painting |
+| Project source | https://github.com/lavalava45/paintpilot-mcp |
 | Public npm package | **None** — build from this repository |
 | MCP Registry entry | **None** — use local stdio |
 | Historical provenance | [`NOTICE`](NOTICE) |

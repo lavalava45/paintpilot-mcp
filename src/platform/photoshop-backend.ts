@@ -1,4 +1,5 @@
 import { PhotoshopConnection } from './connection.js';
+import { exactNotExecutedError } from '../core/execution-outcome.js';
 import {
   recordBackendRouteSelection,
   type BackendRouteTraceInput,
@@ -504,12 +505,14 @@ export class PhotoshopBackendRouter {
     });
 
     if (uxp) {
-      throw new Error(
-        `uxp_bridge_unavailable: ${primitive} requires the Photoshop UXP companion`
+      throw exactNotExecutedError(
+        `uxp_bridge_unavailable: ${primitive} requires the Photoshop UXP companion`,
+        'backend_route_rejected_before_semantic_dispatch'
       );
     }
-    throw new Error(
-      `capability_unavailable: ${primitive} is unsupported by the Photoshop UXP backend`
+    throw exactNotExecutedError(
+      `capability_unavailable: ${primitive} is unsupported by the Photoshop UXP backend`,
+      'primitive_unsupported_before_semantic_dispatch'
     );
   }
 

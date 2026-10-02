@@ -3,22 +3,29 @@ import { resolvePhotoshopCapabilities } from '../platform/capabilities.js';
 import type { PhotoshopConnection } from '../platform/connection.js';
 import {
   invokeNeuralFilter,
+  NEURAL_FILTER_KINDS,
   type NeuralFilterKind,
-} from '../platform/uxp-bridge-client.js';
+} from '../platform/neural-filter-adapter.js';
 import { atomicFailure, atomicSuccess } from './atomic-shared.js';
 import { residualDocumentTarget } from './residual-operation-shared.js';
 
-export const NEURAL_FILTER_KINDS: NeuralFilterKind[] = [
-  'skin_smoothing',
-  'harmonize',
-  'depth_blur',
-  'super_zoom',
-  'colorize',
-];
+export { NEURAL_FILTER_KINDS };
 
 function percentage(value: unknown, fallback: number): number {
   const parsed = typeof value === 'number' ? value : Number(value);
   return Number.isFinite(parsed) ? Math.max(0, Math.min(100, Math.round(parsed))) : fallback;
+}
+
+function neuralRequestParams(args: Record<string, unknown>) {
+  const params = {
+    ...residualDocumentTarget(args),
+    smoothness: percentage(args.smoothness, 50),
+    blur: percentage(args.blur, 50),
+  };
+  const referenceLayerId = args.reference_layer_id;
+  return typeof referenceLayerId === 'number'
+    ? { ...params, reference_layer_id: referenceLayerId }
+    : params;
 }
 
 export async function runNeuralFilter(
@@ -45,26 +52,20 @@ export async function runNeuralFilter(
   }
 
   const filter = requested as NeuralFilterKind;
-  const params = {
-    ...residualDocumentTarget(args),
-    smoothness: percentage(args.smoothness, 50),
-    blur: percentage(args.blur, 50),
-    ...(typeof args.reference_layer_id === 'number'
-      ? { reference_layer_id: args.reference_layer_id }
-      : {}),
-  };
-  const result = await invokeNeuralFilter(filter, params);
-  if (!result.ok) {
-    return atomicFailure({
-      ok: false,
-      code: 'uxp_bridge_unavailable',
-      message: result.error ?? 'Neural filter invocation failed',
-      suggested_next_tool: 'photoshop_get_capabilities',
-    });
+  const params = neuralRequestParams(args);
+  const bridge = await invokeNeuralFilter(filter, params);
+  if (bridge.ok) {
+    return atomicSuccess(
+      `Neural filter "${filter}" applied via UXP bridge`,
+      { filter, params, bridge: bridge.data },
+      'photoshop_get_preview'
+    );
   }
-  return atomicSuccess(
-    `Neural filter "${filter}" applied via UXP bridge`,
-    { filter, params, bridge: result.data },
-    'photoshop_get_preview'
-  );
+
+  return atomicFailure({
+    ok: false,
+    code: 'uxp_bridge_unavailable',
+    message: bridge.error ?? 'Neural filter invocation failed',
+    suggested_next_tool: 'photoshop_get_capabilities',
+  });
 }

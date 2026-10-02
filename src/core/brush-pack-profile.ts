@@ -124,6 +124,83 @@ const ROLE_PURPOSE: Record<BrushSceneRole, string> = {
   'detail-edge': 'Place controlled detail, line and hard-edge accents.',
 };
 
+const ROLE_MARK_FIT: Record<BrushSceneRole, {
+  marks: MediaMarkCharacter[];
+  edges: MediaBrushProfileInput['edge_behavior'][];
+  buildup: MediaBrushProfileInput['buildup_behavior'][];
+}> = {
+  'broad-form': {
+    marks: ['smooth', 'directional', 'hard'],
+    edges: ['variable', 'directional', 'hard'],
+    buildup: ['opaque', 'layered'],
+  },
+  'atmosphere-soft': {
+    marks: ['soft', 'glazing', 'smooth'],
+    edges: ['soft', 'variable'],
+    buildup: ['glazing', 'layered'],
+  },
+  'broken-texture': {
+    marks: ['broken', 'bristly', 'granular', 'textural', 'directional'],
+    edges: ['broken', 'directional', 'variable'],
+    buildup: ['granular', 'streaking', 'layered'],
+  },
+  'detail-edge': {
+    marks: ['hard', 'directional'],
+    edges: ['hard', 'directional'],
+    buildup: ['opaque', 'streaking'],
+  },
+};
+
+function roleEvidenceScore(profile: MediaBrushProfile, role: BrushSceneRole): number {
+  const fit = ROLE_MARK_FIT[role];
+  const roleIntents = new Set(ROLE_INTENTS[role]);
+  const intentHits = profile.usable_visual_intents.filter(intent => roleIntents.has(intent)).length;
+  const markHits = profile.mark_character.filter(mark => fit.marks.includes(mark)).length;
+  const edgeHit = fit.edges.includes(profile.edge_behavior) ? 1 : 0;
+  const buildupHit = fit.buildup.includes(profile.buildup_behavior) ? 1 : 0;
+  const dynamicsHit = profile.recommended_pressure_policy !== 'none' ? 1 : 0;
+  const rotationHit = profile.rotation_meaningful && ['broad-form', 'broken-texture', 'detail-edge'].includes(role) ? 1 : 0;
+  // Probe-observed semantics dominate. Dynamics/rotation are useful tie-breakers, never name heuristics.
+  return intentHits * 8 + markHits * 4 + edgeHit * 3 + buildupHit * 2 + dynamicsHit + rotationHit;
+}
+
+function rankProfilesForRole(profiles: MediaBrushProfile[], role: BrushSceneRole): MediaBrushProfile[] {
+  return profiles
+    .map(profile => ({ profile, score: roleEvidenceScore(profile, role) }))
+    .sort((a, b) => b.score - a.score
+      || a.profile.known_caveats.length - b.profile.known_caveats.length
+      || a.profile.profile_id.localeCompare(b.profile.profile_id))
+    .map(row => row.profile);
+}
+
+function roleCandidateEvidence(profile: MediaBrushProfile, role: BrushSceneRole) {
+  const settings = profile.effective_settings as Record<string, unknown>;
+  const pressurePolicy = profile.recommended_pressure_policy;
+  return {
+    preset_name: profile.preset_name,
+    profile_id: profile.profile_id,
+    evidence_score: roleEvidenceScore(profile, role),
+    mark_character: [...profile.mark_character],
+    edge_behavior: profile.edge_behavior,
+    buildup_behavior: profile.buildup_behavior,
+    useful_scale_range: { ...profile.useful_scale_range },
+    rotation_meaningful: profile.rotation_meaningful,
+    pressure_policy: pressurePolicy,
+    dynamics_capability: {
+      native_pressure_size: settings.use_pressure_size === true,
+      native_pressure_opacity: settings.use_pressure_opacity === true,
+      simulated_pressure_size: pressurePolicy === 'simulated-size' || pressurePolicy === 'simulated-size-opacity',
+      simulated_pressure_opacity: pressurePolicy === 'simulated-opacity' || pressurePolicy === 'simulated-size-opacity',
+      rotation_meaningful: profile.rotation_meaningful,
+      spacing_tunable: Number.isFinite(Number(settings.spacing)),
+      opacity_tunable: Number.isFinite(Number(settings.opacity)),
+      flow_tunable: Number.isFinite(Number(settings.flow)),
+    },
+    effective_settings: { ...profile.effective_settings },
+    caveats: [...profile.known_caveats],
+  };
+}
+
 function stableJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
   if (value && typeof value === 'object') {
@@ -463,7 +540,10 @@ export function buildBrushPreflightFromProfiles(input: {
   const missingRoles: BrushSceneRole[] = [];
   for (const role of requiredRoles) {
     const acceptedIntents = new Set(ROLE_INTENTS[role]);
-    const matches = profiles.filter(profile => profile.usable_visual_intents.some(intent => acceptedIntents.has(intent)));
+    const matches = rankProfilesForRole(
+      profiles.filter(profile => profile.usable_visual_intents.some(intent => acceptedIntents.has(intent))),
+      role
+    );
     if (!matches.length) {
       missingRoles.push(role);
       continue;
@@ -476,6 +556,7 @@ export function buildBrushPreflightFromProfiles(input: {
       visual_intents: preferred.usable_visual_intents.filter(intent => acceptedIntents.has(intent)),
       preferred_preset: preferred.preset_name,
       alternative_presets: matches.slice(1).map(profile => profile.preset_name),
+      candidate_evidence: matches.map(profile => roleCandidateEvidence(profile, role)),
       effective_settings: preferred.effective_settings,
       working_scale: workingScale(preferred),
       pressure_policy: preferred.recommended_pressure_policy,

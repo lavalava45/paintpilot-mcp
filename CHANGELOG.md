@@ -1,13 +1,1143 @@
 # Changelog
 
+## 2026-10-03 — Repository provenance and GitHub identity cleanup
+
+- Updated the repository-facing GitHub URLs from the retired
+  `lavalava45/photoshop-mcp-digital-painting` location to the current
+  `lavalava45/paintpilot-mcp` origin while keeping the package/runtime identity
+  `photoshop-mcp-digital-painting` unchanged.
+- Corrected the root MIT `LICENSE` so it identifies the current project copyright as
+  `lavalava45 and PaintPilot contributors` instead of presenting the historical upstream author as
+  the copyright holder of the independently rewritten current source tree.
+- Retained Ali Sait Teke and the original Photoshop MCP repository in `NOTICE` strictly as historical
+  provenance. The notice now reflects the maintained source-independence gate: no identical files,
+  no substantial same-path copied blocks, no cross-path clone blocks, and no high-similarity
+  implementation files remain in the current production source.
+
+## 2026-10-03 — Compact Guard public schema exposes lighting/color preflight
+
+- Fixed a live-discovered compact-v2 contract mismatch where the Guard compiler required
+  `next_pass.color_gradient_preflight` for broad atmosphere / relighting / optical-effect work, and already
+  understood same-pass `scene_lighting_color_model`, while the public MCP `next_pass` schema rejected both
+  fields because they were absent under `additionalProperties: false`.
+- Added fail-closed public JSON schemas for `scene_lighting_color_model` and
+  `color_gradient_preflight` that mirror the existing compiler normalization contracts instead of weakening
+  the boundary with an open-ended object.
+- Added focused public-schema regression coverage so `photoshop_guard_cycle_auto` cannot again demand these
+  semantic preflights internally while making them impossible for an MCP client to submit.
+- Focused schema regression, TypeScript `--noEmit`, and `npm run build:server` are green.
+
+## 2026-10-03 — Manual Photoshop document close now auto-abandons stale Guard state
+
+- Added document-scoped recovery for a user manually closing an in-progress Photoshop document. The UXP companion
+  listens for Photoshop `close` notifications and sends a bounded `document_closed` event through the existing
+  localhost bridge; Guard then terminalizes only the matching document workflow as
+  `stopped / abandoned_document_absent` instead of leaving stale `uncertain`, report, acknowledgement, visual
+  verdict, barrier or active-job debt that can block the next painting.
+- Close recovery is incarnation-aware. UXP includes the known document-instance witness when available, and Guard
+  rejects a stale close event if the same numeric Photoshop document id has already been rebound to a different
+  incarnation.
+- Guard-controlled `photoshop_close_document` remains a normal terminal close and is not reclassified as manual
+  abandonment. Successful controlled close now records `workflow_lifecycle.reason=controlled_document_close`.
+- Added a self-healing fallback for lost UXP notifications: `photoshop_guard_status` / Guard cycle compares active
+  Guard document debt with fresh UXP document presence and abandons only documents proven absent. A confirmed
+  `document_count=0` can close stale document debt without replaying any Photoshop mutation.
+- Added focused coverage for manual close cleanup, stale-incarnation rejection, controlled-close exclusion,
+  successful controlled-close terminal state, lost-event recovery, and bridge event delivery. Focused verification
+  is green (**39/39**), TypeScript `--noEmit` passes, `node --check uxp-plugin/main.js` passes, and
+  `npm run build:server` passes.
+- Live acceptance on 2026-10-03 passed against `Untitled-1`, `document_id=353`: after the user manually closed the
+  unfinished document, `photoshop_ping` reported `documentCount=0` / no active document, while
+  `photoshop_guard_status` reported empty `uncertain`, pending report/ack/verdict and active-job sets and recorded
+  document 353 as `workflow_lifecycle.status=stopped`, `reason=abandoned_document_absent`. The historical document
+  state remains available for audit but no longer blocks a new workflow.
+
+## 2026-10-02 — E.22 stable per-action `gfxcapture` shutdown and exact mutation clips
+
+- Fixed the remaining live FFmpeg/WGC race that produced **48-byte MP4 files** after otherwise successful
+  Photoshop mutations. The failure was not caused by Photoshop being behind another window: FFmpeg's
+  `gfxcapture` could receive frames, then block waiting for the next Windows Graphics Capture frame and fail to
+  return to its stdin loop to consume the interactive `q` shutdown command.
+- The recorder now preserves the existing **one clip per real Guard visual mutation** contract rather than
+  switching to continuous whole-run recording. After a mutation ends it records the action frame boundary, sends
+  `q`, gives FFmpeg a short ordinary-exit window, and only if `gfxcapture` is still blocked calls Win32
+  `RedrawWindow(HWND)` for the same Photoshop window. `RedrawWindow` does not foreground, raise or activate
+  Photoshop; it only wakes the window/compositor path so FFmpeg can consume `q` and finalize the MP4.
+- Added explicit action frame boundaries and post-finalization trimming so recorder warm-up and the technical
+  wake frame are excluded from the retained viewer-facing clip. The saved clip therefore represents the agent's
+  Photoshop mutation rather than planning/idle time before it or shutdown plumbing after it.
+- Kept the H.264 path low-latency for short mutation clips (`libx264`, `tune=zerolatency`, no B-frames) and retained
+  validation of the finalized video before a manifest entry is accepted.
+- Live regression on `processes/poppy-video-test-process/run-04` passed **two consecutive real Guard visual
+  mutations** through the production lifecycle: `poppy-video-r4-bg-01` produced a valid 1920×1024 H.264 clip
+  (11 frames, 0.366667 s, 61,551 bytes) and `poppy-video-r4-foliage-01` produced a second valid clip
+  (19 frames, 0.633333 s, 70,666 bytes). This directly replaces the earlier sequence where the first later
+  mutation collapsed to a 48-byte `ftyp/free/mdat` shell with no `moov` atom.
+- Focused process-video tests are green (**20/20**) and `npm run build:server` passes. The remaining E.22 work is
+  the broader end-to-end acceptance run covering an intentionally bad attempt, correction/rollback,
+  interruption/resume ordering and deterministic final MP4/SRT assembly; basic per-action capture reliability is
+  no longer the open blocker.
+
+## 2026-10-02 — Hot-loop compiler live acceptance and projection reuse
+
+- Completed the fresh `hotloop-final5-20261002` live performance run with **8 meaningful VisualMicroPlan passes**.
+  Run-scoped benchmark evidence reports **13.337s median visual review**, **1.752s median
+  review_finished -> next_pass_ready diagnostic marker**, **1.690s median PaintingIntent -> dispatch**,
+  **1.25 model-visible Guard round trips per artistic mutation**, **1 predispatch rejection**, and
+  **0 recovery-only round trips**.
+- Fixed the live hot-path bottleneck exposed by the run: `compactPassContext()` now reuses Guard's captured
+  projection instead of repeatedly reading/scanning global painting state and operation history during
+  PaintingIntent compilation, compact-pass validation and deterministic repair. The pre-fix run contained an
+  8.633s intent-to-dispatch outlier; post-fix P3-P8 samples all dispatched in <=1.873s.
+- Hardened live setup/readiness without weakening fail-closed mutation gates: a transient disconnected long-poll
+  readiness sample gets one bounded read-only state wake/probe before readiness is rechecked, and
+  `photoshop_guard_set_art_run` binds the exact live UXP document-incarnation witness before writing the new run.
+- New-owner PaintingIntent compilation now injects the just-created layer's deterministic step reference into
+  layer-targeted mutations and supplies opaque physical-stack facts for structured masses when uniquely implied.
+- Added regression coverage for blank-document reactivation, public-cycle stale scene-model incarnation repair, and
+  new-owner PaintingIntent layer/stack derivation. Full acceptance: **93/93 test files, 939/939 tests**;
+  TypeScript `--noEmit` and `npm run build:server` are green.
+- The sole final-run predispatch rejection, `structured_mass_iconic_primitive_compound`, was a genuine form decision
+  and remained correction rather than recovery. The latency run closes the engineering performance gate; artistic
+  parity remains a separate P1-E.8/P1-E.10 quality/time judgment.
+
+## 2026-10-02 — E.22 GPU-safe Photoshop window capture
+
+- Fixed live process-video capture missing the actual Photoshop document canvas while still recording Photoshop
+  chrome/panels. The root cause was `gdigrab hwnd=...`: Photoshop's document surface is GPU/compositor-rendered,
+  so GDI window capture returned stale/Home content for the viewport even though the live document was visible.
+- The automatic HWND path now uses FFmpeg's Windows Graphics Capture source (`gfxcapture`) against the current
+  Photoshop top-level HWND, followed by `hwdownload` for the existing libx264 pipeline. This captures the real
+  GPU-rendered document surface and remains window-scoped rather than recording the desktop.
+- Explicit non-HWND overrides such as `title=...` remain on the legacy `gdigrab` path for diagnostics/backward
+  compatibility. Live read-only verification on the current Photoshop window captured the open daisy document,
+  layers and UXP panel correctly where the old GDI path captured the Photoshop Home surface instead.
+- Fixed the FFmpeg stop handshake for the new `gfxcapture` path: send the interactive `q` command with
+  `stdin.write()` and leave the pipe open until FFmpeg exits. Closing stdin in the same call could race the
+  command, leave FFmpeg running, and produce only an unfinalized MP4 header.
+- Tightened explicit document-navigation outcome reporting exposed by the live capture diagnostic: a UXP
+  `document_not_found` / `ambiguous_name` activation failure now reports `execution: not-executed`, and the Guard
+  auto-terminalizes matching legacy uncertain journals because no document activation could have occurred.
+
+## 2026-10-02 — E.22 recording readiness indicator in Photoshop
+
+- Extended the UXP Bridge video controls with live readiness indicators for `FFmpeg` and the current Photoshop
+  window before any recording starts. The probe runs `ffmpeg -version` with a short timeout and resolves the
+  current Photoshop HWND, but it does not create a clip or mutate Photoshop.
+- The readiness contract distinguishes `ready`, `ffmpeg-not-found`, `ffmpeg-failed-to-start`,
+  `photoshop-window-not-found`, and a generic Photoshop-window probe failure. The panel renders these as
+  `FFmpeg: готов / не найден / ошибка запуска` and `Окно Photoshop: найдено / не найдено / ошибка проверки`.
+- Added `GET /settings/process-video-trace/readiness` on the existing localhost bridge and bumped the UXP bridge
+  revision to `compact-v2-20261002-video-trace-readiness`.
+
+## 2026-10-02 — E.22 Photoshop-panel video recording toggle
+
+- Added a persistent `Включить видеозапись` control to the Photoshop UXP Bridge panel. The panel reads and writes
+  the setting through the existing localhost bridge; it does not add a new MCP tool or a parallel transport.
+- Added atomic repo-runtime persistence for the recording preference. A saved panel choice has precedence over
+  `PAINTPILOT_PROCESS_VIDEO_TRACE`; the environment variable remains a fallback when no runtime choice exists.
+- Guard video capture now resolves its enabled state from that shared setting immediately before each visual
+  mutation, so toggling the checkbox affects subsequent clips without restarting the PaintPilot child.
+- Added localhost `GET/POST /settings/process-video-trace` endpoints and bumped the UXP bridge revision to
+  `compact-v2-20261002-video-trace-ui`. One Adobe UXP Developer Tool **Reload** is therefore required after this
+  change; `manifest.json` is unchanged, so Unload/Load is not required.
+
+## 2026-10-02 — E.22 dynamic Photoshop HWND capture target
+
+- Replaced the brittle default `title=Adobe Photoshop` capture target with per-clip discovery of the current
+  visible `Photoshop.exe` main-window handle. The recorder now resolves that handle immediately before FFmpeg
+  starts and supplies `gdigrab` with `hwnd=0x...`, so document title, zoom, layer name and unsaved-state changes
+  do not invalidate the default capture target across operations or Photoshop restarts.
+- `PAINTPILOT_PHOTOSHOP_CAPTURE_TARGET` and the programmatic `captureTarget` option remain explicit overrides for
+  debugging/special setups. Discovery failure remains recorder-only/non-authoritative: it is converted to the
+  existing capture warning path and cannot block or replay the Guard mutation.
+- Live read-only discovery against the currently running Photoshop resolved `hwnd=0xA10CFA`, matching the
+  observed Photoshop top-level window. Focused verification: `src/core/process-video-trace.test.ts` **10/10 PASS**,
+  TypeScript `--noEmit` PASS, `npm run build:server` PASS and `git diff --check` PASS.
+
+## 2026-10-02 — Continuation-phase latency instrumentation
+
+- Added durable `photoshop.guard.continuation_timing.v1` boundaries around explicit
+  `photoshop_guard_review_image` delivery and projected them into the existing Guard latency/timeline export.
+- Added opt-in benchmark markers `review_finished` and `next_pass_ready` through the existing
+  `photoshop_guard_status` surface, avoiding a new public tool and avoiding any mandatory normal-painting
+  round trip. Marker mode returns a compact acknowledgement instead of building the expensive full status
+  projection.
+- The latency record can now expose `guard_response_to_review_request_ms`, `review_image_service_ms`,
+  `review_delivery_to_review_finished_marker_ms`, `review_finished_to_next_pass_ready_marker_ms`,
+  `next_pass_ready_marker_to_guard_ms`, and `review_delivery_to_next_guard_ms`. These are explicitly
+  server-observed diagnostic boundaries, not claims about pure model reasoning.
+- Extended the maintained painting-cycle benchmark with a continuation-phase section that reports only
+  instrumented samples and keeps missing phases unknown rather than zero.
+- Regression coverage proves exact phase partitioning, durable timeline export, marker ordering, automatic
+  explicit-review timing, and compact marker-mode behavior. Targeted verification:
+  `tests/session-store-regressions.test.ts` + `tests/embedded-guard.test.ts` **153/153 PASS**;
+  TypeScript `--noEmit` PASS, `npm run build:server` PASS, compact-v2/tool-count verification PASS.
+- Rechecked the actual COS publication budget after rebuilding `dist`: **133 tools / 249,865 bytes** against
+  the 250,000-byte ceiling (**135 bytes remaining**). No new public tool was added; E.8c remains an urgent
+  host-side capacity problem rather than being hidden by the timing instrumentation.
+
+## 2026-10-02 — E.7c refinement style exemption no longer requires prose authority
+
+- Changed `refinement_check.status=style-not-applicable` so its exact `style_contract_basis` is the executable
+  exemption authority; `applicability_reason` is now optional audit/artistic guidance.
+- Preserved fail-closed Art Director validation that the supplied basis exactly matches the active durable
+  `style_contract`; missing prose cannot authorize a style exemption by itself.
+- Repaired stale refinement/unified-operation fixtures to include the now-required perceptual hierarchy, so these
+  suites exercise their intended contracts rather than failing at an unrelated earlier directive gate.
+- Targeted verification: `npx vitest run tests/refinement-check.test.ts tests/unified-artistic-operation.test.ts`
+  PASS (26/26); `npm run build:server` PASS.
+
+## 2026-10-02 — E.7c logical-layer separation prose removed from admission
+
+- Continued E.7c by making `logical_layer.separation_reasons` optional in both compact/public VisualMicroPlan
+  schemas and runtime parsing. New/temporary semantic owners are still admitted fail-closed from the structured
+  Layer Separation Check, independent rollback semantics, exact one-layer creation/targeting and stable owner id;
+  free-form separation prose is audit/artistic guidance only.
+- Added regression coverage for a substantial independently adjustable new owner with complete structured
+  isolation semantics and no narrative separation reasons.
+- Validation: `tests/visual-microplan.test.ts` + `tests/compact-contract-regressions.test.ts` **115/115 PASS**;
+  `npm run build:server` PASS; touched-slice `git diff --check` PASS.
+
+## 2026-10-02 — E.7c Art Director interrupt prose/admission separation
+
+- Made free-form Art Director interrupt `detail` optional audit/artistic guidance. The enumerated interrupt
+  `reason` remains the structural authority that marks the directive interrupted, forces review and prevents
+  further Painter continuation until review; malformed supplied detail is still rejected.
+- Aligned the public Guard schema with runtime semantics and added planner/painter regression coverage proving a
+  classified interrupt works without narrative certification.
+- Validation: `tests/planner-painter.test.ts` 61/61 PASS, `npm run build:server` PASS and `git diff --check`
+  PASS for the changed slice.
+
+## 2026-10-02 — E.7c value-criterion prose/admission separation
+
+- Made `value_check.criteria.*.note` optional audit/artistic guidance. The enumerated criterion `status`
+  values remain the executable value-gate inputs, with PASS/FAIL consistency and exact grayscale
+  evidence/current-frame provenance still fail-closed.
+- Aligned the public Guard schema with runtime semantics and added a regression proving a structurally complete
+  PASS can admit DETAIL without per-criterion prose. Refreshed the value-check fixture with the currently
+  required perceptual-hierarchy contract so the focused suite exercises the value gate rather than failing
+  earlier on unrelated Art Director setup.
+- Validation: `tests/value-check.test.ts` 13/13 PASS and `tests/planner-painter.test.ts` 60/60 PASS.
+
+## 2026-10-02 — E.7c prompt-conflict rationale/admission separation
+
+- Made `prompt_conflict_preflight.resolution_rationale` optional artistic/audit guidance rather than a
+  minimum-length admission certificate. Structural prompt-conflict authority remains fail-closed through the
+  dominant objective, conflict declarations, `resolution_mode`, chosen rendering strategy, first-pass sequence
+  and concrete user-confirmation evidence whenever a conflict requires user choice.
+- Aligned the public Guard schema with runtime semantics and added planner/painter regression coverage proving
+  a structurally complete preflight persists without narrative resolution rationale.
+- Validation: `tests/planner-painter.test.ts` 60/60 PASS and `npm run build:server` PASS.
+
+## 2026-10-02 — E.7c distributed-attention prose/admission separation
+
+- Made `perceptual_hierarchy.distributed_attention_rationale` optional artistic/audit guidance instead of a
+  minimum-length admission certificate. Distributed attention remains structurally explicit through
+  `mode=distributed`, mandatory distributed zone priorities and per-zone contrast/detail/edge/chroma budgets.
+- Added regression coverage proving prose-free distributed hierarchy normalization while retaining rejection of
+  structurally non-distributed priorities. Updated the public Guard schema description to match runtime semantics.
+- Validation: `src/core/perceptual-hierarchy.test.ts` 3/3 PASS, `npm run build:server` PASS and
+  `git diff --check` PASS for the changed slice.
+
+## 2026-10-02 — E.7c scene-ownership prose/admission separation
+
+- Made `scene_ownership_plan.units[].rationale` and
+  `shared_owner_justifications[].rationale` optional audit/artistic guidance in normalization and both public
+  Guard schemas. Stable semantic/owner identity, role/editability, shared-owner classification and exact shared
+  semantic membership remain fail-closed executable ownership authority.
+- Added compact regression coverage proving a deliberately shared owner is admitted and durably normalized
+  without narrative rationale while the existing missing-shared-membership rejection remains intact.
+- Validation: `compact-contract-regressions.test.ts` 51/51 PASS, `npm run build:server` PASS and
+  `git diff --check` PASS for the changed slice.
+
+## 2026-10-02 — E.7c semantic-owner keep prose/admission separation
+
+- Made `photoshop_guard_keep_logical_layer.rationale` optional audit/artistic guidance rather than a
+  minimum-length admission certificate. Promotion still requires the exact durable temporary
+  `hypothesis_id -> layer_id` binding and a compatible scene ownership plan that predeclares the owner.
+- Aligned the public Guard schema and durable lifecycle/report serialization so omitted prose is not recreated
+  as fake authority, while supplied rationale remains available for audit context.
+- Validation: `session-store-regressions.test.ts` 68/68 PASS,
+  `compact-contract-regressions.test.ts` 50/50 PASS, `npm run build:server` PASS and
+  `git diff --check` PASS.
+
+## 2026-10-02 — E.7c stage-reset public-schema alignment
+
+- Aligned the public compact Guard schema with the already-implemented E.7c stage-reset behavior: only the
+  enumerated structural `stage_reset.reason` is required; `stage_reset.detail` is optional audit guidance with
+  no minimum prose length.
+- Extended the stage-regression regression to assert the published tool schema as well as runtime execution, so
+  a future schema/handler drift cannot silently reintroduce a narrative admission certificate.
+- Validation: `compact-contract-regressions.test.ts` 50/50 PASS, `npm run build:server` PASS and
+  `git diff --check` PASS. `npm run verify:canonical` remains FAIL in the shared working tree at acceptance:
+  23/899 failures are concentrated in `value-check`, `refinement-check` and `unified-artistic-operation`, all
+  failing on the unrelated `perceptual_hierarchy must be an object` Art Director state requirement; the compact
+  stage-reset regression passes inside that same canonical run.
+
+## 2026-10-02 — E.7c final-comparison prose/admission separation
+
+- Made `final_comparison.reason` and the five free-form `criteria` strings optional artistic/audit guidance
+  instead of completion certificates. Completion remains fail-closed on explicit scope/preference, current
+  classified whole-frame evidence, durable previous-anchor identity when comparing, document/order binding,
+  unfinished-task rules, and the existing brief/refinement/hostile-review completion gates.
+- Updated the public Art Director schema and added planner/painter regression coverage proving a structurally
+  evidenced current-vs-anchor comparison can complete without narrative comparison prose.
+
+## 2026-10-02 — E.7c artistic-anchor prose/admission separation
+
+- Made `anchor_decision.rationale` optional review/audit guidance instead of a minimum-length admission
+  certificate. Anchor authority remains fail-closed through the explicit action and durable classified frame
+  identity/evidence checks; promotion still cannot target an unretained or mismatched frame.
+- Updated the public Guard schema and added planner/painter regression coverage proving a durable accepted frame
+  can be explicitly promoted without narrative prose. Targeted validation: `planner-painter.test.ts` 57/57;
+  `npm run build:server` PASS.
+
+## 2026-10-02 — E.7c composition-selection prose/admission separation
+
+- Made Art Director `composition_exploration.selection_reason` optional guidance instead of a prerequisite
+  for free or constrained material composition commitment. The bounded hypothesis comparison and exact
+  `selected_id` remain structural decision authority.
+- Added planner/painter regressions proving both free and constrained composition choices persist with a null
+  selection reason when the executable structural choice is otherwise valid.
+
+## 2026-10-02 — E.7c fallback prose/admission separation
+
+- Made VisualMicroPlan `paint_strategy.fallback_reason` optional guidance instead of an execution certificate.
+  `fallback_from_method_id` remains executable routing authority, and a reason without a fallback identity is
+  still rejected as malformed metadata.
+- Preserved continuous-field and optical-veil anti-degradation checks while removing their dependency on
+  minimum-length fallback prose. Added regression coverage for prose-free explicit fallback.
+- Targeted validation: `visual-microplan.test.ts` 62/62, `visual-microplan-compiler.test.ts` 17/17,
+  `compact-contract-regressions.test.ts` 50/50; `npm run build:server` PASS.
+
+## 2026-10-02 — E.7c cross-layer correction prose/admission separation
+
+- Made `cross_layer_correction.reason` optional guidance across the compact Guard and VisualMicroPlan
+  schemas/parser. Executable authorization remains fail-closed through correction/migration mode, current owner
+  layer, exact historical targets, and the post-authoritative binding.
+- Updated the historical-layer correction regression to execute without prose certification. Targeted
+  `compact-contract-regressions.test.ts` validation passes 50/50.
+
+## 2026-10-02 — E.7c stage-reset prose/admission separation
+
+- Removed the minimum-length `stage_reset.detail` prose certificate from backward painting-stage admission. A
+  reset still requires an explicit allowed structural `reason` and exact durable from/to stage binding, so a bare
+  stage label still cannot silently downgrade durable state.
+- Kept optional reset detail as durable audit guidance when supplied and preserved reset invalidation of dependent
+  refinement/physical-stack evidence. Added regression coverage proving an explicit structural reset executes and
+  persists correctly without free-form detail.
+
+## 2026-10-02 — Whole-frame structural-debt enforcement and perspective admission
+
+- Made whole-frame review an execution boundary rather than post-hoc commentary: every meaningful visual pass must
+  include one whole-frame observation before its verdict can close. Compact observations default their evidence
+  scope to the whole delivered frame, while genuinely local-only observations now fail closed.
+- Promote generic `must-fix` visual-review findings into durable `visual_problems`, including a new
+  `perspective_geometry` composition finding. Structural must-fix debt blocks unrelated dependent painting and
+  cosmetic/surface masking of the same problem until a structural correction resolves or reclassifies it.
+- Prevent Art Director completion while any must-fix visual problem remains. A due final whole-image glance may be
+  supplied and verified in the same `action=complete` call, and the public Art Director schema now exposes the
+  already-enforced pre-final hostile review contract instead of hiding that completion requirement.
+- Keep close-only visual workflows active when the just-reviewed target is unresolved, any visual problem remains
+  open, or an Art Director still has unfinished work. A locally successful pass no longer turns remaining artistic
+  work into `ready`/stopped state merely because its own operation goal was satisfied.
+- Strengthened geometry admission independently of paint mechanism: committed spatial owners now require a durable
+  scene-geometry classification; coherent one/two/three-point construction requires the corresponding distinct
+  vanishing-point basis plus an owner Geometry Binding. Filled compact `logical_layer`/causal schema gaps so the
+  public compact contract can express the same structural signals the compiler already understands.
+- Added regressions for whole-frame closure, durable perspective debt, cosmetic rejection with structural repair
+  still admissible, finalization refusal on must-fix debt, mechanism-independent spatial geometry admission,
+  duplicate-VP two-point rejection, public schema parity, and active-workflow retention after a resolved local pass.
+
+## 2026-10-02 — Compact model-facing MCP tool catalog
+
+- Reduced the published `tools/list` byte footprint without changing internal Photoshop/Guard schemas: Guard-only
+  raw mutations now expose a compact Guard routing marker plus the first purpose sentence instead of repeating the
+  full mutation prose on every blocked tool.
+- Compact only the model-facing field descriptions of the three largest orchestration schemas
+  (`photoshop_execute_visual_microplan`, `photoshop_guard_cycle`, `photoshop_guard_cycle_auto`) to their first
+  sentence; property names, required fields, enums, ranges and internal validation semantics remain unchanged.
+- Rebuilt the complete current **133-tool / 16-Guard-tool** catalog; after the structural-contract fields above the
+  current measured exposure is **247,175 bytes**, leaving **2,825 bytes** below the 250,000-byte CoS regression
+  ceiling; updated the embedded MCP acceptance fixture from stale 129 to 133.
+
+## 2026-10-01 — E.7c derivable brush material-role metadata
+
+- Moved unambiguous substantial-brush `material_role` classification into the compact compiler: when the
+  durable brush preflight plus resolved visual intent (and any explicit brush role) leaves exactly one shared
+  single material, Guard derives it instead of requiring duplicate model certification.
+- Kept ambiguous/no-fit material inventories fail-closed and retained brush-role/preset ambiguity, probe,
+  dynamics and retry-evidence checks unchanged.
+- Updated compact-contract regression coverage so an omitted but uniquely evidenced material role proceeds to
+  the next real evidence decision rather than failing on `brush_material_role_required`.
+
+## 2026-10-01 — E.7c derivable construction-role metadata
+
+- Moved the unambiguous continuous-field construction role from model certification into the compact compiler:
+  a pass composed of the dedicated `photoshop_paint_color_gradient` mutation now derives
+  `construction_role=continuous-field` automatically.
+- Kept ambiguous region/brush construction roles fail-closed and preserved material, geometry, method and
+  mandatory after-preview checks. Added regression coverage proving the derived role is persisted in the
+  executable paint strategy.
+
+## 2026-10-01 — E.7c construction-plan/admission separation
+
+- Removed the deep-local `construction_plan` prose certificate from broad structured-mass mutation admission.
+  Representation-strategy prose, structural-feature lists and stage-exit-condition text remain useful durable
+  artistic guidance but no longer grant execution authority.
+- Preserved executable construction-role/material/method checks, anti-iconic primitive constraints and geometry
+  contracts, and added regression coverage proving a safe structured-mass pass can execute without the narrative
+  plan while the same pass still works when guidance is present.
+
+## 2026-10-01 — E.7c escalation-label/admission separation
+
+- Removed validation of optional `causal_escalation_level` from mutation admission. The field may remain as
+  legacy/process annotation, but malformed or stale narrative labels no longer veto an otherwise safe visual
+  operation; observed failure history and executable strategy differences remain authoritative.
+- Added regression coverage proving an artistic VisualMicroPlan enters the normal guarded path even when a
+  legacy escalation label is non-numeric.
+
+## 2026-10-01 — E.7c commentary/admission separation
+
+- Removed the artistic/mixed-run requirement that every visual mutation carry `artistic_commentary` matching
+  user-visible prose. Commentary remains available as presentation/process-trace metadata but no longer grants
+  execution authority or blocks an otherwise safe visual operation.
+- Updated Guard art-run guidance and added regression coverage proving an artistic-mode visual microplan can
+  enter the normal guarded path without a prose commentary token.
+
+## 2026-10-01 — E.7a independent observation closure
+
+- Decoupled valid previous-observation closure from deterministic validation of the next operation in the compact
+  Guard cycle. A malformed continuation can now be rejected without reopening an already delivered visual result.
+- Repeated combined retries are idempotent: the previous operation remains closed and the rejected next mutation
+  is never dispatched or persisted.
+- Added focused embedded-Guard regression coverage for valid previous + invalid next and its repeated retry.
+
+## 2026-10-01 — Forward-roadmap cleanup + E.7 semantic-pass coverage plan
+
+- Pruned completed implementation detail from `docs/PAINTING-ROADMAP.md` so the forward roadmap no longer
+  restates repository-complete E.18e/f/g/i, E.22 capture/assembly implementation, completed E.17 corrective
+  machinery or PaintPilot-owned E.8b checkpoint/timeline work. Those completed slices remain recorded in this
+  changelog and the acceptance matrix; only their outstanding live/host gates remain in the roadmap.
+- Removed stale forward-priority wording for the already-complete E.20 Scene Camera & Imaging Model and
+  Perceptual Hierarchy Contract, corrected the obsolete E.6 dependency on completed E.1/E.2 ownership work, and
+  updated the public-release section to reflect that the GitHub standalone cutover itself is already complete.
+- Added forward task **P1-E.7 Semantic-pass coverage and underfill prevention**, reproduced by the 2026-10-01
+  night-city run. The plan does not add a minimum action/stroke quota: it requires the Planner to account for
+  causally compatible ready work, distinguish primitive-instance count from artistic coverage, surface
+  unexplained pass underfill, and reuse E.18/mechanical-pattern contracts for geometry-bound repeated facade
+  detail. The maintained acceptance fixture includes the observed one-mutation / roughly 27 template-window
+  failure and a one-item simple-pass control.
+
+## 2026-10-01 — E.17g structural-mismatch cosmetic one-shot gate
+
+- Added the problem-local structural-mismatch gate required by E.17g. Once a verdict identifies persistent
+  silhouette/topology/perspective/proportion/occlusion/large-mass/primitive-scaffold debt, only one bounded
+  cosmetic/surface-masking exploratory correction is admitted before another cosmetic pass fails closed as
+  `causal_strategy_exhausted`.
+- Structural rebuilds at causal escalation level 3+ remain admissible, so the gate redirects method-search loops
+  toward the causal scaffold instead of imposing a global action quota.
+- Added focused production regression coverage using the motivating polygonal-tree silhouette/negative-space case.
+
+## 2026-10-01 — E.17g construction-plan exit-condition escalation
+
+- Joined repeated same-problem corrective debt to the active Planner task's durable
+  `construction_plan.stage_exit_condition`. After two unresolved attempts, dependent work below the
+  problem-local minimum causal escalation level now fails closed as `causal_strategy_exhausted` instead of
+  continuing to decorate an unresolved scaffold.
+- The rejection carries the exhausted problem, exact stage exit condition, attempted strategy families, current
+  escalation level and minimum required next level. A structural rebuild that meets the required escalation level
+  remains admissible; independent-region work keeps its existing preservation-facts path.
+- Added focused production regression coverage for blocking another cosmetic/detail continuation while admitting
+  the required structural rebuild.
+
+## 2026-10-01 — E.17g durable corrective-attempt history foundation
+
+- Extended the existing artistic-recovery journal projection instead of adding a parallel retry store. Recovery
+  state now reports per-problem attempt/consecutive-unresolved counts, tried methods/strategy families,
+  regression/rollback outcomes, strongest-known evidenced frame, current causal escalation level and the minimum
+  required next level.
+- Added optional subject-agnostic `causal_strategy_id`, `strategy_family` and validated
+  `causal_escalation_level=0..4` metadata to the Guard request path. Explicit strategy identity can now survive
+  cycle compilation while legacy operations continue to use the structural strategy fingerprint that deliberately
+  ignores color/opacity/preset/count jitter.
+- Added production regression coverage for durable problem-local escalation history, including rollback/regression
+  accounting and a structural-level next-step requirement.
+- Verification: TypeScript `--noEmit` green; focused artistic-recovery production suite 8/8 green.
+
+## 2026-10-01 — E.17d physical/optical completion accountability
+
+- Added completion-side `physical_effect_completion_debt` over the existing semantic owner stack. Persistent
+  transmissive/transparent/effect-only owners must retain a concrete physical/perceptual role rather than an
+  unexplained decorative overlay; opacity/role contradictions are completion debt.
+- When an E.19 Scene Lighting & Color Model is active, lighting/material-causal roles such as atmosphere,
+  optical effects, surface conditions, cast shadows and transmissive surfaces must have a current E.19
+  `lighting_color_binding`. Missing or selectively stale bindings block Art Director completion.
+- `camera-post` remains owned by E.20 and is deliberately not forced through E.19 causality. Ordinary named
+  translucent material roles can remain qualitative when no E.19 scene-light model applies.
+- Compact pass context and status expose physical-effect completion debt separately. Art Director completion now
+  fails closed while that debt remains unresolved.
+- Added regression coverage for an unexplained lantern glow, successful closure after a current E.19 causal
+  binding, relighting-driven stale debt reopening, and E.20 camera-post remaining outside the E.19 gate.
+
+## 2026-10-01 — E.17c E.18-backed geometry completion gate
+
+- Added completion-side `geometry_completion_debt` as a projection over the existing E.18 Scene Geometry Model
+  and durable Object Geometry Bindings; E.17 does not duplicate horizon/vanishing/support-plane logic.
+- `applicability=insufficient_evidence` is explicit completion debt. Deliberate `orthographic_or_diagrammatic`,
+  `flat_or_collage`, and `intentional_non_euclidean` applicability records remain valid brief/style-backed
+  opt-outs rather than being forced through coherent perspective.
+- For coherent-3D owners, only bindings explicitly marked `exact_geometry_completion_relevant` participate in
+  this completion gate. Their current binding must be non-stale and still pass E.18 exact measurement/landmark
+  evidence checks against the exact Scene Geometry Model source frame.
+- Art Director `action=complete` now rejects unresolved E.18 completion debt before declaring a final artistic
+  state. Compact pass context and status expose the same debt separately from ordinary geometry-binding state.
+- Added regressions proving current exact evidence yields no completion debt, a later structural-source revision
+  makes the completion-relevant owner stale, `insufficient_evidence` blocks finalization, and an explicit flat
+  applicability opt-out allows completion.
+
+## 2026-10-01 — E.17b named-object recognition crop gate
+
+- Extended hard brief items with optional `recognition_target` metadata for concrete named subjects/objects without
+  introducing object-specific anatomy logic. Only hard-perceptual items may declare a recognition target.
+- A recognition-target hard item cannot be independently assessed `MET` from prose, layer names or whole-frame
+  intent alone. The final assessment must cite a materialized `review_artifact:<artifact_id>` from the exact
+  current-frame operation, at OBJECT or MICRO review level, bound to the same brief item and whole-frame SHA.
+- Propagated `brief_item_id` / `brief_state` through the existing structured review escalation pipeline into
+  immutable crop evidence, preserving source-document crop coordinates and current-frame provenance.
+- Existing recognition/crop machinery remains generic: ambiguous named subjects can request an OBJECT
+  `object_readability`/structural crop, while deliberately stylized but recognizable subjects are not rejected for
+  lacking photoreal detail. The gate proves prompt-relative identity evidence, not a universal realism score.
+- Added regressions proving a named guardian-lion item cannot be marked `MET` without current-frame crop evidence,
+  that the exact bound crop permits `MET`, and that brief identity survives pending-review → capture → artifact.
+
+## 2026-10-01 — E.17a durable hard-perceptual brief debt
+
+- Extended the existing revision-bound `artistic_evaluation_contract` rather than creating a second brief system.
+  Contracts may now carry explicit `brief_items` classified as `hard_perceptual`, `soft_preference`, or
+  `technical_non_visual`, with stable ids, prompt provenance and concrete requirements.
+- Independently validated global brief assessments now record per-item `UNASSESSED | MET | NOT_MET | UNCERTAIN`
+  results. Every hard-perceptual item must be assessed before a strict brief can report `satisfied`; any
+  `NOT_MET`, `UNCERTAIN` or `UNASSESSED` hard item remains blocking debt, while unresolved soft preferences do
+  not prevent completion.
+- Compact pass context and status/resume now expose `unresolved_hard_brief_debt`. Newly declared hard requirements
+  appear immediately as `UNASSESSED`, so lack of evaluation cannot be mistaken for lack of debt.
+- Structured current-frame review findings may bind directly to a hard brief item with `brief_item_id` plus
+  `brief_state=NOT_MET|UNCERTAIN`. A must-fix producer/critic finding therefore becomes durable prompt debt in the
+  same verdict that detects it instead of coexisting with an optimistic completion claim.
+- Hard-debt evidence follows current-frame lineage: an override sourced from a rolled-back, superseded, foreign-
+  incarnation or otherwise non-authoritative operation no longer blocks forever and falls back to the latest
+  independently validated assessment or `UNASSESSED` state.
+- A later independently validated `MET` result clears the corresponding current-frame override. Strict Art
+  Director completion is gated by `globalCompletionAllowed` only for contracts that actually declare hard brief
+  items, preserving compatibility for older contracts while making the new E.17a mode fail closed.
+- Added regressions for hard-vs-soft debt, uncertain/not-met completion blocking, positive hard-MET completion,
+  immediate UNASSESSED status projection, current-frame finding promotion and rollback retirement.
+
+## 2026-10-01 — Durable Art Director perceptual hierarchy contract complete
+
+- Extended the existing Art Director directive instead of creating a separate E.21 scene model. Added
+  `photoshop.guard.perceptual_hierarchy.v1` with revisioned ranked/distributed attention modes, explicit owner→zone
+  allocation, qualitative contrast/detail/edge/chroma budgets and ordered focal zones for ranked compositions.
+- Ranked mode now rejects the degenerate "every zone is primary" state; intentionally flat/all-over graphics use
+  explicit `mode=distributed` plus a concrete rationale instead of accumulating independent local focal choices.
+- Added bounded Painter task authorization through `perceptual_zone_ids` and semantic-owner `attention_binding`
+  records. Attention-sensitive local passes that change contrast/detail/edge/chroma must identify the exact active
+  hierarchy revision and authorized zone before Photoshop mutation. Cross-owner/unauthorized zone use fails closed.
+- Attention bindings persist through VisualMicroPlan continuation layers and semantic ownership. SessionStore now
+  exposes independent `attention_binding_states` debt. Changes to a bound zone budget or focal ordering selectively
+  stale affected owners; unrelated zone-only revisions leave other attention bindings current.
+- Kept evidence critics and mechanisms separated from hierarchy authority: Value Check/Softness Review remain
+  evidence-bound critics, E.20 camera focus remains optical/capture state, and local edge/detail/chroma mechanisms
+  consume rather than redefine the Art Director attention allocation.
+- Added regressions for ranked budgets, distributed attention, duplicate owner allocation, all-primary rejection,
+  zone-budget and focal-order invalidation, Guard rejection without an attention binding, wrong/unauthorized zone
+  rejection and successful authorized local emphasis dispatch.
+- Per forward-only roadmap policy, the completed Cross-cutting P1-E perceptual hierarchy block was removed from
+  `docs/PAINTING-ROADMAP.md`; this changelog is the historical record.
+
+## 2026-10-01 — E.20 Scene Camera & Imaging Model repository implementation complete
+
+- Completed E.20b focus/depth binding on top of the durable E.20a camera model. Semantic owners may now carry a
+  normalized `camera_binding` pinned to the exact camera revision, a declared depth role and expected focus role.
+  Depth provenance must come either from the same owner's accepted E.18 geometry binding or from an explicit
+  approximate-depth rationale; cross-owner geometry borrowing is rejected before Photoshop mutation.
+- Added durable serialization/reconstruction of camera bindings through VisualMicroPlan continuation layers and
+  SessionStore semantic ownership. Guard rejects missing camera models, stale camera revisions, stale E.18 depth
+  provenance and owner mismatches before dispatch, while explicit current-revision revalidation remains possible.
+- Added `photoshop.guard.imaging_preflight.v1` for E.20c. Camera-post and explicit blur treatment now require a
+  preflight bound to the exact active E.20 revision. It records effect kind/motivation/scope, per-owner depth/focus
+  expectations and edge/detail revalidation. Comparable-depth owners with contradictory focus roles conflict
+  unless an explicit local exception exists; far sharpening against declared background softness also conflicts.
+  Imaging preflight is forbidden from claiming that optical post-processing clears geometry or recognition debt.
+- Completed E.20d selective invalidation. Camera bindings declare dependency domains (`focus`, `motion`,
+  `optical-response`, `capture-finish`); revision diffing invalidates only owners whose declared camera dependencies
+  changed. Geometry-derived bindings additionally inherit the owner's E.18 geometry-stale state, while bounded
+  approximate-depth bindings do not become stale merely because unrelated geometry provenance changed.
+- `camera_binding_states` are reconstructed durably and exposed independently through compact pass context/status,
+  separate from geometry and lighting/color debt. Tests cover focal-depth, motion and capture-finish invalidation,
+  plus E.18 geometry propagation only where the owner's depth relation is actually affected.
+- Completed the E.20f repository regression pack: coherent near/focal/far focus allocation, same-depth conflict,
+  focal-depth invalidation, E.19 atmospheric fog softness remaining distinct from E.20 optical DOF softness,
+  qualitative camera/lens language without fabricated physical focal-length simulation, and subordinate
+  grain/bloom/vignette behavior that cannot close geometry/recognition debt.
+- Per forward-only roadmap policy, the completed P1-E.20 block was removed from `docs/PAINTING-ROADMAP.md`; this
+  changelog is now the historical record for the completed work.
+
+## 2026-10-01 — E.19 preflight admission coverage completed
+
+- Closed the remaining repository-side E.19 admission gap for substantial direct color treatment. Once a visual
+  frame exists, global hue/saturation, vibrance, exposure, photo-filter, gradient-map and LUT mutations now require
+  the same provenance-aware `color_gradient_preflight` used by broad gradients, relighting, atmosphere and major
+  optical-effect work. Local bounded color work is not globally over-gated, and the blank-canvas first-visible
+  progress exemption remains unchanged. Live Photoshop acceptance remains the only E.19 forward gate.
+
+## 2026-10-01 — E.19c Guard enforcement for material/light bindings
+
+- Continued the existing E.19c implementation by wiring `lighting_color_binding` validation into the canonical
+  Guard compiler before MATERIAL dispatch; no parallel runtime or material store was introduced.
+- MATERIAL bindings are checked against the applicable E.19 scene model: the exact current durable revision or
+  a valid same-pass successor. A binding with no active scene model now fails closed with
+  `material_lighting_color_scene_model_missing`; stale/mismatched causal references are rejected before mutation.
+- Added a compact-contract regression proving that a MATERIAL pass cannot dispatch Photoshop strokes when it
+  claims a lighting/color binding without an evidenced active scene model.
+- Focused verification: scene-lighting + compact-contract suites **51 tests green**; TypeScript `--noEmit` green.
+  E.19 remains open for the later preflight/dependency-invalidation slices and their acceptance evidence.
+
+## 2026-10-01 — E.19c material/light binding foundation
+
+- Continued E.19 from the durable scene-model persistence boundary by extending the existing Material Response
+  plan with an optional normalized `lighting_color_binding`; no second material schema/store was introduced.
+- The binding records exact scene-model id/revision plus base color family, received ambient/emitter sources,
+  atmosphere, reflection emitters, surface condition and qualitative color relations.
+- Added causal scene validation that rejects stale E.19 revisions, unknown illumination sources, invented
+  reflection emitters and atmosphere references outside the active scene model. Regression coverage includes
+  the foggy-railway wet painted-metal/headlight case and stale/invented-source failures.
+- Focused verification: **2 files / 67 tests green**; TypeScript `--noEmit` green. E.19c remains open for
+  Guard-cycle enforcement against the current durable scene model before MATERIAL dispatch.
+
+## 2026-10-01 — E.19b Guard persistence
+
+- Continued the E.19 Scene Lighting & Color Model from its normalization foundation and wired it into the
+  canonical Guard cycle rather than creating a parallel state store. `scene_lighting_color_model` is now an
+  allowed cycle contract field and a successful operation persists the normalized model in the durable journal.
+- Added fail-closed identity/revision rules matching the document-incarnation safety boundary: the source document
+  and incarnation must be current, an existing model keeps its `model_id`, and replacement revisions must increase.
+- SessionStore now reconstructs the latest valid lighting/color model only from the current document incarnation
+  and exposes it through compact pass context and compact status/resume. Added regression coverage proving a newer
+  current-incarnation revision wins while a later stale-incarnation record cannot replace it.
+- Focused SessionStore verification is green at **1 file / 60 tests** and TypeScript `--noEmit` is green. E.19
+  remains open for material/light binding, color preflight/severity and selective dependency invalidation.
+
+## 2026-10-01 — E.19 Scene Lighting & Color Model foundation
+
+- Rechecked the higher-priority E.18 live gate first. The installed Photoshop route still reports the required
+  UXP companion unavailable (`fetch failed` / revision not ready), so no live E.18 evidence was fabricated.
+- Started the next repository-owned scene-coherence slice, E.19a/b, with
+  `photoshop.guard.scene_lighting_color_model.v1`: durable revision/incarnation identity, global value
+  structure, ambient environment, emitters, atmosphere, palette relations, sampled anchors and intentional
+  exceptions.
+- Added explicit provenance normalization so prompt/user constraints, reference samples, accepted-frame
+  evidence, deterministic derivation and artist-selected choices remain distinguishable. Exact RGB sample
+  payloads are accepted only as reference/accepted-frame evidence; reference-sample claims require a concrete
+  RGB sample and source.
+- Added focused foggy-railway regressions proving relational cool-environment/warm-emitter constraints remain
+  durable without inventing exact RGB measurements, plus fail-closed tests for false sampled provenance.
+- E.19 is not complete: Guard persistence, material/light binding, preflight severity and dependency
+  invalidation remain open.
+
+## 2026-10-01 — E.8b Guard-side cross-layer timeline export
+
+- Added the PaintPilot-owned E.8b.4 join surface: full Guard status now exports
+  `photoshop.guard.continuation_timeline_export.v1` per document with stable document-incarnation/operation
+  join identity and exact Guard response-ready / next-continuation boundary events.
+- The export projects the existing authoritative E.8a `photoshop.guard.cycle_latency.v1` record rather than
+  inventing a second Photoshop timing schema. The between-call interval stays explicitly
+  `unattributed_until_host_join`, so later COS evidence may partition compaction/resume/recovery phases without
+  mislabelling unobserved time.
+- Added regression coverage for a 40-second visual continuation gap and the host join contract. Focused
+  session-store verification is green at **1 file / 59 tests** and TypeScript `--noEmit` is green. COS-side
+  event correlation and live replacement-chat latency acceptance remain open.
+
+## 2026-10-01 — E.8b automatic exact-resume routing
+
+- Completed the PaintPilot-owned E.8b.2 routing contract: `photoshop_guard_resume` without an explicit document id
+  now consumes and verifies `continuation-checkpoint.json` before doing ordinary durable-state discovery.
+- A verified checkpoint returns the exact pending operation/delivered frame and an explicit continuation contract;
+  the next model action is inspection plus `previous_operation_id + previous_observation`, never mutation replay.
+- A stale/inconsistent checkpoint fails closed into one bounded status/recovery verification and explicitly marks
+  exact resume as required. Only a genuinely missing checkpoint uses the legacy durable-state fallback. COS-side
+  replacement-chat injection/watchdog and live forced-compaction acceptance remain open.
+
+## 2026-10-01 — E.8b exact-resume checkpoint verification
+
+- Completed the repository-owned E.8b.1 persistence slice and started E.8b.2: SessionStore now verifies a
+  supplied continuation checkpoint against current authoritative durable Guard state before it can guide resume.
+- Verification fails closed on document-incarnation, current operation, pending-verdict, delivered-preview
+  operation/SHA/path or immutable art-run drift. A stale checkpoint therefore cannot resume a newer frame.
+- Added bounded persisted-checkpoint load/verification with explicit missing, invalid and stale results. Success
+  returns the exact operation/frame identity and canonical next Guard action without replaying a mutation.
+- Focused verification is green at **1 file / 58 tests**, TypeScript `--noEmit`, painting-policy and
+  acceptance-matrix checks. COS replacement-chat handoff/watchdog and live forced-compaction acceptance remain open.
+
+## 2026-10-01 — E.8b durable continuation checkpoint foundation
+
+- After rechecking the higher-priority live gates, Photoshop is detected but the required UXP companion is still
+  unavailable (`uxp_bridge_revision_missing`), so neither E.18 nor E.22 live acceptance was fabricated.
+- Started the next repository-owned E.8b slice: `SessionStore.continuationCheckpoint()` now derives a compact
+  `photoshop.guard.continuation-checkpoint.v1` directly from durable Guard resume state, including exact
+  document/incarnation, current/pending operation, delivered preview SHA/path, pending-verdict state, active
+  problem/stage/scale/severity, accepted anchor, art-run, planner directive/task and prescriptive next action.
+- Added atomic `persistContinuationCheckpoint()` output under the Guard runtime directory and exposed `process_dir`
+  in the compact document projection so host handoff does not need journal archaeology. Focused regression proves
+  the persisted checkpoint is sufficient for exact-resume routing without embedding journal history.
+- Verification is green at **1 file / 56 tests**, TypeScript `--noEmit`, and `git diff --check`. The COS-side
+  pre-compaction trigger, replacement-chat injection/watchdog and live compaction acceptance remain open.
+
+## 2026-10-01 — E.22 controlled final assembler entry point
+
+- Added `assembleProcessTraceVideo()` as the one controlled repository entry point from retained trace inputs
+  to a captioned FFmpeg render. It deterministically regenerates FFconcat/SRT inputs, invokes the configured
+  FFmpeg binary, and verifies that the final output exists and is non-empty before reporting success.
+- Assembly launch/render failure is fail-closed and cannot fabricate an accepted video or alter Guard mutation
+  semantics. Focused regression coverage proves a missing FFmpeg executable rejects while leaving rebuildable
+  concat/subtitle inputs and no fake final MP4.
+- Focused verification is green at **1 file / 7 tests** and TypeScript `--noEmit` is green. The host has FFmpeg
+  installed, but E.22 live acceptance still requires a real multi-pass Photoshop capture; this entry does not
+  claim that live proof.
+
+## 2026-10-01 — E.22 deterministic captioned assembly inputs
+
+- Added deterministic E.22.4 assembly planning from the append-only process-video manifest: Guard-ordered
+  retained clips now generate an FFconcat list and SRT subtitle artifact without reintroducing wall-clock
+  planning/idle gaps between operations.
+- SRT timing is based on retained clip durations; the canonical caption remains pre-operation
+  artistic_commentary, with an optional outcome/correction note kept as a distinct appended clause. Missing
+  or empty clips and invalid durations fail closed instead of silently producing a misleading process film.
+- Added final FFmpeg assembly arguments that normalize output to 30 fps H.264/yuv420p and burn the generated
+  SRT captions into the process video. Focused tests cover deterministic chronology, dead-gap removal,
+  correction-note retention and missing-clip failure.
+- Focused verification is green at **1 file / 6 tests**, TypeScript --noEmit and touched-file
+  git diff --check are green. This is repository evidence only: a real Photoshop+FFmpeg render remains
+  required before E.22 live acceptance can be claimed.
+
+## 2026-10-01 — E.22 Guard-bound FFmpeg capture lifecycle
+
+- Wired opt-in process-video capture into the canonical Guard mutation lifecycle rather than requiring a
+  separate model-issued recorder call. Capture starts only after durable dispatch marking and immediately
+  before the Photoshop invocation, then stops after a bounded settling tail.
+- Added Windows FFmpeg/gdigrab capture scoped to a configurable Photoshop window target, with clips written
+  under the immutable art run's `video-trace/clips/` directory. The default path is opt-in through
+  `PAINTPILOT_PROCESS_VIDEO_TRACE=1`; FFmpeg path/window target/settling tail remain configurable for live
+  acceptance without changing Guard semantics.
+- Recorder start/stop failures are deliberately non-authoritative: lifecycle-hook exceptions cannot block a
+  canonical mutation, turn an already-dispatched operation into replayable work, or replace Guard evidence.
+  A manifest entry is appended only for a non-empty completed clip.
+- Added focused coverage for opt-in/window-scoped FFmpeg arguments and for recorder lifecycle failure not
+  blocking canonical dispatch. Focused verification is green at **2 files / 21 tests**, TypeScript `--noEmit`,
+  painting-policy, acceptance-matrix and `git diff --check` are green. Live Photoshop/FFmpeg acceptance and
+  subtitle/final assembly are still open; this entry does not claim them.
+
+## 2026-10-01 — E.22 process-video trace manifest foundation
+
+- Added `src/core/process-video-trace.ts` with an append-only, run-local `video-trace/manifest.json` contract
+  and deterministic assembly ordering. Entries preserve visible attempts/corrections/rollbacks rather than
+  replacing earlier history, and duplicate operation ids are idempotent across interruption/resume.
+- Bound the canonical caption source to the operation's pre-dispatch `artistic_commentary`; missing artistic
+  intent fails closed in the trace layer instead of falling back to tool names or technical plumbing.
+- Added focused tests for caption provenance, failed-attempt retention/correction ordering and resume
+  deduplication. Focused geometry + trace verification is green at **3 files / 13 tests**, with TypeScript
+  `--noEmit`, painting-policy and acceptance-matrix checks also green.
+- Attempted the remaining E.18 live acceptance first, but the local Photoshop UXP companion was unavailable
+  and Photoshop was not running. E.18 therefore remains open; no live evidence was fabricated. This E.22 slice
+  is repository-only and does not yet claim FFmpeg capture/Guard-dispatch integration.
+
+## 2026-10-01 — E.18i additional repository regression pack
+
+- Added `src/core/geometry-additional-regressions.test.ts` to cover the remaining non-railway repository
+  shapes: a two-point facade rejects a private window-row perspective, bench/sign/person bindings share one
+  platform support plane while retaining different quantitative strength, explicit orthographic/flat/
+  non-Euclidean applicability records do not invent vanishing points, and organic foliage can bind
+  support/depth anchors without forcing contour vertices into analytic geometry.
+- Kept perspective-regular coverage at the existing Guard/compiler boundary, where scene-family/support
+  provenance is inherited from the current Geometry Binding and contradictory/private perspective is rejected.
+- Focused E.18 repository verification is green at **5 files / 25 tests**. The repository regression pack is
+  complete; live Photoshop current-pixel-coordinate plus durable status/resume stale-debt acceptance remains
+  open and E.18 is therefore not declared complete.
+
+## 2026-10-01 — E.18i maintained railway regression core
+
+- Added \`src/core/geometry-railway-regression.test.ts\` as a maintained regression for the 2026-09-29 railway
+  failure shape. It derives the accepted track corridor from exact rail edges, rejects a near contact outside
+  that corridor, and rejects the dangerous front-only correction where the far termination/control sections
+  still follow an obsolete convergence guess.
+- Added revision-transition coverage proving that changing rail convergence makes the accepted train binding
+  stale and that merely carrying the old construction into the new revision still fails Geometry Preflight;
+  a full current-revision near/mid/far rebuild is required before the binding becomes usable again.
+- Kept repository proof distinct from live Photoshop acceptance; the remaining E.18i additional-scene cases
+  and live pixel-coordinate/status-resume acceptance remain open in the roadmap.
+
 All notable changes to this project are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] — Photoshop MCP — Digital Painting Edition
+## [Unreleased] — PaintPilot — AI Digital Painting for Adobe Photoshop
 
 ### Added
+
+- 2026-10-01 — Completed the specified **P1-E.18g exact measurement/landmark integration** repository slice.
+  Geometry Bindings may now mark exact geometry as completion-relevant and bind bounded deterministic
+  `photoshop_measure_points` / landmark-helper evidence to the exact Scene Geometry Model source frame. Geometry
+  Preflight fails closed on missing evidence or source document/incarnation/dimension provenance mismatch (and
+  exact operation/preview identity when the scene model carries it). The exact-evidence requirement also follows
+  the durable owner into later visual mutation, preventing VALUE/MATERIAL/TEXTURE continuation from silently
+  dropping a completion-relevant geometry dependency. Focused geometry + compact-contract verification passes
+  **3 files / 55 tests** and TypeScript `--noEmit` is green. E.18i repository/live regression acceptance remains
+  open; this entry does not claim live Photoshop acceptance.
+
+- 2026-10-01 — Extended **P1-E.18g integration hardening** through the perspective-regular/mechanical-pattern
+  boundary. A perspective-regular Surface Frame now persists the vanishing-family/support-plane references it
+  inherits from its owner's Scene Geometry Binding, so downstream repetition review consumes explicit scene
+  provenance rather than rediscovering a private local perspective. Coherent-3D perspective-regular visual
+  mutations now require a current Geometry Binding and reuse the same E.18 binding/Geometry Preflight checks
+  even when the pass is not classified as structured-mass construction. This remains repository-only evidence;
+  focused compact-contract + geometry verification is green at **4 files / 58 tests**, TypeScript `--noEmit`,
+  painting-policy, acceptance-matrix and touched-file `git diff --check` are green. Exact measurement/landmark
+  promotion and live E.18 acceptance are still open.
+
+- 2026-10-01 — Advanced **P1-E.18g integration hardening** with a fail-closed Surface Frame → Scene Geometry
+  Binding boundary. Surface Frames may explicitly reference scene vanishing families and a support plane;
+  Guard rejects references outside the owner's durable binding and rejects a local convergence anchor that
+  contradicts the bound Scene Geometry Model vanishing point before Photoshop mutation. Frames without explicit
+  family references inherit/check the binding's families, so local material/repetition flow cannot silently
+  establish a second private perspective. Public VisualMicroPlan schema/serialization preserves the new scene
+  references. Focused compact-contract plus geometry verification passes **4 files / 58 tests**, and TypeScript
+  `--noEmit` is green. E.18g remains open for perspective-regular/mechanical-pattern and exact measurement/
+  landmark evidence integration; no live-acceptance claim is made by this repository-only slice.
+
+- 2026-10-01 — Completed the repository slice of **P1-E.18f Structural dependency invalidation**. Scene geometry
+  revisions now diff stable structural ids and propagate changes transitively from line members/vanishing
+  points through line families into support planes. Geometry bindings retain their exact source revision and
+  are selectively classified current/stale from durable revision history: rail changes stale rail-bound owners
+  without invalidating unrelated facade owners, revision-only/texture-only updates remain geometry-neutral,
+  missing source revisions fail closed, and horizon/projection changes invalidate globally. Compact pass
+  context and status/resume expose `geometry_binding_states`; stale owners cannot continue later visual
+  refinement until an explicit binding revalidation/rebuild targets the current scene revision. Added focused
+  dependency-propagation and SessionStore projection regressions; targeted Guard/geometry tests and TypeScript
+  `--noEmit` are green. E.18g integration hardening is the next roadmap slice.
+
+- 2026-10-01 — Completed the repository slice of **P1-E.18e Deterministic geometry helpers**. Added reusable
+  pure geometry operations for validated line/ray construction, stable and near-parallel line intersection,
+  multi-line/vanishing-family fitting with residual diagnostics, point-to-line distance, x/y/parameter
+  interpolation/extrapolation, converging corridor membership, deterministic near/mid/far cross-sections,
+  bounded envelopes and polygon/support intersection. Geometry Preflight consumes the shared helpers rather
+  than maintaining private math, while semantic line identification and source-frame provenance remain in the
+  scene/binding contracts. Targeted geometry tests and TypeScript --noEmit are green; E.18f structural
+  dependency invalidation is the next roadmap slice.
+
+- 2026-10-01 — Added **model-context protection for Photoshop visual review**. Guard
+  `cycle[_auto]` and job-poll responses are now reference-only for review images
+  (SHA-256, materialized path, dimensions and crop metadata), while the new explicit
+  `photoshop_guard_review_image` tool verifies durable file identity and delivers the exact
+  required bytes only through MCP image content. Visual verdict closure remains fail-closed
+  until every required review role has an explicit delivery receipt. In
+  `PHOTOSHOP_GUARD_MODE=required`, direct `photoshop_get_preview` also defaults to
+  materialized reference delivery unless `include_image=true` is explicitly requested.
+  A final model-facing boundary now redacts semantic binary fields/data URLs from textual or
+  structured payloads and every Guard result reports `estimated_context_bytes`, with a
+  `large_model_facing_response` warning above 64 KiB. Regression coverage includes explicit
+  review delivery, delivery debt, byte-budget enforcement, binary redaction, false-positive
+  avoidance and direct-preview normalization; the full unit suite passes **80 files / 803 tests**.
+
+- 2026-09-30 — Completed **P1-E.18d Mandatory Geometry Preflight** on the public compact Guard path. Every
+  committed coherent-3D `structured-mass` owner now resolves its durable E.18c binding against the exact accepted
+  Scene Geometry Model revision before Photoshop dispatch and records a normalized
+  `photoshop.guard.geometry_preflight.v1` receipt. The preflight operates in source-document pixels, preserves
+  exact document/incarnation/model provenance, requires bounded depth-separated control sections plus far
+  termination for perspective-sensitive construction, checks centerline residual against accepted vanishing
+  families, checks support contact against numeric two-boundary corridors when available, validates optional
+  depth-scale progression against scale anchors, records remaining uncertainty, and fails closed with
+  `projection_family_conflict`, `support_contact_conflict`, `geometry_constraint_conflict` or
+  `geometry_preflight_insufficient` before visual mutation. Accepted receipts survive compact status/resume and
+  are discarded automatically when their scene model/incarnation is no longer current. Focused geometry +
+  scene-model + compact-contract + SessionStore + VisualMicroPlan verification passes **5 files / 167 tests**;
+  TypeScript `--noEmit` is green; the full canonical gate passes **78 files / 793 tests**, pack verification sees
+  **155 dist JS files**, and lint remains at **0 errors / 31 warnings**.
+
+- 2026-09-30 — Completed **P1-E.18c Object Geometry Binding** on the public compact Guard path. Committed
+  coherent-3D `structured-mass` semantic owners now require a normalized durable
+  `photoshop.guard.geometry_binding.v1` before Photoshop mutation. The binding is tied to the exact
+  `scene_geometry_model` id/revision and validates owner identity, support-plane ids, vanishing-family ids,
+  structural dependencies and constraint references fail-closed; stale scene revisions report
+  `geometry_dependency_stale`, missing bindings report `geometry_binding_required`, and unknown structural
+  references are rejected before dispatch. The binding is stored with the semantic owner, projected through
+  compact status/resume, inherited automatically by continuation passes and protected against silent in-place
+  replacement. Explicit orthographic/diagrammatic, flat/collage and intentional non-Euclidean scene opt-outs do
+  not acquire an artificial coherent-3D owner binding. Focused scene-geometry + compact-contract + SessionStore +
+  VisualMicroPlan verification passes **4 files / 162 tests**; TypeScript `--noEmit` is green; the full canonical
+  gate passes **77 files / 788 tests** with lint at **0 errors / 31 warnings**.
+
+- 2026-09-30 — Closed the first **P1-E.18 mandatory Scene Geometry Model gate** on the public compact path.
+  Committed nontrivial `structured-mass` construction now fails closed without an applicable durable
+  `scene_geometry_model`; `insufficient_evidence` cannot authorize committed construction, while explicit
+  orthographic/diagrammatic, flat/collage and intentional non-Euclidean scene classifications remain valid
+  brief-backed opt-outs and `temporary-hypothesis` exploration remains reversible. First-model admission binds
+  its source frame to a freshly observed exact UXP document-incarnation witness before Photoshop dispatch;
+  repeated passes continue to use the durable incarnation check. Host witness tokens are treated as opaque
+  exact values rather than stable-id strings. Focused geometry + SessionStore + compact-contract verification
+  passes **3 files / 99 tests**, the integrated 13a.1B regression passes, TypeScript `--noEmit` is green, and the
+  full canonical gate passes **77 files / 786 tests** with lint at 0 errors.
+
+- 2026-09-30 — Advanced **P1-E.18 Scene Perspective Model** from a pure schema into durable Guard state.
+  `scene_geometry_model` can now travel through the public compact pass contract, is journal-projected only
+  for the exact current Photoshop document incarnation, appears in compact status/resume, and uses fail-closed
+  model/revision/document/incarnation conflict checks before dispatch. A regression proves latest-revision
+  projection and automatic disappearance after document reincarnation. Focused geometry + SessionStore +
+  compact-contract verification is green at **3 files / 97 tests** and TypeScript `--noEmit` is green.
+
+- 2026-09-30 — Completed the **public GitHub standalone cutover**. After reviewing fork-network metadata
+  consequences and creating a verified mirror backup, the repository was detached from the GitHub fork network,
+  renamed to `lavalava45/paintpilot-mcp`, and given standalone product wording. GitHub now reports
+  `isFork: false` with no parent; the local `origin` points to `https://github.com/lavalava45/paintpilot-mcp.git`.
+  The product identity is now **PaintPilot — AI Digital Painting for Adobe Photoshop** with the descriptor
+  **Autonomous AI painting agent for Adobe Photoshop, powered by MCP.** The remaining release work is the
+  repository-wide public-identity sweep followed by a green milestone commit/tag and first standalone release.
+
+- 2026-09-30 — Started **P1-E.18 Scene Perspective Model** with a normalized
+  `photoshop.guard.scene_geometry_model.v1` foundation. The contract records explicit scene applicability,
+  requires a scene-level rationale for non-coherent-3D modes, binds projection data to document/frame
+  provenance, and distinguishes derived vanishing evidence from proposed anchors; a derived vanishing point
+  must cite at least two declared source-line ids. Focused verification is green at **1 file / 3 tests** and
+  TypeScript `--noEmit` is green. Durable Guard journal/status wiring and compiler enforcement remain next.
+
+- 2026-09-30 — Completed **P1-E.4 current-frame lineage enforcement**. Priority reclassification now rejects
+  exact visual verdicts from abandoned branches and computes the latest authoritative verdict through the same
+  durable frame/branch ancestry predicate used by derived-problem reconciliation. Physical semantic-owner bindings
+  deliberately remain a separate concern and survive a non-pixel branch restore while their Photoshop layer still
+  exists and has not been rolled back, deleted, merged, migrated or invalidated by authoritative inventory. Added
+  regressions for both the stale-perceptual-evidence rejection and surviving physical-owner boundary. Focused compact
+  + SessionStore verification is green at **2 files / 93 tests**; TypeScript `--noEmit`, touched-file
+  `git diff --check`, and the full canonical gate are green (**76 files / 780 tests**, lint 0 errors).
+
+- 2026-09-30 — Added durable **P1-E.4 frame/branch ancestry** for perceptual evidence. Guard now reconstructs
+  current-frame ancestry from the already-durable baseline-preview parent chain, with verified accepted-anchor
+  restoration overriding the ordinary parent to point at the restored anchor. Trend and non-trend evidence that
+  belongs to a superseded branch loses authority even without a manually written `current_frame_authority=false`,
+  while evidence on the restored ancestral branch remains authoritative. Legacy journals with no resolvable lineage
+  keep the explicit-authority fallback. Added a branch-restore regression; focused compact + SessionStore verification
+  is green at **2 files / 91 tests** and TypeScript `--noEmit` is green.
+
+- 2026-09-30 — Made **P1-E.4 stale-evidence reconciliation durable across status/resume**. When ordinary
+  priority preflight prunes or retires non-ancestral trend/non-trend evidence, the reconciled document projection
+  is now persisted through the canonical painting-state writer instead of existing only as an in-memory gate
+  view; supplied request-local projection snapshots remain side-effect free. Regression coverage proves a stale
+  non-trend source is removed from durable state and does not reappear in compact continuation status. Focused
+  compact + SessionStore verification is green at **2 files / 90 tests**, TypeScript `--noEmit` and touched-file
+  `git diff --check` are green.
+
+- 2026-09-30 — Completed **P1-E.2 ownership-aware target verification and owner→layer-stack reconciliation**.
+  Successful `photoshop_get_layers` inventory observations now retire stale semantic-owner physical bindings
+  that disappeared through external Photoshop delete/undo without a Guard delete/merge record. Authority
+  falls back to the newest observed surviving binding; owners with no surviving physical layer are removed,
+  preventing stale historical IDs from retaining mutation authority. Focused compact + SessionStore
+  verification is green at **2 files / 88 tests**, TypeScript `--noEmit` and touched-file `git diff --check`
+  are green.
+
+- 2026-09-30 — Added the missing **P1-E.2 public historical-layer execution regression**. The compact
+  public path now proves that an explicit cross-layer correction can reach real VisualMicroPlan dispatch
+  against a historical physical binding of the same semantic owner while preserving the newer authoritative
+  binding and the bounded owner stack. This complements the SessionStore migration/rollback projection
+  regressions instead of testing only compiler acceptance. Focused compact + SessionStore verification is
+  green at **2 files / 87 tests**.
+
+- 2026-09-30 — Wired the **P1-E.2 `cross_layer_correction` contract through the real downstream execution
+  contract**. The compact compiler already validated and emitted the contract, but public execution still
+  rejected it at the SessionStore request allowlist and VisualMicroPlan schema/parser, and the microplan
+  continuation rule still required every mutation to hit only the current layer. The request/schema/parser
+  now accept the bounded Guard contract, and VisualMicroPlan permits only its explicitly authorized
+  historical targets while Guard remains responsible for stack/current/post-authority validation. Focused
+  compact + SessionStore verification is green at **2 files / 86 tests**, TypeScript `--noEmit` and
+  `git diff --check` are green.
+
+- 2026-09-30 — Added the homestead-derived **P1-E.2 shared-owner targeting regression**. A tree-only
+  correction now has explicit regression coverage proving that a concrete mutation aimed at the separately
+  declared shared hills/houses raster owner fails closed before Photoshop dispatch. Focused compact +
+  SessionStore verification is green at **2 files / 86 tests**.
+
+- 2026-09-30 — Hardened **P1-E.2 cross-layer ownership reconciliation**. Successful explicit migration can
+  move the authoritative semantic binding to its declared historical target while correction mode preserves
+  the current binding. SessionStore now excludes rolled-back/non-current-frame operations from semantic
+  ownership projection, preventing a reverted migration (or its continuation metadata) from silently
+  regaining owner authority after restart. Focused compact + SessionStore verification is green at **2 files /
+  85 tests**, TypeScript `--noEmit` is green, and `git diff --check` passes for the touched E.2 files.
+
+- 2026-09-30 — Advanced **P1-E.2 owner→physical-layer targeting**. Durable semantic owners already expose
+  bounded `physical_layer_ids`; compact preflight now checks concrete layer targets nested inside every
+  medium/global visual mutation against that projected stack before dispatch. A target outside the owner's
+  stack fails closed with `semantic_mutation_target_owner_mismatch`; a historical stack member that is not
+  the current authoritative binding fails with `semantic_cross_layer_contract_required` rather than being
+  silently accepted. This deliberately prepares, but does not yet authorize, explicit migration/shared-owner
+  cross-layer correction. Focused compact + SessionStore verification is green at **2 files / 83 tests** and
+  TypeScript `--noEmit` is green.
+
+- 2026-09-29 — Completed **P1-E.1 predeclared semantic scene ownership**. Added a Guard-level
+  `photoshop.guard.scene_ownership_plan.v1` contract that must exist before the first committed
+  nontrivial semantic owner is constructed. The plan predeclares scene concerns and their stable future
+  `logical_layer.hypothesis_id` owners before Photoshop dispatch, preserving correction/rollback rights
+  rather than enforcing a one-object-one-layer quota. Continuous fields and disposable temporary
+  hypotheses remain legal; intentional shared owners require an exact semantic-id set plus a concrete
+  sharing rationale. Guard rejects committed owners invented outside the durable plan and rejects
+  standalone `photoshop_create_layer` in nontrivial painting because that route would bypass atomic
+  semantic owner binding. Temporary owners may be explored without a plan, but Guard-only `keep`
+  promotion now requires/predeclares durable scene ownership. The plan is journal-backed and exposed by
+  compact status/resume across restart. Focused verification is green at **3 files / 86 tests** plus
+  TypeScript build. Full `verify:canonical` is green at **76/76 test files / 769/769 tests**, **152 packed
+  dist JS files**, lint **0 errors / 30 existing warnings**, **131 atomic tools / 15 Guard tools / 5 prompts**.
+  Source-independence remains green at **206 / 42,656 = 0.4829%** with **0 cross-path clone blocks**.
+
+- 2026-09-29 — Completed **P1-E.16 preparation exact-outcome / false-uncertainty hardening**. Added the
+  canonical `photoshop.execution_exact_outcome.v1` contract for failures proven to have been rejected before
+  Photoshop semantic dispatch, and propagate that proof through atomic/public tool error envelopes and
+  nested VisualMicroPlan preparation. The reproduced first-step `photoshop_create_layer` route rejection can
+  now terminate the enclosing plan as durable `execution='not-executed'` instead of creating false
+  reconciliation debt. The micro-plan tracks prior state-changing preparation with the canonical Guard
+  execution classification: if a layer/brush/selection/configuration side effect already completed, a later
+  failure remains partial/`uncertain` even when that failing child itself was rejected pre-dispatch. Pure edge
+  method compilation and statically resolvable protected-layer checks now run before preparation; deferred
+  post-preparation argument resolution/validation has distinct failure codes and retains uncertainty whenever
+  earlier preparation changed Photoshop. Regression coverage freezes the zero-side-effect case, prior-side-
+  effect case, pre-preparation edge rejection, deferred post-create failure, public create-layer exact proof,
+  SessionStore terminalization and post-dispatch visual-mutation no-replay behavior. Focused verification is
+  green at **7 files / 237 tests**. Full `verify:canonical` is green at **75/75 test files / 764/764 tests**,
+  **151 packed dist JS files**, lint **0 errors / 30 existing warnings**, **131 atomic tools / 15 Guard tools /
+  5 prompts**. Source-independence remains green at **206 / 42,288 = 0.4871%** with **0 cross-path clone
+  blocks**. The acceptance for the reproduced failure mode is controlled/integration-level; no fresh live
+  Photoshop outage or mutation failure was deliberately induced merely to reproduce the transport fault.
+
+- 2026-09-29 — Closed the remaining cross-path source-independence and local dependency-cleanup gaps.
+  `verify:source-independence` now compares normalized contiguous source blocks across **different file
+  paths** with an 8-line threshold, backed by a regression test proving that a moved/reindented block is
+  detected. The previously identified 19-line Neural Filter residue and 10-line UXP font-search residue
+  were independently rewritten; the stronger gate then exposed and closed four additional 8–11-line
+  moved blocks. Current result: **0 cross-path clone blocks**, alongside the existing same-path gates.
+  Local reference/upstream/Adobe/proof/backup trees were removed, the canonical checkout still has only
+  `origin`, and `node_modules` was rebuilt from a cleaned pnpm dependency graph. `pnpm-lock.yaml` is now
+  intended to be tracked instead of ignored, eliminating the previous mismatch where development docs
+  required `--frozen-lockfile` but a fresh clone had no committed pnpm lockfile. Full canonical
+  verification is green at **75/75 test files / 757/757 tests**, **150 packed dist JS files**, lint
+  **0 errors / 30 existing warnings**, **131 atomic tools / 15 Guard tools / 5 prompts**.
+
+- 2026-09-29 — Removed the canonical checkout's persistent historical `upstream` Git remote and
+  hardened the maintained external-intake policy around a single project `origin`. Development and
+  release documentation now require exact external URL/revision inspection or a disposable checkout
+  outside the canonical project tree instead of a standing upstream remote. `verify:external-intake`
+  now fails if maintained workflow documentation reintroduces `git remote add upstream` or
+  `git remote set-url upstream`. Historical Git ancestry and the required MIT attribution in
+  `LICENSE`/`NOTICE` remain intact.
+
+- 2026-09-29 — Completed **P1-S residual source-independence hardening** and the standalone-product
+  implementation-ownership cutover. Against historical baseline
+  `7b635963f87b5b8ff5380c3156841f5253ec8063`, the reproducible production-runtime audit now reports
+  **206 aligned exact lines / 42,057 nonblank lines = 0.4898% exact-line overlap**. The canonical gate
+  default is tightened from 5% to **0.50%**, with **0 byte-identical production files, 0 contiguous
+  exact blocks >=12 lines, 0 production files >=50% exact similarity, 0 retired package entries and
+  0 package-script dependencies on an upstream checkout/remote**. Project-owned runtime registries,
+  session/log/error/document-target/discovery abstractions, server protocol/lifecycle composition,
+  host guidance/prompt catalogs and semantic tool catalogs now own the maintained implementation;
+  historical paths remain only as thin compatibility facades where needed. Neural Filter semantics
+  were removed from generic bridge plumbing. The working UXP bridge was deliberately **not** rewritten
+  merely to chase a cosmetic 0% score. Full `verify:canonical` is green at **74/74 test files / 755/755
+  tests**, **150 packed dist JS files**, lint **0 errors / 30 existing warnings**, and **131 atomic tools /
+  15 Guard tools / 5 prompts**. `LICENSE` and `NOTICE` remain mandatory historical attribution; the
+  0.4898% figure is a source-line-overlap metric, not an authorship percentage.
+
+- 2026-09-29: P1-E.14 method breadth observability now joins durable `method_usage` with the current
+  capability snapshot, exposing available semantic method IDs and the subset not yet used in the run.
+  This makes "available but never used" measurable without introducing random diversity pressure.
+
+- 2026-09-29: P1-E.14 selected-candidate pressure execution now uses the chosen preset's probe-backed
+  pressure policy instead of the role-level preferred preset policy. Simulated pressure candidates are
+  consequently fail-closed unless the VisualMicroPlan contains matching executable stroke dynamics;
+  focused compact + session-store regressions pass **80/80**.
+
+- 2026-09-29: Extended P1-E.14 anti-stickiness across problem boundaries: compact Guard now remembers bounded recent preset/material outcomes and requires a causal retry explanation before reusing a recently failed preset for the same material when evidence-bound alternatives exist.
+
+- Guard brush selection now resists failure-driven preset stickiness: for a stable visual problem with
+  multiple preflighted candidates, retrying the same preset after failure/rollback requires an explicit
+  causal `brush_retry_reason`; legitimate successful reuse remains unaffected.
+
+- 2026-09-29: P1-E.14 brush candidate portfolios now expose durable `dynamics_capability` metadata for
+  native/simulated pressure, meaningful rotation and spacing/opacity/flow tunability. SessionStore
+  validates/persists it and planner guidance uses it for causal taper/buildup/breakup/directional marks.
+  Focused brush-profile + session-store tests pass **50/50**.
+
+- 2026-09-29: P1-E.14 brush roles now retain durable `candidate_evidence` for every ranked viable preset:
+  probe-derived mark/edge/buildup behavior, scale, rotation, pressure, settings, caveats, profile identity
+  and evidence score survive SessionStore persistence and are exposed in Guard status. Focused brush-
+  profile + session-store tests pass **50/50** and TypeScript build is green.
+
+- 2026-09-29: P1-E.14 brush preflight now ranks multiple role candidates by probe-observed mark/edge/buildup/dynamics fit instead of making deterministic profile order the preferred-brush decision; added a name-blind broken-texture regression proving a bristly evidence-fit candidate beats a generic smooth candidate.
+
+- 2026-09-29 — Completed P1-E.13 correction scoping. Compact Guard now records a machine-readable
+  `correction_scope` before dispatch, binding the stable problem to semantic owner, durable physical
+  layer IDs, region/bounds, canonical method class and mutation tools instead of relying on the active
+  Photoshop layer. The semantic-owner regression now asserts the exact correction scope. Also admitted
+  the already-implemented P1-E.12 root-cause escalation fields through the production preflight field
+  allowlist (state-only tests had masked that integration gap). Focused compact + recovery tests pass
+  **43/43** and TypeScript build is green.
+
+- 2026-09-29 — Completed **P1-E.12 repeated-problem structural escalation**. After two unsuccessful
+  attempts on the same stable problem, a dependent third mutation must classify the root cause, explain
+  it, and declare a real causal-level change; one diagnosed structural attempt is allowed, after which
+  further dependent mutation stops instead of resetting the loop. Supported root-cause classes include
+  owner/layer, representation, scale, method family, silhouette/negative space, value/form, brush
+  vocabulary and insufficient evidence. Read-only diagnosis and independent work remain available.
+
+- 2026-09-29 — P1-E.14 multi-candidate brush selection: substantial form/material/detail work no
+  longer silently reuses `preferred_preset` when a preflighted role has several viable presets. Guard
+  now requires an explicit evidence-fit choice; single-candidate roles remain deterministic. Prompt
+  guidance mirrors the contract, and compact-contract regression is green at 36/36 including deliberate
+  selection of a non-preferred alternative.
+
+- 2026-09-29 — Added the first P1-E.14 tool/brush breadth observability slice. Guard document status now
+  derives `method_usage` from durable completed VisualMicroPlans, including distinct/count summaries for
+  mutation tools, semantic method classes/IDs, brush roles/presets, stages, problems and outcomes. This
+  makes the regions + familiar-brush default-collapse measurable before changing selection policy.
+  Focused session-store regression is green at 43/43; TypeScript build and `git diff --check` pass.
+
+- 2026-09-29 — Guard priority reclassification is now evidence-bound: resolving/rescaling/re-severitying an existing
+  open visual problem through `photoshop_guard_set_priorities` requires the latest authoritative visual
+  verdict for that document, rejects stale/rolled-back evidence, and persists the evidence operation and
+  sequence on the problem. This prevents priority blockers from being dismissed by controller assertion
+  while retaining the existing larger-before-finer stage gate.
+
+- 2026-09-29 — Added the read-only P1-E.8 deterministic next-pass lint to
+  `photoshop_guard_status(next_pass=...)`. It reuses the compact compiler and durable Guard preflight
+  to expose machine-readable blockers before execution; no additional public tool was added.
+
+- 2026-09-29 — Exposed checkpoint debt before visual-plan construction: compact Guard status/resume now
+  report `checkpoint_due_before_next_visual_mutation`, its reason, and the complete bounded checkpoint
+  debt state while preserving the existing risk-weighted fail-closed checkpoint gate (P1-E.5).
+
+- 2026-09-29: implement the exact-rollback half of **P1-E.4 rollback-aware evidence invalidation**.
+  Completed Guard rollbacks now durably mark the rejected source operation as discarded current-frame
+  evidence. Cumulative-trend projection ignores rolled-back records, and already-promoted trend problems
+  prune that source/evidence/region lineage and retire themselves when surviving support falls below the
+  original promotion threshold. Historical operation/verdict evidence remains durable for diagnostics,
+  but a rolled-back one-pass global degradation can no longer remain an open must-fix and block the
+  restored frame. Focused verification passes: embedded-guard + planner-painter 126/126 and TypeScript
+  build. Broader supersede/non-ancestral branch lineage remains tracked in P1-E.4.
+
+- 2026-09-29: complete the repository implementation of **P1-E.3 canonical semantic method-class
+  resolution**. Compact Guard now prefers a validated known `method_id` over the low-level transport
+  classification when the method's primary tool matches the dispatched mutation. In particular,
+  `installed-brush-preset` on `photoshop_paint_strokes` remains `preset-brush` rather than collapsing
+  to generic `paint`; known method IDs cannot be used to relabel an incompatible mutation tool, and
+  fail closed with `step_method_tool_mismatch`. Brush-strategy compilation accepts both generic paint
+  and semantic preset-brush classes. Focused verification passes: compact-contract regressions 35/35,
+  visual-microplan + painting-method-palette 71/71, and TypeScript build.
 
 - 2026-09-28: close **P2.4 fresh-origin release autonomy** and therefore the overall **P2
   independent-product cutover**. Published commit
@@ -262,6 +1392,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add sticky technical/artistic/mixed commentary modes with independent short/normal/detailed verbosity and one-action overrides.
 
 ### Changed
+
+- 2026-09-29: clean the forward roadmap after the overnight implementation run. Closed P1-C and P2,
+  completed P1-E.3/P1-E.5/P1-E.12/P1-E.13 implementation plans, and already-completed P1-E.14 slices
+  no longer occupy the forward TODO. Remaining P1-E work is reprioritized around scene-level ownership,
+  current-frame lineage, live method/brush breadth proof, correction/history ergonomics and final
+  benchmark/regression closure. Human-only acceptance tracks are explicitly non-blocking for machine
+  engineering, and the former P1-E.15 host-neutral/single-source requirement is consolidated into P1-D.
 
 - 2026-09-28: harden the P2.4 fresh-origin Windows proof against checkout line-ending variance.
   A literal published Windows clone at `a32e184` passed all 740 Vitest tests but exposed that
@@ -1886,3 +3023,275 @@ weaken acceptance to a vague “looks similar” claim merely to close the task.
 - 1.1.0 (`6e1c1f0`)
 - 1.0.0 (`17d8d91`)
 - Phase E residual pass: prompt helper reduced to a compatibility re-export; core prompt registry now consumes guide-contract directly; image and neural catalog schemas were re-expressed without public-contract changes. Gate: 1,278/40,087 exact lines = 3.19%, 0 identical files, 20 large blocks, 17 high-similarity files. build:server green; canonical tests 72/72 and 716/716, then verify:tool-counts exposed concurrent dirty-worktree drift (128 discovered vs docs expecting 130).
+- P1-E.4 lineage hardening: priority preflight now reconciles non-trend derived problem evidence as well as cumulative trends. Stale source-operation support is pruned and an unsupported open blocker is retired rather than retaining authority over the current frame. Added regression coverage for a superseded single-source medium blocker; focused compact + SessionStore suite is 90/90 green with TypeScript `--noEmit` and touched-file diff checks green.
+## 2026-10-01 — E.19d color/gradient preflight foundation
+
+- Continued E.19 after canonical material/light binding enforcement with a normalized
+  `photoshop.guard.color_gradient_preflight.v1` receipt. Semantic stops now carry role, family and provenance;
+  artist-selected exact RGB remains explicitly artistic, while reference/accepted-frame stops must identify a
+  durable E.19 source anchor.
+- The preflight is revision-bound to the exact active Scene Lighting & Color Model, carries the represented
+  interaction and required palette relations, reports sampled-anchor RGB contradictions as `conflict`, and
+  reports relations not established by the scene model as `review-required` rather than inventing certainty.
+- Added focused railway-gradient regressions for supported artistic+sampled stops, sampled-anchor contradiction,
+  stale revision and unknown evidence anchor. Guard admission/persistence remains open, so E.19d is not marked
+  complete by this slice.
+
+## 2026-10-01 — E.19d canonical Guard admission
+
+- Wired `photoshop.guard.color_gradient_preflight.v1` into the canonical compact Guard compiler. After a visual
+  frame exists, gradient/color-field passes, atmosphere/optical-effect owners, and explicit global
+  `lighting-structure` changes now require a preflight before Photoshop dispatch. The first-visible blank-canvas
+  path is intentionally exempt so the new causal gate cannot delay first visible progress.
+- Preflights are normalized against the exact applicable durable or same-pass Scene Lighting & Color Model.
+  Missing scene state, invalid/stale receipts and `conflict` outcomes reject before mutation; softer
+  `review-required` outcomes remain admissible. Accepted normalized receipts are carried on the durable Guard
+  operation, and the operation-contract allowlist now recognizes that field.
+- Verification: TypeScript `--noEmit`; focused color-preflight + compact-contract suite **2 files / 48 tests**;
+  `verify:painting-policy`; `verify:acceptance-matrix`; touched-file `git diff --check` — all green. E.19d
+  remains open for broader category coverage; E.19f selective invalidation is still pending.
+## 2026-10-01 — E.19f selective lighting/color dependency invalidation
+
+- Continued the current E.19 implementation with causal dependency diffing between durable Scene Lighting &
+  Color Model revisions. Ambient, emitter, atmosphere, sampled-anchor, global-value and palette-relation
+  changes now have stable dependency ids instead of treating every newer model revision as stale-everything.
+- Added per-owner `lighting_color_binding_states` reconstructed from current-frame durable material-response
+  history and exposed them through compact pass context/status independently of geometry stale debt.
+- Guard material admission now accepts an older scene revision only when selective invalidation proves that
+  the owner's declared light/color dependencies are unchanged; changed or unverifiable dependencies remain
+  fail-closed before Photoshop mutation.
+- Added regressions proving headlight-family changes stale the train/headlight reflection while leaving an
+  ambient-only mountain current, fog changes stale fog dependents, and revision-only changes do not create
+  false debt. Focused verification: **2 files / 69 tests green**; TypeScript `--noEmit` green.
+- E.19f remains open only for the explicit geometry→lighting receiver/source bridge where a spatial change
+  itself changes a declared lighting/material relationship.
+## 2026-10-01 — E.19f geometry-to-lighting dependency bridge
+
+- Completed the repository-side E.19f bridge from Scene Geometry Model changes into lighting/material stale
+  debt without introducing a global geometry=>color invalidation rule.
+- `lighting_color_binding` now accepts an optional `spatial_relation` that pins the exact Scene Geometry Model
+  id/revision plus the stable geometry dependency ids that materially affect the receiver/source relationship.
+- Durable `lighting_color_binding_states` now combine E.19 causal-source changes with those explicit E.18
+  spatial dependencies. A changed declared VP/family/plane/anchor stales the lighting binding; unrelated geometry
+  remains non-stale. Missing source revisions fail closed instead of guessing that an old relation is still valid.
+- Guard MATERIAL admission verifies current spatial dependency ids against the applicable Scene Geometry Model
+  and rejects missing or stale spatial relations before Photoshop mutation. An older relation is admissible only
+  when durable selective-state evidence proves its declared geometry dependencies unchanged.
+- Added a regression proving that moving the declared rail-depth geometry invalidates the train's lighting
+  relation while an otherwise similar owner with no declared spatial dependency remains current.
+- Verification: TypeScript `--noEmit` green; focused Guard/SessionStore/lighting suites **3 files / 115 tests
+  green**. E.19f repository implementation is complete; E.19h regression/live acceptance remains next.
+## 2026-10-01 — E.19h repository regression pack complete
+
+- Completed the repository-side E.19 acceptance/regression pack across all six roadmap scenarios: foggy railway
+  relational light/color state, semantic sky-gradient stops with revisable artist-selected RGB, selective
+  headlight invalidation, reference-sample departure rejection, explicit stylized/nonphysical palette exception,
+  and grayscale/value-only operation without invented hue/chroma complexity.
+- Added regressions confirming an artist-selected teal may change while the same causal relations remain
+  satisfied, intentional stylization remains explicitly declared rather than masquerading as sampled evidence,
+  and monochrome scenes can collapse to value-only palette relations.
+- Rechecked the canonical Chat On Steroids Photoshop route before claiming live acceptance. The current route is
+  not ready: `photoshop_ping` reports `ready=false`, `plugin_connected=false`, `revision_match=false` with
+  `uxp_bridge_revision_missing`; Guard capability state also reports UXP `fetch failed`. No live Photoshop
+  acceptance is claimed or inferred from repository tests.
+- Focused verification: **3 files / 76 tests green** plus TypeScript `--noEmit` green. Repository E.19h is
+  complete; the live Photoshop acceptance remains an explicit blocked gate.
+## 2026-10-01 — E.20a Scene Camera & Imaging Model foundation
+
+- Started E.20 after completing the repository-side E.19 regression pack. Added
+  `photoshop.guard.scene_camera_imaging_model.v1` with document-incarnation/source-frame identity and an exact
+  dependency on the active E.18 Scene Geometry Model revision; an E.19 Scene Lighting & Color Model provenance
+  pair may also be pinned when camera/imaging behavior depends on accepted light/color state.
+- The model records qualitative framing/view/lens character, focal/depth-of-field behavior, camera/subject
+  motion and shutter character, optical softness/bloom/halation, capture grain/vignette/film-or-sensor character,
+  plus explicit intentional exceptions. It deliberately does not invent focal-length/radiometric simulation or
+  a second perspective model.
+- Added normalization regressions for exact E.18/E.19 provenance, qualitative custom lens character and
+  fail-closed incomplete lighting/color provenance. Focused verification: **1 file / 3 tests green** plus
+  TypeScript `--noEmit` green. Guard persistence and E.20b focus/depth binding remain open.
+## 2026-10-01 — E.20a Guard persistence
+
+- Wired `photoshop.guard.scene_camera_imaging_model.v1` into canonical Guard admission/persistence rather than
+  creating a parallel camera state store. Camera revisions now validate exact document/incarnation identity,
+  the applicable E.18 Scene Geometry Model revision, and—when present—the exact applicable E.19 light/color
+  revision before dispatch.
+- Durable replacement preserves camera `model_id` and requires a strictly increasing revision. Invalid or stale
+  geometry/light provenance is rejected before Photoshop mutation.
+- SessionStore now reconstructs only the latest valid camera/imaging model for the current document incarnation
+  and exposes it through compact pass context plus compact status/resume.
+- Added regression coverage proving a newer current-incarnation camera revision wins while a later record from
+  an old incarnation cannot replace it. Focused verification: **2 files / 66 tests green**; TypeScript
+  `--noEmit` green. E.20a persistence is implemented; E.20b focus/depth binding is next.
+## 2026-10-01 — E.17g maintained homestead corrective benchmark
+
+- Added a maintained homestead-tree regression for the motivating bad-scaffold failure shape. It reports three
+  candidate attempts and two same-problem candidates before structural escalation: the first cosmetic correction
+  is admitted and journaled, the second cosmetic method-search is rejected before dispatch, and a structural
+  negative-space rebuild remains admissible.
+- This closes the repository benchmark slice of E.17g without claiming the remaining live Photoshop completion
+  acceptance.
+
+## 2026-10-01 — E.17f pre-final hostile-review completion gate
+
+- Wired the already-defined `photoshop.guard.pre_final_hostile_review.v1` contract into the canonical Art
+  Director `complete` transition. Completion now requires an exact-current-frame hostile review after global
+  brief, E.18 geometry and E.17d/E.19 physical-effect completion checks.
+- The review is normalized against the active artistic evaluation contract/current frame and receives the current
+  completion-debt projections. Any mapped hard defect rejects completion; an accepted review is persisted with
+  the completed Art Director state instead of remaining an unused helper.
+- Verification: TypeScript `--noEmit` green; focused `artistic-contract` + `session-store-regressions` suite
+  **2 files / 76 tests green**. Live Photoshop STOP/FINALIZE acceptance remains open.
+
+## 2026-10-01 — E.7a internal checkpoint persistence
+
+- Completed the remaining repository-side E.7a persistence slice. The compact compiler now defers checkpoint
+  debt to the embedded runtime, which automatically saves a deterministic layered PSD inside the immutable
+  art-run `checkpoints/` directory immediately before a due visual mutation.
+- Automatic saves reuse the normal guarded logical-operation path, durable save receipt, on-disk non-empty PSD
+  verification and operation acknowledgement. Routine checkpoint reporting is closed internally rather than
+  consuming a model-facing protocol turn.
+- A verified save clears mutation-risk checkpoint debt and the same visual pass can continue. Missing project
+  binding or an unverified save blocks the visual mutation; an uncertain save record remains durable for
+  recovery instead of permitting replacement mutation work.
+- Added embedded regressions for successful automatic persistence and fail-closed missing-file verification.
+  Focused verification: `tests/embedded-guard.test.ts` **79/79 green**; TypeScript `--noEmit` green.
+
+## 2026-10-01 — E.11 semantic history-ownership evidence foundation
+
+- Added `photoshop.guard.semantic_pass_history_ownership.v1` to VisualMicroPlan `pass_execution` results so
+  semantic-pass rollback evidence is explicit rather than inferred from mutation count or tool labels.
+- A completed pass is `exact` only when every completed visual mutation reports a positive `history_steps`
+  count. Missing counts remain `unproven`; a failed/uncertain mutation forces `partial-or-uncertain` even when
+  the completed prefix is known, preventing repository code from pretending that a partial pass is atomic.
+- Added focused coverage for an exact two-mutation span and a middle-mutation failure. Verification:
+  `tests/visual-microplan.test.ts` **61/61 green** and `npm run build:server` green. Live Photoshop history-span
+  correspondence/rollback-boundary acceptance remains open before E.7b batching can be widened.
+
+## 2026-10-01 — E.11 durable semantic-pass rollback handle
+
+- Joined semantic-pass history ownership to Guard rollback state. Exact E.11 ownership is now authoritative
+  for rollback depth and produces a durable `photoshop.guard.semantic_pass_rollback_handle.v1` tied to the
+  originating Guard operation and exact owned history-step count.
+- Removed the competing fallback for E.11-aware passes: `unproven` and `partial-or-uncertain` ownership no
+  longer becomes an invented one-step rollback merely because the outer Guard operation is visual. Legacy
+  non-E.11 records retain their historical fallback until migrated.
+- Live Photoshop history-span/boundary correspondence remains required before E.7b restrictions widen.
+
+## 2026-10-01 — E.11 fail-closed unproven rollback
+
+- Prevented E.11-aware `unproven` and `partial-or-uncertain` semantic passes from creating a zero-step pending
+  rollback through the ordinary visual-verdict path. Such a pass now fails closed with
+  `semantic_pass_rollback_unproven` and must be reconciled or restored from an exact accepted anchor.
+- Exact semantic-pass ownership continues to produce the durable exact-step rollback handle; legacy operations
+  without an E.11 ownership receipt retain their existing rollback accounting.
+## 2026-10-01 — E.7c observed corrective escalation
+
+- Removed `causal_escalation_level` as a required admission certificate from the E.17 construction-exit and
+  structural-mismatch corrective gates. The Guard still preserves observed same-problem history and blocks
+  repeated cosmetic/detail masking, but a causally distinct structural repair no longer needs a numeric
+  escalation label merely to execute safely.
+- Updated the maintained artistic-recovery regressions, including a label-free structural-repair control.
+  This is a bounded E.7c slice; broader prose/label-only artistic admission cleanup remains open.
+
+## 2026-10-01 — E.7c label-free bounded recovery
+
+- Removed the mandatory `root_cause_classification`, `root_cause_reason` and `causal_level_change`
+  negotiation that previously sat between two observed failed strategies and the one remaining bounded
+  visual attempt. A causally distinct candidate can now proceed directly from the durable failure history.
+- Exhausted-strategy reuse and the existing bounded terminal state remain fail-closed in this slice; the
+  broader E.7c removal of attempt-count admission thresholds remains open.
+
+## 2026-10-01 — E.7c attempt-count veto removal
+
+- Removed the fixed failed-attempt-count terminal gate from dependent artistic recovery. Observed failures
+  remain durable and an exhausted strategy still cannot be reused, but a genuinely distinct safe visual
+  strategy is no longer rejected merely because it is the fourth or later attempt at the same unresolved
+  artistic problem.
+- Added a focused regression proving a fourth distinct strategy is admitted after three failures while reuse
+  of an exhausted earlier strategy remains fail-closed.
+
+## 2026-10-01 — E.7c strategy-validation cadence/admission separation
+
+- Stopped the configured `strategy_validation_after_microplans` threshold from automatically creating an
+  Art Director `review_due` barrier. The meaningful-pass counter and configured cadence remain durable
+  artistic guidance/telemetry, while observed failure, uncertainty, protected-quality loss, task completion
+  and the ordinary bounded task-review cadence retain their review behavior.
+- Updated the planner/painter regression to prove that reaching the strategy-validation threshold alone keeps
+  the directive active and admits continued Painter work instead of demanding narrative validation metadata.
+
+## 2026-10-01 — E.7c stage-label/admission separation
+
+- Removed backward/unknown artistic stage labels as standalone visual-mutation vetoes. A label-only backward
+  declaration can execute but cannot downgrade the canonical durable painting stage.
+- Preserved explicit structural reset semantics: only a valid `stage_reset` may move durable stage state
+  backwards, and that reset continues to invalidate dependent refinement/physical-stack evidence. Invalid
+  explicit reset tuples still fail closed.
+
+## 2026-10-02 — E.7c brush-rationale/admission separation
+
+- Removed `brush_preset_choice_reason` and `brush_retry_reason` prose as standalone mutation-admission
+  certificates. Multi-candidate material work still requires an explicit evidence-bound preset choice, and
+  presets outside the preflighted role portfolio remain rejected.
+- Prior failed/rolled-back brush usage remains durable artistic context, but retrying an explicitly selected
+  safe preset no longer requires a narrative explanation before Photoshop dispatch. This removes another
+  schema-repair turn without weakening executable preset fit, document/layer safety or recovery semantics.
+- Updated the compact-contract regression to prove an explicit unexplained choice and same/cross-problem
+  retries are admissible while implicit multi-candidate selection remains fail-closed.
+
+## 2026-10-02 — E.7c completion-reason/admission separation
+
+- Removed per-row `global_brief_assessment.brief_item_results[].reason` and
+  `pre_final_hostile_review.checks[].reason` as mandatory completion certificates. Structured item state and
+  hostile-review area/status remain authoritative; supplied prose is preserved as optional audit guidance.
+- Kept completion fail-closed on exact contract/frame/authorized-critic provenance, complete hard-brief coverage,
+  recognition evidence, unresolved hard debt, the full hostile-review area matrix and mapped major defects.
+- Added a regression proving an evidence-bound satisfied brief and a clear six-area hostile review can complete
+  without narrative reason fields.
+
+## 2026-10-02 — E.7c layer-separation prose/admission separation
+
+- Removed `layer_separation_check.reasons` as a mandatory VisualMicroPlan/MCP admission certificate. Structural
+  authority remains `change_kind + substantial + rollback_value + independent_adjustment_expected`; these fields
+  still derive required isolation and remain bound to logical-layer rollback semantics.
+- Kept required isolation, logical-owner consistency and anti-layer-explosion enforcement fail-closed. Optional
+  reasons remain available as artistic/audit guidance rather than being synthesized to satisfy a schema.
+- Added runtime and public compact-schema regressions. Focused verification: `visual-microplan` +
+  `compact-contract-regressions` **2 files / 114 tests green**; `npm run build:server` green.
+
+## 2026-10-02 — E.7c scene-geometry applicability prose separation
+
+- Removed `scene_geometry_model.applicability_rationale` as a mandatory certificate when structured scene
+  applicability is not `coherent_3d`. The applicability enum and validated projection/frame structure remain
+  executable authority; supplied rationale is preserved only as optional artistic/audit guidance.
+- Kept exact document/frame provenance, projection/vanishing evidence validation and downstream geometry or
+  completion debt fail-closed. Added a normalization regression proving a flat/collage declaration persists
+  without prose while optional rationale is still retained when supplied.
+
+## 2026-10-02 — E.7c value-exception structural authority
+
+- Replaced Value Gate exception prose as admission authority with an exact durable `style_contract_basis`.
+  Both `override` and `style-not-applicable` must identify a valid style-contract field whose criterion exactly
+  matches the active Art Director `style_contract`; stale/mismatched bases fail closed.
+- `override_reason` and `applicability_reason` are now optional artistic/audit guidance. Override still requires
+  exact-current grayscale evidence and criterion statuses; prose alone cannot authorize either exception path.
+- Updated the public Guard schema and value/planner fixtures. Focused verification: `value-check` +
+  `planner-painter` **2 files / 73 tests green**; the broader refinement/unified fixture run remains red only on
+  the pre-existing missing-`perceptual_hierarchy` fixture drift, not on Value Gate assertions.
+
+## 2026-10-02 — E.7c strategy-validation reason separation
+
+- Removed `strategy_validation.reason` as a mandatory narrative certificate when reconciling a durable/legacy
+  strategy-validation review barrier. Exact-current frame provenance and the actual `dominant_objective_read` and
+  `strategy_fit` visual findings remain required; replans still require a changed rendering strategy or first-pass
+  sequence.
+- Added a regression proving an evidence-bound `pass` can close without duplicate reason prose while preserving the
+  visual findings themselves.
+
+## 2026-10-02 — E.7c painting-profile transition prose separation
+
+- Removed `profile_transition_reason` as a mandatory certificate for the one supported in-place
+  `simple_graphic -> nontrivial_painting` upgrade. The explicit requested profile plus the stronger validated
+  nontrivial-painting obligations remain the transition authority; optional prose is retained only as audit/artistic
+  context.
+- Updated the public Guard schema and planner/painter regression so a fully preflighted upgrade succeeds without
+  synthesized narrative text while an upgrade missing the stronger brush preflight still fails closed.

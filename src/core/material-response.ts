@@ -68,6 +68,23 @@ export interface MaterialResponsePlan {
     intent: string;
   };
   styleContractBasis?: MaterialResponseStyleBasis;
+  lightingColorBinding?: LightingColorBinding;
+}
+
+export interface LightingColorBinding {
+  sceneModelId: string;
+  sceneModelRevision: number;
+  baseColorFamily: string;
+  receives: string[];
+  atmosphere?: string;
+  reflectionSources: string[];
+  surfaceCondition?: string;
+  colorRelations: string[];
+  spatialRelation?: {
+    sceneGeometryModelId: string;
+    sceneGeometryRevision: number;
+    dependencyIds: string[];
+  };
 }
 
 export interface MaterialResponseReviewComponent {
@@ -122,6 +139,46 @@ function parseStyleBasis(value: unknown, name: string): MaterialResponseStyleBas
   const criterion = text(raw.criterion, `${name}.criterion`);
   if (criterion.length < 8) throw new Error(`${name}.criterion must state the exact durable style criterion`);
   return { field, criterion };
+}
+
+function stringList(value: unknown, name: string): string[] {
+  if (!Array.isArray(value) || value.length > 24) throw new Error(`${name} must be an array with at most 24 entries`);
+  return [...new Set(value.map((item, index) => text(item, `${name}[${index}]`)))];
+}
+
+function parseLightingColorBinding(value: unknown): LightingColorBinding | undefined {
+  if (value === undefined) return undefined;
+  const raw = object(value, 'material_response.lighting_color_binding');
+  if (typeof raw.scene_model_revision !== 'number' || !Number.isInteger(raw.scene_model_revision) || raw.scene_model_revision <= 0) {
+    throw new Error('material_response.lighting_color_binding.scene_model_revision must be a positive integer');
+  }
+  let spatialRelation: LightingColorBinding['spatialRelation'];
+  if (raw.spatial_relation !== undefined) {
+    const spatial = object(raw.spatial_relation, 'material_response.lighting_color_binding.spatial_relation');
+    if (typeof spatial.scene_geometry_revision !== 'number' || !Number.isInteger(spatial.scene_geometry_revision) || spatial.scene_geometry_revision <= 0) {
+      throw new Error('material_response.lighting_color_binding.spatial_relation.scene_geometry_revision must be a positive integer');
+    }
+    const dependencyIds = stringList(spatial.dependency_ids ?? [], 'material_response.lighting_color_binding.spatial_relation.dependency_ids');
+    if (!dependencyIds.length) {
+      throw new Error('material_response.lighting_color_binding.spatial_relation.dependency_ids must name at least one spatial dependency');
+    }
+    spatialRelation = {
+      sceneGeometryModelId: text(spatial.scene_geometry_model_id, 'material_response.lighting_color_binding.spatial_relation.scene_geometry_model_id'),
+      sceneGeometryRevision: spatial.scene_geometry_revision,
+      dependencyIds,
+    };
+  }
+  return {
+    sceneModelId: text(raw.scene_model_id, 'material_response.lighting_color_binding.scene_model_id'),
+    sceneModelRevision: raw.scene_model_revision,
+    baseColorFamily: text(raw.base_color_family, 'material_response.lighting_color_binding.base_color_family'),
+    receives: stringList(raw.receives ?? [], 'material_response.lighting_color_binding.receives'),
+    ...(raw.atmosphere === undefined ? {} : { atmosphere: text(raw.atmosphere, 'material_response.lighting_color_binding.atmosphere') }),
+    reflectionSources: stringList(raw.reflection_sources ?? [], 'material_response.lighting_color_binding.reflection_sources'),
+    ...(raw.surface_condition === undefined ? {} : { surfaceCondition: text(raw.surface_condition, 'material_response.lighting_color_binding.surface_condition') }),
+    colorRelations: stringList(raw.color_relations ?? [], 'material_response.lighting_color_binding.color_relations'),
+    ...(spatialRelation ? { spatialRelation } : {}),
+  };
 }
 
 function parsePlanComponents(value: unknown): Record<MaterialResponseComponent, MaterialResponsePlanComponent> {
@@ -189,6 +246,7 @@ export function normalizeMaterialResponsePlan(
     intent: text(micro.intent, 'material_response.microtexture.intent'),
   };
   const styleContractBasis = parseStyleBasis(record.style_contract_basis, 'material_response.style_contract_basis');
+  const lightingColorBinding = parseLightingColorBinding(record.lighting_color_binding);
 
   assertEssentialApplicability(responseRole, components, styleContractBasis, 'planning');
 
@@ -227,6 +285,7 @@ export function normalizeMaterialResponsePlan(
     components,
     microtexture,
     ...(styleContractBasis ? { styleContractBasis } : {}),
+    ...(lightingColorBinding ? { lightingColorBinding } : {}),
   };
 }
 

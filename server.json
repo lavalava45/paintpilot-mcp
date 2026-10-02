@@ -3,9 +3,9 @@
   "name": "io.github.lavalava45/photoshop-mcp-digital-painting",
   "description": "Independent Windows-first MCP system for AI-driven digital painting and guarded Photoshop automation.",
   "repository": {
-    "url": "https://github.com/lavalava45/photoshop-mcp-digital-painting",
+    "url": "https://github.com/lavalava45/paintpilot-mcp",
     "source": "github"
   },
   "version": "1.7.6",
-  "websiteUrl": "https://github.com/lavalava45/photoshop-mcp-digital-painting"
+  "websiteUrl": "https://github.com/lavalava45/paintpilot-mcp"
 }

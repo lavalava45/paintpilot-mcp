@@ -10,6 +10,9 @@ import {
   normalizeMaterialResponsePlan,
   type MaterialResponsePlan,
 } from './material-response.js';
+import { normalizeGeometryBinding, type GeometryBinding } from './geometry-binding.js';
+import { normalizeCameraBinding, type CameraBinding } from './scene-camera-imaging-model.js';
+import { normalizeAttentionBinding, type AttentionBinding } from './perceptual-hierarchy.js';
 
 export const VISUAL_MICROPLAN_ACTION_CLASSES = [
   'ADD',
@@ -129,6 +132,8 @@ export type VisualMicroPlanSurfaceFrameDistribution =
 export interface VisualMicroPlanSurfaceFrame {
   axes: Array<{ id: string; angleDegrees: number; weight: number }>;
   convergenceAnchor?: { x: number; y: number };
+  sceneVanishingFamilyIds?: string[];
+  sceneSupportPlaneId?: string;
   depthProgression?: { nearScale: number; farScale: number; direction: 'toward-anchor' | 'away-from-anchor' };
   distribution: VisualMicroPlanSurfaceFrameDistribution;
   localExceptions: string[];
@@ -184,6 +189,7 @@ export const VISUAL_MICROPLAN_PREPARE_TOOLS = new Set([
   'photoshop_set_brush',
   'photoshop_set_foreground_color',
   'photoshop_sample_color',
+  'photoshop_geometry_calculate',
   'photoshop_measure_points',
   'photoshop_transform_landmarks',
   'photoshop_compare_landmarks',
@@ -332,6 +338,9 @@ export interface VisualMicroPlan {
     parentHypothesisId?: string;
     parentConstructionRevision?: string;
     constructionChange: boolean;
+    geometryBinding?: GeometryBinding;
+    cameraBinding?: CameraBinding;
+    attentionBinding?: AttentionBinding;
     negativeSpace?: {
       relation: VisualMicroPlanNegativeSpaceRelation;
       parentHypothesisId: string;
@@ -355,6 +364,13 @@ export interface VisualMicroPlan {
       targetHypothesisId: string;
     }>;
   };
+  crossLayerCorrection?: {
+    mode: 'correction' | 'migration';
+    currentLayerId: number;
+    targetLayerIds: number[];
+    postAuthoritativeLayerId: number;
+    reason?: string;
+  };
   plannerDirectiveId?: string;
   plannerTaskId?: string;
   painterScope?: VisualMicroPlanPainterScope;
@@ -373,6 +389,7 @@ export interface VisualMicroPlan {
     fallbackReason?: string;
     brushRole?: string;
     presetName?: string;
+    selectionReason?: string;
     brushPackId?: string;
     stampProfileId?: string;
     pressurePolicy: VisualMicroPlanPressurePolicy;
@@ -754,11 +771,10 @@ export function parseVisualMicroPlan(args: Record<string, unknown>): VisualMicro
     const fallbackReason = raw.fallback_reason === undefined
       ? undefined
       : requireString(raw.fallback_reason, 'paint_strategy.fallback_reason');
-    if (!!fallbackFromMethodId !== !!fallbackReason) {
-      throw new Error('paint_strategy fallback requires both fallback_from_method_id and fallback_reason');
-    }
-    if (fallbackReason && fallbackReason.length < 20) {
-      throw new Error('paint_strategy.fallback_reason must state a concrete reason, not a token fallback label');
+    // E.7c: fallback_from_method_id is executable routing authority; fallback_reason is
+    // optional artistic/audit guidance and must not be a mutation-admission certificate.
+    if (fallbackReason && !fallbackFromMethodId) {
+      throw new Error('paint_strategy.fallback_reason requires fallback_from_method_id');
     }
     paintStrategy = {
       ...(constructionRole ? { constructionRole } : {}),
@@ -768,6 +784,7 @@ export function parseVisualMicroPlan(args: Record<string, unknown>): VisualMicro
       ...(fallbackReason ? { fallbackReason } : {}),
       ...(raw.brush_role === undefined ? {} : { brushRole: requireString(raw.brush_role, 'paint_strategy.brush_role') }),
       ...(raw.preset_name === undefined ? {} : { presetName: requireString(raw.preset_name, 'paint_strategy.preset_name') }),
+      ...(raw.selection_reason === undefined ? {} : { selectionReason: requireString(raw.selection_reason, 'paint_strategy.selection_reason') }),
       ...(raw.brush_pack_id === undefined ? {} : { brushPackId: requireString(raw.brush_pack_id, 'paint_strategy.brush_pack_id') }),
       ...(raw.stamp_profile_id === undefined ? {} : { stampProfileId: requireString(raw.stamp_profile_id, 'paint_strategy.stamp_profile_id') }),
       pressurePolicy,
@@ -811,13 +828,9 @@ export function parseVisualMicroPlan(args: Record<string, unknown>): VisualMicro
   if (typeof separationRaw.independent_adjustment_expected !== 'boolean') {
     throw new Error('layer_separation_check.independent_adjustment_expected must be boolean');
   }
-  const separationReasons = parseStringArray(
-    separationRaw.reasons,
-    'layer_separation_check.reasons'
-  );
-  if (!separationReasons.length) {
-    throw new Error('layer_separation_check.reasons requires at least one concrete reason');
-  }
+  const separationReasons = separationRaw.reasons === undefined
+    ? []
+    : parseStringArray(separationRaw.reasons, 'layer_separation_check.reasons');
   const independentNewKinds = new Set<VisualMicroPlanLayerChangeKind>([
     'new-object',
     'new-material',
@@ -886,6 +899,15 @@ export function parseVisualMicroPlan(args: Record<string, unknown>): VisualMicro
       throw new Error('logical_layer.construction_change must be boolean');
     }
     const constructionChange = raw.construction_change === true;
+    const geometryBinding = raw.geometry_binding === undefined
+      ? undefined
+      : normalizeGeometryBinding(raw.geometry_binding);
+    const cameraBinding = raw.camera_binding === undefined
+      ? undefined
+      : normalizeCameraBinding(raw.camera_binding);
+    const attentionBinding = raw.attention_binding === undefined
+      ? undefined
+      : normalizeAttentionBinding(raw.attention_binding);
     let negativeSpace: NonNullable<VisualMicroPlan['logicalLayer']>['negativeSpace'];
     if (raw.negative_space !== undefined) {
       const negative = parseArgsObject(raw.negative_space, 'logical_layer.negative_space');
@@ -956,6 +978,12 @@ export function parseVisualMicroPlan(args: Record<string, unknown>): VisualMicro
         if (![x, y].every(Number.isFinite)) throw new Error('logical_layer.surface_frame.convergence_anchor requires finite x/y');
         convergenceAnchor = { x, y };
       }
+      const sceneVanishingFamilyIds = frame.scene_vanishing_family_ids === undefined
+        ? []
+        : parseStringArray(frame.scene_vanishing_family_ids, 'logical_layer.surface_frame.scene_vanishing_family_ids');
+      const sceneSupportPlaneId = frame.scene_support_plane_id === undefined
+        ? undefined
+        : requireString(frame.scene_support_plane_id, 'logical_layer.surface_frame.scene_support_plane_id');
       let depthProgression: VisualMicroPlanSurfaceFrame['depthProgression'];
       if (frame.depth_progression !== undefined) {
         const depth = parseArgsObject(frame.depth_progression, 'logical_layer.surface_frame.depth_progression');
@@ -977,7 +1005,11 @@ export function parseVisualMicroPlan(args: Record<string, unknown>): VisualMicro
       const localExceptions = frame.local_exceptions === undefined
         ? []
         : parseStringArray(frame.local_exceptions, 'logical_layer.surface_frame.local_exceptions');
-      surfaceFrame = { axes, ...(convergenceAnchor ? { convergenceAnchor } : {}), ...(depthProgression ? { depthProgression } : {}), distribution, localExceptions };
+      surfaceFrame = {
+        axes, ...(convergenceAnchor ? { convergenceAnchor } : {}), sceneVanishingFamilyIds,
+        ...(sceneSupportPlaneId ? { sceneSupportPlaneId } : {}),
+        ...(depthProgression ? { depthProgression } : {}), distribution, localExceptions,
+      };
     }
     if (constructionTier === 'primary' && (parentHypothesisId || parentConstructionRevision)) {
       throw new Error('logical_layer.construction_tier=primary must not declare a construction parent');
@@ -1047,7 +1079,11 @@ export function parseVisualMicroPlan(args: Record<string, unknown>): VisualMicro
       hypothesis,
       rollbackValue,
       expectedIndependentRollback: raw.expected_independent_rollback,
-      separationReasons: parseStringArray(raw.separation_reasons, 'logical_layer.separation_reasons'),
+      // E.7c: rollback/isolation structure is executable authority. Free-form separation
+      // prose is retained only as optional audit/artistic guidance.
+      separationReasons: raw.separation_reasons === undefined
+        ? []
+        : parseStringArray(raw.separation_reasons, 'logical_layer.separation_reasons'),
       ...(positiveInteger(raw.layer_id, 'logical_layer.layer_id') === undefined ? {} : { layerId: positiveInteger(raw.layer_id, 'logical_layer.layer_id') }),
       ...(raw.layer_name === undefined ? {} : { layerName: requireString(raw.layer_name, 'logical_layer.layer_name') }),
       ...(positiveInteger(raw.merge_target_layer_id, 'logical_layer.merge_target_layer_id') === undefined
@@ -1059,6 +1095,9 @@ export function parseVisualMicroPlan(args: Record<string, unknown>): VisualMicro
       ...(parentHypothesisId ? { parentHypothesisId } : {}),
       ...(parentConstructionRevision ? { parentConstructionRevision } : {}),
       constructionChange,
+      ...(geometryBinding ? { geometryBinding } : {}),
+      ...(cameraBinding ? { cameraBinding } : {}),
+      ...(attentionBinding ? { attentionBinding } : {}),
       ...(negativeSpace ? { negativeSpace } : {}),
       ...(causalEffect ? { causalEffect } : {}),
       preserveNegativeSpaceIds: raw.preserve_negative_space_ids === undefined
@@ -1067,6 +1106,26 @@ export function parseVisualMicroPlan(args: Record<string, unknown>): VisualMicro
       ...(surfaceFrame ? { surfaceFrame } : {}),
       depthRelations,
     };
+  }
+
+  let crossLayerCorrection: VisualMicroPlan['crossLayerCorrection'];
+  if (args.cross_layer_correction !== undefined) {
+    const raw = parseArgsObject(args.cross_layer_correction, 'cross_layer_correction');
+    const mode = parseEnum(raw.mode, 'cross_layer_correction.mode', ['correction', 'migration'] as const);
+    const currentLayerId = positiveInteger(raw.current_layer_id, 'cross_layer_correction.current_layer_id');
+    const postAuthoritativeLayerId = positiveInteger(raw.post_authoritative_layer_id, 'cross_layer_correction.post_authoritative_layer_id');
+    if (!currentLayerId || !postAuthoritativeLayerId) throw new Error('cross_layer_correction requires positive current/post layer ids');
+    if (!Array.isArray(raw.target_layer_ids) || raw.target_layer_ids.length < 1) {
+      throw new Error('cross_layer_correction.target_layer_ids requires at least one physical layer');
+    }
+    const targetLayerIds = raw.target_layer_ids.map((value, index) => {
+      const id = positiveInteger(value, `cross_layer_correction.target_layer_ids[${index}]`);
+      if (!id) throw new Error('cross_layer_correction target layer ids must be positive integers');
+      return id;
+    });
+    if (new Set(targetLayerIds).size !== targetLayerIds.length) throw new Error('cross_layer_correction.target_layer_ids must be unique');
+    const reason = typeof raw.reason === 'string' && raw.reason.trim() ? raw.reason.trim() : undefined;
+    crossLayerCorrection = { mode, currentLayerId, targetLayerIds, postAuthoritativeLayerId, ...(reason ? { reason } : {}) };
   }
 
   if (logicalLayer && logicalLayer.rollbackValue !== layerSeparationCheck.rollbackValue) {
@@ -1255,9 +1314,9 @@ export function parseVisualMicroPlan(args: Record<string, unknown>): VisualMicro
       step.tool !== 'photoshop_paint_color_gradient' && step.methodId !== 'continuous-color-field'
     );
     if (nonDefaultFieldMutation) {
-      if (paintStrategy.fallbackFromMethodId !== 'continuous-color-field' || !paintStrategy.fallbackReason) {
+      if (paintStrategy.fallbackFromMethodId !== 'continuous-color-field') {
         throw new Error(
-          'construction_role=continuous-field defaults to method_id=continuous-color-field; any alternate mechanism requires fallback_from_method_id=continuous-color-field plus fallback_reason'
+          'construction_role=continuous-field defaults to method_id=continuous-color-field; any alternate mechanism requires fallback_from_method_id=continuous-color-field'
         );
       }
     }
@@ -1268,10 +1327,10 @@ export function parseVisualMicroPlan(args: Record<string, unknown>): VisualMicro
       step.tool === 'photoshop_paint_dabs' || step.methodId === 'soft-brush-build'
     );
     if (usesLegacySoftDabChain) {
-      if (!paintStrategy.fallbackFromMethodId || !paintStrategy.fallbackReason
+      if (!paintStrategy.fallbackFromMethodId
           || paintStrategy.fallbackFromMethodId === 'soft-brush-build') {
         throw new Error(
-          'construction_role=optical-veil cannot silently degrade to Soft Round/soft-brush dab-chain; declare a different preferred fallback_from_method_id and a concrete fallback_reason'
+          'construction_role=optical-veil cannot silently degrade to Soft Round/soft-brush dab-chain; declare a different preferred fallback_from_method_id'
         );
       }
     }
@@ -1325,9 +1384,6 @@ export function parseVisualMicroPlan(args: Record<string, unknown>): VisualMicro
       if (!logicalLayer.expectedIndependentRollback) {
         throw new Error('create-new/temporary-hypothesis requires expected_independent_rollback=true');
       }
-      if (!logicalLayer.separationReasons.length) {
-        throw new Error('create-new/temporary-hypothesis requires at least one separation_reasons entry');
-      }
       if (!logicalLayer.layerName) {
         throw new Error('create-new/temporary-hypothesis requires logical_layer.layer_name');
       }
@@ -1360,7 +1416,7 @@ export function parseVisualMicroPlan(args: Record<string, unknown>): VisualMicro
       }
       for (const index of mutationIndexes) {
         for (const ref of rawMutationTargetRefs(steps[index]!)) {
-          if (ref !== logicalLayer.layerId) {
+          if (ref !== logicalLayer.layerId && !crossLayerCorrection?.targetLayerIds.includes(Number(ref))) {
             throw new Error(`continue-logical-layer/adjust mutations must target logical_layer.layer_id=${logicalLayer.layerId}`);
           }
         }
@@ -1549,6 +1605,7 @@ export function parseVisualMicroPlan(args: Record<string, unknown>): VisualMicro
     },
     layerSeparationCheck,
     logicalLayer,
+    crossLayerCorrection,
     plannerDirectiveId,
     plannerTaskId,
     painterScope,
@@ -1633,6 +1690,19 @@ export function normalizeToolResultForPlaceholders(result: ToolResult): unknown 
     try {
       return JSON.parse(text) as unknown;
     } catch {
+      // Native connector hosts may append a non-JSON identity footer to an
+      // otherwise valid JSON tool payload. Keep placeholder/preflight parsing
+      // compatible with the raw semantic tool result instead of treating that
+      // presentation footer as a malformed Photoshop response.
+      const identityMarker = '\n\n--- Identity notice ---';
+      const markerIndex = text.indexOf(identityMarker);
+      if (markerIndex > 0) {
+        try {
+          return JSON.parse(text.slice(0, markerIndex)) as unknown;
+        } catch {
+          // Fall through and try the next text block.
+        }
+      }
       // Try the next text block; preview results contain image + JSON metadata.
     }
   }

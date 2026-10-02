@@ -1,14 +1,14 @@
 # Photoshop MCP — Digital Painting Edition
 
-> Independently maintained Windows-first Photoshop MCP system — 130 tools including painting, VisualMicroPlan execution, color sampling, landmarks/guides, previews, embedded Guard orchestration and 0 recipes. Not affiliated with Adobe.
+> Independently maintained Windows-first Photoshop MCP system — 133 tools including painting, VisualMicroPlan execution, color sampling, landmarks/guides, previews, embedded Guard orchestration and 0 recipes. Not affiliated with Adobe.
 
-**Project:** https://github.com/lavalava45/photoshop-mcp-digital-painting
+**Project:** https://github.com/lavalava45/paintpilot-mcp
 **Historical provenance:** `NOTICE`
 
 ## Quick start
 
 ```bash
-git clone https://github.com/lavalava45/photoshop-mcp-digital-painting.git
+git clone https://github.com/lavalava45/paintpilot-mcp.git
 cd photoshop-mcp-digital-painting
 npm install
 npm run build:server
@@ -47,22 +47,22 @@ Compose supported semantic `photoshop_*` tools directly. Use the five `ps.*` gui
 
 ## Tool surface
 
-- **130 tools** — semantic `photoshop_*` surface; 14 are the embedded `photoshop_guard_*` façade
+- **133 tools** — semantic `photoshop_*` surface; 16 are the embedded `photoshop_guard_*` façade
 - **5 MCP prompts** — including `ps.digital_painting_control`
 - **Native Sky Replacement** — optional sky replacement using Photoshop's built-in feature
 - **State** — `photoshop_get_state`, `photoshop_get_preview`, `photoshop_get_capabilities`
 
 ## Distribution
 
-- Project source/docs/issues: https://github.com/lavalava45/photoshop-mcp-digital-painting
+- Project source/docs/issues: https://github.com/lavalava45/paintpilot-mcp
 - Public npm package: none
 - MCP Registry entry: none
 - Historical origin/licensing: `NOTICE` + `LICENSE`
 
 ## Documentation
 
-- [README](https://github.com/lavalava45/photoshop-mcp-digital-painting/blob/digital-painting/README.md)
-- [Install](https://github.com/lavalava45/photoshop-mcp-digital-painting/blob/digital-painting/INSTALL.md)
-- [Architecture](https://github.com/lavalava45/photoshop-mcp-digital-painting/blob/digital-painting/docs/architecture.md)
-- [Available tools](https://github.com/lavalava45/photoshop-mcp-digital-painting/blob/digital-painting/docs/available-tools.md)
-- [Agent map](https://github.com/lavalava45/photoshop-mcp-digital-painting/blob/digital-painting/AGENTS.md)
+- [README](https://github.com/lavalava45/paintpilot-mcp/blob/digital-painting/README.md)
+- [Install](https://github.com/lavalava45/paintpilot-mcp/blob/digital-painting/INSTALL.md)
+- [Architecture](https://github.com/lavalava45/paintpilot-mcp/blob/digital-painting/docs/architecture.md)
+- [Available tools](https://github.com/lavalava45/paintpilot-mcp/blob/digital-painting/docs/available-tools.md)
+- [Agent map](https://github.com/lavalava45/paintpilot-mcp/blob/digital-painting/AGENTS.md)

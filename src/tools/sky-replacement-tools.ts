@@ -10,6 +10,15 @@ import {
 } from './atomic-shared.js';
 
 const SKY_ACTION_TIMEOUT_MS = 120_000;
+const SKY_REPLACEMENT_INPUT_SCHEMA = {
+  type: 'object' as const,
+  properties: {
+    sky_image_path: {
+      type: 'string' as const,
+      description: 'Optional absolute path to a sky image file',
+    },
+  },
+};
 
 export function createSkyReplacementTools(
   connection: PhotoshopConnection,
@@ -19,21 +28,8 @@ export function createSkyReplacementTools(
     {
       tool: {
         name: 'photoshop_sky_replacement',
-        description:
-          'Replace the sky using Photoshop native Sky Replacement when available.\\n\\n' +
-          'Use when: a sky image path is provided and native Sky Replacement is supported.\\n' +
-          'Fallback: use ps.composite_blend with semantic place/mask/blend tools for a manual composite.\\n\\n' +
-          'Returns: JSON { ok, summary, details }.\\n' +
-          'Preconditions: active document; optional sky_image_path for custom sky.',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            sky_image_path: {
-              type: 'string',
-              description: 'Optional absolute path to a sky image file',
-            },
-          },
-        },
+        description: 'Replace the sky using Photoshop native Sky Replacement when available.',
+        inputSchema: SKY_REPLACEMENT_INPUT_SCHEMA,
       },
       handler: async (args) => skyReplacement(connection, backendRouter, args),
     },

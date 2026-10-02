@@ -85,6 +85,30 @@ function capturedPreview(dir: string, capture: any, patch: Record<string, unknow
 }
 
 describe('durable multiscale review escalation state', () => {
+  it('carries named-object brief identity through OBJECT crop capture provenance', () => {
+    const { dir, store } = fixture();
+    const plan = store.planReviewEscalation('review-op', [{
+      kind: 'object_readability',
+      severity: 'must-fix',
+      region_bounds: { left: 40, top: 50, right: 180, bottom: 210 },
+      brief_item_id: 'guardian-lion',
+      brief_state: 'UNCERTAIN',
+    }], { persist: true }) as any;
+    expect(plan.captures).toHaveLength(1);
+    expect(plan.captures[0]).toMatchObject({
+      level: 'object',
+      brief_item_id: 'guardian-lion',
+      brief_state: 'UNCERTAIN',
+    });
+    const evidence = store.attachReviewEvidence('review-op', plan.captures[0], capturedPreview(dir, plan.captures[0])) as any;
+    expect(evidence).toMatchObject({
+      review_level: 'object',
+      brief_item_id: 'guardian-lion',
+      brief_state: 'UNCERTAIN',
+      bound_whole_sha256: expect.any(String),
+      artifact_id: expect.any(String),
+    });
+  });
   it('persists structured overview uncertainty as OBJECT review debt across restart without parsing free text', () => {
     const { dir, controller, store } = fixture();
     const region = { left: 80, top: 60, right: 220, bottom: 190 };

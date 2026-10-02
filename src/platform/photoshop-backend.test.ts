@@ -8,6 +8,8 @@ import {
   type PhotoshopStateSnapshot,
 } from './photoshop-backend.js';
 import type { BackendRouteTraceInput } from './backend-route-trace.js';
+import { ExactNotExecutedError } from '../core/execution-outcome.js';
+import { buildEnvelopeFromError } from '../core/tool-result-contract.js';
 
 function backendFixture(
   kind: PhotoshopBackend['kind'],
@@ -191,6 +193,36 @@ describe('PhotoshopBackendRouter', () => {
       reason: 'uxp_unavailable_fail_closed',
     })]);
     expect(legacy.counts().availabilityChecks).toBe(0);
+  });
+
+  it('preserves exact not-executed proof for a backend-route rejection before semantic dispatch', async () => {
+    const uxp = backendFixture('uxp', { available: false });
+    const router = new PhotoshopBackendRouter(
+      {} as PhotoshopConnection,
+      [uxp.backend],
+      () => undefined
+    );
+
+    const error = await router.backendFor('layer.create').then(
+      () => undefined,
+      (value: unknown) => value
+    );
+    expect(error).toBeInstanceOf(ExactNotExecutedError);
+
+    const result = buildEnvelopeFromError(error);
+    const text = result.content.find(item => item.type === 'text');
+    const body = JSON.parse(text && 'text' in text ? text.text : '{}');
+    expect(body).toMatchObject({
+      ok: false,
+      code: 'uxp_bridge_unavailable',
+      execution: 'not-executed',
+      execution_proof: {
+        protocol: 'photoshop.execution_exact_outcome.v1',
+        dispatch: 'not-dispatched',
+        side_effects: 'none',
+        reason: 'backend_route_rejected_before_semantic_dispatch',
+      },
+    });
   });
   const canonicalPaintingMutations: PhotoshopPrimitive[] = [
     'brush.presets.select',

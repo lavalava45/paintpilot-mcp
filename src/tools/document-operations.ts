@@ -117,26 +117,25 @@ export async function runListDocuments(router: PhotoshopBackendRouter): Promise<
   try {
     const value = await router.listDocuments();
     if (value.ok === false) {
+      const message = String(value.message || 'Failed to list documents');
       return atomicFailure({
-        ok: false,
         code: 'extendscript_runtime_error',
-        message: String(value.message || 'Failed to list documents'),
+        ok: false,
         suggested_next_tool: 'photoshop_get_state',
+        message,
       });
     }
 
     const count = typeof value.count === 'number' ? value.count : 0;
+    const summary = count > 0 ? `${count} open document${count === 1 ? '' : 's'}` : 'No documents open';
+    const nextTool = count > 0 ? 'photoshop_get_document_info' : 'photoshop_create_document';
     const details: Record<string, unknown> = {
-      count,
-      documents: value.documents ?? [],
       active_document_id: value.active_document_id ?? null,
-      ...(value.context === undefined ? {} : { context: value.context }),
+      documents: value.documents ?? [],
+      count,
     };
-    return atomicSuccess(
-      count === 0 ? 'No documents open' : `${count} open document${count === 1 ? '' : 's'}`,
-      details,
-      count === 0 ? 'photoshop_create_document' : 'photoshop_get_document_info'
-    );
+    if (value.context !== undefined) details.context = value.context;
+    return atomicSuccess(summary, details, nextTool);
   } catch (error) {
     return atomicFailureFromError(error);
   }
@@ -173,6 +172,9 @@ export async function runSetActiveDocument(
         code,
         message: String(outcome.data.message || 'Failed to set active document'),
         suggested_next_tool: 'photoshop_list_documents',
+        ...((code === 'document_not_found' || code === 'ambiguous_name')
+          ? { execution: 'not-executed' as const }
+          : {}),
         ...(Array.isArray(outcome.data.matching_document_ids)
           ? { suggested_args: { matching_document_ids: outcome.data.matching_document_ids } }
           : {}),

@@ -4,6 +4,10 @@
 export type ExecutionOutcome = 'not-executed' | 'completed' | 'failed' | 'uncertain';
 export type ArtisticOutcome = 'resolved' | 'unresolved' | 'regression' | 'uncertain';
 export type GlobalBriefOutcome = 'satisfied' | 'unsatisfied' | 'regression' | 'uncertain' | 'not-evaluated';
+export const PRE_FINAL_HOSTILE_REVIEW_AREAS = [
+  'whole_frame_brief', 'named_subject_recognition', 'geometry_completion',
+  'physical_effect_accountability', 'material_differentiation', 'style_realism',
+] as const;
 
 const GLOBAL_BRIEF_OUTCOMES = new Set<GlobalBriefOutcome>([
   'satisfied', 'unsatisfied', 'regression', 'uncertain', 'not-evaluated',
@@ -38,6 +42,13 @@ export interface ArtisticEvaluationContract {
   stage_transition_expectations: string[];
   final_evidence_requirements: string[];
   provenance: Array<{ source: string; detail: string }>;
+  brief_items: Array<{
+    item_id: string;
+    kind: 'hard_perceptual' | 'soft_preference' | 'technical_non_visual';
+    requirement: string;
+    provenance: string;
+    recognition_target?: string;
+  }>;
 }
 
 export function normalizeArtisticEvaluationContract(
@@ -78,6 +89,44 @@ export function normalizeArtisticEvaluationContract(
     stage_transition_expectations: strings(input.stage_transition_expectations, 'artistic_evaluation_contract.stage_transition_expectations', { min: 1, max: 8 }),
     final_evidence_requirements: strings(input.final_evidence_requirements, 'artistic_evaluation_contract.final_evidence_requirements', { min: 1, max: 8 }),
     provenance,
+    brief_items: input.brief_items === undefined
+      ? []
+      : (() => {
+          if (!Array.isArray(input.brief_items) || input.brief_items.length > 24) {
+            throw new Error('artistic_evaluation_contract.brief_items must contain at most 24 items');
+          }
+          const seen = new Set<string>();
+          return input.brief_items.map((entry, index) => {
+            if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+              throw new Error(`artistic_evaluation_contract.brief_items[${index}] must be an object`);
+            }
+            const row = entry as Record<string, unknown>;
+            const itemId = text(row.item_id);
+            const kind = text(row.kind)?.toLowerCase();
+            const requirement = text(row.requirement);
+            const itemProvenance = text(row.provenance);
+            if (!itemId || itemId.length > 80 || seen.has(itemId)) throw new Error(`artistic_evaluation_contract.brief_items[${index}].item_id must be unique`);
+            if (!['hard_perceptual', 'soft_preference', 'technical_non_visual'].includes(kind ?? '')) {
+              throw new Error(`artistic_evaluation_contract.brief_items[${index}].kind is invalid`);
+            }
+            if (!requirement || !itemProvenance) throw new Error(`artistic_evaluation_contract.brief_items[${index}] requires requirement and provenance`);
+            seen.add(itemId);
+            const recognitionTarget = row.recognition_target === undefined ? undefined : text(row.recognition_target);
+            if (row.recognition_target !== undefined && !recognitionTarget) {
+              throw new Error(`artistic_evaluation_contract.brief_items[${index}].recognition_target must be non-empty when supplied`);
+            }
+            if (recognitionTarget && kind !== 'hard_perceptual') {
+              throw new Error(`artistic_evaluation_contract.brief_items[${index}].recognition_target is only valid for hard_perceptual items`);
+            }
+            return {
+              item_id: itemId,
+              kind: kind as ArtisticEvaluationContract['brief_items'][number]['kind'],
+              requirement,
+              provenance: itemProvenance,
+              ...(recognitionTarget ? { recognition_target: recognitionTarget } : {}),
+            };
+          });
+        })(),
   };
 
   if (previous) {
@@ -259,6 +308,27 @@ export function normalizeGlobalBriefAssessment(
   const criteria = assessment.criteria === undefined
     ? []
     : strings(assessment.criteria, 'global_brief_assessment.criteria', { max: 16 });
+  const briefItems = input.contract?.brief_items ?? [];
+  const hardItems = briefItems.filter(item => item.kind === 'hard_perceptual');
+  const rawResults = assessment.brief_item_results;
+  const resultRows = rawResults === undefined ? [] : (() => {
+    if (!Array.isArray(rawResults) || rawResults.length > 24) throw new Error('global_brief_assessment.brief_item_results must contain at most 24 items');
+    const byId = new Map(briefItems.map(item => [item.item_id, item]));
+    const seen = new Set<string>();
+    return rawResults.map((entry, index) => {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) throw new Error(`brief_item_results[${index}] must be an object`);
+      const row = entry as Record<string, unknown>;
+      const itemId = text(row.item_id);
+      const state = text(row.state)?.toUpperCase();
+      const reason = text(row.reason);
+      const evidence = row.evidence === undefined ? [] : strings(row.evidence, `global_brief_assessment.brief_item_results[${index}].evidence`, { max: 8 });
+      const item = itemId ? byId.get(itemId) : undefined;
+      if (!itemId || seen.has(itemId) || !item) throw new Error(`brief_item_results[${index}].item_id must reference one unique active brief item`);
+      if (!['UNASSESSED', 'MET', 'NOT_MET', 'UNCERTAIN'].includes(state ?? '')) throw new Error(`brief_item_results[${index}].state is invalid`);
+      seen.add(itemId);
+      return { item_id: itemId, kind: item.kind, requirement: item.requirement, state, ...(reason ? { reason } : {}), evidence };
+    });
+  })();
 
   if (!exactContract || !exactFrame || !authorizedCritic) {
     return {
@@ -273,6 +343,15 @@ export function normalizeGlobalBriefAssessment(
       ],
     };
   }
+  const resultsById = new Map(resultRows.map(row => [row.item_id, row]));
+  const missingHard = hardItems.filter(item => !resultsById.has(item.item_id));
+  if (missingHard.length) {
+    throw new Error(`global_brief_assessment requires evidence-bound states for every hard_perceptual brief item: ${missingHard.map(item => item.item_id).join(', ')}`);
+  }
+  const unresolvedHard = resultRows.filter(row => row.kind === 'hard_perceptual' && row.state !== 'MET');
+  if (requested === 'satisfied' && unresolvedHard.length) {
+    throw new Error(`global_brief_assessment outcome=satisfied conflicts with unresolved hard brief debt: ${unresolvedHard.map(row => `${row.item_id}:${row.state}`).join(', ')}`);
+  }
   return {
     outcome: requested,
     validation: 'independently-validated',
@@ -282,10 +361,105 @@ export function normalizeGlobalBriefAssessment(
     critic_authority: 'authorized',
     critic_result_id: criticResultId,
     criteria,
+    brief_item_results: resultRows,
+    unresolved_hard_brief_debt: unresolvedHard,
     reason,
   };
 }
 
 export function globalCompletionAllowed(assessment: Record<string, unknown> | null | undefined): boolean {
-  return assessment?.outcome === 'satisfied' && assessment?.validation === 'independently-validated';
+  return assessment?.outcome === 'satisfied'
+    && assessment?.validation === 'independently-validated'
+    && (!Array.isArray(assessment?.unresolved_hard_brief_debt) || assessment.unresolved_hard_brief_debt.length === 0);
+}
+
+export function normalizePreFinalHostileReview(
+  raw: unknown,
+  input: {
+    contract: ArtisticEvaluationContract;
+    frame?: { sha256?: string | null } | null;
+    globalAssessment?: Record<string, unknown> | null;
+    geometryDebt?: unknown[];
+    physicalEffectDebt?: unknown[];
+  }
+): Record<string, unknown> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('pre_final_hostile_review must be an object');
+  const review = raw as Record<string, unknown>;
+  const contractId = text(review.contract_id);
+  const contractRevision = Number(review.contract_revision);
+  const frameSha = text(review.frame_sha256)?.toLowerCase();
+  if (contractId !== input.contract.contract_id || contractRevision !== input.contract.revision) {
+    throw new Error('pre_final_hostile_review must reference the exact active artistic contract revision');
+  }
+  if (!input.frame?.sha256 || frameSha !== String(input.frame.sha256).toLowerCase()) {
+    throw new Error('pre_final_hostile_review must reference the exact current frame SHA');
+  }
+  if (!Array.isArray(review.checks) || review.checks.length !== PRE_FINAL_HOSTILE_REVIEW_AREAS.length) {
+    throw new Error(`pre_final_hostile_review.checks must contain exactly ${PRE_FINAL_HOSTILE_REVIEW_AREAS.length} required review areas`);
+  }
+  const seenAreas = new Set<string>();
+  const checks = review.checks.map((entry, index) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) throw new Error(`pre_final_hostile_review.checks[${index}] must be an object`);
+    const row = entry as Record<string, unknown>;
+    const area = text(row.area);
+    const status = text(row.status)?.toLowerCase();
+    const reason = text(row.reason);
+    if (!area || !PRE_FINAL_HOSTILE_REVIEW_AREAS.includes(area as typeof PRE_FINAL_HOSTILE_REVIEW_AREAS[number]) || seenAreas.has(area)) {
+      throw new Error(`pre_final_hostile_review.checks[${index}].area must be one unique required area`);
+    }
+    if (!['clear', 'defect', 'not_applicable'].includes(status ?? '')) throw new Error(`pre_final_hostile_review.checks[${index}].status is invalid`);
+    seenAreas.add(area);
+    return { area, status, ...(reason ? { reason } : {}) };
+  });
+  for (const area of PRE_FINAL_HOSTILE_REVIEW_AREAS) {
+    if (!seenAreas.has(area)) throw new Error(`pre_final_hostile_review is missing required area ${area}`);
+  }
+  if (!Array.isArray(review.major_defects) || review.major_defects.length > 12) {
+    throw new Error('pre_final_hostile_review.major_defects must contain at most 12 items');
+  }
+  const briefItems = new Map(input.contract.brief_items.map(item => [item.item_id, item]));
+  const majorDefects = review.major_defects.map((entry, index) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) throw new Error(`pre_final_hostile_review.major_defects[${index}] must be an object`);
+    const row = entry as Record<string, unknown>;
+    const summary = text(row.summary);
+    const debtClass = text(row.debt_class)?.toLowerCase();
+    const briefItemId = text(row.brief_item_id);
+    if (!summary || !['hard', 'soft'].includes(debtClass ?? '')) throw new Error(`pre_final_hostile_review.major_defects[${index}] requires summary and debt_class=hard|soft`);
+    if (debtClass === 'hard') {
+      const item = briefItemId ? briefItems.get(briefItemId) : undefined;
+      if (!item || item.kind !== 'hard_perceptual') {
+        throw new Error(`pre_final_hostile_review hard defect ${index} must map to an active hard_perceptual brief item`);
+      }
+    }
+    return { summary, debt_class: debtClass, ...(briefItemId ? { brief_item_id: briefItemId } : {}) };
+  });
+  if (checks.some(check => check.status === 'defect') && !majorDefects.length) {
+    throw new Error('pre_final_hostile_review defect checks require at least one mapped major_defect');
+  }
+  if ((input.geometryDebt?.length ?? 0) > 0) {
+    const geometryCheck = checks.find(check => check.area === 'geometry_completion');
+    if (geometryCheck?.status === 'clear') throw new Error('pre_final_hostile_review cannot mark geometry clear while E.18 completion debt exists');
+  }
+  if ((input.physicalEffectDebt?.length ?? 0) > 0) {
+    const effectCheck = checks.find(check => check.area === 'physical_effect_accountability');
+    if (effectCheck?.status === 'clear') throw new Error('pre_final_hostile_review cannot mark physical effects clear while E.17d/E.19 debt exists');
+  }
+  const hardDefects = majorDefects.filter(defect => defect.debt_class === 'hard');
+  const resultRows = Array.isArray(input.globalAssessment?.brief_item_results) ? input.globalAssessment.brief_item_results : [];
+  const resultById = new Map(resultRows.map(row => [row?.item_id, row]));
+  for (const defect of hardDefects) {
+    if (resultById.get(defect.brief_item_id)?.state === 'MET') {
+      throw new Error(`pre_final_hostile_review hard defect conflicts with brief item ${defect.brief_item_id} being assessed MET on the same frame`);
+    }
+  }
+  return {
+    protocol: 'photoshop.guard.pre_final_hostile_review.v1',
+    contract_id: contractId,
+    contract_revision: contractRevision,
+    frame_sha256: frameSha,
+    checks,
+    major_defects: majorDefects,
+    hard_defects: hardDefects,
+    completion_allowed: hardDefects.length === 0,
+  };
 }

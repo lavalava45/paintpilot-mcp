@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const ROOT = resolve(import.meta.dirname, '..');
-const PROJECT_REPOSITORY = 'https://github.com/lavalava45/photoshop-mcp-digital-painting';
+const PROJECT_REPOSITORY = 'https://github.com/lavalava45/paintpilot-mcp';
 const PRODUCT_NAME = 'photoshop-mcp-digital-painting';
 const DISPLAY_NAME = 'Photoshop MCP — Digital Painting Edition';
 
@@ -19,7 +19,7 @@ const packageJson = json('package.json');
 const serverJson = json('server.json');
 const manifest = json('mcpb/manifest.json');
 const buildMcpb = read('scripts/build-mcpb.ts');
-const serverSource = read('src/core/server.ts');
+const serverSource = read('src/core/photoshop-mcp-server.ts');
 const noticePath = resolve(ROOT, 'NOTICE');
 const notice = existsSync(noticePath) ? read('NOTICE') : '';
 
@@ -77,7 +77,7 @@ const primaryIdentityFiles = [
   'CONTRIBUTING.md', 'RELEASE_CHECKLIST.md', 'llms.txt', 'AGENTS.md',
   'README.de.md', 'README.es.md', 'README.ja.md', 'README.tr.md', 'README.zh-CN.md',
   'docs/architecture.md', 'docs/development.md', 'docs/available-tools.md',
-  'docs/painting-policy/foundations.md', 'docs/mascot.md', 'src/prompts/instructions.ts',
+  'docs/painting-policy/foundations.md', 'docs/mascot.md', 'src/prompts/host-guidance.ts',
 ];
 const legacyPrimaryPatterns = [
   /Photoshop MCP[^\n]*Digital Painting Fork/i,

@@ -15,18 +15,19 @@ pnpm install --frozen-lockfile
 npm run build
 ```
 
-An `upstream` remote is optional and is used only for selective comparison/intake. Normal build,
-test, packaging and runtime operation must work from this repository alone. If you want to inspect
-upstream changes, add it explicitly:
+`pnpm-lock.yaml` is part of the canonical repository and must stay synchronized with `package.json`.
+Do not maintain an ad-hoc dependency set in `node_modules`; after dependency changes, regenerate the
+lockfile deliberately and verify that a clean `pnpm install --frozen-lockfile` succeeds.
 
-```bash
-git remote add upstream https://github.com/alisaitteke/photoshop-mcp.git
-git fetch upstream
-```
+The canonical checkout keeps only this project's own repository remote (`origin`). Do **not** configure
+a standing `upstream` remote for the historical source project. Normal build, test, packaging, release
+and runtime operation are self-contained in this repository.
 
-Fetching is discovery only; do not turn the comparison remote into a routine merge/rebase target.
-Evaluate individual candidate changes under [`external-intake.md`](external-intake.md), which requires
-a current project need, architecture-fit review, provenance and the ordinary project acceptance gates.
+When a historical or external change needs investigation, inspect the exact external repository URL
+and revision directly, or use a disposable checkout outside the canonical project directory. External
+material is discovery/input only; it must never become a routine merge/rebase baseline. Evaluate every
+candidate under [`external-intake.md`](external-intake.md), which requires a current project need,
+architecture-fit review, provenance and the ordinary project acceptance gates.
 
 Useful commands:
 

@@ -32,28 +32,23 @@ function layerTool(
 }
 
 const createDescription = [
-  'Create a new empty layer with explicit stack placement. By default it is placed above the layer that was active when the call started.',
-  'Use when: user needs a blank layer for painting, fills, or stacking content.\nDo NOT use when: adding text — use photoshop_create_text_layer.',
-  'Use above_layer_id or below_layer_id when exact ordering matters; provide at most one.',
-  'Returns: created layer id/name/path, requested placement, actual stack index and adjacent layer ids.\nPreconditions: active document. Side effects: adds layer to history.',
+  'Create an empty layer, defaulting above the previously active layer.',
+  'Use above_layer_id or below_layer_id for exact placement; provide at most one.',
 ].join('\n\n');
 
 const textLayerDescription = [
   'Create a text layer with content, position, font size, and optional font.',
-  'Use when: adding labels, titles, or typography to the design.\nDo NOT use when: editing existing text — use photoshop_update_text_content.',
-  'Returns: layer name, text, position, fontSize, font (when fontName set), context.\nUse photoshop_list_fonts to discover font names; photoshop_set_text_font to change font later.\nPreconditions: active document. Side effects: adds text layer.',
+  'Use photoshop_update_text_content for existing text and photoshop_list_fonts to discover fonts.',
 ].join('\n\n');
 
 const listDescription = [
   'List all layers in the active document with kind, visibility, and opacity.',
-  'Use when: choosing a layer to edit, debugging structure, or after organize_layers.\nDo NOT use when: only session summary is needed — use photoshop_get_state (lighter).',
-  'Returns: layerCount, layers array, context.\nPreconditions: active document. Side effects: none.',
+  'Use photoshop_get_state for a lighter session summary.',
 ].join('\n\n');
 
 const selectDescription = [
   'Select the active layer by exact name, including layers inside groups.',
-  'Use when: a transform or property tool must target a named layer (photoshop_scale_layer, etc.).\nDo NOT use when: the layer is already active — check photoshop_get_state first.',
-  'Returns: selected, layerName, kind, bounds (best-effort), context.\nFirst depth-first name match wins when duplicate names exist in different groups.\nPreconditions: active document. Side effects: changes active layer.',
+  'Duplicate names resolve to the first depth-first match.',
 ].join('\n\n');
 
 export function createLayerTools(

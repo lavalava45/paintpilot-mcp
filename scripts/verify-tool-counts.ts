@@ -31,11 +31,13 @@ const FILES = [
 
 function listToolSourceFiles(): string[] {
   const files = [
-    join(ROOT, 'src', 'core', 'server.ts'),
+    join(ROOT, 'src', 'core', 'photoshop-mcp-server.ts'),
     join(ROOT, 'src', 'core', 'server-tool-catalog.ts'),
   ];
   for (const name of readdirSync(TOOLS_DIR)) {
-    if (name.endsWith('-tools.ts')) files.push(join(TOOLS_DIR, name));
+    if (name.endsWith('-tools.ts') || name.endsWith('-catalog.ts')) {
+      files.push(join(TOOLS_DIR, name));
+    }
   }
   const recipes = join(TOOLS_DIR, 'recipes');
   if (existsSync(recipes)) {

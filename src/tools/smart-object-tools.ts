@@ -32,26 +32,10 @@ const layerNameField: Fields = {
 };
 
 const descriptions = {
-  convert: [
-    'Convert the active layer, or an exact named layer, to an embedded Smart Object.',
-    'Use when non-destructive transforms or filters are needed. An already-Smart-Object target reports success with already_smart_object; unlock or duplicate a Background layer first.',
-    'Returns layer_name, kind and optional already_smart_object/context. Side effect: one history step.',
-  ].join('\n\n'),
-  replace: [
-    'Replace the embedded contents of a Smart Object from an image file while preserving transforms, warps and Smart Filters.',
-    'Use for mockup/template asset replacement. The target must already be a Smart Object; this is embedded-content replacement rather than linked-object relinking.',
-    'file_path must be an existing absolute path. Returns layer_name/file_path/context and replaces embedded pixels.',
-  ].join('\n\n'),
-  edit: [
-    'Open a Smart Object for Edit Contents; its embedded .psb becomes the active document until saved and closed.',
-    'Use to edit embedded pixels non-destructively; use photoshop_replace_smart_object_contents when swapping the whole asset.',
-    'Returns parent_document, embedded_document, layer_name and context; changes the active document to the embedded contents.',
-  ].join('\n\n'),
-  copy: [
-    'Create an independent Smart Object via Copy with its own embedded contents.',
-    'Use when the duplicate must not share embedded data with the source. Use photoshop_duplicate_layer when linked instances are desired.',
-    'Returns source_layer_name, new_layer_name, kind and context; adds a new Smart Object layer.',
-  ].join('\n\n'),
+  convert: 'Convert the active or named layer to an embedded Smart Object.',
+  replace: 'Replace embedded Smart Object contents from an image file while preserving transforms, warps and Smart Filters.',
+  edit: 'Open embedded Smart Object contents as the active document for editing.',
+  copy: 'Create an independent Smart Object copy with separate embedded contents.',
 };
 
 export function createSmartObjectTools(

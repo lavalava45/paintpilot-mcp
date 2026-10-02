@@ -181,6 +181,28 @@ describe('microplan request compilation and pre-dispatch diagnostics', () => {
     expect(calls).toEqual([]);
   });
 
+  it('does not let an observability lifecycle failure block canonical dispatch', async () => {
+    const calls: string[] = [];
+    const record: any = { id: 'trace-nonblocking', tool: 'photoshop_save_document', args: { document_id: 7 }, visual: false };
+    const result = await executeLogicalOperation({
+      input: record,
+      store: {
+        begin: () => ({ record, replay: false }),
+        markDispatched: () => calls.push('dispatch'),
+        complete: (active: any, toolResult: any) => ({ ...active, result: toolResult, execution: 'executed' }),
+        fail: (active: any, error: any) => ({ ...active, failed: true, error: String(error) }),
+      },
+      invoke: async () => { calls.push('invoke'); return { content: [{ type: 'text', text: '{"ok":true}' }] }; },
+      materializeArguments: (_tool: string, args: unknown) => args,
+      mutationLifecycle: {
+        beforeMutation: () => { calls.push('trace-start'); throw new Error('recorder unavailable'); },
+        afterMutation: () => { calls.push('trace-stop'); },
+      },
+    });
+    expect(result.record.failed).not.toBe(true);
+    expect(calls).toEqual(['dispatch', 'trace-start', 'invoke', 'trace-stop']);
+  });
+
   it('rejects an unsupported stage before execution', () => {
     const input = template();
     input.stage = 'BLOCKIIN';

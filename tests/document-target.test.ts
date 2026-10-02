@@ -97,4 +97,33 @@ describe('request-scoped document dispatch targeting', () => {
     );
     expect(seen).toEqual([42]);
   });
+
+  it('annotates the first JSON tool payload with the effective pinned target', async () => {
+    const wrapped = wrapDocumentIdHandler(
+      'photoshop_set_layer_opacity',
+      async () => ({
+        content: [{ type: 'text', text: JSON.stringify({ ok: true, changed: true }) }],
+      })
+    );
+
+    const result = await wrapped({ document_id: 42, opacity: 50 });
+    const payload = JSON.parse((result.content[0] as { text: string }).text) as {
+      document_target?: { id: number; pinned: boolean };
+    };
+    expect(payload.document_target).toEqual({ id: 42, pinned: true });
+  });
+
+  it('appends target metadata when a handler has no JSON object payload to annotate', async () => {
+    const wrapped = wrapDocumentIdHandler(
+      'photoshop_set_layer_opacity',
+      async () => ({ content: [{ type: 'text', text: 'plain text result' }] })
+    );
+
+    const result = await wrapped({ document_id: 42, opacity: 50 });
+    expect(result.content).toHaveLength(2);
+    expect((result.content[0] as { text: string }).text).toBe('plain text result');
+    expect(JSON.parse((result.content[1] as { text: string }).text)).toEqual({
+      document_target: { id: 42, pinned: true },
+    });
+  });
 });

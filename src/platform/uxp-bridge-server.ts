@@ -19,6 +19,11 @@ import path from 'node:path';
 import { Logger } from '../utils/logger.js';
 import { executionTimeoutMs } from '../core/execution-context.js';
 import { UXP_BRIDGE_REVISION } from '../core/guard/protocol-version.js';
+import {
+  probeProcessVideoTraceReadiness,
+  readProcessVideoTraceSetting,
+  setProcessVideoTraceEnabled,
+} from '../core/process-video-trace.js';
 
 const logger = new Logger('UxpBridgeServer');
 
@@ -66,6 +71,19 @@ export interface UxpBridgeInvokeOptions {
   expectedBridgeRevision?: string;
 }
 
+export const UXP_BRIDGE_EVENT_PROTOCOL = 'photoshop.uxp.event.v1' as const;
+
+export interface UxpBridgeEvent {
+  protocol: typeof UXP_BRIDGE_EVENT_PROTOCOL;
+  event: 'document_closed';
+  document_id: number;
+  observed_at: string;
+  controlled: boolean;
+  command_id?: string;
+  document_name?: string;
+  document_instance_witness?: Record<string, unknown>;
+}
+
 export type UxpBridgeCommandProbe =
   | { status: 'receipt'; receipt: UxpBridgeCommandReceipt }
   | { status: 'absent' }
@@ -90,6 +108,7 @@ const resultWaiters = new Map<
   Set<{ resolve: (result: UxpBridgeResult) => void; timer: NodeJS.Timeout }>
 >();
 const commandRecords = new Map<string, UxpBridgeCommandRecord>();
+const eventListeners = new Set<(event: UxpBridgeEvent) => void | Promise<void>>();
 let lastPluginPollAt = 0;
 let pluginPollCount = 0;
 let pluginBridgeRevision: string | null = null;
@@ -98,7 +117,14 @@ let pluginDocumentCount: number | null = null;
 let pluginActiveDocument: { id?: number; name?: string } | null = null;
 
 const LONG_POLL_TIMEOUT_MS = 20_000;
-const PLUGIN_CONNECTED_WINDOW_MS = LONG_POLL_TIMEOUT_MS + 2_000;
+// Guard calls can spend ~20s in connector/validation work before their final
+// force-refreshed readiness probe. In a background Photoshop session the UXP
+// companion may also reopen its next long-poll a little late after the server's
+// 20s response. A 2s grace therefore produced false disconnects even though the
+// companion was healthy and continuously polling. Keep the grace bounded: long
+// enough to span one delayed reopen/Guard preflight, but short enough that a
+// genuinely gone companion still becomes unavailable promptly.
+const PLUGIN_CONNECTED_WINDOW_MS = LONG_POLL_TIMEOUT_MS + 15_000;
 const COMMAND_RECEIPT_PROTOCOL = 'photoshop.uxp.command_receipt.v1' as const;
 export const UXP_BRIDGE_REGISTRATION_PROTOCOL = 'photoshop.uxp.registration.v1' as const;
 export const COMMAND_REQUEST_PROTOCOL = 'photoshop.uxp.command.v1' as const;
@@ -356,6 +382,13 @@ export function getUxpBridgePort(): number {
   return listenPort;
 }
 
+export function subscribeUxpBridgeEvents(
+  listener: (event: UxpBridgeEvent) => void | Promise<void>
+): () => void {
+  eventListeners.add(listener);
+  return () => eventListeners.delete(listener);
+}
+
 async function serveDiagnostic(
   res: ServerResponse,
   action: string
@@ -378,6 +411,23 @@ async function serveDiagnostic(
 
 export function isUxpPluginConnected(now = Date.now()): boolean {
   return lastPluginPollAt > 0 && now - lastPluginPollAt <= PLUGIN_CONNECTED_WINDOW_MS;
+}
+
+export function getUxpBridgeHealthSnapshot(now = Date.now()) {
+  return {
+    ok: true as const,
+    pending: pendingCommands.length,
+    waiting_long_polls: pendingPolls.length,
+    plugin_connected: isUxpPluginConnected(now),
+    last_plugin_poll_age_ms: lastPluginPollAt > 0 ? now - lastPluginPollAt : null,
+    plugin_poll_count: pluginPollCount,
+    transport: 'long-poll' as const,
+    bridge_revision: pluginBridgeRevision,
+    expected_bridge_revision: UXP_BRIDGE_REVISION,
+    photoshop_version: pluginPhotoshopVersion,
+    document_count: pluginDocumentCount,
+    active_document: pluginActiveDocument,
+  };
 }
 
 function removePendingPoll(res: ServerResponse): void {
@@ -432,20 +482,104 @@ export async function ensureUxpBridgeServer(): Promise<number> {
       const url = new URL(req.url ?? '/', `http://127.0.0.1:${listenPort}`);
 
       if (req.method === 'GET' && url.pathname === '/health') {
-        const now = Date.now();
-        json(res, 200, {
-          ok: true,
-          pending: pendingCommands.length,
-          waiting_long_polls: pendingPolls.length,
-          plugin_connected: isUxpPluginConnected(now),
-          last_plugin_poll_age_ms: lastPluginPollAt > 0 ? now - lastPluginPollAt : null,
-          plugin_poll_count: pluginPollCount,
-          transport: 'long-poll',
-          bridge_revision: pluginBridgeRevision,
-          expected_bridge_revision: UXP_BRIDGE_REVISION,
-          photoshop_version: pluginPhotoshopVersion,
-          document_count: pluginDocumentCount,
-          active_document: pluginActiveDocument,
+        json(res, 200, getUxpBridgeHealthSnapshot());
+        return;
+      }
+
+      if (req.method === 'POST' && url.pathname === '/event') {
+        let body = '';
+        req.on('data', (chunk) => {
+          body += chunk;
+          if (body.length > 16 * 1024) req.destroy();
+        });
+        req.on('end', async () => {
+          try {
+            const parsed = JSON.parse(body) as Partial<UxpBridgeEvent>;
+            if (parsed.protocol !== UXP_BRIDGE_EVENT_PROTOCOL) {
+              json(res, 409, {
+                ok: false,
+                error: parsed.protocol ? 'uxp_event_protocol_mismatch' : 'uxp_event_protocol_missing',
+                event_protocol: parsed.protocol ?? null,
+                expected_event_protocol: UXP_BRIDGE_EVENT_PROTOCOL,
+              });
+              return;
+            }
+            if (parsed.event !== 'document_closed') {
+              json(res, 400, { ok: false, error: 'unsupported_uxp_event' });
+              return;
+            }
+            const documentId = Number(parsed.document_id);
+            if (!Number.isSafeInteger(documentId) || documentId <= 0) {
+              json(res, 400, { ok: false, error: 'document_id_required' });
+              return;
+            }
+            const observedAt = typeof parsed.observed_at === 'string' && Number.isFinite(Date.parse(parsed.observed_at))
+              ? new Date(parsed.observed_at).toISOString()
+              : new Date().toISOString();
+            const event: UxpBridgeEvent = {
+              protocol: UXP_BRIDGE_EVENT_PROTOCOL,
+              event: 'document_closed',
+              document_id: documentId,
+              observed_at: observedAt,
+              controlled: parsed.controlled === true,
+              ...(typeof parsed.command_id === 'string' && parsed.command_id.trim()
+                ? { command_id: parsed.command_id.trim() }
+                : {}),
+              ...(typeof parsed.document_name === 'string' && parsed.document_name.trim()
+                ? { document_name: parsed.document_name.trim() }
+                : {}),
+              ...(parsed.document_instance_witness && typeof parsed.document_instance_witness === 'object' && !Array.isArray(parsed.document_instance_witness)
+                ? { document_instance_witness: structuredClone(parsed.document_instance_witness) }
+                : {}),
+            };
+            const deliveries = [...eventListeners].map(async listener => {
+              try { await listener(event); }
+              catch (error) { logger.warn(`UXP event listener failed: ${error instanceof Error ? error.message : String(error)}`); }
+            });
+            await Promise.all(deliveries);
+            json(res, 200, { ok: true, delivered_to: eventListeners.size });
+          } catch (error) {
+            json(res, 400, {
+              ok: false,
+              error: error instanceof SyntaxError ? 'invalid_json' : `uxp_event_rejected:${error instanceof Error ? error.message : String(error)}`,
+            });
+          }
+        });
+        return;
+      }
+
+      if (req.method === 'GET' && url.pathname === '/settings/process-video-trace') {
+        json(res, 200, { ok: true, ...readProcessVideoTraceSetting() });
+        return;
+      }
+
+      if (req.method === 'GET' && url.pathname === '/settings/process-video-trace/readiness') {
+        json(res, 200, { ok: true, ...probeProcessVideoTraceReadiness() });
+        return;
+      }
+
+      if (req.method === 'POST' && url.pathname === '/settings/process-video-trace') {
+        let body = '';
+        req.on('data', (chunk) => {
+          body += chunk;
+          if (body.length > 4096) req.destroy();
+        });
+        req.on('end', () => {
+          try {
+            const parsed = JSON.parse(body) as { enabled?: unknown };
+            if (typeof parsed.enabled !== 'boolean') {
+              json(res, 400, { ok: false, error: 'process_video_trace_enabled_boolean_required' });
+              return;
+            }
+            json(res, 200, { ok: true, ...setProcessVideoTraceEnabled(parsed.enabled) });
+          } catch (error) {
+            json(res, 400, {
+              ok: false,
+              error: error instanceof SyntaxError
+                ? 'invalid_json'
+                : `process_video_trace_setting_write_failed:${error instanceof Error ? error.message : String(error)}`,
+            });
+          }
         });
         return;
       }
@@ -944,6 +1078,7 @@ export async function shutdownUxpBridgeServer(): Promise<void> {
   }
   resultWaiters.clear();
   commandRecords.clear();
+  eventListeners.clear();
   pendingCommands.length = 0;
   await new Promise<void>((resolve) => server!.close(() => resolve()));
   server = null;

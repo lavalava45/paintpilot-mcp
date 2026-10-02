@@ -8,15 +8,15 @@
   "long_description": "Photoshop MCP — Digital Painting Edition is an independently maintained Windows-first MCP system for AI-driven digital painting and evidence-bound Photoshop automation. It includes a durable embedded Guard, semantic painting/editing tools, visual verification, and a Photoshop UXP companion. It is not affiliated with or endorsed by Adobe Inc. Historical upstream provenance and licensing are documented in NOTICE and LICENSE.",
   "author": {
     "name": "lavalava45",
-    "url": "https://github.com/lavalava45/photoshop-mcp-digital-painting"
+    "url": "https://github.com/lavalava45/paintpilot-mcp"
   },
-  "homepage": "https://github.com/lavalava45/photoshop-mcp-digital-painting",
+  "homepage": "https://github.com/lavalava45/paintpilot-mcp",
   "repository": {
     "type": "git",
-    "url": "https://github.com/lavalava45/photoshop-mcp-digital-painting"
+    "url": "https://github.com/lavalava45/paintpilot-mcp"
   },
-  "documentation": "https://github.com/lavalava45/photoshop-mcp-digital-painting/blob/digital-painting/INSTALL.md",
-  "support": "https://github.com/lavalava45/photoshop-mcp-digital-painting/issues",
+  "documentation": "https://github.com/lavalava45/paintpilot-mcp/blob/digital-painting/INSTALL.md",
+  "support": "https://github.com/lavalava45/paintpilot-mcp/issues",
   "license": "MIT",
   "keywords": [
     "mcp",

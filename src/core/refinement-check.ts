@@ -227,9 +227,6 @@ export function normalizeRefinementCheck(raw: unknown): RefinementCheck {
 
   if (status === 'style-not-applicable') {
     const applicabilityReason = text(record.applicability_reason);
-    if (!applicabilityReason || applicabilityReason.length < 12) {
-      throw new Error('refinement_check.status=style-not-applicable requires a concrete applicability_reason');
-    }
     const rawBasis = record.style_contract_basis;
     if (!rawBasis || typeof rawBasis !== 'object' || Array.isArray(rawBasis)) {
       throw new Error('refinement_check.status=style-not-applicable requires style_contract_basis');
@@ -254,7 +251,7 @@ export function normalizeRefinementCheck(raw: unknown): RefinementCheck {
       criteria: {},
       confidence,
       limitations,
-      applicability_reason: applicabilityReason,
+      applicability_reason: applicabilityReason ?? null,
       style_contract_basis: { field, criterion },
       low_frequency_evidence: null,
       material_response: null,

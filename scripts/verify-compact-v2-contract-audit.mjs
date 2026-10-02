@@ -65,7 +65,7 @@ const instructionFiles = [
   'docs/painting-policy/foundations.md',
   'docs/painting-policy/operations.md',
   'docs/performance-and-latency.md',
-  'src/prompts/instructions.ts',
+  'src/prompts/host-guidance.ts',
   'src/prompts/templates/digital-painting-control.ts',
 ];
 

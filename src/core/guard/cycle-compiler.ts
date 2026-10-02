@@ -5,7 +5,12 @@ import { compileVisualMicroPlan } from '../visual-microplan-compiler.js';
 import { preflightVisualMicroPlanForExecution } from '../../tools/visual-microplan-tools.js';
 import { isVisual, parseTexts } from './session-store.js';
 import { compileArtisticOperation } from '../artistic-operation-contract.js';
-import { paintingMethodCapabilities } from '../painting-method-palette.js';
+import {
+  paintingMethodCapabilities,
+  selectPaintingConstructionMethod,
+  type PaintingConstructionRole,
+  type PaintingImpactClass,
+} from '../painting-method-palette.js';
 import { UXP_BRIDGE_REVISION } from './protocol-version.js';
 import {
   VISUAL_MICROPLAN_ACTION_CLASSES,
@@ -29,7 +34,49 @@ import {
   isBackwardPaintingStageTransition,
   paintingStageRank,
 } from '../painting-stage-policy.js';
-import { normalizeMaterialResponsePlan } from '../material-response.js';
+import { normalizeMaterialResponsePlan, type MaterialResponsePlan } from '../material-response.js';
+import {
+  normalizeSceneOwnershipPlan,
+  sceneOwnershipOwnerIds,
+  type SceneOwnershipPlan,
+} from '../scene-ownership-plan.js';
+import { normalizeSceneGeometryModel, type SceneGeometryModel } from '../scene-geometry-model.js';
+import {
+  assertLightingColorBindingMatchesScene,
+  lightingColorBindingStaleness,
+  normalizeSceneLightingColorModel,
+  type SceneLightingColorModel,
+} from '../scene-lighting-color-model.js';
+import { normalizeColorGradientPreflight, type ColorGradientPreflight } from '../color-gradient-preflight.js';
+import { normalizeImagingPreflight, type ImagingPreflight } from '../imaging-preflight.js';
+import { normalizeAttentionBinding, normalizePerceptualHierarchy } from '../perceptual-hierarchy.js';
+import { cameraBindingStaleness, normalizeCameraBinding, normalizeSceneCameraImagingModel, type SceneCameraImagingModel } from '../scene-camera-imaging-model.js';
+import {
+  changedSceneGeometryDependencyIds,
+  geometryBindingDependencyIds,
+  geometryBindingIssues,
+  geometryBindingStaleness,
+  normalizeGeometryBinding,
+  type GeometryBinding,
+} from '../geometry-binding.js';
+import { runGeometryPreflight, type GeometryPreflightReport } from '../geometry-preflight.js';
+import { guardExecutionClass } from './execution-policy.js';
+import {
+  PaintingIntentError,
+  paintingIntentFingerprint,
+  parsePaintingIntent,
+} from './painting-intent.js';
+import {
+  NextPassCompilerError,
+  compilePaintingIntentToNextPass,
+} from './next-pass-compiler.js';
+import {
+  applyDeterministicPassRepairs,
+  classifyViolations,
+  machineRepairRecipe,
+  splitPassForBudget,
+  type StructuredRepairOperation,
+} from './preflight-repair.js';
 
 export interface GuardCycleCompilerStore {
   read?(id: string): Record<string, unknown> | undefined;
@@ -38,15 +85,27 @@ export interface GuardCycleCompilerStore {
     previous_report?: Record<string, unknown>;
     previous_operation_ack?: Record<string, unknown>;
   };
-  compactPassContext?(documentId: number): {
+  compactPassContext?(documentId: number, projectionContext?: GuardProjectionContext): {
     stage?: string;
     scale?: string;
     painting_profile?: string;
+    has_visual_frame?: boolean;
     active_problem_id?: string;
     active_problem_scale?: string;
     brush_roles?: Array<Record<string, unknown>>;
     brush_inventory_scope?: string | null;
+    recent_brush_problem_usage?: Array<Record<string, unknown>>;
+    recent_brush_usage?: Array<Record<string, unknown>>;
     logical_layer_owners?: Array<Record<string, unknown>>;
+    scene_ownership_plan?: Record<string, unknown> | null;
+    scene_geometry_model?: Record<string, unknown> | null;
+    scene_lighting_color_model?: Record<string, unknown> | null;
+    scene_camera_imaging_model?: Record<string, unknown> | null;
+    geometry_binding_states?: Array<Record<string, unknown>>;
+    lighting_color_binding_states?: Array<Record<string, unknown>>;
+    camera_binding_states?: Array<Record<string, unknown>>;
+    attention_binding_states?: Array<Record<string, unknown>>;
+    document_incarnation_id?: string | null;
     art_director?: Record<string, unknown> | null;
   };
   planAcceptedAnchorRestore?(
@@ -62,6 +121,8 @@ export interface GuardCycleCompilerStore {
       plannedPreviousVisualVerdict?: boolean;
       projectionContext?: GuardProjectionContext;
       stateOnly?: boolean;
+      deferCheckpointDebt?: boolean;
+      compilerDeferredFromOperationId?: string;
     }
   ): string[];
 }
@@ -79,6 +140,36 @@ export interface GuardCycleCompileResult {
   rejection?: ToolResult;
   violations: GuardCycleCompileViolation[];
   normalizations: Array<{ code: string; message: string }>;
+  compilerTelemetry?: GuardCompilerTelemetry;
+  repairAudit?: GuardCompilerRepairAudit;
+  compilerDeferredFromOperationId?: string;
+}
+
+export interface GuardCompilerTelemetry {
+  painting_intent_compile_ms: number;
+  durable_state_injection_ms: number;
+  local_validation_ms: number;
+  auto_repair_ms: number;
+  auto_repair_count: number;
+  auto_split_count: number;
+  model_semantic_ambiguity_count: number;
+  preflight_rejection_exposed_to_model_count: number;
+  intent_received_at: string;
+  compiled_at?: string;
+  validated_at?: string;
+  repaired_at?: string;
+}
+
+export interface GuardCompilerRepairAudit {
+  protocol: 'photoshop.guard.compiler_repair.v1';
+  original_intent_fingerprint?: string;
+  first_compiled_payload_fingerprint?: string;
+  repairs: StructuredRepairOperation[];
+  repaired_payload_fingerprint?: string;
+  first_violation_fingerprint?: string;
+  final_violation_fingerprint?: string;
+  final_validation: 'valid' | 'rejected' | 'systemic-repeat';
+  deferred_next_pass?: Record<string, unknown>;
 }
 
 export interface GuardCycleCompilerOptions {
@@ -87,6 +178,7 @@ export interface GuardCycleCompilerOptions {
   ) => Promise<GuardCycleCompileViolation[]>;
   projectionContext?: GuardProjectionContext;
   nextOperationValidation?: 'full' | 'state-only';
+  compilerDeferredFromOperationId?: string;
 }
 
 function stableJson(value: unknown): string {
@@ -217,9 +309,10 @@ function operationSchemaErrors(operation: Record<string, unknown>, registry: Too
 function violation(
   scope: GuardCycleCompileViolation['scope'],
   code: string,
-  message: string
+  message: string,
+  details?: Record<string, unknown>
 ): GuardCycleCompileViolation {
-  return { scope, code, message };
+  return { scope, code, message, ...(details ? { details } : {}) };
 }
 
 function uniqueViolations(violations: GuardCycleCompileViolation[]): GuardCycleCompileViolation[] {
@@ -294,7 +387,7 @@ function compactObservationToVerdict(
         : {}),
       observations: Array.isArray(observation.observations)
         ? observation.observations
-        : [{ region: 'delivered review frame', visible: compactObserved }],
+        : [{ region: 'whole frame', visible: compactObserved }],
       primary_mismatch: text(observation.primary_mismatch)
         ?? (compactTarget === 'resolved'
           ? 'No blocking mismatch is visible in the supplied observation.'
@@ -421,10 +514,15 @@ const COMPACT_DOCUMENT_BOOTSTRAP_TOOLS = new Set([
   'photoshop_open_image',
 ]);
 
-function compactStepMethodClass(step: Record<string, unknown>): string | undefined {
+function compactStepMethodClass(step: Record<string, unknown>, registry?: ToolRegistry): string | undefined {
   const args = step.args && typeof step.args === 'object' && !Array.isArray(step.args)
     ? step.args as Record<string, unknown>
     : {};
+  const methodId = text(step.method_id);
+  if (methodId && registry) {
+    const semanticMethod = paintingMethodCapabilities(registry).find(capability => capability.id === methodId);
+    if (semanticMethod && semanticMethod.primaryTool === text(step.tool)) return semanticMethod.methodClass;
+  }
   return visualMicroPlanMethodClassForStep({ tool: text(step.tool) ?? '', args });
 }
 
@@ -438,6 +536,30 @@ function compactChangeDomain(method: string | undefined): string {
   if (method === 'region') return 'local-shape';
   if (method === 'erase' || method === 'line' || method === 'mask') return 'local-edge';
   return 'local-tone';
+}
+
+function isCanonicalLowVertexRegionCompound(steps: Array<Record<string, unknown>>): boolean {
+  const regions = steps.flatMap(step => {
+    if (text(step.tool) !== 'photoshop_paint_regions') return [];
+    const args = step.args && typeof step.args === 'object' && !Array.isArray(step.args)
+      ? step.args as Record<string, unknown>
+      : undefined;
+    return Array.isArray(args?.regions)
+      ? args!.regions.filter((region): region is Record<string, unknown> => !!region && typeof region === 'object' && !Array.isArray(region))
+      : [];
+  });
+  if (regions.length < 2) return false;
+  let contourCount = 0;
+  for (const region of regions) {
+    if (!Array.isArray(region.contours) || region.contours.length === 0) return false;
+    for (const contour of region.contours) {
+      if (!contour || typeof contour !== 'object' || Array.isArray(contour)) return false;
+      const points = (contour as Record<string, unknown>).points;
+      if (!Array.isArray(points) || points.length < 3 || points.length > 4) return false;
+      contourCount += 1;
+    }
+  }
+  return contourCount >= 2;
 }
 
 function inferUniqueClassification(input: {
@@ -491,11 +613,9 @@ function resolveCompactStageTransition(
   const stage = requestedStage ?? durableStage ?? canonicalPaintingStage(fallbackStage);
 
   if (requestedStage && paintingStageRank(requestedStage) === undefined) {
-    violations.push(violation(
-      'next_operation',
-      'painting_stage_unknown',
-      `next_pass.stage=${requestedStage} is not a recognized painting stage and cannot replace durable stage ${durableStage ?? 'none'}`
-    ));
+    // E.7c: an artistic stage label is guidance, not execution authority.
+    // Unknown labels are ignored for canonical stage state rather than forcing
+    // schema repair before an otherwise executable visual experiment.
     return { stage: durableStage ?? stage };
   }
 
@@ -516,12 +636,9 @@ function resolveCompactStageTransition(
   }
 
   if (!rawStageReset || typeof rawStageReset !== 'object' || Array.isArray(rawStageReset)) {
-    violations.push(violation(
-      'next_operation',
-      'painting_stage_regression_requires_reset',
-      `painting_stage_regression_requires_reset: durable stage ${durableStage} cannot move backward to ${stage} from an ordinary Painter pass; supply explicit next_pass.stage_reset only for genuine structural rework`
-    ));
-    return { stage };
+    // Label-only regressions do not downgrade durable state and do not block
+    // execution. Genuine structural resets remain explicit and validated below.
+    return { stage: durableStage };
   }
 
   const reset = rawStageReset as Record<string, unknown>;
@@ -534,14 +651,11 @@ function resolveCompactStageTransition(
       `next_pass.stage_reset.reason must be one of ${PAINTING_STAGE_RESET_REASONS.join('|')}`
     ));
   }
-  if (!detail || detail.length < 12) {
-    violations.push(violation(
-      'next_operation',
-      'painting_stage_reset_detail_required',
-      'next_pass.stage_reset.detail must give a concrete structural reason of at least 12 characters'
-    ));
-  }
-  if (!reason || !PAINTING_STAGE_RESET_REASONS.includes(reason as never) || !detail || detail.length < 12) {
+  // E.7c: the executable reset reason is the authority for a deliberate
+  // backward structural transition. Free-form detail remains useful audit
+  // guidance, but requiring a minimum prose length only creates a schema-
+  // repair turn without making the reset safer.
+  if (!reason || !PAINTING_STAGE_RESET_REASONS.includes(reason as never)) {
     return { stage };
   }
 
@@ -552,7 +666,7 @@ function resolveCompactStageTransition(
       from_stage: durableStage,
       to_stage: stage,
       reason,
-      detail,
+      ...(detail ? { detail } : {}),
     },
   };
 }
@@ -560,7 +674,8 @@ function resolveCompactStageTransition(
 function compileCompactPass(
   raw: Record<string, unknown>,
   store: GuardCycleCompilerStore,
-  registry: ToolRegistry
+  registry: ToolRegistry,
+  projectionContext?: GuardProjectionContext
 ): { operation?: Record<string, unknown>; violations: GuardCycleCompileViolation[]; normalizations?: Array<{ code: string; message: string }> } {
   const violations: GuardCycleCompileViolation[] = [];
   const normalizations: Array<{ code: string; message: string }> = [];
@@ -685,8 +800,15 @@ function compileCompactPass(
       : {};
     if (!bootstrap) actionArgs.document_id ??= Number(documentId);
     const context = !bootstrap && Number.isSafeInteger(documentId)
-      ? store.compactPassContext?.(Number(documentId)) ?? {}
+      ? store.compactPassContext?.(Number(documentId), projectionContext) ?? {}
       : {};
+    if (context.painting_profile === 'nontrivial_painting' && onlyTool === 'photoshop_create_layer') {
+      violations.push(violation(
+        'next_operation',
+        'semantic_owner_create_requires_visual_microplan',
+        'nontrivial painting must create persistent paint layers inside the bounded VisualMicroPlan that also declares logical_layer ownership; a standalone create-layer operation would bypass atomic semantic owner binding'
+      ));
+    }
     const art = context.art_director && typeof context.art_director === 'object'
       ? context.art_director as Record<string, unknown>
       : undefined;
@@ -728,6 +850,12 @@ function compileCompactPass(
         ...(raw.independent_region === true ? { independent_region: true } : {}),
         ...(raw.addresses_primary_mismatch === true ? { addresses_primary_mismatch: true } : {}),
         ...(text(raw.addresses_problem_id) ? { addresses_problem_id: text(raw.addresses_problem_id) } : {}),
+        ...(text(raw.root_cause_classification) ? { root_cause_classification: text(raw.root_cause_classification) } : {}),
+        ...(text(raw.root_cause_reason) ? { root_cause_reason: text(raw.root_cause_reason) } : {}),
+        ...(raw.causal_level_change === true ? { causal_level_change: true } : {}),
+        ...(text(raw.causal_strategy_id) ? { causal_strategy_id: text(raw.causal_strategy_id) } : {}),
+        ...(text(raw.strategy_family) ? { strategy_family: text(raw.strategy_family) } : {}),
+        ...(Number.isInteger(raw.causal_escalation_level) ? { causal_escalation_level: raw.causal_escalation_level } : {}),
       } : {}),
     };
 
@@ -836,7 +964,20 @@ function compileCompactPass(
   }
 
   const mutationSteps = actions.filter(step => VISUAL_MICROPLAN_MUTATION_TOOLS.has(text(step.tool) ?? ''));
-  const methodClasses = [...new Set(mutationSteps.map(compactStepMethodClass).filter(Boolean))] as string[];
+  const knownMethods = new Map(paintingMethodCapabilities(registry).map(capability => [capability.id, capability]));
+  for (const step of mutationSteps) {
+    const methodId = text(step.method_id);
+    if (!methodId) continue;
+    const semanticMethod = knownMethods.get(methodId);
+    if (semanticMethod && semanticMethod.primaryTool !== text(step.tool)) {
+      violations.push(violation(
+        'next_operation',
+        'step_method_tool_mismatch',
+        `method_id=${methodId} requires primary tool ${semanticMethod.primaryTool}, not ${text(step.tool) ?? 'missing'}`
+      ));
+    }
+  }
+  const methodClasses = [...new Set(mutationSteps.map(step => compactStepMethodClass(step, registry)).filter(Boolean))] as string[];
   if (methodClasses.length > 1) {
     violations.push(violation(
       'next_operation',
@@ -853,7 +994,7 @@ function compileCompactPass(
   }
   const methodClass = methodClasses[0];
   const risk = mutationSteps
-    .map(step => compactRiskForMethod(compactStepMethodClass(step)))
+    .map(step => compactRiskForMethod(compactStepMethodClass(step, registry)))
     .sort((a, b) => ['low', 'moderate', 'high'].indexOf(b) - ['low', 'moderate', 'high'].indexOf(a))[0]
     ?? 'low';
   const explicitActionClass = text(raw.action_class)?.toUpperCase();
@@ -874,7 +1015,7 @@ function compileCompactPass(
   const actionClass = explicitActionClass
     ?? (methodClass === 'rollback' ? 'ROLLBACK' : methodClass === 'erase' ? 'ERASE' : 'ADD');
 
-  const context = store.compactPassContext?.(Number(documentId)) ?? {};
+  const context = store.compactPassContext?.(Number(documentId), projectionContext) ?? {};
   const { stage, stageReset } = resolveCompactStageTransition(
     raw,
     context,
@@ -932,12 +1073,371 @@ function compileCompactPass(
     && !Array.isArray(raw.logical_layer)
     ? structuredClone(raw.logical_layer) as Record<string, unknown>
     : undefined;
+  const plannedLogicalDecision = text(rawLogicalLayer?.decision)?.toLowerCase();
+  let durableSceneOwnershipPlan: SceneOwnershipPlan | undefined;
+  if (context.scene_ownership_plan) {
+    try {
+      durableSceneOwnershipPlan = normalizeSceneOwnershipPlan(context.scene_ownership_plan);
+    } catch (error) {
+      violations.push(violation(
+        'next_operation',
+        'scene_ownership_plan_state_invalid',
+        `Durable scene ownership plan is invalid: ${error instanceof Error ? error.message : String(error)}`
+      ));
+    }
+  }
+  let suppliedSceneOwnershipPlan: SceneOwnershipPlan | undefined;
+  if (raw.scene_ownership_plan !== undefined) {
+    try {
+      suppliedSceneOwnershipPlan = normalizeSceneOwnershipPlan(raw.scene_ownership_plan);
+    } catch (error) {
+      violations.push(violation(
+        'next_operation',
+        'scene_ownership_plan_invalid',
+        error instanceof Error ? error.message : String(error)
+      ));
+    }
+  }
+  if (durableSceneOwnershipPlan && suppliedSceneOwnershipPlan
+    && stableJson(durableSceneOwnershipPlan) !== stableJson(suppliedSceneOwnershipPlan)) {
+    violations.push(violation(
+      'next_operation',
+      'scene_ownership_plan_conflict',
+      `scene_ownership_plan_conflict: document already owns durable plan ${durableSceneOwnershipPlan.plan_id}; do not silently replace its semantic ownership map during a Painter pass`
+    ));
+  }
+  const sceneOwnershipPlan = durableSceneOwnershipPlan ?? suppliedSceneOwnershipPlan;
+  const sceneOwnershipPlanToPersist = !durableSceneOwnershipPlan && suppliedSceneOwnershipPlan
+    ? suppliedSceneOwnershipPlan
+    : undefined;
+  let durableSceneGeometryModel: SceneGeometryModel | undefined;
+  if (context.scene_geometry_model) {
+    try {
+      durableSceneGeometryModel = normalizeSceneGeometryModel(context.scene_geometry_model);
+    } catch (error) {
+      violations.push(violation('next_operation', 'scene_geometry_model_state_invalid',
+        `Durable scene geometry model is invalid: ${error instanceof Error ? error.message : String(error)}`));
+    }
+  }
+  let suppliedSceneGeometryModel: SceneGeometryModel | undefined;
+  if (raw.scene_geometry_model !== undefined) {
+    try {
+      suppliedSceneGeometryModel = normalizeSceneGeometryModel(raw.scene_geometry_model);
+    } catch (error) {
+      violations.push(violation('next_operation', 'scene_geometry_model_invalid',
+        error instanceof Error ? error.message : String(error)));
+    }
+  }
+  let sceneGeometryModelToPersist: SceneGeometryModel | undefined;
+  if (suppliedSceneGeometryModel) {
+    if (suppliedSceneGeometryModel.source_frame.document_id !== documentId) {
+      violations.push(violation('next_operation', 'scene_geometry_model_document_mismatch',
+        `scene_geometry_model_document_mismatch: source_frame.document_id=${suppliedSceneGeometryModel.source_frame.document_id} does not match operation document_id=${documentId}`));
+    } else if (context.document_incarnation_id
+      && suppliedSceneGeometryModel.source_frame.document_incarnation !== context.document_incarnation_id) {
+      violations.push(violation('next_operation', 'scene_geometry_model_incarnation_mismatch',
+        `scene_geometry_model_incarnation_mismatch: source_frame.document_incarnation=${suppliedSceneGeometryModel.source_frame.document_incarnation} must match the exact current document incarnation=${context.document_incarnation_id}`));
+    } else if (durableSceneGeometryModel) {
+      if (suppliedSceneGeometryModel.model_id !== durableSceneGeometryModel.model_id) {
+        violations.push(violation('next_operation', 'scene_geometry_model_conflict',
+          `scene_geometry_model_conflict: durable model_id=${durableSceneGeometryModel.model_id}; replacement must preserve model identity`));
+      } else if (suppliedSceneGeometryModel.revision <= durableSceneGeometryModel.revision) {
+        violations.push(violation('next_operation', 'scene_geometry_model_revision_conflict',
+          `scene_geometry_model_revision_conflict: supplied revision=${suppliedSceneGeometryModel.revision} must be greater than durable revision=${durableSceneGeometryModel.revision}`));
+      } else {
+        sceneGeometryModelToPersist = suppliedSceneGeometryModel;
+      }
+    } else {
+      sceneGeometryModelToPersist = suppliedSceneGeometryModel;
+    }
+  }
+  const applicableSceneGeometryModel = sceneGeometryModelToPersist ?? durableSceneGeometryModel;
+  let durableSceneLightingColorModel: SceneLightingColorModel | undefined;
+  if (context.scene_lighting_color_model) {
+    try {
+      durableSceneLightingColorModel = normalizeSceneLightingColorModel(context.scene_lighting_color_model);
+    } catch (error) {
+      violations.push(violation('next_operation', 'scene_lighting_color_model_state_invalid',
+        `Durable scene lighting/color model is invalid: ${error instanceof Error ? error.message : String(error)}`));
+    }
+  }
+  let suppliedSceneLightingColorModel: SceneLightingColorModel | undefined;
+  if (raw.scene_lighting_color_model !== undefined) {
+    try {
+      suppliedSceneLightingColorModel = normalizeSceneLightingColorModel(raw.scene_lighting_color_model);
+    } catch (error) {
+      violations.push(violation('next_operation', 'scene_lighting_color_model_invalid', error instanceof Error ? error.message : String(error)));
+    }
+  }
+  let sceneLightingColorModelToPersist: SceneLightingColorModel | undefined;
+  if (suppliedSceneLightingColorModel) {
+    if (suppliedSceneLightingColorModel.source_frame.document_id !== documentId) {
+      violations.push(violation('next_operation', 'scene_lighting_color_model_document_mismatch',
+        `scene_lighting_color_model_document_mismatch: source_frame.document_id=${suppliedSceneLightingColorModel.source_frame.document_id} does not match operation document_id=${documentId}`));
+    } else if (context.document_incarnation_id && suppliedSceneLightingColorModel.source_frame.document_incarnation !== context.document_incarnation_id) {
+      violations.push(violation('next_operation', 'scene_lighting_color_model_incarnation_mismatch',
+        `scene_lighting_color_model_incarnation_mismatch: source_frame.document_incarnation=${suppliedSceneLightingColorModel.source_frame.document_incarnation} must match the exact current document incarnation=${context.document_incarnation_id}`));
+    } else if (durableSceneLightingColorModel) {
+      if (suppliedSceneLightingColorModel.model_id !== durableSceneLightingColorModel.model_id) {
+        violations.push(violation('next_operation', 'scene_lighting_color_model_conflict',
+          `scene_lighting_color_model_conflict: durable model_id=${durableSceneLightingColorModel.model_id}; replacement must preserve model identity`));
+      } else if (suppliedSceneLightingColorModel.revision <= durableSceneLightingColorModel.revision) {
+        violations.push(violation('next_operation', 'scene_lighting_color_model_revision_conflict',
+          `scene_lighting_color_model_revision_conflict: supplied revision=${suppliedSceneLightingColorModel.revision} must be greater than durable revision=${durableSceneLightingColorModel.revision}`));
+      } else sceneLightingColorModelToPersist = suppliedSceneLightingColorModel;
+    } else sceneLightingColorModelToPersist = suppliedSceneLightingColorModel;
+  }
+  const applicableSceneLightingColorModel = sceneLightingColorModelToPersist ?? durableSceneLightingColorModel;
+  let durableSceneCameraImagingModel: SceneCameraImagingModel | undefined;
+  if (context.scene_camera_imaging_model) {
+    try {
+      durableSceneCameraImagingModel = normalizeSceneCameraImagingModel(context.scene_camera_imaging_model);
+    } catch (error) {
+      violations.push(violation('next_operation', 'scene_camera_imaging_model_state_invalid',
+        `Durable scene camera/imaging model is invalid: ${error instanceof Error ? error.message : String(error)}`));
+    }
+  }
+  let suppliedSceneCameraImagingModel: SceneCameraImagingModel | undefined;
+  if (raw.scene_camera_imaging_model !== undefined) {
+    try {
+      suppliedSceneCameraImagingModel = normalizeSceneCameraImagingModel(raw.scene_camera_imaging_model);
+    } catch (error) {
+      violations.push(violation('next_operation', 'scene_camera_imaging_model_invalid', error instanceof Error ? error.message : String(error)));
+    }
+  }
+  let sceneCameraImagingModelToPersist: SceneCameraImagingModel | undefined;
+  if (suppliedSceneCameraImagingModel) {
+    if (suppliedSceneCameraImagingModel.source_frame.document_id !== documentId) {
+      violations.push(violation('next_operation', 'scene_camera_imaging_model_document_mismatch',
+        `scene_camera_imaging_model source document ${suppliedSceneCameraImagingModel.source_frame.document_id} does not match operation document ${documentId}`));
+    } else if (context.document_incarnation_id
+      && suppliedSceneCameraImagingModel.source_frame.document_incarnation !== context.document_incarnation_id) {
+      violations.push(violation('next_operation', 'scene_camera_imaging_model_incarnation_mismatch',
+        `scene_camera_imaging_model source incarnation must match current document incarnation ${context.document_incarnation_id}`));
+    } else if (!applicableSceneGeometryModel
+      || suppliedSceneCameraImagingModel.geometry_model_id !== applicableSceneGeometryModel.model_id
+      || suppliedSceneCameraImagingModel.geometry_model_revision !== applicableSceneGeometryModel.revision) {
+      violations.push(violation('next_operation', 'scene_camera_imaging_geometry_mismatch',
+        'scene_camera_imaging_model must reference the exact applicable Scene Geometry Model revision'));
+    } else if (suppliedSceneCameraImagingModel.lighting_color_model_id
+      && (!applicableSceneLightingColorModel
+        || suppliedSceneCameraImagingModel.lighting_color_model_id !== applicableSceneLightingColorModel.model_id
+        || suppliedSceneCameraImagingModel.lighting_color_model_revision !== applicableSceneLightingColorModel.revision)) {
+      violations.push(violation('next_operation', 'scene_camera_imaging_lighting_mismatch',
+        'scene_camera_imaging_model lighting/color provenance must reference the exact applicable E.19 revision'));
+    } else if (durableSceneCameraImagingModel) {
+      if (suppliedSceneCameraImagingModel.model_id !== durableSceneCameraImagingModel.model_id) {
+        violations.push(violation('next_operation', 'scene_camera_imaging_model_conflict',
+          `durable camera model_id=${durableSceneCameraImagingModel.model_id}; replacement must preserve model identity`));
+      } else if (suppliedSceneCameraImagingModel.revision <= durableSceneCameraImagingModel.revision) {
+        violations.push(violation('next_operation', 'scene_camera_imaging_model_revision_conflict',
+          `supplied camera revision=${suppliedSceneCameraImagingModel.revision} must be greater than durable revision=${durableSceneCameraImagingModel.revision}`));
+      } else sceneCameraImagingModelToPersist = suppliedSceneCameraImagingModel;
+    } else sceneCameraImagingModelToPersist = suppliedSceneCameraImagingModel;
+  }
+  const applicableSceneCameraImagingModel = sceneCameraImagingModelToPersist ?? durableSceneCameraImagingModel;
+  const imagingPreflightRequired = (
+    text(rawLogicalLayer?.physical_role)?.toLowerCase() === 'camera-post'
+    || ['gaussian-blur', 'smart-blur'].includes(text(raw.preferred_method_id)?.toLowerCase() ?? '')
+  );
+  let imagingPreflight: ImagingPreflight | undefined;
+  if (imagingPreflightRequired && raw.imaging_preflight === undefined) {
+    violations.push(violation('next_operation', 'imaging_preflight_required',
+      'Substantial camera/post or blur treatment requires imaging_preflight against the active E.20 camera model'));
+  } else if (raw.imaging_preflight !== undefined) {
+    if (!applicableSceneCameraImagingModel) {
+      violations.push(violation('next_operation', 'imaging_preflight_camera_model_missing',
+        'imaging_preflight requires an active durable or same-pass scene_camera_imaging_model'));
+    } else {
+      try {
+        imagingPreflight = normalizeImagingPreflight(raw.imaging_preflight, applicableSceneCameraImagingModel);
+        if (imagingPreflight.outcome === 'conflict') {
+          violations.push(violation('next_operation', 'imaging_preflight_conflict', imagingPreflight.findings.join('; ')));
+        }
+      } catch (error) {
+        violations.push(violation('next_operation', 'imaging_preflight_invalid', error instanceof Error ? error.message : String(error)));
+      }
+    }
+  }
+  const rawLogicalLayerForColor = raw.logical_layer && typeof raw.logical_layer === 'object' && !Array.isArray(raw.logical_layer)
+    ? raw.logical_layer as Record<string, unknown>
+    : undefined;
+  // The blank-canvas first-visible-progress path is intentionally exempt: it
+  // must not be delayed by a scene-color receipt before any visual frame
+  // exists. Once a frame exists, broad color decisions become causal edits
+  // and require the E.19 receipt.
+  const broadColorAdjustmentTools = new Set([
+    'photoshop_adjust_hue_saturation',
+    'photoshop_adjust_vibrance',
+    'photoshop_adjust_exposure',
+    'photoshop_apply_photo_filter',
+    'photoshop_apply_gradient_map',
+    'photoshop_apply_lut',
+  ]);
+  const hasBroadDirectColorAdjustment = scale === 'global'
+    && mutationSteps.some(step => broadColorAdjustmentTools.has(text(step.tool) ?? ''));
+  const colorPreflightRequired = context.has_visual_frame === true && (methodClass === 'gradient'
+    || ['atmosphere', 'optical-effect'].includes(text(rawLogicalLayerForColor?.physical_role) ?? '')
+    || (scale === 'global' && Array.isArray(raw.change_domains) && raw.change_domains.includes('lighting-structure'))
+    || hasBroadDirectColorAdjustment);
+  let colorGradientPreflight: ColorGradientPreflight | undefined;
+  if (colorPreflightRequired && raw.color_gradient_preflight === undefined) {
+    violations.push(violation('next_operation', 'color_gradient_preflight_required',
+      'Large color-field/gradient, broad relighting, atmosphere, and major optical-effect passes require next_pass.color_gradient_preflight before dispatch'));
+  } else if (raw.color_gradient_preflight !== undefined) {
+    if (!applicableSceneLightingColorModel) {
+      violations.push(violation('next_operation', 'color_gradient_preflight_scene_model_missing',
+        'color_gradient_preflight requires an active durable or same-pass scene_lighting_color_model'));
+    } else {
+      try {
+        colorGradientPreflight = normalizeColorGradientPreflight(raw.color_gradient_preflight, applicableSceneLightingColorModel);
+        if (colorGradientPreflight.outcome === 'conflict') {
+          violations.push(violation('next_operation', 'color_gradient_preflight_conflict',
+            `color_gradient_preflight conflicts with established E.19 evidence: ${colorGradientPreflight.findings.join('; ')}`));
+        }
+      } catch (error) {
+        violations.push(violation('next_operation', 'color_gradient_preflight_invalid',
+          error instanceof Error ? error.message : String(error)));
+      }
+    }
+  }
+  const validateMaterialLightingBinding = (plan: MaterialResponsePlan) => {
+    if (!plan.lightingColorBinding) return;
+    if (!applicableSceneLightingColorModel) {
+      violations.push(violation('next_operation', 'material_lighting_color_scene_model_missing',
+        'material_response.lighting_color_binding requires an active durable or same-pass scene_lighting_color_model'));
+      return;
+    }
+    const binding = plan.lightingColorBinding;
+    const ownerId = text(logicalLayer?.hypothesis_id);
+    const priorState = ownerId ? lightingColorBindingStateByOwner.get(ownerId) : undefined;
+    const sameRevision = binding.sceneModelId === applicableSceneLightingColorModel.model_id
+      && binding.sceneModelRevision === applicableSceneLightingColorModel.revision;
+    const samePassSuccessor = !!sceneLightingColorModelToPersist && !!durableSceneLightingColorModel
+      && binding.sceneModelId === durableSceneLightingColorModel.model_id
+      && binding.sceneModelRevision === durableSceneLightingColorModel.revision;
+    const staleness = sameRevision
+      ? { stale: false, changed_dependency_ids: [] as string[] }
+      : samePassSuccessor
+        ? lightingColorBindingStaleness(binding, sceneLightingColorModelToPersist!, durableSceneLightingColorModel!)
+        : {
+            stale: priorState?.stale !== false,
+            changed_dependency_ids: Array.isArray(priorState?.changed_dependency_ids)
+              ? priorState.changed_dependency_ids.map(value => text(value)).filter((value): value is string => !!value)
+              : [],
+          };
+    if (staleness.stale) {
+      violations.push(violation('next_operation', 'material_lighting_color_binding_stale',
+        `material lighting/color binding is stale against ${applicableSceneLightingColorModel.model_id}@${applicableSceneLightingColorModel.revision}; changed dependencies=${staleness.changed_dependency_ids.join(',') || 'unknown/source-revision-unavailable'}`));
+      return;
+    }
+    const spatial = binding.spatialRelation;
+    if (spatial) {
+      if (!applicableSceneGeometryModel) {
+        violations.push(violation('next_operation', 'material_lighting_spatial_geometry_missing',
+          'material_response.lighting_color_binding.spatial_relation requires an active Scene Geometry Model'));
+        return;
+      }
+      const currentSpatialRevision = spatial.sceneGeometryModelId === applicableSceneGeometryModel.model_id
+        && spatial.sceneGeometryRevision === applicableSceneGeometryModel.revision;
+      if (currentSpatialRevision) {
+        const validSpatialIds = new Set<string>([
+          ...applicableSceneGeometryModel.projection.vanishing_points.map(point => point.id),
+          ...applicableSceneGeometryModel.line_families.map(family => family.id),
+          ...applicableSceneGeometryModel.line_families.flatMap(family => family.members.map(member => member.id)),
+          ...applicableSceneGeometryModel.support_planes.map(plane => plane.id),
+          ...applicableSceneGeometryModel.scale_anchors.map(anchor => anchor.id),
+        ]);
+        const unknown = spatial.dependencyIds.filter(id => !validSpatialIds.has(id));
+        if (unknown.length) {
+          violations.push(violation('next_operation', 'material_lighting_spatial_dependency_missing',
+            `lighting spatial relation references unknown Scene Geometry dependency id(s): ${unknown.join(',')}`));
+          return;
+        }
+      } else {
+        const priorSpatialState = priorState?.spatial_relation && typeof priorState.spatial_relation === 'object'
+          ? priorState.spatial_relation as Record<string, unknown>
+          : undefined;
+        if (priorSpatialState?.stale !== false) {
+          violations.push(violation('next_operation', 'material_lighting_spatial_relation_stale',
+            `lighting spatial relation depends on geometry ${spatial.sceneGeometryModelId}@${spatial.sceneGeometryRevision}, but current geometry is ${applicableSceneGeometryModel.model_id}@${applicableSceneGeometryModel.revision}`));
+          return;
+        }
+      }
+    }
+    // Current-revision bindings still receive the strict causal-reference validation.
+    // Older bindings are admitted only when selective invalidation proved their dependencies unchanged.
+    if (sameRevision) {
+      try {
+        assertLightingColorBindingMatchesScene(binding, applicableSceneLightingColorModel);
+      } catch (error) {
+        violations.push(violation('next_operation', 'material_lighting_color_binding_stale',
+          error instanceof Error ? error.message : String(error)));
+      }
+    }
+  };
+  const lightingColorBindingStateByOwner = new Map(
+    (Array.isArray(context.lighting_color_binding_states) ? context.lighting_color_binding_states : [])
+      .map(state => [text(state?.owner_id), state] as const)
+      .filter(([ownerId]) => !!ownerId)
+  );
+  const geometryBindingStateByOwner = new Map(
+    (Array.isArray(context.geometry_binding_states) ? context.geometry_binding_states : [])
+      .map(state => [text(state?.owner_id), state] as const)
+      .filter(([ownerId]) => !!ownerId)
+  );
+  const cameraBindingStateByOwner = new Map(
+    (Array.isArray(context.camera_binding_states) ? context.camera_binding_states : [])
+      .map(state => [text(state?.owner_id), state] as const)
+      .filter(([ownerId]) => !!ownerId)
+  );
+  const bindingStalenessAgainstApplicable = (binding: GeometryBinding, ownerId: string) => {
+    if (!applicableSceneGeometryModel) return { stale: true, changed_dependency_ids: [] as string[] };
+    if (binding.scene_geometry_revision === applicableSceneGeometryModel.revision
+        && binding.scene_geometry_model_id === applicableSceneGeometryModel.model_id) {
+      return { stale: false, changed_dependency_ids: [] as string[] };
+    }
+    const priorState = geometryBindingStateByOwner.get(ownerId);
+    if (!sceneGeometryModelToPersist || !durableSceneGeometryModel) {
+      return {
+        stale: priorState?.stale !== false,
+        changed_dependency_ids: Array.isArray(priorState?.changed_dependency_ids)
+          ? priorState.changed_dependency_ids.map(value => text(value)).filter((value): value is string => !!value)
+          : [],
+      };
+    }
+    if (binding.scene_geometry_revision === durableSceneGeometryModel.revision) {
+      return geometryBindingStaleness(binding, sceneGeometryModelToPersist, durableSceneGeometryModel);
+    }
+    if (priorState?.stale !== false) {
+      return {
+        stale: true,
+        changed_dependency_ids: Array.isArray(priorState?.changed_dependency_ids)
+          ? priorState.changed_dependency_ids.map(value => text(value)).filter((value): value is string => !!value)
+          : [],
+      };
+    }
+    const changed = changedSceneGeometryDependencyIds(durableSceneGeometryModel, sceneGeometryModelToPersist);
+    const dependencies = new Set(geometryBindingDependencyIds(binding));
+    const relevant = changed.filter(id => id === '__projection__' || dependencies.has(id));
+    return { stale: relevant.length > 0, changed_dependency_ids: relevant };
+  };
   const declaredChangeKind = text(rawLayerSeparation?.change_kind)?.toLowerCase();
   const declaredRollbackValue = text(rawLayerSeparation?.rollback_value)?.toLowerCase();
   const declaredRequiresIsolation = rawLayerSeparation?.substantial === true
     && ['new-object', 'new-material', 'new-light', 'new-plane'].includes(declaredChangeKind ?? '')
     && (declaredRollbackValue !== 'low' || rawLayerSeparation?.independent_adjustment_expected === true);
   const semanticCreateMetadataRequired = context.painting_profile === 'nontrivial_painting' && !!createStep;
+
+  if (semanticCreateMetadataRequired
+    && plannedLogicalDecision !== 'temporary-hypothesis'
+    && !sceneOwnershipPlan) {
+    violations.push(violation(
+      'next_operation',
+      'scene_ownership_plan_required',
+      'scene_ownership_plan_required: predeclare the durable semantic ownership map before the first committed nontrivial layer owner is constructed; temporary hypotheses remain exempt until they are kept'
+    ));
+  }
 
   if (semanticCreateMetadataRequired && !rawLayerSeparation) {
     violations.push(violation(
@@ -985,11 +1485,18 @@ function compileCompactPass(
     owners.map(owner => [text(owner.hypothesis_id), owner]).filter(([key]) => !!key) as Array<[string, Record<string, unknown>]>
   );
   const ownerByLayerId = new Map(
-    owners
-      .filter(owner => Number.isSafeInteger(owner.layer_id) && Number(owner.layer_id) > 0)
-      .map(owner => [Number(owner.layer_id), owner] as [number, Record<string, unknown>])
+    owners.flatMap(owner => {
+      const projected = Array.isArray(owner.physical_layer_ids)
+        ? owner.physical_layer_ids.map(Number).filter(id => Number.isSafeInteger(id) && id > 0)
+        : [];
+      const current = Number(owner.layer_id);
+      const ids = projected.length
+        ? projected
+        : (Number.isSafeInteger(current) && current > 0 ? [current] : []);
+      return ids.map(id => [id, owner] as [number, Record<string, unknown>]);
+    })
   );
-  const logicalDecision = text(logicalLayer?.decision)?.toLowerCase();
+  const logicalDecision = plannedLogicalDecision;
   const logicalHypothesisId = text(logicalLayer?.hypothesis_id);
   const logicalLayerId = Number(logicalLayer?.layer_id);
   const physicalSignatureRoles = new Set(['opaque-mass', 'support-surface', 'transmissive-surface']);
@@ -1008,12 +1515,136 @@ function compileCompactPass(
     return ownerConstructionStale(parent, seen);
   };
 
+  // P1-E.13: make the causal correction scope explicit before choosing/dispatching
+  // the visual method.  This is derived from durable ownership rather than from
+  // whichever Photoshop layer happens to be active, so read-only lint/status can
+  // explain exactly what a corrective pass intends to touch.
+  const scopedOwner = logicalHypothesisId ? ownerByHypothesis.get(logicalHypothesisId) : undefined;
+  const rawCrossLayerCorrection = raw.cross_layer_correction
+    && typeof raw.cross_layer_correction === 'object'
+    && !Array.isArray(raw.cross_layer_correction)
+    ? structuredClone(raw.cross_layer_correction) as Record<string, unknown>
+    : undefined;
+  const correctionScope = logicalHypothesisId ? {
+    problem_id: problemId,
+    semantic_owner_ids: [logicalHypothesisId],
+    physical_layer_ids: Number.isSafeInteger(logicalLayerId) && logicalLayerId > 0
+      ? [logicalLayerId]
+      : (Number.isSafeInteger(scopedOwner?.layer_id) && Number(scopedOwner?.layer_id) > 0
+        ? [Number(scopedOwner?.layer_id)]
+        : []),
+    region,
+    ...(regionBounds ? { region_bounds: structuredClone(regionBounds) } : {}),
+    method_class: methodClass,
+    mutation_tools: [...new Set(mutationSteps.map(step => text(step.tool)).filter(Boolean))],
+    owner_binding: scopedOwner ? 'durable' : (createStep ? 'planned-create' : 'unresolved'),
+  } : undefined;
+  const crossLayerCorrection = rawCrossLayerCorrection ? {
+    mode: (text(rawCrossLayerCorrection.mode) ?? '').toLowerCase(),
+    current_layer_id: Number(rawCrossLayerCorrection.current_layer_id),
+    target_layer_ids: Array.isArray(rawCrossLayerCorrection.target_layer_ids)
+      ? rawCrossLayerCorrection.target_layer_ids.map(Number)
+      : [],
+    post_authoritative_layer_id: Number(rawCrossLayerCorrection.post_authoritative_layer_id),
+    reason: text(rawCrossLayerCorrection.reason) ?? '',
+  } : undefined;
+
+  // P1-E.2: the semantic declaration and the concrete mutation target must agree.
+  // A pass used to be able to declare owner A/layer X while an action silently
+  // carried layer_id=Y.  Check every concrete layer target in medium/global
+  // visual mutations against the owner's projected physical stack, but keep the
+  // current binding authoritative until an explicit migration/cross-layer
+  // correction contract exists. Dynamic $steps references are intentionally
+  // ignored here because create-new ownership is resolved atomically at runtime.
+  const mutationTargetLayerIds = new Set<number>();
+  const collectConcreteLayerIds = (value: unknown, key?: string): void => {
+    if (Array.isArray(value)) {
+      for (const entry of value) collectConcreteLayerIds(entry, key);
+      return;
+    }
+    if (!value || typeof value !== 'object') {
+      if ((key === 'layer_id' || key === 'layerId') && Number.isSafeInteger(Number(value)) && Number(value) > 0) {
+        mutationTargetLayerIds.add(Number(value));
+      }
+      return;
+    }
+    for (const [childKey, child] of Object.entries(value as Record<string, unknown>)) {
+      collectConcreteLayerIds(child, childKey);
+    }
+  };
+  if (logicalHypothesisId && ['medium', 'global'].includes((scale ?? '').toLowerCase())) {
+    for (const step of mutationSteps) collectConcreteLayerIds(step.args);
+    const projectedIds = Array.isArray(scopedOwner?.physical_layer_ids)
+      ? scopedOwner.physical_layer_ids.map(Number).filter(id => Number.isSafeInteger(id) && id > 0)
+      : (Number.isSafeInteger(Number(scopedOwner?.layer_id)) ? [Number(scopedOwner?.layer_id)] : []);
+    const projectedSet = new Set(projectedIds);
+    const currentOwnerLayerId = Number(scopedOwner?.layer_id);
+    const crossMode = (text(rawCrossLayerCorrection?.mode) ?? '').toLowerCase();
+    const crossCurrentLayerId = Number(rawCrossLayerCorrection?.current_layer_id);
+    const crossPostLayerId = Number(rawCrossLayerCorrection?.post_authoritative_layer_id);
+    const rawCrossTargets = rawCrossLayerCorrection?.target_layer_ids;
+    const crossTargets = Array.isArray(rawCrossTargets)
+      ? rawCrossTargets.map(Number).filter(id => Number.isSafeInteger(id) && id > 0)
+      : [];
+    const crossTargetSet = new Set(crossTargets);
+    const historicalTargets = [...mutationTargetLayerIds].filter(id => Number.isSafeInteger(currentOwnerLayerId) && id !== currentOwnerLayerId);
+    const crossContractValid = !!rawCrossLayerCorrection
+      && ['correction', 'migration'].includes(crossMode)
+      && Number.isSafeInteger(currentOwnerLayerId)
+      && crossCurrentLayerId === currentOwnerLayerId
+      && crossTargets.length > 0
+      && new Set(crossTargets).size === crossTargets.length
+      && crossTargets.every(id => projectedSet.has(id))
+      && historicalTargets.length > 0
+      && historicalTargets.every(id => crossTargetSet.has(id))
+      && crossTargets.every(id => historicalTargets.includes(id))
+      && (crossMode === 'correction'
+        ? crossPostLayerId === currentOwnerLayerId
+        : (crossTargets.length === 1 && crossPostLayerId === crossTargets[0]));
+    // E.7c: the layer ids + correction/migration mode carry execution authority.
+    // Free-form reason is audit guidance and must not be a mutation-admission token.
+    if (rawCrossLayerCorrection && !crossContractValid) {
+      violations.push(violation(
+        'next_operation',
+        'semantic_cross_layer_contract_invalid',
+        `semantic_cross_layer_contract_invalid: cross_layer_correction must exactly bind current layer ${currentOwnerLayerId || 'unknown'}, the historical mutation targets, and a valid post-authoritative binding; correction must preserve the current binding while migration must select its single target`
+      ));
+    }
+    for (const targetLayerId of mutationTargetLayerIds) {
+      const targetOwner = ownerByLayerId.get(targetLayerId);
+      if (!scopedOwner || !projectedSet.has(targetLayerId)) {
+        violations.push(violation(
+          'next_operation',
+          'semantic_mutation_target_owner_mismatch',
+          `semantic_mutation_target_owner_mismatch: ${scale} mutation for logical owner ${logicalHypothesisId} targets physical layer ${targetLayerId}, which is not in its durable physical layer stack${targetOwner ? ` and belongs to ${text(targetOwner.hypothesis_id)}` : ''}`
+        ));
+      } else if (Number.isSafeInteger(currentOwnerLayerId) && targetLayerId !== currentOwnerLayerId && !crossContractValid) {
+        violations.push(violation(
+          'next_operation',
+          'semantic_cross_layer_contract_required',
+          `semantic_cross_layer_contract_required: logical owner ${logicalHypothesisId} historically spans physical layers ${projectedIds.join(', ')}, but ${targetLayerId} is not its current binding ${currentOwnerLayerId}; declare explicit migration/shared-owner cross-layer correction semantics before targeting a historical binding`
+        ));
+      }
+    }
+  }
+
   if (declaredRequiresIsolation && !['create-new', 'temporary-hypothesis'].includes(logicalDecision ?? '')) {
     violations.push(violation(
       'next_operation',
       'semantic_layer_isolation_required',
       `semantic_layer_isolation_required: substantial independently adjustable ${declaredChangeKind} work requires logical_layer.decision=create-new|temporary-hypothesis before Photoshop dispatch`
     ));
+  }
+
+  if (sceneOwnershipPlan && logicalHypothesisId && logicalDecision === 'create-new') {
+    const plannedOwnerIds = new Set(sceneOwnershipOwnerIds(sceneOwnershipPlan));
+    if (!plannedOwnerIds.has(logicalHypothesisId)) {
+      violations.push(violation(
+        'next_operation',
+        'scene_ownership_owner_unplanned',
+        `scene_ownership_owner_unplanned: committed logical owner ${logicalHypothesisId} is not predeclared by scene_ownership_plan=${sceneOwnershipPlan.plan_id}; replan ownership before Photoshop dispatch instead of inventing a new persistent owner reactively`
+      ));
+    }
   }
 
   if (logicalLayer && logicalHypothesisId) {
@@ -1083,6 +1714,101 @@ function compileCompactPass(
             'surface_frame_owner_conflict',
             `surface_frame_owner_conflict: logical owner ${logicalHypothesisId} has a durable surface frame; replan/create a structural owner rather than silently changing its orientation frame during continuation`
           ));
+          }
+        }
+        const declaredGeometryBinding = logicalLayer.geometry_binding;
+        const durableGeometryBinding = existingOwner.geometry_binding;
+        if (declaredGeometryBinding === undefined && durableGeometryBinding && typeof durableGeometryBinding === 'object') {
+          logicalLayer.geometry_binding = structuredClone(durableGeometryBinding);
+        } else if (declaredGeometryBinding !== undefined && durableGeometryBinding !== undefined) {
+          try {
+            const declared = normalizeGeometryBinding(declaredGeometryBinding);
+            const durable = normalizeGeometryBinding(durableGeometryBinding);
+            if (stableJson(declared) !== stableJson(durable)) {
+              const durableStaleness = bindingStalenessAgainstApplicable(durable, logicalHypothesisId);
+              const declaredIssues = applicableSceneGeometryModel
+                ? geometryBindingIssues(declared, applicableSceneGeometryModel, logicalHypothesisId)
+                : [{ code: 'scene_geometry_model_required', message: 'scene geometry is unavailable' }];
+              const explicitRevalidation = durableStaleness.stale
+                && declared.scene_geometry_model_id === applicableSceneGeometryModel?.model_id
+                && declared.scene_geometry_revision === applicableSceneGeometryModel?.revision
+                && declaredIssues.length === 0;
+              if (!explicitRevalidation) {
+                violations.push(violation(
+                  'next_operation',
+                  'geometry_binding_owner_conflict',
+                  `geometry_binding_owner_conflict: logical owner ${logicalHypothesisId} already has a durable geometry binding; replace it only as an explicit revalidation against the current scene geometry after its prior dependencies become stale`
+                ));
+              }
+            }
+          } catch (error) {
+            violations.push(violation(
+              'next_operation',
+              'geometry_binding_state_invalid',
+              `Durable/declared geometry binding for logical owner ${logicalHypothesisId} is invalid: ${error instanceof Error ? error.message : String(error)}`
+            ));
+          }
+        }
+        const declaredCameraBinding = logicalLayer.camera_binding;
+        const durableCameraBinding = existingOwner.camera_binding;
+        if (declaredCameraBinding === undefined && durableCameraBinding && typeof durableCameraBinding === 'object') {
+          logicalLayer.camera_binding = structuredClone(durableCameraBinding);
+        } else if (declaredCameraBinding !== undefined && durableCameraBinding !== undefined) {
+          try {
+            const declared = normalizeCameraBinding(declaredCameraBinding);
+            const durable = normalizeCameraBinding(durableCameraBinding);
+            if (stableJson(declared) !== stableJson(durable)) {
+              const explicitRevalidation = !!applicableSceneCameraImagingModel
+                && declared.sceneCameraModelId === applicableSceneCameraImagingModel.model_id
+                && declared.sceneCameraRevision === applicableSceneCameraImagingModel.revision
+                && (durable.sceneCameraModelId !== applicableSceneCameraImagingModel.model_id
+                  || durable.sceneCameraRevision !== applicableSceneCameraImagingModel.revision);
+              if (!explicitRevalidation) {
+                violations.push(violation(
+                  'next_operation',
+                  'camera_binding_owner_conflict',
+                  `camera_binding_owner_conflict: logical owner ${logicalHypothesisId} already has a durable camera binding; replace it only as explicit revalidation against the current camera model revision`
+                ));
+              }
+            }
+          } catch (error) {
+            violations.push(violation(
+              'next_operation',
+              'camera_binding_state_invalid',
+              `Durable/declared camera binding for logical owner ${logicalHypothesisId} is invalid: ${error instanceof Error ? error.message : String(error)}`
+            ));
+          }
+        }
+        const declaredAttentionBinding = logicalLayer.attention_binding;
+        const durableAttentionBinding = existingOwner.attention_binding;
+        if (declaredAttentionBinding === undefined && durableAttentionBinding && typeof durableAttentionBinding === 'object') {
+          logicalLayer.attention_binding = structuredClone(durableAttentionBinding);
+        } else if (declaredAttentionBinding !== undefined && durableAttentionBinding !== undefined) {
+          try {
+            const declared = normalizeAttentionBinding(declaredAttentionBinding);
+            const durable = normalizeAttentionBinding(durableAttentionBinding);
+            if (stableJson(declared) !== stableJson(durable)) {
+              const artState = context.art_director && typeof context.art_director === 'object'
+                ? context.art_director as Record<string, unknown>
+                : undefined;
+              const hierarchy = artState?.perceptual_hierarchy && typeof artState.perceptual_hierarchy === 'object'
+                ? normalizePerceptualHierarchy(artState.perceptual_hierarchy)
+                : undefined;
+              const explicitRevalidation = !!hierarchy && declared.hierarchyRevision === hierarchy.revision;
+              if (!explicitRevalidation) {
+                violations.push(violation(
+                  'next_operation',
+                  'attention_binding_owner_conflict',
+                  `attention_binding_owner_conflict: logical owner ${logicalHypothesisId} already has a durable attention binding; replace it only as explicit revalidation against the current perceptual hierarchy revision`
+                ));
+              }
+            }
+          } catch (error) {
+            violations.push(violation(
+              'next_operation',
+              'attention_binding_state_invalid',
+              `Durable/declared attention binding for logical owner ${logicalHypothesisId} is invalid: ${error instanceof Error ? error.message : String(error)}`
+            ));
           }
         }
         const declaredNegativeSpace = logicalLayer.negative_space;
@@ -1195,6 +1921,234 @@ function compileCompactPass(
             `construction_graph_parent_stale: ${logicalHypothesisId ?? 'unknown'} was bound to parent revision ${boundParentRevision ?? 'missing'}, but ${parentHypothesisId} is now ${currentParentRevision}; replan dependent construction before further refinement`
           ));
         }
+      }
+    }
+  }
+
+  // Geometry debt follows the owner into every later visual stage, not only another
+  // structured-mass pass. VALUE/MATERIAL/TEXTURE work cannot silently decorate a
+  // structurally stale owner. Supplying a current explicit revalidation above clears it.
+  if (logicalHypothesisId && mutationSteps.length > 0 && logicalLayer?.geometry_binding && applicableSceneGeometryModel) {
+    try {
+      const binding = normalizeGeometryBinding(logicalLayer.geometry_binding);
+      const staleness = bindingStalenessAgainstApplicable(binding, logicalHypothesisId);
+      if (staleness.stale) {
+        violations.push(violation(
+          'next_operation',
+          'geometry_dependency_stale',
+          `geometry_dependency_stale: owner=${logicalHypothesisId} cannot continue visual refinement against scene geometry ${applicableSceneGeometryModel.model_id}@${applicableSceneGeometryModel.revision}; changed dependencies=${staleness.changed_dependency_ids.join(',') || 'unknown/source-revision-unavailable'}; explicitly revalidate or rebuild the complete geometry binding first`
+        ));
+      }
+      // Exact geometry is a durable completion claim, not a one-pass construction hint.
+      // Once an owner declares it completion-relevant, every later visual mutation must
+      // retain exact-frame measurement/landmark evidence. This keeps VALUE/MATERIAL/TEXTURE
+      // continuation from silently dropping the deterministic evidence dependency.
+      if (!staleness.stale && binding.exact_geometry_completion_relevant) {
+        const exactPreflight = runGeometryPreflight(binding, applicableSceneGeometryModel);
+        for (const issue of exactPreflight.issues.filter(issue =>
+          issue.code === 'geometry_exact_evidence_required'
+          || issue.code === 'geometry_exact_evidence_source_mismatch'
+        )) {
+          violations.push(violation('next_operation', issue.code, issue.message));
+        }
+      }
+    } catch {
+      // The dedicated binding validation path reports malformed durable/declared state.
+    }
+  }
+
+  if (logicalHypothesisId && mutationSteps.length > 0 && logicalLayer?.camera_binding) {
+    try {
+      const binding = normalizeCameraBinding(logicalLayer.camera_binding);
+      logicalLayer.camera_binding = {
+        scene_camera_model_id: binding.sceneCameraModelId,
+        scene_camera_revision: binding.sceneCameraRevision,
+        ...(binding.geometryBindingOwnerId ? { geometry_binding_owner_id: binding.geometryBindingOwnerId } : {}),
+        depth_role: binding.depthRole,
+        expected_focus_role: binding.expectedFocusRole,
+        dependency_domains: binding.dependencyDomains,
+        ...(binding.localException ? { local_exception: binding.localException } : {}),
+        ...(binding.approximateDepthRationale ? { approximate_depth_rationale: binding.approximateDepthRationale } : {}),
+      };
+      if (!applicableSceneCameraImagingModel) {
+        violations.push(violation(
+          'next_operation',
+          'scene_camera_imaging_model_required',
+          `camera_binding_required_model: owner=${logicalHypothesisId} requires an active durable scene_camera_imaging_model before focus/depth-dependent mutation`
+        ));
+      } else {
+        const sameRevision = binding.sceneCameraModelId === applicableSceneCameraImagingModel.model_id
+          && binding.sceneCameraRevision === applicableSceneCameraImagingModel.revision;
+        const samePassSuccessor = !!sceneCameraImagingModelToPersist && !!durableSceneCameraImagingModel
+          && binding.sceneCameraModelId === durableSceneCameraImagingModel.model_id
+          && binding.sceneCameraRevision === durableSceneCameraImagingModel.revision;
+        const priorState = cameraBindingStateByOwner.get(logicalHypothesisId);
+        const cameraState = sameRevision
+          ? { stale: false, changed_dependency_ids: [] as string[] }
+          : samePassSuccessor
+            ? cameraBindingStaleness(binding, sceneCameraImagingModelToPersist!, durableSceneCameraImagingModel!)
+            : {
+                stale: priorState?.stale !== false,
+                changed_dependency_ids: Array.isArray(priorState?.changed_dependency_ids)
+                  ? priorState.changed_dependency_ids.map(value => text(value)).filter((value): value is string => !!value)
+                  : [],
+              };
+        if (cameraState.stale) {
+          violations.push(violation(
+            'next_operation',
+            'camera_binding_stale',
+            `camera_binding_stale: owner=${logicalHypothesisId} is bound to ${binding.sceneCameraModelId}@${binding.sceneCameraRevision}; changed dependencies=${cameraState.changed_dependency_ids.join(',') || 'unknown/source-revision-unavailable'}`
+          ));
+        }
+      }
+      if (applicableSceneCameraImagingModel && (!applicableSceneGeometryModel
+        || applicableSceneCameraImagingModel.geometry_model_id !== applicableSceneGeometryModel.model_id
+        || applicableSceneCameraImagingModel.geometry_model_revision !== applicableSceneGeometryModel.revision)) {
+        violations.push(violation(
+          'next_operation',
+          'camera_binding_geometry_stale',
+          `camera_binding_geometry_stale: active camera model does not reference the exact current Scene Geometry Model revision`
+        ));
+      }
+
+      if (binding.geometryBindingOwnerId) {
+        if (binding.geometryBindingOwnerId !== logicalHypothesisId) {
+          violations.push(violation(
+            'next_operation',
+            'camera_binding_geometry_owner_mismatch',
+            `camera_binding_geometry_owner_mismatch: owner=${logicalHypothesisId} cannot derive depth from geometry owner=${binding.geometryBindingOwnerId}`
+          ));
+        } else if (!logicalLayer.geometry_binding || !applicableSceneGeometryModel) {
+          violations.push(violation(
+            'next_operation',
+            'camera_binding_geometry_required',
+            `camera_binding_geometry_required: owner=${logicalHypothesisId} must carry its accepted E.18 geometry binding when depth_role is geometry-derived`
+          ));
+        } else {
+          const geometryBinding = normalizeGeometryBinding(logicalLayer.geometry_binding);
+          const staleness = bindingStalenessAgainstApplicable(geometryBinding, logicalHypothesisId);
+          if (staleness.stale) {
+            violations.push(violation(
+              'next_operation',
+              'camera_binding_geometry_stale',
+              `camera_binding_geometry_stale: owner=${logicalHypothesisId} cannot derive focus depth from stale geometry; changed dependencies=${staleness.changed_dependency_ids.join(',') || 'unknown'}`
+            ));
+          }
+        }
+      }
+    } catch (error) {
+      violations.push(violation(
+        'next_operation',
+        'camera_binding_invalid',
+        `camera_binding_invalid: owner=${logicalHypothesisId}; ${error instanceof Error ? error.message : String(error)}`
+      ));
+    }
+  }
+
+  // Surface Frame is a local orientation/material-flow view of the owner's scene binding,
+  // never an independent perspective model. Explicit scene references make inheritance
+  // auditable; the numeric scene/preflight layer remains the sole geometry solver.
+  if (logicalHypothesisId && logicalLayer?.surface_frame && logicalLayer?.geometry_binding
+      && applicableSceneGeometryModel?.applicability === 'coherent_3d') {
+    try {
+      const frame = logicalLayer.surface_frame as Record<string, unknown>;
+      const binding = normalizeGeometryBinding(logicalLayer.geometry_binding);
+      const frameFamilyIds = new Set(
+        Array.isArray(frame.scene_vanishing_family_ids)
+          ? frame.scene_vanishing_family_ids.map(value => text(value)).filter((value): value is string => !!value)
+          : []
+      );
+      const allowedFamilies = new Set(binding.vanishing_family_ids);
+      for (const familyId of frameFamilyIds) {
+        if (!allowedFamilies.has(familyId)) {
+          violations.push(violation(
+            'next_operation', 'surface_frame_geometry_conflict',
+            `surface_frame_geometry_conflict: owner=${logicalHypothesisId} surface frame references vanishing family ${familyId}, but its Scene Geometry Binding does not`
+          ));
+        }
+      }
+      const frameSupportPlane = text(frame.scene_support_plane_id);
+      if (frameSupportPlane && frameSupportPlane !== binding.support_plane_id) {
+        violations.push(violation(
+          'next_operation', 'surface_frame_geometry_conflict',
+          `surface_frame_geometry_conflict: owner=${logicalHypothesisId} surface frame references support plane ${frameSupportPlane}, but its Scene Geometry Binding uses ${binding.support_plane_id ?? 'none'}`
+        ));
+      }
+      // Persist the resolved scene references into the compiled Surface Frame so downstream
+      // perspective-regular/mechanical-pattern consumers do not have to rediscover geometry
+      // provenance or silently fall back to an independent local perspective assumption.
+      if (!frameFamilyIds.size && binding.vanishing_family_ids.length) {
+        frame.scene_vanishing_family_ids = [...binding.vanishing_family_ids];
+      }
+      if (!frameSupportPlane && binding.support_plane_id) {
+        frame.scene_support_plane_id = binding.support_plane_id;
+      }
+      const anchor = frame.convergence_anchor;
+      if (anchor && typeof anchor === 'object' && !Array.isArray(anchor)) {
+        const point = anchor as Record<string, unknown>;
+        const x = Number(point.x); const y = Number(point.y);
+        const referencedFamilies = frameFamilyIds.size ? [...frameFamilyIds] : binding.vanishing_family_ids;
+        for (const familyId of referencedFamilies) {
+          const family = applicableSceneGeometryModel.line_families.find(item => item.id === familyId);
+          const vp = family?.vanishing_point_id
+            ? applicableSceneGeometryModel.projection.vanishing_points.find(item => item.id === family.vanishing_point_id)
+            : undefined;
+          if (vp && Math.hypot(x - vp.x, y - vp.y) > 1) {
+            violations.push(violation(
+              'next_operation', 'surface_frame_geometry_conflict',
+              `surface_frame_geometry_conflict: owner=${logicalHypothesisId} convergence_anchor conflicts with scene vanishing point ${vp.id} for family ${familyId}`
+            ));
+          }
+        }
+      }
+    } catch {
+      // Dedicated Surface Frame / Geometry Binding validation reports malformed state.
+    }
+  }
+
+  // Perspective-regular repetition is itself geometry-sensitive even when the pass is
+  // MATERIAL/TEXTURE rather than structured-mass construction. It must consume the owner's
+  // current Scene Geometry Binding instead of using Surface Frame as a second perspective model.
+  const perspectiveRegularSurface = logicalLayer?.surface_frame
+    && typeof logicalLayer.surface_frame === 'object'
+    && !Array.isArray(logicalLayer.surface_frame)
+    && text((logicalLayer.surface_frame as Record<string, unknown>).distribution)?.toLowerCase() === 'perspective-regular';
+  if (logicalHypothesisId && mutationSteps.length > 0 && perspectiveRegularSurface
+      && applicableSceneGeometryModel?.applicability === 'coherent_3d') {
+    if (!logicalLayer?.geometry_binding) {
+      violations.push(violation(
+        'next_operation',
+        'geometry_binding_required',
+        `geometry_binding_required: perspective-regular surface work for owner=${logicalHypothesisId} must consume the current Scene Geometry Binding before Photoshop mutation`
+      ));
+    } else {
+      try {
+        const binding = normalizeGeometryBinding(logicalLayer.geometry_binding);
+        const staleness = bindingStalenessAgainstApplicable(binding, logicalHypothesisId);
+        const bindingIssues = geometryBindingIssues(binding, applicableSceneGeometryModel, logicalHypothesisId, {
+          allowOlderUnchangedRevision: !staleness.stale,
+        });
+        if (staleness.stale && !bindingIssues.some(issue => issue.code === 'geometry_dependency_stale')) {
+          bindingIssues.push({
+            code: 'geometry_dependency_stale',
+            message: `geometry binding for owner=${logicalHypothesisId} is stale against scene geometry ${applicableSceneGeometryModel.model_id}@${applicableSceneGeometryModel.revision}; changed dependencies=${staleness.changed_dependency_ids.join(',') || 'unknown/source-revision-unavailable'}`,
+          });
+        }
+        for (const issue of bindingIssues) {
+          violations.push(violation('next_operation', issue.code, `${issue.code}: owner=${logicalHypothesisId}; ${issue.message}`));
+        }
+        if (!bindingIssues.length) {
+          const preflight = runGeometryPreflight(binding, applicableSceneGeometryModel);
+          for (const issue of preflight.issues) {
+            violations.push(violation('next_operation', issue.code, issue.message));
+          }
+        }
+      } catch (error) {
+        violations.push(violation(
+          'next_operation',
+          'geometry_binding_invalid',
+          `geometry_binding_invalid: owner=${logicalHypothesisId}; ${error instanceof Error ? error.message : String(error)}`
+        ));
       }
     }
   }
@@ -1359,20 +2313,288 @@ function compileCompactPass(
     .at(-1);
   const roles = Array.isArray(context.brush_roles) ? context.brush_roles : [];
   const explicitBrushRole = text(raw.brush_role);
-  const constructionRole = text(raw.construction_role);
+  let constructionRole = text(raw.construction_role);
+  let requestedMaterialRole = text(raw.material_role);
   let brushRole: Record<string, unknown> | undefined;
   let paintStrategy: Record<string, unknown> | undefined;
 
   const art = context.art_director && typeof context.art_director === 'object'
     ? context.art_director as Record<string, unknown>
     : undefined;
-  const changeDomains = [...new Set(mutationSteps.map(step => compactChangeDomain(compactStepMethodClass(step))))];
+  const changeDomains = [...new Set(mutationSteps.map(step => compactChangeDomain(compactStepMethodClass(step, registry))))];
   const plannerDirectiveId = text(art?.directive_id);
   const plannerTaskId = text(art?.current_task_id);
+  const plannerTasks = Array.isArray(art?.tasks) ? art.tasks as Array<Record<string, unknown>> : [];
+  const activePlannerTask = plannerTaskId
+    ? plannerTasks.find(task => text(task.task_id) === plannerTaskId)
+    : undefined;
+  let perceptualHierarchy;
+  if (art?.perceptual_hierarchy && typeof art.perceptual_hierarchy === 'object') {
+    try { perceptualHierarchy = normalizePerceptualHierarchy(art.perceptual_hierarchy); }
+    catch (error) {
+      violations.push(violation('next_operation', 'perceptual_hierarchy_state_invalid', error instanceof Error ? error.message : String(error)));
+    }
+  }
+  const attentionBindingStateByOwner = new Map(
+    (Array.isArray(context.attention_binding_states) ? context.attention_binding_states : [])
+      .map(state => [text(state?.owner_id), state] as const)
+      .filter(([ownerId]) => !!ownerId)
+  );
+  const affectedQualities = Array.isArray(raw.affected_qualities)
+    ? raw.affected_qualities.map(value => text(value)?.toLowerCase()).filter((value): value is string => !!value)
+    : [];
+  const attentionSensitive = mutationSteps.length > 0 && (
+    changeDomains.some(domain => ['local-tone', 'local-edge', 'local-texture', 'lighting-structure'].includes(domain))
+    || affectedQualities.some(value => /(contrast|detail|edge|chroma|saturation|accent)/.test(value))
+  );
+  if (perceptualHierarchy && attentionSensitive && logicalHypothesisId) {
+    if (!logicalLayer?.attention_binding) {
+      violations.push(violation(
+        'next_operation',
+        'attention_binding_required',
+        `attention_binding_required: owner=${logicalHypothesisId} changes perceptual emphasis and must identify the active Art Director hierarchy zone/budget before Photoshop mutation`
+      ));
+    } else {
+      try {
+        const binding = normalizeAttentionBinding(logicalLayer.attention_binding);
+        logicalLayer.attention_binding = {
+          hierarchy_revision: binding.hierarchyRevision,
+          zone_id: binding.zoneId,
+          dimensions: binding.dimensions,
+        };
+        const zone = perceptualHierarchy.zones.find(item => item.id === binding.zoneId);
+        if (!zone || !zone.owner_ids.includes(logicalHypothesisId)) {
+          violations.push(violation(
+            'next_operation',
+            'attention_binding_zone_owner_mismatch',
+            `attention_binding_zone_owner_mismatch: owner=${logicalHypothesisId} is not allocated to perceptual zone=${binding.zoneId}`
+          ));
+        }
+        const taskZones = Array.isArray(activePlannerTask?.perceptual_zone_ids)
+          ? activePlannerTask!.perceptual_zone_ids.map(value => text(value)).filter((value): value is string => !!value)
+          : [];
+        if (!taskZones.includes(binding.zoneId)) {
+          violations.push(violation(
+            'next_operation',
+            'attention_binding_task_zone_not_authorized',
+            `attention_binding_task_zone_not_authorized: active Painter task ${plannerTaskId ?? 'unknown'} does not authorize perceptual zone=${binding.zoneId}`
+          ));
+        }
+        if (binding.hierarchyRevision !== perceptualHierarchy.revision) {
+          const priorState = attentionBindingStateByOwner.get(logicalHypothesisId);
+          if (priorState?.stale !== false) {
+            violations.push(violation(
+              'next_operation',
+              'attention_binding_stale',
+              `attention_binding_stale: owner=${logicalHypothesisId} is bound to hierarchy revision ${binding.hierarchyRevision}, current revision=${perceptualHierarchy.revision}`
+            ));
+          }
+        }
+      } catch (error) {
+        violations.push(violation('next_operation', 'attention_binding_invalid', error instanceof Error ? error.message : String(error)));
+      }
+    }
+  }
   const painterScope = scale === 'medium' ? 'medium' : 'local';
   let visualIntent = text(raw.visual_intent);
   let impactClass = text(raw.impact_class);
-  if (visualIntent || impactClass || text(raw.preferred_method_id)) {
+  const broadNontrivialRegionAdd = context.painting_profile === 'nontrivial_painting'
+    && methodClass === 'region'
+    && actionClass === 'ADD'
+    && ['global', 'medium'].includes((scale ?? '').toLowerCase());
+  // E.7c: construction role is compiler metadata when the executable method
+  // already makes the semantic construction unambiguous. Do not require the
+  // model to restate what a dedicated continuous-field primitive proves.
+  if (!constructionRole
+      && methodClass === 'gradient'
+      && mutationSteps.length > 0
+      && mutationSteps.every(step => text(step.tool) === 'photoshop_paint_color_gradient')) {
+    constructionRole = 'continuous-field';
+    normalizations.push({
+      code: 'construction_role_normalized',
+      message: 'Derived construction_role=continuous-field from the dedicated color-gradient execution primitive.',
+    });
+  }
+  const committedStructuredConstruction = context.painting_profile === 'nontrivial_painting'
+    && constructionRole === 'structured-mass'
+    && mutationSteps.length > 0
+    && actionClass !== 'ROLLBACK'
+    && plannedLogicalDecision !== 'temporary-hypothesis';
+  const committedSpatialOwnerConstruction = context.painting_profile === 'nontrivial_painting'
+    && mutationSteps.length > 0
+    && actionClass !== 'ROLLBACK'
+    && !!plannedLogicalDecision
+    && plannedLogicalDecision !== 'temporary-hypothesis'
+    && !!logicalHypothesisId
+    && (
+      plannedLogicalDecision === 'create-new'
+        ? (
+            physicalSignatureRoles.has(physicalRole ?? '')
+            || !!constructionTier
+            || logicalLayer?.construction_change === true
+            || perspectiveRegularSurface
+          )
+        : logicalLayer?.construction_change === true
+    );
+  const sceneGeometryRequired = committedStructuredConstruction || committedSpatialOwnerConstruction;
+  let geometryPreflight: GeometryPreflightReport | undefined;
+  if (sceneGeometryRequired && !applicableSceneGeometryModel) {
+    violations.push(violation(
+      'next_operation',
+      'scene_geometry_model_required',
+      'scene_geometry_model_required: committed early semantic/spatial construction requires one durable document-incarnation-bound scene_geometry_model before Photoshop mutation; classify the scene as coherent_3d or record an explicit orthographic/flat/non-Euclidean opt-out instead of constructing from independent visual guesses'
+    ));
+  } else if (sceneGeometryRequired
+      && applicableSceneGeometryModel?.applicability === 'insufficient_evidence') {
+    violations.push(violation(
+      'next_operation',
+      'scene_geometry_model_required',
+      'scene_geometry_model_required: applicability=insufficient_evidence may defer exploratory planning but cannot authorize committed structured construction; establish coherent_3d geometry or an explicit brief/style-backed opt-out before mutation'
+    ));
+  }
+  if (sceneGeometryRequired && applicableSceneGeometryModel?.applicability === 'coherent_3d') {
+    const projectionKind = applicableSceneGeometryModel.projection.kind;
+    const requiredVanishingPoints = projectionKind === 'one_point' ? 1
+      : projectionKind === 'two_point' ? 2
+        : projectionKind === 'three_point' ? 3 : 0;
+    if (requiredVanishingPoints > 0) {
+      const finiteVanishingPoints = applicableSceneGeometryModel.projection.vanishing_points.length;
+      const coveredVanishingPoints = new Set(
+        applicableSceneGeometryModel.line_families
+          .map(family => family.vanishing_point_id)
+          .filter((value): value is string => !!value)
+      );
+      if (
+        finiteVanishingPoints < requiredVanishingPoints
+        || coveredVanishingPoints.size < requiredVanishingPoints
+      ) {
+        violations.push(violation(
+          'next_operation',
+          'perspective_basis_required',
+          `perspective_basis_required: projection.kind=${projectionKind} requires at least ${requiredVanishingPoints} explicit vanishing point(s) covered by distinct line families before committed construction; got vanishing_points=${finiteVanishingPoints}, covered_vanishing_points=${coveredVanishingPoints.size}`
+        ));
+      }
+    }
+  }
+  if (sceneGeometryRequired
+      && applicableSceneGeometryModel?.applicability === 'coherent_3d'
+      && logicalHypothesisId) {
+    if (!logicalLayer?.geometry_binding) {
+      violations.push(violation(
+        'next_operation',
+        'geometry_binding_required',
+        `geometry_binding_required: committed coherent-3D structured owner ${logicalHypothesisId} must bind to scene geometry ${applicableSceneGeometryModel.model_id}@${applicableSceneGeometryModel.revision} before Photoshop mutation`
+      ));
+    } else {
+      try {
+        const binding = normalizeGeometryBinding(logicalLayer.geometry_binding);
+        logicalLayer.geometry_binding = binding;
+        const perspectiveProjection = ['one_point', 'two_point', 'three_point'].includes(
+          applicableSceneGeometryModel.projection.kind
+        );
+        if (perspectiveProjection && binding.vanishing_family_ids.length === 0) {
+          violations.push(violation(
+            'next_operation',
+            'perspective_binding_required',
+            `perspective_binding_required: owner=${logicalHypothesisId} must bind at least one accepted vanishing family before committed perspective construction`
+          ));
+        }
+        const staleness = bindingStalenessAgainstApplicable(binding, logicalHypothesisId);
+        const bindingIssues = geometryBindingIssues(binding, applicableSceneGeometryModel, logicalHypothesisId, {
+          allowOlderUnchangedRevision: !staleness.stale,
+        });
+        if (staleness.stale && !bindingIssues.some(issue => issue.code === 'geometry_dependency_stale')) {
+          bindingIssues.push({
+            code: 'geometry_dependency_stale',
+            message: `geometry binding for owner=${logicalHypothesisId} is stale against scene geometry ${applicableSceneGeometryModel.model_id}@${applicableSceneGeometryModel.revision}; changed dependencies=${staleness.changed_dependency_ids.join(',') || 'unknown/source-revision-unavailable'}`,
+          });
+        }
+        for (const issue of bindingIssues) {
+          violations.push(violation('next_operation', issue.code, `${issue.code}: owner=${logicalHypothesisId}; ${issue.message}`));
+        }
+        if (!bindingIssues.length) {
+          const preflight = runGeometryPreflight(binding, applicableSceneGeometryModel);
+          geometryPreflight = preflight.report;
+          for (const issue of preflight.issues) {
+            violations.push(violation('next_operation', issue.code, issue.message));
+          }
+        }
+      } catch (error) {
+        violations.push(violation(
+          'next_operation',
+          'geometry_binding_invalid',
+          `geometry_binding_invalid: owner=${logicalHypothesisId}; ${error instanceof Error ? error.message : String(error)}`
+        ));
+      }
+    }
+  }
+  if (broadNontrivialRegionAdd && !constructionRole) {
+    violations.push(violation(
+      'next_operation',
+      'broad_region_construction_role_required',
+      'broad nontrivial region ADD work must declare construction_role before choosing photoshop_paint_regions; use structured-mass for genuine form-bearing closed mass or the applicable continuous/soft/environmental role'
+    ));
+  }
+  if (broadNontrivialRegionAdd && constructionRole && !requestedMaterialRole) {
+    violations.push(violation(
+      'next_operation',
+      'construction_role_material_role_required',
+      `construction_role=${constructionRole} requires next_pass.material_role so the semantic construction is fixed before mechanism selection`
+    ));
+  }
+  if (broadNontrivialRegionAdd && constructionRole === 'structured-mass'
+      && isCanonicalLowVertexRegionCompound(mutationSteps as Array<Record<string, unknown>>)) {
+    violations.push(violation(
+      'next_operation',
+      'structured_mass_iconic_primitive_compound',
+      'structured-mass region block-in cannot encode a representational form solely as a compound of 3-4 point canonical polygons; preserve characteristic/asymmetric geometry in at least one contour or choose a different form-bearing mechanism'
+    ));
+  }
+  // E.7c: construction_plan is durable artistic guidance, not an execution
+  // certificate. Broad structured work still goes through the executable
+  // construction-role/material/method checks above and the geometry contracts
+  // below, but missing narrative representation/features/exit-condition prose
+  // must not veto an otherwise safe mutation.
+
+  let rolePreferredMethodId: string | undefined;
+  if (constructionRole) {
+    try {
+      const roleImpactClass = (impactClass ?? 'construct') as PaintingImpactClass;
+      const roleSelection = selectPaintingConstructionMethod(
+        registry,
+        constructionRole as PaintingConstructionRole,
+        roleImpactClass,
+        Array.isArray(raw.avoid_method_ids) ? raw.avoid_method_ids.map(text).filter(Boolean) as string[] : [],
+        { stage },
+      );
+      if (visualIntent && visualIntent !== roleSelection.visualIntent) {
+        violations.push(violation(
+          'next_operation',
+          'construction_role_intent_mismatch',
+          `construction_role=${constructionRole} resolves to visual_intent=${roleSelection.visualIntent}, not ${visualIntent}`
+        ));
+      }
+      visualIntent ??= roleSelection.visualIntent;
+      impactClass ??= roleImpactClass;
+      rolePreferredMethodId = roleSelection.selected.id;
+      const explicitPreferredMethodId = text(raw.preferred_method_id);
+      if (explicitPreferredMethodId && explicitPreferredMethodId !== rolePreferredMethodId) {
+        violations.push(violation(
+          'next_operation',
+          'construction_role_method_mismatch',
+          `construction_role=${constructionRole} selects method ${rolePreferredMethodId} before primitive choice; preferred_method_id=${explicitPreferredMethodId} would bypass that routing`
+        ));
+      }
+    } catch (error) {
+      violations.push(violation(
+        'next_operation',
+        'construction_role_method_unavailable',
+        error instanceof Error ? error.message : String(error)
+      ));
+    }
+  }
+  const preferredMethodId = rolePreferredMethodId ?? text(raw.preferred_method_id);
+  if (visualIntent || impactClass || preferredMethodId) {
     if (!visualIntent || !impactClass) {
       violations.push(violation(
         'next_operation',
@@ -1386,14 +2608,14 @@ function compileCompactPass(
           visualIntent: visualIntent as never,
           impactClass: impactClass as never,
           stage,
-          preferredMethodId: text(raw.preferred_method_id),
+          preferredMethodId,
           avoidMethodIds: Array.isArray(raw.avoid_method_ids) ? raw.avoid_method_ids.map(text).filter(Boolean) as string[] : [],
           documentId: Number(documentId),
           runtimeRevision: UXP_BRIDGE_REVISION,
         });
       } catch (error) {
         const executedMutationTools = [...new Set(mutationSteps.map(step => text(step.tool)).filter(Boolean))] as string[];
-        const inferred = inferUniqueClassification({
+        const inferred = constructionRole ? null : inferUniqueClassification({
           registry,
           goal,
           actionClass,
@@ -1411,7 +2633,7 @@ function compileCompactPass(
               visualIntent: visualIntent as never,
               impactClass: impactClass as never,
               stage,
-              preferredMethodId: text(raw.preferred_method_id),
+              preferredMethodId,
               avoidMethodIds: Array.isArray(raw.avoid_method_ids) ? raw.avoid_method_ids.map(text).filter(Boolean) as string[] : [],
               documentId: Number(documentId),
               runtimeRevision: UXP_BRIDGE_REVISION,
@@ -1446,10 +2668,40 @@ function compileCompactPass(
     }
   }
 
-  if (methodClass === 'paint') {
-    const requestedMaterialRole = text(raw.material_role);
+  if (methodClass === 'paint' || methodClass === 'preset-brush') {
     const rankedStage = paintingStageRank(stage);
     const materialFitnessRequired = rankedStage !== undefined && rankedStage >= 4 && roles.length > 0;
+    // E.7c: material role is compiler-owned when the durable brush preflight makes
+    // it unambiguous. Filter by the already-resolved visual intent (and an explicit
+    // brush role, when supplied), then derive only when every compatible role names
+    // the same single material. Ambiguous inventories remain fail-closed below.
+    if (materialFitnessRequired && !requestedMaterialRole) {
+      const compatibleRoles = roles.filter(role => {
+        const roleId = text(role.role_id);
+        const intents = Array.isArray(role.visual_intents)
+          ? role.visual_intents.map(value => text(value)?.toLowerCase()).filter(Boolean)
+          : [];
+        return (!explicitBrushRole || roleId === explicitBrushRole)
+          && (!visualIntent || intents.includes(visualIntent.toLowerCase()));
+      });
+      const compatibleMaterials = [...new Set(compatibleRoles.flatMap(role =>
+        Array.isArray(role.material_roles) ? role.material_roles.map(text).filter(Boolean) as string[] : []
+      ))];
+      const everyCompatibleRoleIsSingleMaterial = compatibleRoles.length > 0
+        && compatibleRoles.every(role => {
+          const materials = Array.isArray(role.material_roles)
+            ? [...new Set(role.material_roles.map(text).filter(Boolean))]
+            : [];
+          return materials.length === 1 && materials[0] === compatibleMaterials[0];
+        });
+      if (compatibleMaterials.length === 1 && everyCompatibleRoleIsSingleMaterial) {
+        requestedMaterialRole = compatibleMaterials[0];
+        normalizations.push({
+          code: 'material_role_normalized',
+          message: `Derived material_role=${requestedMaterialRole} from the unambiguous durable brush preflight.`,
+        });
+      }
+    }
     if (materialFitnessRequired && !requestedMaterialRole) {
       violations.push(violation(
         'next_operation',
@@ -1514,6 +2766,18 @@ function compileCompactPass(
         text(brushRole.preferred_preset),
         ...(Array.isArray(brushRole.alternative_presets) ? brushRole.alternative_presets.map(text) : []),
       ].filter(Boolean));
+      const candidateEvidence = Array.isArray(brushRole.candidate_evidence)
+        ? brushRole.candidate_evidence.find(candidate => text(candidate?.preset_name) === selectedPreset)
+        : undefined;
+      const viablePresetCount = acceptedPresets.size;
+      if (materialFitnessRequired && viablePresetCount > 1 && !selectedPreset) {
+        violations.push(violation(
+          'next_operation',
+          'brush_preset_choice_required',
+          `brush_role=${text(brushRole.role_id)} has ${viablePresetCount} preflighted presets for material_role=${requestedMaterialRole ?? 'unspecified'}; explicitly select the evidence-fit preset instead of silently reusing preferred_preset=${text(brushRole.preferred_preset) ?? 'missing'}`
+        ));
+      }
+      const presetChoiceReason = text(raw.brush_preset_choice_reason);
       if (selectedPreset && !acceptedPresets.has(selectedPreset)) {
         violations.push(violation(
           'next_operation',
@@ -1521,7 +2785,32 @@ function compileCompactPass(
           `selected preset ${selectedPreset} is not bound to brush_role=${text(brushRole.role_id)}`
         ));
       }
-      selectedPreset ??= text(brushRole.preferred_preset);
+      const recentProblemBrush = Array.isArray(context.recent_brush_problem_usage)
+        ? context.recent_brush_problem_usage.find(row => text(row.problem_id) === problemId)
+        : undefined;
+      const lastProblemPreset = text(recentProblemBrush?.preset_name);
+      const lastProblemOutcome = text(recentProblemBrush?.outcome);
+      const retryReason = text(raw.brush_retry_reason);
+      const recentSameMaterialFailure = Array.isArray(context.recent_brush_usage)
+        ? [...context.recent_brush_usage].reverse().find(row =>
+            text(row.preset_name) === selectedPreset
+            && text(row.material_role) === requestedMaterialRole
+            && text(row.problem_id) !== problemId
+            && ['failed', 'rolled-back', 'rollback-required'].includes(text(row.outcome) ?? ''))
+        : undefined;
+      // E.7c: explicit preset identity remains executable input, but prose explaining the
+      // choice/retry is guidance only. Observed failed usage remains durable context for the
+      // next artistic decision; it is not a standalone mutation-admission certificate.
+      void lastProblemPreset;
+      void lastProblemOutcome;
+      void retryReason;
+      void recentSameMaterialFailure;
+      // A single-candidate role is deterministic. When several preflighted marks fit substantial
+      // material work, do not collapse the portfolio back to the first/preferred preset merely
+      // because the caller omitted a choice; the violation above forces an evidence-fit decision.
+      if (viablePresetCount <= 1 || !materialFitnessRequired) {
+        selectedPreset ??= text(brushRole.preferred_preset);
+      }
       if (selectedPreset && !actions.some(step => text(step.tool) === 'photoshop_select_brush_preset')) {
         const ids = new Set(actions.map(step => text(step.id)).filter(Boolean));
         let selectId = 'guard_select_brush';
@@ -1541,7 +2830,11 @@ function compileCompactPass(
           ?? (Array.isArray(brushRole.visual_intents) ? text(brushRole.visual_intents[0]) : undefined),
         brush_role: text(brushRole.role_id),
         ...(selectedPreset ? { preset_name: selectedPreset } : {}),
-        pressure_policy: text(brushRole.pressure_policy),
+        ...(presetChoiceReason ? { selection_reason: presetChoiceReason } : {}),
+        // Pressure/dynamics are properties of the selected mark, not merely of the role's
+        // preferred preset. Preserve the selected candidate's probed policy so VisualMicroPlan
+        // validation can require the corresponding executable stroke dynamics.
+        pressure_policy: text(candidateEvidence?.pressure_policy) ?? text(brushRole.pressure_policy),
       };
     }
   }
@@ -1550,6 +2843,15 @@ function compileCompactPass(
     paintStrategy = {
       construction_role: constructionRole,
       material_role: text(raw.material_role),
+      visual_intent: visualIntent,
+      pressure_policy: 'none',
+    };
+  }
+
+  if (constructionRole && !paintStrategy && visualIntent && requestedMaterialRole) {
+    paintStrategy = {
+      construction_role: constructionRole,
+      material_role: requestedMaterialRole,
       visual_intent: visualIntent,
       pressure_policy: 'none',
     };
@@ -1626,6 +2928,7 @@ function compileCompactPass(
       : { mode: 'after_only' },
     layer_separation_check: layerSeparationCheck,
     ...(logicalLayer ? { logical_layer: logicalLayer } : {}),
+    ...(rawCrossLayerCorrection ? { cross_layer_correction: rawCrossLayerCorrection } : {}),
     action_class: actionClass,
     problem_id: problemId,
     expected_visual_result: goal,
@@ -1639,6 +2942,7 @@ function compileCompactPass(
     ...(Array.isArray(raw.replace_protected_layer_ids) ? { replace_protected_layer_ids: raw.replace_protected_layer_ids } : {}),
     ...(paintStrategy ? { paint_strategy: paintStrategy } : {}),
     ...(raw.material_response !== undefined ? { material_response: structuredClone(raw.material_response) } : {}),
+    ...(colorGradientPreflight ? { color_gradient_preflight: colorGradientPreflight } : {}),
     ...(plannerDirectiveId && plannerTaskId ? {
       planner_directive_id: plannerDirectiveId,
       planner_task_id: plannerTaskId,
@@ -1650,6 +2954,9 @@ function compileCompactPass(
       ...(raw.independent_region === true ? { independent_region: true } : {}),
       ...(raw.addresses_primary_mismatch === true ? { addresses_primary_mismatch: true } : {}),
       ...(text(raw.addresses_problem_id) ? { addresses_problem_id: text(raw.addresses_problem_id) } : {}),
+      ...(text(raw.causal_strategy_id) ? { causal_strategy_id: text(raw.causal_strategy_id) } : {}),
+      ...(text(raw.strategy_family) ? { strategy_family: text(raw.strategy_family) } : {}),
+      ...(Number.isInteger(raw.causal_escalation_level) ? { causal_escalation_level: raw.causal_escalation_level } : {}),
     } : {}),
     steps: actions,
   };
@@ -1663,11 +2970,12 @@ function compileCompactPass(
       ));
     } else {
       try {
-        normalizeMaterialResponsePlan(raw.material_response, {
+        const materialPlan = normalizeMaterialResponsePlan(raw.material_response, {
           physicalRole: text(logicalLayer?.physical_role),
           opacityRole: text(logicalLayer?.opacity_role),
           constructionRole: text(paintStrategy?.construction_role),
         });
+        validateMaterialLightingBinding(materialPlan);
       } catch (error: unknown) {
         violations.push(violation(
           'next_operation',
@@ -1687,6 +2995,17 @@ function compileCompactPass(
       args,
       ...(stageReset ? { stage_reset: stageReset } : {}),
       significance_mode: significanceMode,
+      ...(sceneOwnershipPlanToPersist ? { scene_ownership_plan: sceneOwnershipPlanToPersist } : {}),
+      ...(sceneGeometryModelToPersist ? { scene_geometry_model: sceneGeometryModelToPersist } : {}),
+      ...(sceneLightingColorModelToPersist ? { scene_lighting_color_model: sceneLightingColorModelToPersist } : {}),
+      ...(sceneCameraImagingModelToPersist ? { scene_camera_imaging_model: sceneCameraImagingModelToPersist } : {}),
+      ...(imagingPreflight ? { imaging_preflight: imagingPreflight } : {}),
+      ...(geometryPreflight ? { geometry_preflight: geometryPreflight } : {}),
+      ...(correctionScope ? { correction_scope: correctionScope } : {}),
+      ...(crossLayerCorrection ? { cross_layer_correction: crossLayerCorrection } : {}),
+      ...(text(raw.root_cause_classification) ? { root_cause_classification: text(raw.root_cause_classification) } : {}),
+      ...(text(raw.root_cause_reason) ? { root_cause_reason: text(raw.root_cause_reason) } : {}),
+      ...(raw.causal_level_change === true ? { causal_level_change: true } : {}),
       visual_review_profile: visualReviewProfile,
       preview_args: {
         max_dimension_px: visualReviewProfile.whole_max_dimension_px,
@@ -1748,6 +3067,45 @@ async function compileNextOperation(
       ];
   let visualMicroPlanCompiled = stateOnly || compiled.tool !== 'photoshop_execute_visual_microplan';
 
+  if (!stateOnly && compiled.tool === 'photoshop_analyze_value_structure') {
+    const documentId = Number((compiled.args as Record<string, unknown> | undefined)?.document_id);
+    const context = Number.isSafeInteger(documentId) && documentId > 0
+      ? store.compactPassContext?.(documentId, options.projectionContext)
+      : undefined;
+    if (context?.painting_profile === 'nontrivial_painting' && context.has_visual_frame !== true) {
+      violations.push(violation(
+        'next_operation',
+        'premature_value_analysis',
+        'premature_value_analysis: do not spend a structural value-check round on a fresh blank nontrivial canvas; make the first meaningful visual construction pass first, then analyze value at a structural gate'
+      ));
+    }
+  }
+
+  if (!stateOnly) {
+    const documentId = Number((compiled.args as Record<string, unknown> | undefined)?.document_id);
+    const context = Number.isSafeInteger(documentId) && documentId > 0
+      ? store.compactPassContext?.(documentId, options.projectionContext)
+      : undefined;
+    if (context?.painting_profile === 'nontrivial_painting'
+        && context.has_visual_frame !== true
+        && guardExecutionClass(String(compiled.tool ?? '')) === 'preparation-only'
+        && compiled.tool !== 'photoshop_create_document'
+        && compiled.tool !== 'photoshop_open_image'
+        // Explicit document activation is target recovery/navigation, not future-stage
+        // artistic preparation. A pinned blank document may legitimately stop being
+        // active between Guard calls (for example when another workflow creates a
+        // document). Blocking activation here makes the required first visual pass
+        // unreachable because every following mutation fails closed on document
+        // mismatch before it can create visible progress.
+        && compiled.tool !== 'photoshop_set_active_document') {
+      violations.push(violation(
+        'next_operation',
+        'premature_future_preparation',
+        'premature_future_preparation: fresh blank nontrivial canvases must make first visible progress before standalone future-stage setup; put preparation that is causally required by the immediate first visual pass inside that same visual microplan instead of spending a separate Guard cycle on it'
+      ));
+    }
+  }
+
   if (!stateOnly && compiled.tool === 'photoshop_execute_visual_microplan') {
     try {
       compiled = {
@@ -1772,6 +3130,10 @@ async function compileNextOperation(
     plannedPreviousVisualVerdict,
     projectionContext: options.projectionContext,
     stateOnly,
+    deferCheckpointDebt: true,
+    ...(options.compilerDeferredFromOperationId
+      ? { compilerDeferredFromOperationId: options.compilerDeferredFromOperationId }
+      : {}),
   })) {
     violations.push(violation('next_operation', 'guard_preflight_failed', message));
   }
@@ -1820,9 +3182,22 @@ export async function compileGuardCycle(
   registry: ToolRegistry,
   options: GuardCycleCompilerOptions = {}
 ): Promise<GuardCycleCompileResult> {
+  const intentReceivedAt = new Date().toISOString();
   const compiledInput = structuredClone(input);
   const violations: GuardCycleCompileViolation[] = [];
   const normalizations: Array<{ code: string; message: string }> = [];
+  let paintingIntentCompileMs = 0;
+  let durableStateInjectionMs = 0;
+  let localValidationMs = 0;
+  let autoRepairMs = 0;
+  let autoRepairCount = 0;
+  let autoSplitCount = 0;
+  let originalIntentFingerprint: string | undefined;
+  let compilerDeferredFromOperationId: string | undefined;
+  let compiledAt: string | undefined;
+  let validatedAt: string | undefined;
+  let repairedAt: string | undefined;
+  let repairAudit: GuardCompilerRepairAudit | undefined;
   const internalStateOnlyRevalidation = options.nextOperationValidation === 'state-only';
   const compactPreviousOperationId = text(compiledInput.previous_operation_id);
   const compactPreviousObservationSupplied = compiledInput.previous_observation !== undefined;
@@ -1888,6 +3263,41 @@ export async function compileGuardCycle(
       };
     }
   }
+  const rawPaintingIntent = compiledInput.painting_intent;
+  if (rawPaintingIntent !== undefined && compiledInput.next_pass !== undefined) {
+    violations.push(violation(
+      'cycle',
+      'competing_next_request_forms',
+      'Supply either painting_intent or next_pass, not both. PaintingIntent is the compact artistic input and next_pass is the compatibility contract.'
+    ));
+    delete compiledInput.painting_intent;
+  } else if (rawPaintingIntent !== undefined) {
+    const paintingIntentStartedAt = Date.now();
+    try {
+      const intent = parsePaintingIntent(rawPaintingIntent);
+      originalIntentFingerprint = paintingIntentFingerprint(intent);
+      compilerDeferredFromOperationId = intent.deferred_from_operation_id;
+      const intentCompilation = compilePaintingIntentToNextPass(intent, store, options.projectionContext);
+      durableStateInjectionMs = intentCompilation.durable_state_injection_ms;
+      compiledInput.next_pass = intentCompilation.next_pass;
+      normalizations.push(...intentCompilation.diagnostics.map(item => ({
+        code: item.code,
+        message: item.message,
+      })));
+      compiledAt = new Date().toISOString();
+    } catch (error) {
+      const semantic = error instanceof PaintingIntentError || error instanceof NextPassCompilerError;
+      violations.push(violation(
+        'next_operation',
+        semantic ? error.code : 'painting_intent_compiler_failure',
+        error instanceof Error ? error.message : String(error),
+        semantic && error.details ? error.details : undefined
+      ));
+    } finally {
+      paintingIntentCompileMs = Date.now() - paintingIntentStartedAt;
+      delete compiledInput.painting_intent;
+    }
+  }
   if (compiledInput.previous_observation !== undefined) {
     const previousOperationId = text(compiledInput.previous_operation_id);
     const expanded = compactObservationToVerdict(compiledInput.previous_observation, normalizations);
@@ -1901,6 +3311,7 @@ export async function compileGuardCycle(
     }
   }
   const rawNextPass = compiledInput.next_pass;
+  let sourceNextPass: Record<string, unknown> | undefined;
   if (rawNextPass !== undefined && compiledInput.next_operation !== undefined) {
     violations.push(violation(
       'cycle',
@@ -1915,15 +3326,19 @@ export async function compileGuardCycle(
         'photoshop_guard_cycle next_pass must be an object when supplied'
       ));
     } else {
-      const compact = compileCompactPass(rawNextPass as Record<string, unknown>, store, registry);
+      sourceNextPass = structuredClone(rawNextPass as Record<string, unknown>);
+      const compact = compileCompactPass(sourceNextPass, store, registry, options.projectionContext);
       violations.push(...compact.violations);
       if (compact.normalizations?.length) normalizations.push(...compact.normalizations);
-      if (compact.operation) compiledInput.next_operation = compact.operation;
+      if (compact.operation) {
+        compiledInput.next_operation = compact.operation;
+        compiledAt ??= new Date().toISOString();
+      }
     }
     delete compiledInput.next_pass;
   }
-  const rawNextOperation = compiledInput.next_operation;
-  const hasNextOperation = rawNextOperation !== undefined;
+  let rawNextOperation = compiledInput.next_operation;
+  let hasNextOperation = rawNextOperation !== undefined;
   let nextOperation: Record<string, unknown> | undefined;
 
   if (hasNextOperation && (!rawNextOperation || typeof rawNextOperation !== 'object' || Array.isArray(rawNextOperation))) {
@@ -1933,7 +3348,7 @@ export async function compileGuardCycle(
       'photoshop_guard_cycle next_operation must be an object when supplied'
     ));
   }
-  if (!hasNextOperation) {
+  if (!hasNextOperation && rawPaintingIntent === undefined) {
     const previousOperationId = compiledInput.previous_operation_id;
     if (typeof previousOperationId !== 'string' || !previousOperationId.trim()) {
       violations.push(violation(
@@ -1956,27 +3371,152 @@ export async function compileGuardCycle(
     }
   }
 
-  if (hasNextOperation && rawNextOperation && typeof rawNextOperation === 'object' && !Array.isArray(rawNextOperation)) {
-    const plannedPreviousOperationId = typeof compiledInput.previous_operation_id === 'string'
-      ? compiledInput.previous_operation_id.trim() || undefined
-      : undefined;
-    const plannedPreviousVisualVerdict = !!compiledInput.previous_visual_verdict;
-    const next = await compileNextOperation(
-      rawNextOperation as Record<string, unknown>,
+  const plannedPreviousOperationId = typeof compiledInput.previous_operation_id === 'string'
+    ? compiledInput.previous_operation_id.trim() || undefined
+    : undefined;
+  const plannedPreviousVisualVerdict = !!compiledInput.previous_visual_verdict;
+  const validateNextOperation = async (
+    operation: Record<string, unknown>
+  ): Promise<Awaited<ReturnType<typeof compileNextOperation>>> => {
+    const validationStartedAt = Date.now();
+    const result = await compileNextOperation(
+      operation,
       store,
       registry,
       plannedPreviousOperationId,
       plannedPreviousVisualVerdict,
-      options
+      {
+        ...options,
+        ...(compilerDeferredFromOperationId ? { compilerDeferredFromOperationId } : {}),
+      }
     );
+    localValidationMs += Date.now() - validationStartedAt;
+    validatedAt = new Date().toISOString();
+    return result;
+  };
+
+  if (hasNextOperation && rawNextOperation && typeof rawNextOperation === 'object' && !Array.isArray(rawNextOperation)) {
+    const next = await validateNextOperation(rawNextOperation as Record<string, unknown>);
     nextOperation = next.operation;
     violations.push(...next.violations);
     normalizations.push(...next.normalizations);
     compiledInput.next_operation = next.operation;
+    rawNextOperation = next.operation;
+  }
+
+  const initialNextViolations = uniqueViolations(violations.filter(item => item.scope === 'next_operation'));
+  if (sourceNextPass && initialNextViolations.length) {
+    const classified = classifyViolations(initialNextViolations);
+    const hasSemanticOrSystemic = classified.some(item =>
+      item.repair_class === 'MODEL_SEMANTIC_DECISION' || item.repair_class === 'SYSTEMIC_FAILURE'
+    );
+    const repairStartedAt = Date.now();
+    const documentId = Number(sourceNextPass.document_id);
+    const context = Number.isSafeInteger(documentId) && documentId > 0
+      ? store.compactPassContext?.(documentId, options.projectionContext) ?? {}
+      : {};
+    const deterministic = applyDeterministicPassRepairs(sourceNextPass, initialNextViolations, context);
+    let repairCandidate = deterministic.repaired_pass;
+    const appliedRepairs = [...deterministic.repairs];
+    let deferredNextPass: Record<string, unknown> | undefined;
+
+    if (!hasSemanticOrSystemic) {
+      const split = splitPassForBudget(repairCandidate, initialNextViolations);
+      if (split) {
+        repairCandidate = split.first_pass;
+        deferredNextPass = split.deferred_pass;
+        appliedRepairs.push(split.repair);
+        autoSplitCount = 1;
+      }
+    }
+
+    if (appliedRepairs.length) {
+      const firstViolationFingerprint = fingerprint(initialNextViolations);
+      const firstCompiledPayloadFingerprint = fingerprint(nextOperation ?? rawNextOperation ?? sourceNextPass);
+      const preservedViolations = violations.filter(item => item.scope !== 'next_operation');
+      const repairedCompact = compileCompactPass(repairCandidate, store, registry, options.projectionContext);
+      const repairedNextViolations = [...repairedCompact.violations];
+      if (repairedCompact.normalizations?.length) normalizations.push(...repairedCompact.normalizations);
+      let repairedOperation = repairedCompact.operation;
+      if (repairedOperation) {
+        const repairedValidation = await validateNextOperation(repairedOperation);
+        repairedOperation = repairedValidation.operation;
+        repairedNextViolations.push(...repairedValidation.violations);
+        normalizations.push(...repairedValidation.normalizations);
+      }
+      const uniqueRepairedNextViolations = uniqueViolations(repairedNextViolations);
+      const finalViolationFingerprint = fingerprint(uniqueRepairedNextViolations);
+      const repeatedSameViolation = uniqueRepairedNextViolations.length > 0
+        && finalViolationFingerprint === firstViolationFingerprint;
+
+      violations.splice(0, violations.length, ...preservedViolations);
+      if (repeatedSameViolation) {
+        violations.push(violation(
+          'next_operation',
+          'deterministic_repair_repeat',
+          'A bounded deterministic repair pass reproduced the same violation fingerprint. Treat this as a compiler/systemic defect; do not retry automatically.',
+          {
+            violation_fingerprint: finalViolationFingerprint,
+            original_error_codes: [...new Set(uniqueRepairedNextViolations.map(item => item.code))],
+          }
+        ));
+      } else {
+        violations.push(...uniqueRepairedNextViolations);
+      }
+
+      nextOperation = repairedOperation;
+      rawNextOperation = repairedOperation;
+      hasNextOperation = repairedOperation !== undefined;
+      if (repairedOperation) compiledInput.next_operation = repairedOperation;
+      sourceNextPass = repairCandidate;
+      repairedAt = new Date().toISOString();
+      autoRepairCount = deterministic.repairs.length;
+      repairAudit = {
+        protocol: 'photoshop.guard.compiler_repair.v1',
+        ...(originalIntentFingerprint ? { original_intent_fingerprint: originalIntentFingerprint } : {}),
+        first_compiled_payload_fingerprint: firstCompiledPayloadFingerprint,
+        repairs: appliedRepairs,
+        repaired_payload_fingerprint: fingerprint(repairedOperation ?? repairCandidate),
+        first_violation_fingerprint: firstViolationFingerprint,
+        final_violation_fingerprint: repeatedSameViolation
+          ? finalViolationFingerprint
+          : fingerprint(uniqueRepairedNextViolations),
+        final_validation: repeatedSameViolation
+          ? 'systemic-repeat'
+          : uniqueRepairedNextViolations.length ? 'rejected' : 'valid',
+        ...(deferredNextPass ? { deferred_next_pass: deferredNextPass } : {}),
+      };
+    }
+    autoRepairMs = Date.now() - repairStartedAt;
   }
 
   const unique = uniqueViolations(violations);
-  if (!unique.length) return { input: compiledInput, nextOperation, violations: [], normalizations };
+  const classifiedFinal = classifyViolations(unique);
+  const compilerTelemetry: GuardCompilerTelemetry = {
+    painting_intent_compile_ms: paintingIntentCompileMs,
+    durable_state_injection_ms: durableStateInjectionMs,
+    local_validation_ms: localValidationMs,
+    auto_repair_ms: autoRepairMs,
+    auto_repair_count: autoRepairCount,
+    auto_split_count: autoSplitCount,
+    model_semantic_ambiguity_count: classifiedFinal.filter(item => item.repair_class === 'MODEL_SEMANTIC_DECISION').length,
+    preflight_rejection_exposed_to_model_count: unique.length ? 1 : 0,
+    intent_received_at: intentReceivedAt,
+    ...(compiledAt ? { compiled_at: compiledAt } : {}),
+    ...(validatedAt ? { validated_at: validatedAt } : {}),
+    ...(repairedAt ? { repaired_at: repairedAt } : {}),
+  };
+  if (!unique.length) {
+    return {
+      input: compiledInput,
+      nextOperation,
+      violations: [],
+      normalizations,
+      compilerTelemetry,
+      ...(repairAudit ? { repairAudit } : {}),
+      ...(compilerDeferredFromOperationId ? { compilerDeferredFromOperationId } : {}),
+    };
+  }
 
   const cycleFingerprint = fingerprint(compiledInput);
   const rejectionFingerprint = fingerprint({ cycle_fingerprint: cycleFingerprint, violations: unique });
@@ -1990,19 +3530,26 @@ export async function compileGuardCycle(
     : {};
   const nextDocumentId = Number.isSafeInteger(nextArgs.document_id) && Number(nextArgs.document_id) > 0
     ? Number(nextArgs.document_id)
-    : undefined;
-  const passContext = nextDocumentId ? store.compactPassContext?.(nextDocumentId) : undefined;
+    : Number.isSafeInteger(Number(sourceNextPass?.document_id)) && Number(sourceNextPass?.document_id) > 0
+      ? Number(sourceNextPass?.document_id)
+      : undefined;
+  const passContext = nextDocumentId ? store.compactPassContext?.(nextDocumentId, options.projectionContext) : undefined;
   const artDirector = passContext?.art_director && typeof passContext.art_director === 'object'
     ? passContext.art_director as Record<string, unknown>
     : undefined;
   const currentTaskId = text(artDirector?.current_task_id);
   const tasks = Array.isArray(artDirector?.tasks) ? artDirector.tasks as Array<Record<string, unknown>> : [];
   const currentTask = currentTaskId ? tasks.find(task => text(task.task_id) === currentTaskId) : undefined;
+  const systemicFailure = classifiedFinal.some(item => item.repair_class === 'SYSTEMIC_FAILURE');
+  const semanticDecisionRequired = classifiedFinal.some(item => item.repair_class === 'MODEL_SEMANTIC_DECISION');
   return {
     input: compiledInput,
     nextOperation,
     violations: unique,
     normalizations,
+    compilerTelemetry,
+    ...(repairAudit ? { repairAudit } : {}),
+    ...(compilerDeferredFromOperationId ? { compilerDeferredFromOperationId } : {}),
     rejection: jsonResult({
       ok: false,
       code: 'guard_cycle_preflight_rejected',
@@ -2054,11 +3601,19 @@ export async function compileGuardCycle(
         repeat_same_semantic_cycle: true,
         previous_operation_closed: false,
         photoshop_mutation_started: false,
+        correction_mode: 'payload-only-first',
+        repository_or_schema_investigation: 'defer-until-corrected-resubmit-repeats-or-systemic-defect-is-explicit',
+        first_response: 'apply the listed deterministic violations directly to the rejected payload and resubmit immediately',
+        ...machineRepairRecipe(unique, repairAudit?.repairs ?? []),
         ...(currentTaskId ? { planner_task_id: currentTaskId } : {}),
         ...(text(currentTask?.status) ? { planner_task_status: text(currentTask?.status) } : {}),
       },
       next_required_action:
-        'Correct all listed deterministic finalization and next-operation errors together, then resubmit the same Guard cycle. The previous operation was not closed and no next Photoshop operation was dispatched.',
+        systemicFailure
+          ? 'A bounded compiler/systemic defect remains after local validation. Do not retry the identical payload automatically. Inspect only the bounded compiler diagnostics; no Photoshop mutation was dispatched and no recovery/reconcile is required.'
+          : semanticDecisionRequired
+            ? 'Provide the named artistic or structural decision and resubmit the same semantic Guard cycle. This is not recovery: no Photoshop mutation was dispatched and no fresh state/preview read is required solely because of this rejection.'
+            : 'Apply the listed deterministic violations directly to the rejected payload and immediately resubmit the same semantic Guard cycle. Do not inspect repository source, schemas, tests, status, state, or extra previews before this first corrected resubmission unless the rejection itself explicitly identifies a systemic runtime/tool defect. The previous operation was not closed and no Photoshop mutation was dispatched.',
     }, true),
   };
 }

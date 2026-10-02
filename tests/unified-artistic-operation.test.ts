@@ -50,6 +50,20 @@ function directive() {
     strategy_validation_after_microplans: 2,
     strategy_validation: { status: 'pending' },
     composition_exploration: { hypotheses: [] },
+    perceptual_hierarchy: {
+      revision: 1,
+      mode: 'distributed',
+      zones: [{
+        id: 'whole-frame',
+        owner_ids: ['whole-frame'],
+        priority: 'distributed',
+        contrast_budget: 'medium',
+        detail_budget: 'medium',
+        edge_certainty: 'medium',
+        chroma_accent: 'restricted',
+      }],
+      ordering: [],
+    },
     assessment: {
       composition: 'Stable composition.',
       focal_hierarchy: 'Primary subject remains dominant.',
@@ -70,6 +84,7 @@ function directive() {
       status: 'style-not-applicable',
       observed: false,
       applicability_reason: 'Synthetic operation-routing fixture.',
+      style_contract_basis: { field: 'color_policy', criterion: 'preserve palette relationships' },
       limitations: ['Does not exercise grayscale evidence.'],
     },
     refinement_check: {

@@ -3,6 +3,23 @@ import { PhotoshopBackendRouter } from '../platform/photoshop-backend.js';
 import { PhotoshopConnection } from '../platform/connection.js';
 import { invokeUxpOperation } from '../platform/uxp-bridge-client.js';
 import { atomicFailureFromError, atomicSuccess } from './atomic-shared.js';
+import {
+  boundsFromPoints,
+  corridorContainsPoint,
+  crossSectionBetweenLines,
+  fitLineIntersection,
+  fitVanishingFamily,
+  intersectLines,
+  normalizedLineEquation,
+  pointOnLineAtParameter,
+  pointOnLineAtX,
+  pointOnLineAtY,
+  pointToLineDistance,
+  polygonsIntersect,
+  type GeometryAxis,
+  type GeometryLine,
+} from '../core/geometry-math.js';
+import type { GeometryPoint } from '../core/scene-geometry-model.js';
 
 type GuideOrientation = 'HORIZONTAL' | 'VERTICAL';
 
@@ -36,6 +53,13 @@ interface LandmarkFrame {
   bottom: number;
 }
 
+interface GeometrySourceFrame {
+  document_id: number;
+  document_incarnation: string;
+  width: number;
+  height: number;
+}
+
 function finiteNumber(value: unknown, name: string): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
     throw new Error(`${name} must be a finite number`);
@@ -48,6 +72,149 @@ function nonEmptyString(value: unknown, name: string): string {
     throw new Error(`${name} must be a non-empty string`);
   }
   return value.trim();
+}
+
+function geometryPoint(value: unknown, path: string): GeometryPoint {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${path} must be an object`);
+  const point = value as Record<string, unknown>;
+  return { x: finiteNumber(point.x, `${path}.x`), y: finiteNumber(point.y, `${path}.y`) };
+}
+
+function geometryLines(value: unknown, minimum = 1): Array<{ id: string; line: GeometryLine }> {
+  if (!Array.isArray(value) || value.length < minimum || value.length > 32) {
+    throw new Error(`lines must contain ${minimum}-32 entries`);
+  }
+  return value.map((entry, index) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) throw new Error(`lines[${index}] must be an object`);
+    const record = entry as Record<string, unknown>;
+    const rawPoints = record.points;
+    if (!Array.isArray(rawPoints) || rawPoints.length !== 2) throw new Error(`lines[${index}].points must contain exactly two points`);
+    return {
+      id: record.id === undefined ? `line_${index + 1}` : nonEmptyString(record.id, `lines[${index}].id`),
+      line: [geometryPoint(rawPoints[0], `lines[${index}].points[0]`), geometryPoint(rawPoints[1], `lines[${index}].points[1]`)],
+    };
+  });
+}
+
+function geometryPolygon(value: unknown, path: string): GeometryPoint[] {
+  if (!Array.isArray(value) || value.length < 3 || value.length > 200) throw new Error(`${path} must contain 3-200 points`);
+  return value.map((point, index) => geometryPoint(point, `${path}[${index}]`));
+}
+
+function geometrySourceFrame(value: unknown): GeometrySourceFrame {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('source_frame must be an object');
+  const frame = value as Record<string, unknown>;
+  const documentId = finiteNumber(frame.document_id, 'source_frame.document_id');
+  const width = finiteNumber(frame.width, 'source_frame.width');
+  const height = finiteNumber(frame.height, 'source_frame.height');
+  if (!Number.isSafeInteger(documentId) || documentId <= 0) throw new Error('source_frame.document_id must be a positive integer');
+  if (!(width > 0) || !(height > 0)) throw new Error('source_frame width/height must be > 0');
+  return {
+    document_id: documentId,
+    document_incarnation: nonEmptyString(frame.document_incarnation, 'source_frame.document_incarnation'),
+    width,
+    height,
+  };
+}
+
+export async function calculateGeometry(args: Record<string, unknown>): Promise<ToolResult> {
+  try {
+    const operation = nonEmptyString(args.operation, 'operation');
+    const sourceFrame = geometrySourceFrame(args.source_frame);
+    const threshold = args.near_parallel_threshold === undefined
+      ? undefined
+      : finiteNumber(args.near_parallel_threshold, 'near_parallel_threshold');
+    const tolerance = args.tolerance_px === undefined ? 0 : finiteNumber(args.tolerance_px, 'tolerance_px');
+    if (tolerance < 0) throw new Error('tolerance_px must be >= 0');
+    const provenance = { source_frame: sourceFrame, coordinate_space: 'source_document_pixels', semantic_detection: false };
+
+    if (operation === 'line_equation') {
+      const lines = geometryLines(args.lines, 1);
+      if (lines.length !== 1) throw new Error('line_equation requires exactly one line');
+      const [start, end] = lines[0].line;
+      return atomicSuccess('Deterministic line/ray geometry calculated', {
+        ...provenance,
+        line: { id: lines[0].id, equation: normalizedLineEquation(lines[0].line), origin: start, direction: { x: end.x - start.x, y: end.y - start.y } },
+      });
+    }
+    if (operation === 'line_intersection') {
+      const lines = geometryLines(args.lines, 2);
+      if (lines.length !== 2) throw new Error('line_intersection requires exactly two lines');
+      return atomicSuccess('Deterministic line intersection calculated', {
+        ...provenance,
+        intersection: intersectLines(lines[0].line, lines[1].line, threshold),
+        line_ids: lines.map(line => line.id),
+      });
+    }
+    if (operation === 'fit_intersection' || operation === 'fit_vanishing_family') {
+      const lines = geometryLines(args.lines, 2);
+      const fit = operation === 'fit_vanishing_family'
+        ? fitVanishingFamily(lines.map(item => item.line), threshold)
+        : fitLineIntersection(lines.map(item => item.line), threshold);
+      return atomicSuccess(
+        operation === 'fit_vanishing_family' ? 'Vanishing family fitted from caller-supplied lines' : 'Robust multi-line intersection fitted',
+        { ...provenance, fit, line_ids: lines.map(line => line.id) }
+      );
+    }
+    if (operation === 'point_line_distance') {
+      const lines = geometryLines(args.lines, 1);
+      if (lines.length !== 1) throw new Error('point_line_distance requires exactly one line');
+      const point = geometryPoint(args.point, 'point');
+      return atomicSuccess('Point-to-line residual calculated', {
+        ...provenance, point, line_id: lines[0].id, distance_px: pointToLineDistance(point, lines[0].line),
+      });
+    }
+    if (operation === 'line_sample') {
+      const lines = geometryLines(args.lines, 1);
+      if (lines.length !== 1) throw new Error('line_sample requires exactly one line');
+      let point: GeometryPoint | undefined;
+      if (args.parameter !== undefined) {
+        point = pointOnLineAtParameter(lines[0].line, finiteNumber(args.parameter, 'parameter'));
+      } else {
+        const axis = nonEmptyString(args.axis, 'axis') as GeometryAxis;
+        if (axis !== 'x' && axis !== 'y') throw new Error('axis must be x|y');
+        const value = finiteNumber(args.value, 'value');
+        point = axis === 'x' ? pointOnLineAtX(lines[0].line, value) : pointOnLineAtY(lines[0].line, value);
+        if (!point) throw new Error(`line cannot be uniquely sampled at ${axis}=${value}`);
+      }
+      return atomicSuccess('Line interpolation/extrapolation calculated', { ...provenance, line_id: lines[0].id, point });
+    }
+    if (operation === 'corridor_section' || operation === 'cross_section') {
+      const lines = geometryLines(args.lines, 2);
+      if (lines.length !== 2) throw new Error(`${operation} requires exactly two boundary lines`);
+      const axis = nonEmptyString(args.axis, 'axis') as GeometryAxis;
+      if (axis !== 'x' && axis !== 'y') throw new Error('axis must be x|y');
+      const value = finiteNumber(args.value, 'value');
+      const section = crossSectionBetweenLines(lines[0].line, lines[1].line, axis, value);
+      if (!section) throw new Error(`boundary lines cannot produce a unique ${axis}=${value} cross-section`);
+      return atomicSuccess('Perspective corridor cross-section calculated', {
+        ...provenance, boundary_line_ids: lines.map(line => line.id), section,
+      });
+    }
+    if (operation === 'corridor_contains_point') {
+      const lines = geometryLines(args.lines, 2);
+      if (lines.length !== 2) throw new Error('corridor_contains_point requires exactly two boundary lines');
+      const point = geometryPoint(args.point, 'point');
+      const inside = corridorContainsPoint(point, lines[0].line, lines[1].line, tolerance);
+      return atomicSuccess('Support/corridor contact relation calculated', {
+        ...provenance, boundary_line_ids: lines.map(line => line.id), point, tolerance_px: tolerance,
+        status: inside === undefined ? 'indeterminate' : inside ? 'inside' : 'outside',
+      });
+    }
+    if (operation === 'envelope_relation') {
+      const first = geometryPolygon(args.polygon_a, 'polygon_a');
+      const second = geometryPolygon(args.polygon_b, 'polygon_b');
+      return atomicSuccess('Bounded envelope relation calculated', {
+        ...provenance,
+        bounds_a: boundsFromPoints(first),
+        bounds_b: boundsFromPoints(second),
+        polygons_intersect: polygonsIntersect(first, second),
+      });
+    }
+    throw new Error('operation must be one of line_equation|line_intersection|fit_intersection|fit_vanishing_family|point_line_distance|line_sample|corridor_section|cross_section|corridor_contains_point|envelope_relation');
+  } catch (error) {
+    return atomicFailureFromError(error);
+  }
 }
 
 function parsePoints(value: unknown): MeasurementPoint[] {
@@ -403,6 +570,78 @@ export function createMeasurementTools(connection: PhotoshopConnection): ToolDef
         },
       },
       handler: async (args) => measurePoints(backendRouter, args),
+    },
+    {
+      tool: {
+        name: 'photoshop_geometry_calculate',
+        description:
+          'Pure deterministic source-pixel geometry for Scene Geometry Model / Geometry Preflight work. The caller supplies semantic line endpoints, points or polygons plus exact source-frame provenance; this tool performs no semantic detection and creates no Photoshop history.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            operation: {
+              type: 'string',
+              enum: [
+                'line_equation', 'line_intersection', 'fit_intersection', 'fit_vanishing_family',
+                'point_line_distance', 'line_sample', 'corridor_section', 'cross_section',
+                'corridor_contains_point', 'envelope_relation',
+              ],
+            },
+            source_frame: {
+              type: 'object',
+              properties: {
+                document_id: { type: 'number', minimum: 1 },
+                document_incarnation: { type: 'string', minLength: 1 },
+                width: { type: 'number', exclusiveMinimum: 0 },
+                height: { type: 'number', exclusiveMinimum: 0 },
+              },
+              required: ['document_id', 'document_incarnation', 'width', 'height'],
+              additionalProperties: false,
+              description: 'Exact source-document pixel frame used by every supplied coordinate.',
+            },
+            lines: {
+              type: 'array', minItems: 1, maxItems: 32,
+              items: {
+                type: 'object',
+                properties: {
+                  id: { type: 'string' },
+                  points: {
+                    type: 'array', minItems: 2, maxItems: 2,
+                    items: {
+                      type: 'object',
+                      properties: { x: { type: 'number' }, y: { type: 'number' } },
+                      required: ['x', 'y'], additionalProperties: false,
+                    },
+                  },
+                },
+                required: ['points'], additionalProperties: false,
+              },
+              description: 'Caller-identified visible or planned line candidates in source-document pixels.',
+            },
+            point: {
+              type: 'object',
+              properties: { x: { type: 'number' }, y: { type: 'number' } },
+              required: ['x', 'y'], additionalProperties: false,
+            },
+            axis: { type: 'string', enum: ['x', 'y'] },
+            value: { type: 'number' },
+            parameter: { type: 'number', description: 'Normalized/unbounded line parameter; values outside 0..1 extrapolate.' },
+            tolerance_px: { type: 'number', minimum: 0 },
+            near_parallel_threshold: { type: 'number', exclusiveMinimum: 0, maximum: 1 },
+            polygon_a: {
+              type: 'array', minItems: 3, maxItems: 200,
+              items: { type: 'object', properties: { x: { type: 'number' }, y: { type: 'number' } }, required: ['x', 'y'], additionalProperties: false },
+            },
+            polygon_b: {
+              type: 'array', minItems: 3, maxItems: 200,
+              items: { type: 'object', properties: { x: { type: 'number' }, y: { type: 'number' } }, required: ['x', 'y'], additionalProperties: false },
+            },
+          },
+          required: ['operation', 'source_frame'],
+          additionalProperties: false,
+        },
+      },
+      handler: calculateGeometry,
     },
     {
       tool: {

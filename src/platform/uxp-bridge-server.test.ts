@@ -110,6 +110,41 @@ describe('UXP bridge long-poll transport', () => {
     expect(performance.now() - started).toBeLessThan(500);
   });
 
+  it('delivers validated document-close events to bridge subscribers', async () => {
+    let observed: Record<string, unknown> | undefined;
+    const unsubscribe = bridge.subscribeUxpBridgeEvents(async (event) => {
+      observed = event as unknown as Record<string, unknown>;
+    });
+    try {
+      const response = await nativeFetch(`${base}/event`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          protocol: bridge.UXP_BRIDGE_EVENT_PROTOCOL,
+          event: 'document_closed',
+          document_id: 42,
+          observed_at: '2026-10-03T00:00:00.000Z',
+          controlled: false,
+          document_instance_witness: {
+            protocol: 'photoshop.uxp.document_instance_witness.v1',
+            session_id: 'uxp-test',
+            token: 'uxp-test:42',
+          },
+        }),
+      });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({ ok: true, delivered_to: 1 });
+      expect(observed).toMatchObject({
+        event: 'document_closed',
+        document_id: 42,
+        controlled: false,
+        document_instance_witness: { token: 'uxp-test:42' },
+      });
+    } finally {
+      unsubscribe();
+    }
+  });
+
   it('does not dispatch a UXP command after the shared logical deadline has expired', async () => {
     const pollPromise = pluginPoll(base);
     await waitForPendingPoll(base);
@@ -150,6 +185,15 @@ describe('UXP bridge long-poll transport', () => {
     expect(body.plugin_connected).toBe(true);
     expect(body.waiting_long_polls).toBeGreaterThanOrEqual(1);
     expect(body.transport).toBe('long-poll');
+    expect(bridge.getUxpBridgeHealthSnapshot()).toMatchObject({
+      ok: true,
+      plugin_connected: true,
+      transport: 'long-poll',
+      bridge_revision: TEST_BRIDGE_REVISION,
+      active_document: { id: 42, name: 'Parity.psd' },
+    });
+    expect(bridge.isUxpPluginConnected(Date.now() + 30_000)).toBe(true);
+    expect(bridge.isUxpPluginConnected(Date.now() + 40_000)).toBe(false);
 
     const cleanupInvoke = bridge.invokeUxpBridge('diagnostic_ping', {}, 2_000);
     const cleanupResponse = await pendingPoll;

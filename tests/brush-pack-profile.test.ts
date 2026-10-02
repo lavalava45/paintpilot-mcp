@@ -282,4 +282,67 @@ describe('P0-E.2 evidence-based media brush profiling', () => {
     expect(built.complete).toBe(false);
     expect(built.missing_role_coverage).toEqual(expect.arrayContaining(['broad-form', 'atmosphere-soft', 'detail-edge']));
   });
+
+  it('ranks role candidates by probe-observed mark fit instead of profile-id/inventory order', () => {
+    const root = dir();
+    seedPack(root, ['Generic First', 'Broken Bristle']);
+    recordMediaBrushProfile({
+      brush_pack_id: packId, ...state('Generic First'),
+      usable_visual_intents: ['texture'], material_roles: ['foliage'], mark_character: ['smooth'],
+      useful_scale_range: { min_px: 12, max_px: 180 }, edge_behavior: 'soft', buildup_behavior: 'glazing',
+      rotation_meaningful: false, recommended_pressure_policy: 'none', known_caveats: [],
+      evidence: evidence(root, 'generic-first'),
+    }, { recordDirectory: root });
+    recordMediaBrushProfile({
+      brush_pack_id: packId, ...state('Broken Bristle'),
+      usable_visual_intents: ['texture'], material_roles: ['foliage'], mark_character: ['broken', 'bristly', 'textural'],
+      useful_scale_range: { min_px: 12, max_px: 180 }, edge_behavior: 'broken', buildup_behavior: 'granular',
+      rotation_meaningful: true, recommended_pressure_policy: 'native-preset', known_caveats: [],
+      evidence: evidence(root, 'broken-bristle'),
+    }, { recordDirectory: root });
+
+    const built = buildBrushPreflightFromProfiles({
+      brush_pack_id: packId, inventory_total: 100,
+      preset_states: [state('Generic First'), state('Broken Bristle')], required_roles: ['broken-texture'],
+    }, { recordDirectory: root }) as any;
+    expect(built.complete).toBe(true);
+    expect(built.brush_preflight.roles[0].preferred_preset).toBe('Broken Bristle');
+    expect(built.brush_preflight.roles[0].alternative_presets).toEqual(['Generic First']);
+    expect(built.brush_preflight.roles[0].candidate_evidence).toHaveLength(2);
+    expect(built.brush_preflight.roles[0].candidate_evidence[0]).toMatchObject({
+      preset_name: 'Broken Bristle',
+      mark_character: ['broken', 'bristly', 'textural'],
+      edge_behavior: 'broken',
+      buildup_behavior: 'granular',
+      rotation_meaningful: true,
+      pressure_policy: 'native-preset',
+      dynamics_capability: {
+        native_pressure_size: true,
+        native_pressure_opacity: false,
+        simulated_pressure_size: false,
+        simulated_pressure_opacity: false,
+        rotation_meaningful: true,
+        spacing_tunable: true,
+        opacity_tunable: true,
+        flow_tunable: true,
+      },
+    });
+    expect(built.brush_preflight.roles[0].candidate_evidence[0].evidence_score)
+      .toBeGreaterThan(built.brush_preflight.roles[0].candidate_evidence[1].evidence_score);
+
+    const workspace = dir();
+    const store = new SessionStore(path.join(workspace, 'controller'), {
+      visualBarrierDirectory: path.join(workspace, 'barriers'), workspaceRoot: workspace,
+    });
+    const persisted = store.setArtRunState({
+      document_id: 42,
+      process_dir: 'processes/candidate-evidence-process/run-01',
+      brush_preflight: built.brush_preflight,
+    });
+    expect(persisted.brush_preflight.roles[0].candidate_evidence[0]).toMatchObject({
+      preset_name: 'Broken Bristle', profile_id: expect.stringMatching(/^media-profile-sha256:/),
+      edge_behavior: 'broken', pressure_policy: 'native-preset',
+      dynamics_capability: expect.objectContaining({ native_pressure_size: true, rotation_meaningful: true }),
+    });
+  });
 });

@@ -65,6 +65,9 @@ function confirmedTargets(record) {
               ...(typeof layer.construction_tier === 'string' ? { construction_tier: layer.construction_tier } : {}),
               ...(typeof layer.parent_hypothesis_id === 'string' ? { parent_hypothesis_id: layer.parent_hypothesis_id } : {}),
               ...(typeof layer.parent_construction_revision === 'string' ? { parent_construction_revision: layer.parent_construction_revision } : {}),
+              ...(layer.geometry_binding && typeof layer.geometry_binding === 'object' ? { geometry_binding: structuredClone(layer.geometry_binding) } : {}),
+              ...(layer.camera_binding && typeof layer.camera_binding === 'object' ? { camera_binding: structuredClone(layer.camera_binding) } : {}),
+              ...(layer.attention_binding && typeof layer.attention_binding === 'object' ? { attention_binding: structuredClone(layer.attention_binding) } : {}),
               ...(layer.negative_space && typeof layer.negative_space === 'object' ? { negative_space: structuredClone(layer.negative_space) } : {}),
               ...(layer.causal_effect && typeof layer.causal_effect === 'object' ? { causal_effect: structuredClone(layer.causal_effect) } : {}),
               ...(layer.surface_frame && typeof layer.surface_frame === 'object' ? { surface_frame: structuredClone(layer.surface_frame) } : {}),
@@ -238,7 +241,7 @@ export function visualReviewPackage(record, significance) {
         : before
           ? 'metadata_only_prior_frame_already_available'
           : 'unavailable',
-      note: 'MCP image delivery proves which bytes were supplied for review; it does not prove correct visual interpretation.',
+      note: 'Guard cycle responses are reference-only. Exact review bytes must be requested explicitly with photoshop_guard_review_image before visual verdict closure.',
     },
   };
 }
@@ -266,8 +269,8 @@ export function cycleEnvelope(store, record, { replay = false, closed_previous }
       ? `Obtain and attach a recovery preview for operation ${record.id}, then inspect/classify it before any new visual mutation.`
     : state === 'awaiting_visual_review'
         ? pendingReview
-          ? `Inspect the escalated visual_review crop evidence for operation ${record.id}, then call photoshop_guard_cycle_auto again with previous_operation_id=${record.id} + previous_observation. This is the same artistic operation; do not replay its mutation. Include next_pass only when resubmitting the reviewed observation.`
-          : 'Inspect the visual_review image content carried by this response (use materialized_path only as a recovery fallback), then call photoshop_guard_cycle_auto once with previous_operation_id + previous_observation. Include next_pass to continue, or omit it to finalize the last pass. Guard derives the technical report and exact durable receipt acknowledgement internally.'
+          ? `Call photoshop_guard_review_image for operation ${record.id} and inspect the escalated crop evidence, then call photoshop_guard_cycle_auto again with previous_operation_id=${record.id} + previous_observation. This is the same artistic operation; do not replay its mutation. Include next_pass only when resubmitting the reviewed observation.`
+          : `Call photoshop_guard_review_image with operation_id=${record.id}, inspect the exact delivered review image(s), then call photoshop_guard_cycle_auto once with previous_operation_id + previous_observation. Include next_pass to continue, or omit it to finalize the last pass. Guard derives the technical report and exact durable receipt acknowledgement internally.`
         : 'Continue through photoshop_guard_cycle_auto. For a completed non-visual prior operation, Guard-owned technical closure stays behind the compact facade; do not switch to standalone report/ack/verdict tools or a next_operation payload.';
   const significance = store.visualSignificance(record.id);
   const visualReview = visualReviewPackage(record, significance);
@@ -367,6 +370,8 @@ export async function executeLogicalOperation({
   onProgress,
   preflight,
   projectionContext,
+  compilerDeferredFromOperationId,
+  mutationLifecycle,
 }) {
   const timing = {
     before_preview_ms: null,
@@ -381,7 +386,10 @@ export async function executeLogicalOperation({
   }
   const rejection = await preflight?.(input);
   if (rejection) return { preflightRejection: rejection, replay: false, timing };
-  const { record, replay } = store.begin(input, { projectionContext });
+  const { record, replay } = store.begin(input, {
+    projectionContext,
+    ...(compilerDeferredFromOperationId ? { compilerDeferredFromOperationId } : {}),
+  });
   if (replay) return { record, replay: true, timing };
   let activeRecord = record;
 
@@ -437,8 +445,27 @@ export async function executeLogicalOperation({
     const mutationTimeout = remainingTimeout();
     store.markDispatched(activeRecord);
     await onProgress?.('mutation');
+    let mutationTraceToken;
+    try {
+      mutationTraceToken = await mutationLifecycle?.beforeMutation?.(activeRecord);
+    } catch {
+      // Recorder/observability failure must never alter canonical mutation semantics.
+    }
     const mutationStartedAt = Date.now();
-    const result = await invoke(input.tool, mutationArgs, mutationTimeout);
+    let result;
+    let mutationError;
+    try {
+      result = await invoke(input.tool, mutationArgs, mutationTimeout);
+    } catch (error) {
+      mutationError = error;
+      throw error;
+    } finally {
+      try {
+        await mutationLifecycle?.afterMutation?.(activeRecord, mutationTraceToken, mutationError);
+      } catch {
+        // Trace finalization is best-effort and cannot make a dispatched mutation replayable.
+      }
+    }
     timing.photoshop_dispatch_wall_ms = Date.now() - mutationStartedAt;
     let completed = store.complete(activeRecord, result);
     activeRecord = completed;

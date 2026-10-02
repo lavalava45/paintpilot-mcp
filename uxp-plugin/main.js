@@ -18,15 +18,147 @@ const { tryHandleP3LayerAdvancedOperation } = require('./p3-layer-advanced-ops')
 
 const BRIDGE_PORT = 38452;
 const BRIDGE_BASE = `http://127.0.0.1:${BRIDGE_PORT}`;
-const BRIDGE_REVISION = 'compact-v2-20260926-brush-profile';
+const BRIDGE_REVISION = 'compact-v2-20261002-video-trace-readiness';
 const REGISTRATION_PROTOCOL = 'photoshop.uxp.registration.v1';
 const COMMAND_PROTOCOL = 'photoshop.uxp.command.v1';
 const RESULT_PROTOCOL = 'photoshop.uxp.command_result.v1';
+const EVENT_PROTOCOL = 'photoshop.uxp.event.v1';
 
 let polling = false;
+let bridgeUiConnected = false;
+let videoTraceUiBound = false;
+let videoTraceUpdateInFlight = false;
+let closeNotificationBound = false;
 const pendingResultDeliveries = new Map();
+const recentDocumentWitnesses = new Map();
+const controlledCloseCommands = new Map();
 const RESULT_DELIVERY_TTL_MS = 15 * 60 * 1000;
 const MAX_PENDING_RESULT_DELIVERIES = 128;
+const CONTROLLED_CLOSE_TTL_MS = 10_000;
+
+function bridgeUiElements() {
+  // Unit/vm harnesses load the bridge transport code without a UXP DOM. The
+  // panel is optional presentation, so absence of document must be a clean
+  // no-op rather than preventing transport/geometry/bootstrap helpers from
+  // loading.
+  const dom = typeof document !== 'undefined' ? document : null;
+  return {
+    dot: dom?.getElementById('bridgeStatusDot') ?? null,
+    text: dom?.getElementById('bridgeStatusText') ?? null,
+    checkbox: dom?.getElementById('videoTraceEnabled') ?? null,
+    status: dom?.getElementById('videoTraceStatus') ?? null,
+    ffmpegStatus: dom?.getElementById('ffmpegStatus') ?? null,
+    photoshopWindowStatus: dom?.getElementById('photoshopWindowStatus') ?? null,
+  };
+}
+
+function setReadinessText(element, text, ok) {
+  if (!element) return;
+  element.textContent = text;
+  element.className = ok ? 'ready' : 'error';
+}
+
+async function refreshVideoTraceReadiness() {
+  const { ffmpegStatus, photoshopWindowStatus } = bridgeUiElements();
+  if (!ffmpegStatus || !photoshopWindowStatus) return;
+  ffmpegStatus.textContent = 'FFmpeg: проверка…';
+  ffmpegStatus.className = '';
+  photoshopWindowStatus.textContent = 'Окно Photoshop: проверка…';
+  photoshopWindowStatus.className = '';
+  try {
+    const response = await fetch(`${BRIDGE_BASE}/settings/process-video-trace/readiness`);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const state = await response.json();
+    const ffmpegState = state?.ffmpeg?.status;
+    if (ffmpegState === 'ready') {
+      setReadinessText(ffmpegStatus, 'FFmpeg: готов', true);
+    } else if (ffmpegState === 'not-found') {
+      setReadinessText(ffmpegStatus, 'FFmpeg: не найден', false);
+    } else {
+      setReadinessText(ffmpegStatus, 'FFmpeg: ошибка запуска', false);
+    }
+    const windowState = state?.photoshop_window?.status;
+    if (windowState === 'ready') {
+      setReadinessText(photoshopWindowStatus, 'Окно Photoshop: найдено', true);
+    } else if (windowState === 'not-found') {
+      setReadinessText(photoshopWindowStatus, 'Окно Photoshop: не найдено', false);
+    } else {
+      setReadinessText(photoshopWindowStatus, 'Окно Photoshop: ошибка проверки', false);
+    }
+  } catch (error) {
+    setReadinessText(ffmpegStatus, `FFmpeg: проверка недоступна`, false);
+    setReadinessText(photoshopWindowStatus, `Окно Photoshop: проверка недоступна`, false);
+  }
+}
+
+function setBridgeUiConnected(connected) {
+  bridgeUiConnected = connected;
+  const { dot, text, checkbox } = bridgeUiElements();
+  if (dot) dot.className = connected ? 'dot connected' : 'dot';
+  if (text) text.textContent = connected ? 'PaintPilot: connected' : 'PaintPilot: disconnected';
+  if (checkbox && !videoTraceUpdateInFlight) checkbox.disabled = !connected;
+}
+
+function videoTraceSourceLabel(source) {
+  if (source === 'runtime') return 'сохранено в PaintPilot';
+  if (source === 'environment') return 'из environment';
+  return 'по умолчанию';
+}
+
+async function refreshVideoTraceSetting() {
+  const { checkbox, status } = bridgeUiElements();
+  if (!checkbox || !status) return;
+  try {
+    const response = await fetch(`${BRIDGE_BASE}/settings/process-video-trace`);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const state = await response.json();
+    checkbox.checked = state?.enabled === true;
+    checkbox.disabled = false;
+    const mode = checkbox.checked ? 'Запись включена' : 'Запись выключена';
+    status.textContent = `${mode} · ${videoTraceSourceLabel(state?.source)} · окно Photoshop определяется автоматически`;
+  } catch (error) {
+    checkbox.disabled = true;
+    status.textContent = `Настройка записи недоступна: ${error?.message ?? String(error)}`;
+  }
+}
+
+async function updateVideoTraceSetting(enabled) {
+  const { checkbox, status } = bridgeUiElements();
+  if (!checkbox || !status || videoTraceUpdateInFlight) return;
+  videoTraceUpdateInFlight = true;
+  checkbox.disabled = true;
+  status.textContent = enabled ? 'Включаю запись…' : 'Выключаю запись…';
+  try {
+    const response = await fetch(`${BRIDGE_BASE}/settings/process-video-trace`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled }),
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const state = await response.json();
+    checkbox.checked = state?.enabled === true;
+    status.textContent = `${checkbox.checked ? 'Запись включена' : 'Запись выключена'} · сохранено в PaintPilot · окно Photoshop определяется автоматически`;
+    await refreshVideoTraceReadiness();
+  } catch (error) {
+    status.textContent = `Не удалось изменить настройку: ${error?.message ?? String(error)}`;
+    await refreshVideoTraceSetting();
+  } finally {
+    videoTraceUpdateInFlight = false;
+    checkbox.disabled = !bridgeUiConnected;
+  }
+}
+
+function setupBridgePanelUi() {
+  const { checkbox } = bridgeUiElements();
+  if (!checkbox) return;
+  if (!videoTraceUiBound) {
+    checkbox.addEventListener('change', () => updateVideoTraceSetting(checkbox.checked));
+    videoTraceUiBound = true;
+  }
+  setBridgeUiConnected(bridgeUiConnected);
+  refreshVideoTraceSetting();
+  refreshVideoTraceReadiness();
+}
 
 // A Document DOM object represents one live open-document instance. Keep an
 // opaque per-object witness inside the long-lived UXP plugin process so a
@@ -59,11 +191,95 @@ function documentInstanceWitness(documentId) {
     token = `${DOCUMENT_WITNESS_SESSION_ID}:${documentInstanceWitnessSequence}`;
     documentInstanceWitnesses.set(target, token);
   }
-  return {
+  const witness = {
     protocol: 'photoshop.uxp.document_instance_witness.v1',
     session_id: DOCUMENT_WITNESS_SESSION_ID,
     token,
   };
+  recentDocumentWitnesses.set(documentId, witness);
+  return witness;
+}
+
+function cleanupControlledCloseCommands(now = Date.now()) {
+  for (const [documentId, value] of controlledCloseCommands) {
+    if (!value || value.expires_at <= now) controlledCloseCommands.delete(documentId);
+  }
+}
+
+function markControlledClose(documentId, commandId) {
+  if (!Number.isSafeInteger(documentId) || documentId <= 0) return;
+  cleanupControlledCloseCommands();
+  controlledCloseCommands.set(documentId, {
+    command_id: commandId,
+    expires_at: Date.now() + CONTROLLED_CLOSE_TTL_MS,
+  });
+}
+
+function takeControlledClose(documentId) {
+  cleanupControlledCloseCommands();
+  const value = controlledCloseCommands.get(documentId) ?? null;
+  if (value) controlledCloseCommands.delete(documentId);
+  return value;
+}
+
+function closeEventDocumentId(descriptor) {
+  const candidates = [
+    descriptor?.documentID,
+    descriptor?.documentId,
+    descriptor?.ID,
+    descriptor?._target?.[0]?._id,
+  ];
+  for (const value of candidates) {
+    const id = numericValue(value);
+    if (Number.isSafeInteger(id) && id > 0) return id;
+  }
+  return null;
+}
+
+async function postBridgeEvent(payload) {
+  try {
+    await fetch(`${BRIDGE_BASE}/event`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  } catch {
+    // The Guard also has a fresh list_documents fallback on its next status/cycle.
+  }
+}
+
+async function onPhotoshopNotification(eventName, descriptor) {
+  const normalizedEvent = typeof eventName === 'string'
+    ? eventName
+    : String(eventName?.event ?? eventName?.name ?? '');
+  if (normalizedEvent !== 'close') return;
+  const documentId = closeEventDocumentId(descriptor);
+  if (!documentId) return;
+  const controlled = takeControlledClose(documentId);
+  const witness = recentDocumentWitnesses.get(documentId) ?? null;
+  await postBridgeEvent({
+    protocol: EVENT_PROTOCOL,
+    event: 'document_closed',
+    document_id: documentId,
+    observed_at: new Date().toISOString(),
+    controlled: !!controlled,
+    ...(controlled?.command_id ? { command_id: controlled.command_id } : {}),
+    ...(witness ? { document_instance_witness: witness } : {}),
+  });
+  recentDocumentWitnesses.delete(documentId);
+}
+
+function setupPhotoshopNotifications() {
+  if (closeNotificationBound) return;
+  try {
+    const pending = action.addNotificationListener(['close'], onPhotoshopNotification);
+    closeNotificationBound = true;
+    if (pending && typeof pending.catch === 'function') {
+      pending.catch(() => { closeNotificationBound = false; });
+    }
+  } catch {
+    closeNotificationBound = false;
+  }
 }
 
 function fileUrlFromNativePath(nativePath, operation = 'save_document') {
@@ -3525,6 +3741,13 @@ async function handleCommand(cmd) {
 
   try {
     await assertPinnedActiveDocument(cmdAction, params);
+    if (cmdAction === 'close_document') {
+      const requestedId = Number(params.document_id ?? app.activeDocument?.id);
+      if (Number.isSafeInteger(requestedId) && requestedId > 0) {
+        documentInstanceWitness(requestedId);
+        markControlledClose(requestedId, id);
+      }
+    }
     const p1Document = await tryHandleP1DocumentOperation(cmdAction, params);
     if (p1Document?.handled) {
       await postResult({ id, ok: true, data: p1Document.data ?? {} });
@@ -3833,6 +4056,10 @@ async function handleCommand(cmd) {
 
     await postResult(commandErrorResult(id, `unknown_action:${cmdAction}`));
   } catch (error) {
+    if (cmdAction === 'close_document') {
+      const requestedId = Number(params.document_id);
+      if (Number.isSafeInteger(requestedId) && requestedId > 0) controlledCloseCommands.delete(requestedId);
+    }
     await postResult(commandErrorResult(id, error));
   }
 }
@@ -3846,6 +4073,9 @@ async function pollOnce() {
   try {
     await flushPendingResults();
     const activeDocument = app.activeDocument;
+    if (activeDocument && Number.isSafeInteger(Number(activeDocument.id))) {
+      documentInstanceWitness(Number(activeDocument.id));
+    }
     const query = [
       `protocol=${encodeURIComponent(REGISTRATION_PROTOCOL)}`,
       `revision=${encodeURIComponent(BRIDGE_REVISION)}`,
@@ -3875,6 +4105,12 @@ async function pollLoop() {
   polling = true;
   while (polling) {
     const connected = await pollOnce();
+    const wasConnected = bridgeUiConnected;
+    setBridgeUiConnected(connected);
+    if (connected && !wasConnected) {
+      refreshVideoTraceSetting();
+      refreshVideoTraceReadiness();
+    }
     // A healthy long-poll immediately opens the next request. Back off only when
     // the localhost server is unavailable so a stopped MCP process cannot cause
     // a tight retry loop inside Photoshop.
@@ -3887,6 +4123,8 @@ async function pollLoop() {
 entrypoints.setup({
   plugin: {
     create() {
+      setupBridgePanelUi();
+      setupPhotoshopNotifications();
       pollLoop();
     },
     destroy() {
@@ -3896,9 +4134,13 @@ entrypoints.setup({
   panels: {
     bridgePanel: {
       create() {
+        setupBridgePanelUi();
+        setupPhotoshopNotifications();
         pollLoop();
       },
       show() {
+        setupBridgePanelUi();
+        setupPhotoshopNotifications();
         pollLoop();
       },
       // Keep the bridge alive when the panel is hidden. Persistence is a
@@ -3908,4 +4150,6 @@ entrypoints.setup({
   },
 });
 
+setupBridgePanelUi();
+setupPhotoshopNotifications();
 pollLoop();

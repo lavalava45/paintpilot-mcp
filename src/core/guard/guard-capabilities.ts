@@ -3,6 +3,7 @@ import {
   VISUAL_MICROPLAN_MAX_LAYER_CREATIONS,
   VISUAL_MICROPLAN_MAX_MUTATIONS,
 } from '../visual-microplan.js';
+import { MODEL_CONTEXT_WARNING_BYTES } from '../model-facing-tool-result.js';
 
 export const GUARD_CAPABILITIES_PROTOCOL = 'photoshop.guard.capabilities.v1';
 export const OPERATION_RECEIPT_PROTOCOL = 'photoshop.guard.operation_receipt.v1';
@@ -33,6 +34,17 @@ export function guardCapabilities(env = process.env) {
       durable: true,
       preview_required: true,
       verdict_required_before_next_visual_mutation: true,
+      cycle_preview_delivery: 'materialized_reference_only',
+      explicit_image_review_tool: 'photoshop_guard_review_image',
+      exact_review_image_delivery_required_before_verdict: true,
+    },
+    model_context_compaction: {
+      guard_hot_loop_embeds_image_bytes: false,
+      binary_text_fields_redacted: true,
+      direct_preview_guard_required_default: 'reference_only',
+      direct_preview_explicit_image_opt_in: 'include_image=true',
+      estimated_context_bytes_reported: true,
+      warning_threshold_bytes: MODEL_CONTEXT_WARNING_BYTES,
     },
     compact_pass_limits: {
       max_visual_mutations: VISUAL_MICROPLAN_MAX_MUTATIONS,
@@ -155,6 +167,14 @@ export function guardCapabilities(env = process.env) {
       canonical_external_gap_field: 'inter_call_unattributed_gap_ms',
       request_json_bytes_recorded: true,
       model_call_count_observable: false,
+      continuation_phase_diagnostics: {
+        protocol: 'photoshop.guard.continuation_timing.v1',
+        explicit_review_delivery_boundaries_recorded: true,
+        diagnostic_marker_carrier: 'photoshop_guard_status',
+        diagnostic_marker_phases: ['review_finished', 'next_pass_ready'],
+        normal_hot_loop_markers_required: false,
+        marker_intervals_are_server_observed_not_pure_model_reasoning: true,
+      },
     },
     postcondition_verification: {
       mode: 'tool_specific',

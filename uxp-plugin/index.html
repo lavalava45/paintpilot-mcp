@@ -11,10 +11,53 @@
         color: #ccc;
         background: #323232;
       }
+      .status-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin-bottom: 10px;
+      }
+      .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #777;
+      }
+      .dot.connected { background: #58a55c; }
+      .control {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        margin: 8px 0;
+      }
+      .detail {
+        color: #999;
+        font-size: 11px;
+        line-height: 1.35;
+      }
+      .readiness {
+        margin-top: 8px;
+        padding-top: 7px;
+        border-top: 1px solid #4a4a4a;
+      }
+      .ready { color: #7fbe83; }
+      .error { color: #d98686; }
     </style>
   </head>
   <body>
-    <p>Photoshop MCP UXP Bridge active — localhost long-poll connected.</p>
+    <div class="status-row">
+      <span id="bridgeStatusDot" class="dot"></span>
+      <span id="bridgeStatusText">PaintPilot: connecting…</span>
+    </div>
+    <label class="control">
+      <input id="videoTraceEnabled" type="checkbox" disabled />
+      <span>Включить видеозапись</span>
+    </label>
+    <div id="videoTraceStatus" class="detail">Состояние записи загружается…</div>
+    <div class="readiness detail">
+      <div id="ffmpegStatus">FFmpeg: проверка…</div>
+      <div id="photoshopWindowStatus">Окно Photoshop: проверка…</div>
+    </div>
     <script src="main.js"></script>
   </body>
 </html>

@@ -24,15 +24,11 @@ function imageTool(
 
 const placeDescription = [
   'Place an external image file as a new layer in the active document.',
-  "x/y are absolute canvas coordinates for the placed layer's top-left bound in pixels (0,0 = document top-left), not an offset from Photoshop's default centered Place.",
-  'Use for compositing an asset into an open document at a known position; use photoshop_open_image when the file should become a new document.',
-  'Returns the placed layer information, including absolute_top_left position semantics. Requires an active document and an existing file; adds one layer.',
+  'x/y are absolute canvas coordinates for the placed layer top-left.',
 ].join('\n\n');
 
 const openDescription = [
   'Open an image file as a new Photoshop document.',
-  'Use when a file should become the editable active document; use photoshop_place_image to add an asset to an existing composite.',
-  'Returns document identity and dimensions through the stable UXP command result. Requires an existing file and changes the active document.',
 ].join('\n\n');
 
 export function createImagePlacementTools(

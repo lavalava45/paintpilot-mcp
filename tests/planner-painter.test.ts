@@ -98,6 +98,10 @@ function passingValueCheck() {
     status: 'style-not-applicable',
     observed: false,
     applicability_reason: 'Planner/Painter unit tests isolate directive routing and do not exercise the separate grayscale evidence gate.',
+    style_contract_basis: {
+      field: 'finish_criteria',
+      criterion: 'coherent expressive hierarchy without over-rendering the background',
+    },
     limitations: ['Synthetic controller test; value evidence is covered by value-check.test.ts.'],
   };
 }
@@ -136,6 +140,15 @@ function directive(id = 'face-focus', reviewAfter = 3) {
     },
     composition_freedom: 'fixed',
     composition_exploration: { hypotheses: [] },
+    perceptual_hierarchy: {
+      revision: 1,
+      mode: 'ranked',
+      zones: [
+        { id: 'face-zone', owner_ids: ['face-owner'], priority: 'primary', contrast_budget: 'high', detail_budget: 'high', edge_certainty: 'high', chroma_accent: 'allowed' },
+        { id: 'background-zone', owner_ids: ['background-owner'], priority: 'support', contrast_budget: 'low', detail_budget: 'low', edge_certainty: 'low', chroma_accent: 'restricted' },
+      ],
+      ordering: ['face-zone', 'background-zone'],
+    },
     assessment: assessment(),
     value_check: passingValueCheck(),
     refinement_check: {
@@ -151,12 +164,14 @@ function directive(id = 'face-focus', reviewAfter = 3) {
         summary: 'Darken the right side of the face locally.',
         region: 'face',
         allowed_scales: ['medium', 'small'],
+        perceptual_zone_ids: ['face-zone'],
       },
       {
         task_id: 'cheek-edge',
         summary: 'Lose the cheek edge into the background without changing silhouette.',
         region: 'cheek',
         allowed_scales: ['small'],
+        perceptual_zone_ids: ['face-zone'],
       },
     ],
   };
@@ -209,6 +224,40 @@ function acceptedVerdict() {
     target_resolved: 'no',
     regressions: [],
     global_readability: 'stable',
+  };
+}
+
+function completionReviewEvidence(s: SessionStore) {
+  const state = s.paintingState().documents['42'];
+  const art = state.art_director;
+  const frame = state.current_frame;
+  const contract = art.artistic_evaluation_contract;
+  const pendingGlance = art.whole_image_glance?.due === true
+    ? {
+        whole_image_glance: {
+          trigger: art.whole_image_glance.reason,
+          observation: 'Exact-current whole-frame review finds no unresolved global defect beyond the completion checks.',
+          operation_id: art.whole_image_glance.required_operation_id,
+          frame_sha256: art.whole_image_glance.required_frame_sha256,
+        },
+      }
+    : {};
+  return {
+    ...pendingGlance,
+    pre_final_hostile_review: {
+      contract_id: contract.contract_id,
+      contract_revision: contract.revision,
+      frame_sha256: frame.sha256,
+      checks: [
+        { area: 'whole_frame_brief', status: 'clear', reason: 'Whole-frame brief read is coherent on the exact current frame.' },
+        { area: 'named_subject_recognition', status: 'not_applicable', reason: 'This synthetic fixture has no named-subject recognition requirement.' },
+        { area: 'geometry_completion', status: 'clear', reason: 'No unresolved geometry completion debt remains in this successful fixture.' },
+        { area: 'physical_effect_accountability', status: 'clear', reason: 'No unresolved physical-effect debt remains in this successful fixture.' },
+        { area: 'material_differentiation', status: 'clear', reason: 'No material-differentiation hard defect is visible in this synthetic fixture.' },
+        { area: 'style_realism', status: 'clear', reason: 'The exact current frame remains consistent with the synthetic style contract.' },
+      ],
+      major_defects: [],
+    },
   };
 }
 
@@ -304,12 +353,130 @@ function seedTrendSignal(
 }
 
 describe('Art Director / Painter controller contract', () => {
+  it('surfaces hard-perceptual brief items as UNASSESSED durable debt before final assessment', () => {
+    const s = store();
+    const d = directive('brief-debt', 5) as any;
+    d.artistic_evaluation_contract.brief_items = [
+      { item_id: 'lion-recognition', kind: 'hard_perceptual', requirement: 'Guardian lion must be visibly recognizable as a lion.', provenance: 'user_brief:named subject' },
+      { item_id: 'snow-polish', kind: 'soft_preference', requirement: 'Fine snow sparkle may be added if useful.', provenance: 'user_brief:optional polish' },
+    ];
+    s.setArtDirectorState({ document_id: 42, action: 'review', directive: d });
+    expect(s.compactPassContext(42).art_director.unresolved_hard_brief_debt).toEqual([
+      expect.objectContaining({ item_id: 'lion-recognition', state: 'UNASSESSED', kind: 'hard_perceptual' }),
+    ]);
+    expect(s.statusCompact().documents['42'].unresolved_hard_brief_debt).toEqual([
+      expect.objectContaining({ item_id: 'lion-recognition', state: 'UNASSESSED' }),
+    ]);
+  });
+
+  it('requires current-frame OBJECT/MICRO crop evidence before a named recognition hard item can be MET', () => {
+    const s = store();
+    const frame = seedClassifiedFrame(s, 'recognition-frame', 1);
+    const makeDirective = () => {
+      const d = directive('recognition-gate', 5) as any;
+      d.artistic_evaluation_contract.brief_items = [{
+        item_id: 'guardian-lion', kind: 'hard_perceptual',
+        requirement: 'The guardian sculpture must visibly read as a lion rather than an abstract stone mass.',
+        provenance: 'user_brief:named subject', recognition_target: 'guardian lion',
+      }];
+      return d;
+    };
+    const assessment = {
+      outcome: 'satisfied', contract_id: 'synthetic-planner-brief-contract', contract_revision: 1,
+      frame_sha256: frame.sha256, critic_authority: 'authorized', critic_result_id: 'recognition-critic',
+      brief_item_results: [{
+        item_id: 'guardian-lion', state: 'MET', reason: 'The held-out crop supports a lion identity.',
+        evidence: ['review_artifact:lion-crop-artifact'],
+      }],
+      reason: 'Named-object recognition is supported by exact current-frame crop evidence.',
+    };
+    expect(() => s.setArtDirectorState({
+      document_id: 42, action: 'review', directive: makeDirective(), global_brief_assessment: assessment,
+    })).toThrow(/cannot be MET without a materialized current-frame OBJECT\/MICRO review artifact/);
+
+    const cropBytes = Buffer.from('guardian-lion-object-crop');
+    const cropPath = path.join(s.directory, 'guardian-lion-crop.jpg');
+    writeFileSync(cropPath, cropBytes);
+    const cropSha = createHash('sha256').update(cropBytes).digest('hex');
+    const source = s.read('recognition-frame')! as any;
+    source.review_evidence = [{
+      artifact_id: 'lion-crop-artifact', source_operation_id: 'recognition-frame',
+      requirement_id: 'recognition-requirement', capture_id: 'recognition-capture', capture_sequence: 1,
+      finding_kind: 'object_readability', brief_item_id: 'guardian-lion', severity: 'must-fix', review_level: 'object',
+      requested_region: { left: 10, top: 10, right: 100, bottom: 100 },
+      effective_region: { left: 10, top: 10, right: 100, bottom: 100 },
+      document_id: 42, canvas_width: 800, canvas_height: 600,
+      bound_whole_sha256: frame.sha256, sha256: cropSha, materialized_path: cropPath,
+      mime_type: 'image/jpeg', width: 90, height: 90, materialized_for_review: true,
+    }];
+    s.write(source);
+    expect(() => s.setArtDirectorState({
+      document_id: 42, action: 'review', directive: makeDirective(), global_brief_assessment: assessment,
+    })).not.toThrow();
+    expect(s.statusCompact().documents['42'].unresolved_hard_brief_debt).toEqual([]);
+  });
+
+  it('promotes a current-frame must-fix finding into durable hard brief debt', () => {
+    const s = store();
+    const d = directive('brief-finding', 5) as any;
+    d.artistic_evaluation_contract.brief_items = [
+      { item_id: 'lion-recognition', kind: 'hard_perceptual', requirement: 'Guardian lion must be visibly recognizable as a lion.', provenance: 'user_brief:named subject' },
+    ];
+    s.setArtDirectorState({ document_id: 42, action: 'review', directive: d });
+    const bytes = Buffer.from('brief-finding-frame');
+    const framePath = path.join(s.directory, 'brief-finding.jpg');
+    writeFileSync(framePath, bytes);
+    const sha = createHash('sha256').update(bytes).digest('hex');
+    s.write({
+      id: 'brief-finding-op', tool: 'photoshop_set_layer_opacity', args: { document_id: 42, opacity: 50 },
+      summary: 'Brief finding fixture', purpose: 'Prove current-frame defect becomes durable prompt debt',
+      hash: 'hash-brief-finding', sequence: 1, created_at: new Date().toISOString(), completed_at: new Date().toISOString(),
+      phase: 'completed', execution: 'completed', visual: true, failed: false,
+      preview: { sha256: sha, materialized_path: framePath, document_id: 42, width: 800, height: 600 },
+    } as any);
+    s.verdict({
+      id: 'brief-finding-op', preview_id: 'brief-finding-op', sha256: sha,
+      verdict: 'neutral', disposition: 'correct',
+      observations: [{ region: 'whole frame', visible: 'The two stone masses remain visibly ambiguous as guardian lions.' }],
+      primary_mismatch: 'Required guardian lions are not recognizable.',
+      observed_change: 'The current frame still shows ambiguous symmetric stone masses instead of readable lion forms.',
+      target_resolved: 'no', regressions: [], uncertainty: 'identity remains ambiguous',
+      global_readability: 'unknown', primitive_footprint: 'none', trend_signals: [],
+      review_findings: [{
+        kind: 'subject_recognition', severity: 'must-fix', brief_item_id: 'lion-recognition', brief_state: 'NOT_MET',
+      }],
+    });
+    expect(s.statusCompact().documents['42'].unresolved_hard_brief_debt).toEqual([
+      expect.objectContaining({ item_id: 'lion-recognition', state: 'NOT_MET', source_operation_id: 'brief-finding-op' }),
+    ]);
+
+    const source = s.read('brief-finding-op')! as any;
+    source.rollback = { completed: true, rollback_operation_id: 'brief-finding-undo' };
+    s.write(source);
+    expect(s.statusCompact().documents['42'].unresolved_hard_brief_debt).toEqual([
+      expect.objectContaining({ item_id: 'lion-recognition', state: 'UNASSESSED' }),
+    ]);
+  });
   it('fails closed when the mandatory prompt-conflict preflight is missing', () => {
     const s = store();
     const d = directive();
     delete (d as any).prompt_conflict_preflight;
     expect(() => s.setArtDirectorState({ document_id: 42, action: 'review', directive: d }))
       .toThrow(/prompt_conflict_preflight is required/);
+  });
+
+  it('treats prompt-conflict resolution rationale as optional artistic guidance', () => {
+    const s = store();
+    const d = directive();
+    delete (d.prompt_conflict_preflight as any).resolution_rationale;
+    const state = s.setArtDirectorState({ document_id: 42, action: 'review', directive: d });
+    expect(state.art_director.prompt_conflict_preflight).toMatchObject({
+      dominant_objective: d.prompt_conflict_preflight.dominant_objective,
+      resolution_mode: d.prompt_conflict_preflight.resolution_mode,
+      chosen_rendering_strategy: d.prompt_conflict_preflight.chosen_rendering_strategy,
+      first_pass_strategy: d.prompt_conflict_preflight.first_pass_strategy,
+    });
+    expect(state.art_director.prompt_conflict_preflight).not.toHaveProperty('resolution_rationale');
   });
 
   it('requires a pipeline-level prompt conflict to be resolved before Painter mutation', () => {
@@ -368,10 +535,10 @@ describe('Art Director / Painter controller contract', () => {
     expect(() => s.setArtDirectorState({ document_id: 42, action: 'review', directive: d })).not.toThrow();
   });
 
-  it('forces an early strategy review after the configured number of meaningful previews and ignores insufficient passes', () => {
+  it('keeps strategy-validation cadence as guidance without blocking Painter mutation', () => {
     const s = store();
     const d = directive('face-focus', 8);
-    d.strategy_validation_after_microplans = 2;
+    d.strategy_validation_after_microplans = 1;
     s.setArtDirectorState({ document_id: 42, action: 'review', directive: d });
 
     let current = s.paintingState().documents['42'];
@@ -392,16 +559,9 @@ describe('Art Director / Painter controller contract', () => {
     });
     s.updatePaintingState(42, () => next);
     expect(next.art_director.strategy_meaningful_microplans).toBe(1);
+    expect(next.art_director.status).toBe('active');
     expect(next.art_director.review_due).toBe(false);
-
-    current = s.paintingState().documents['42'];
-    next = s.advanceArtDirectorAfterVerdict(current, context(), acceptedVerdict(), {
-      id: 'meaningful-two',
-      significance: { execution_effect: 'meaningful' },
-      verdict: { trend_signals: [], at: new Date().toISOString() },
-    });
-    expect(next.art_director.status).toBe('review_due');
-    expect(next.art_director.review_reason).toBe('strategy_validation:2_meaningful_microplans');
+    expect(next.art_director.review_reason).toBeNull();
   });
 
   it('requires exact-current-frame strategy validation and forces a changed strategy on replan', () => {
@@ -456,6 +616,26 @@ describe('Art Director / Painter controller contract', () => {
     const reviewed = s.setArtDirectorState({ document_id: 42, action: 'review', directive: replanned });
     expect(reviewed.art_director.strategy_validation).toMatchObject({ status: 'pending', last_result: 'replan' });
     expect(reviewed.art_director.strategy_meaningful_microplans).toBe(0);
+
+    s.updatePaintingState(42, state => ({
+      ...state,
+      current_frame: { operation_id: 'strategy-frame', sha256: 'a'.repeat(64), path: 'frame.jpg' },
+      art_director: {
+        ...state.art_director,
+        status: 'review_due',
+        review_due: true,
+        review_reason: 'strategy_validation:legacy_durable_barrier',
+      },
+    }));
+    const passWithoutNarrativeReason = directive('face-focus', 8);
+    passWithoutNarrativeReason.strategy_validation = {
+      status: 'pass', evidence_operation_id: 'strategy-frame',
+      dominant_objective_read: 'The dominant objective is visibly advancing in the exact current frame.',
+      strategy_fit: 'The chosen rendering strategy is visibly producing the intended representation.',
+    } as any;
+    const passed = s.setArtDirectorState({ document_id: 42, action: 'review', directive: passWithoutNarrativeReason });
+    expect(passed.art_director.strategy_validation).toMatchObject({ status: 'pass', evidence_operation_id: 'strategy-frame' });
+    expect(passed.art_director.strategy_validation).not.toHaveProperty('reason');
   });
 
   it('keeps a repeated localized cumulative trend medium-scoped and allows unrelated medium work', () => {
@@ -536,8 +716,19 @@ describe('Art Director / Painter controller contract', () => {
       'lighting-model', 'texture-finish',
     ]);
 
+    expect(() => s.setPriorityState({
+      document_id: 42,
+      problems: [
+        { problem_id: 'form-foundation', scale: 'medium', severity: 'must-fix', status: 'resolved', region: 'subject' },
+        { problem_id: 'lighting-model', scale: 'medium', severity: 'must-fix', status: 'open', region: 'subject', depends_on_problem_ids: ['form-foundation'] },
+        { problem_id: 'texture-finish', scale: 'small', severity: 'should-fix', status: 'open', region: 'subject', depends_on_problem_ids: ['lighting-model'] },
+      ],
+    })).toThrow(/priority_reclassification_evidence_required/);
+
+    seedClassifiedFrame(s, 'form-foundation-review', 1);
     const second = s.setPriorityState({
       document_id: 42,
+      evidence_operation_id: 'form-foundation-review',
       problems: [
         { problem_id: 'form-foundation', scale: 'medium', severity: 'must-fix', status: 'resolved', region: 'subject' },
         {
@@ -555,6 +746,43 @@ describe('Art Director / Painter controller contract', () => {
     expect(compact.primary_blocker.problem_id).toBe('lighting-model');
     expect(compact.primary_next_action).toBe('resolve primary artistic problem lighting-model');
     expect(compact.problem_backlog.map((problem: any) => problem.problem_id)).toEqual(['texture-finish']);
+    expect(second.visual_problems['form-foundation']).toMatchObject({
+      reclassification_evidence_operation_id: 'form-foundation-review',
+      reclassification_evidence_sequence: 1,
+    });
+  });
+
+  it('keeps must-fix debt visible through a lower-severity unresolved prerequisite', () => {
+    const s = store();
+    const state = s.setPriorityState({
+      document_id: 42,
+      problems: [
+        {
+          problem_id: 'support-plane', scale: 'medium', severity: 'should-fix', status: 'open',
+          region: 'subject', hypothesis: 'The support plane must be corrected before the dependent silhouette can be judged.',
+        },
+        {
+          problem_id: 'subject-silhouette', scale: 'global', severity: 'must-fix', status: 'open',
+          region: 'subject', hypothesis: 'The subject silhouette is the completion blocker.',
+          depends_on_problem_ids: ['support-plane'],
+        },
+      ],
+    });
+
+    expect(state.visual_problems['subject-silhouette']).toMatchObject({
+      severity: 'must-fix',
+      status: 'open',
+      depends_on_problem_ids: ['support-plane'],
+    });
+    expect((s as any).largestOpenMustFix(state.visual_problems)).toMatchObject({
+      problem_id: 'support-plane',
+      severity: 'should-fix',
+      status: 'open',
+    });
+    const compact = s.statusCompact().documents['42'] as any;
+    expect(compact.primary_blocker).toMatchObject({ problem_id: 'support-plane' });
+    expect(compact.primary_next_action).toBe('resolve primary artistic problem support-plane');
+    expect(compact.problem_backlog.map((problem: any) => problem.problem_id)).toContain('subject-silhouette');
   });
 
   it('allows a new severe whole-frame regression to pre-empt a smaller active problem', () => {
@@ -714,6 +942,7 @@ describe('Art Director / Painter controller contract', () => {
 
     s.setPriorityState({
       document_id: 42,
+      evidence_operation_id: 'trend-old-2',
       problems: [{
         problem_id: 'cumulative-trend-primitive-footprint-repeating',
         scale: 'medium',
@@ -773,7 +1002,6 @@ describe('Art Director / Painter controller contract', () => {
       document_id: 42,
       process_dir: 'processes/profile-upgrade-process/run-01',
       painting_profile: 'nontrivial_painting',
-      profile_transition_reason: 'The user expanded the task into a materially developed painting.',
       brush_preflight: {
         completed: true,
         inventory_observed: true,
@@ -797,6 +1025,11 @@ describe('Art Director / Painter controller contract', () => {
       },
     });
     expect(upgraded.painting_profile).toBe('nontrivial_painting');
+    expect(upgraded.profile_transition).toMatchObject({
+      from: 'simple_graphic',
+      to: 'nontrivial_painting',
+    });
+    expect(upgraded.profile_transition).not.toHaveProperty('reason');
     expect(upgraded.process_dir).toBe('processes/profile-upgrade-process/run-01');
     expect(upgraded.profile_transition).toMatchObject({
       from: 'simple_graphic',
@@ -1019,6 +1252,74 @@ describe('Art Director / Painter controller contract', () => {
     expect(third.art_director.completed_microplans).toBe(3);
     expect(third.art_director.status).toBe('review_due');
     expect(third.art_director.review_reason).toBe('cadence:3_microplans');
+  });
+
+  it('keeps evidence-bound brief states and hostile-review statuses executable without prose reasons', () => {
+    const s = store();
+    const frame = seedClassifiedFrame(s, 'reason-free-completion', 1);
+    const brief = directive('reason-free-completion', 5) as any;
+    brief.tasks = [brief.tasks[0]];
+    brief.artistic_evaluation_contract.brief_items = [{
+      item_id: 'whole-frame-read', kind: 'hard_perceptual',
+      requirement: 'The whole frame must satisfy the requested composition.',
+      provenance: 'user_brief:composition',
+    }];
+    s.setArtDirectorState({
+      document_id: 42,
+      action: 'review',
+      directive: brief,
+      global_brief_assessment: {
+        outcome: 'satisfied',
+        contract_id: brief.artistic_evaluation_contract.contract_id,
+        contract_revision: 1,
+        frame_sha256: frame.sha256,
+        critic_authority: 'authorized',
+        critic_result_id: 'reason-free-critic',
+        brief_item_results: [{ item_id: 'whole-frame-read', state: 'MET' }],
+      },
+    });
+    expect(s.paintingState().documents['42'].global_brief_assessment?.brief_item_results).toEqual([
+      expect.objectContaining({ item_id: 'whole-frame-read', state: 'MET' }),
+    ]);
+    expect((s.paintingState().documents['42'].global_brief_assessment?.brief_item_results as any[])[0]).not.toHaveProperty('reason');
+
+    s.updatePaintingState(42, current => ({
+      ...current,
+      art_director: {
+        ...current.art_director,
+        tasks: current.art_director.tasks.map((task: any) => ({ ...task, status: 'completed' })),
+        current_task_id: null,
+      },
+    }));
+    const review = completionReviewEvidence(s) as any;
+    review.pre_final_hostile_review.checks = review.pre_final_hostile_review.checks
+      .map(({ reason: _reason, ...check }: any) => check);
+    expect(() => s.setArtDirectorState({
+      document_id: 42,
+      action: 'complete',
+      ...review,
+      final_comparison: {
+        scope: 'no_previous',
+        preferred: 'current',
+        reason: 'The current frame is the only accepted completion candidate in this fixture.',
+        criteria: {
+          coherence: 'Current frame is coherent.',
+          expressiveness: 'Current frame satisfies the bounded fixture.',
+          color: 'No color regression is present.',
+          rhythm: 'No rhythm regression is present.',
+          detail_selectivity: 'No detail-selectivity regression is present.',
+        },
+      },
+      global_brief_assessment: {
+        outcome: 'satisfied',
+        contract_id: brief.artistic_evaluation_contract.contract_id,
+        contract_revision: 1,
+        frame_sha256: frame.sha256,
+        critic_authority: 'authorized',
+        critic_result_id: 'reason-free-final-critic',
+        brief_item_results: [{ item_id: 'whole-frame-read', state: 'MET' }],
+      },
+    })).not.toThrow();
   });
 
   it('persists the task-scoped three-pass autonomy window across restart', () => {
@@ -1454,8 +1755,9 @@ describe('Art Director / Painter controller contract', () => {
       light_pattern: 'Diagonal warm light cuts across the face and hands.',
     });
     free.composition_exploration.selected_id = 'offset';
-    free.composition_exploration.selection_reason = 'The offset version creates stronger negative-space tension and a clearer directional light rhythm.';
-    expect(() => s.setArtDirectorState({ document_id: 42, action: 'review', directive: free })).not.toThrow();
+    delete free.composition_exploration.selection_reason;
+    const freeState = s.setArtDirectorState({ document_id: 42, action: 'review', directive: free });
+    expect(freeState.art_director.composition_exploration.selection_reason).toBeNull();
   });
 
   it('admits fixed/reference composition with zero alternatives and forbids branch ceremony', () => {
@@ -1528,10 +1830,11 @@ describe('Art Director / Painter controller contract', () => {
       light_pattern: 'Warm light remains diagonal but more symmetrical.',
     });
     constrained.composition_exploration.selected_id = 'left-bias';
-    constrained.composition_exploration.selection_reason = 'The left-biased version better preserves directional negative-space tension.';
+    delete constrained.composition_exploration.selection_reason;
     const state = s.setArtDirectorState({ document_id: 42, action: 'review', directive: constrained });
     expect(state.art_director.composition_exploration.hypotheses).toHaveLength(2);
     expect(state.art_director.composition_exploration.selected_id).toBe('left-bias');
+    expect(state.art_director.composition_exploration.selection_reason).toBeNull();
   });
 
   it('keeps cheap composition exploration as controller data with zero Photoshop operation records', () => {
@@ -1681,6 +1984,47 @@ describe('Art Director / Painter controller contract', () => {
     })).toThrow(/restore\/reconcile that stronger state/);
   });
 
+  it('blocks Art Director completion while an unresolved structural must-fix problem remains', () => {
+    const s = store();
+    seedClassifiedFrame(s, 'structural-debt-final-frame', 1);
+    const single = directive('structural-debt-final', 5);
+    single.tasks = [single.tasks[0]];
+    s.setArtDirectorState({ document_id: 42, action: 'review', directive: single });
+    s.updatePaintingState(42, current => ({
+      ...current,
+      visual_problems: {
+        ...(current.visual_problems ?? {}),
+        'facade-perspective': {
+          problem_id: 'facade-perspective',
+          scale: 'global',
+          severity: 'must-fix',
+          status: 'open',
+          region: 'whole-frame',
+          structural_review: true,
+          source_review_kind: 'perspective_geometry',
+        },
+      },
+      art_director: {
+        ...current.art_director,
+        tasks: current.art_director.tasks.map(task => ({ ...task, status: 'completed' })),
+        current_task_id: null,
+      },
+    }));
+
+    expect(() => s.setArtDirectorState({
+      document_id: 42,
+      action: 'complete',
+      final_comparison: {
+        scope: 'no_previous', preferred: 'current',
+        reason: 'The current frame is the only final candidate.',
+        criteria: {
+          coherence: 'Current candidate only.', expressiveness: 'Current candidate only.',
+          color: 'Current candidate only.', rhythm: 'Current candidate only.', detail_selectivity: 'Current candidate only.',
+        },
+      },
+    })).toThrow(/unresolved must-fix visual problem remains: facade-perspective/);
+  });
+
   it('keeps a locally accepted weaker frame without overwriting the primary artistic anchor', () => {
     const s = store();
     const anchorFrame = seedClassifiedFrame(s, 'anchor-strong', 1);
@@ -1702,6 +2046,33 @@ describe('Art Director / Painter controller contract', () => {
       operation_id: anchorFrame.operation_id,
       sha256: anchorFrame.sha256,
       path: anchorFrame.path,
+    });
+  });
+
+  it('allows an explicit durable anchor choice without prose rationale', () => {
+    const s = store();
+    const anchorFrame = seedClassifiedFrame(s, 'anchor-without-prose', 1);
+    s.setArtDirectorState({
+      document_id: 42,
+      action: 'review',
+      directive: directive('anchor-without-prose-review', 5),
+      anchor_decision: {
+        action: 'promote_primary',
+        operation_id: anchorFrame.operation_id,
+      },
+    });
+
+    const state = s.paintingState().documents['42'];
+    expect(state.primary_artistic_anchor).toMatchObject({
+      operation_id: anchorFrame.operation_id,
+      sha256: anchorFrame.sha256,
+      path: anchorFrame.path,
+      rationale: null,
+    });
+    expect(state.last_anchor_decision).toMatchObject({
+      action: 'promote_primary',
+      operation_id: anchorFrame.operation_id,
+      rationale: null,
     });
   });
 
@@ -1834,6 +2205,7 @@ describe('Art Director / Painter controller contract', () => {
     const completed = s.setArtDirectorState({
       document_id: 42,
       action: 'complete',
+      ...completionReviewEvidence(s),
       final_comparison: {
         ...finalComparison,
         preferred: 'current',
@@ -1849,6 +2221,55 @@ describe('Art Director / Painter controller contract', () => {
     expect(completed.art_director.final_comparison).toMatchObject({
       evidence_contract: 'composition-whole-frame',
     });
+  });
+
+  it('completes a structurally evidenced final comparison without narrative reason or criteria prose', () => {
+    const s = store();
+    const primary = seedClassifiedFrame(s, 'finish-prose-free-primary', 1);
+    const single = directive('finish-prose-free-directive', 5);
+    single.tasks = [single.tasks[0]];
+    s.setArtDirectorState({
+      document_id: 42,
+      action: 'review',
+      directive: single,
+      anchor_decision: {
+        action: 'promote_primary',
+        operation_id: primary.operation_id,
+      },
+    });
+    const current = seedClassifiedFrame(s, 'finish-prose-free-current', 2);
+    s.updatePaintingState(42, state => ({
+      ...state,
+      art_director: {
+        ...state.art_director,
+        tasks: state.art_director.tasks.map(task => ({ ...task, status: 'completed' })),
+        current_task_id: null,
+      },
+    }));
+
+    const completed = s.setArtDirectorState({
+      document_id: 42,
+      action: 'complete',
+      ...completionReviewEvidence(s),
+      final_comparison: {
+        scope: 'compared',
+        current_operation_id: current.operation_id,
+        best_previous_operation_id: primary.operation_id,
+        preferred: 'current',
+      },
+    });
+
+    expect(completed.final_artistic_frame).toMatchObject({
+      operation_id: current.operation_id,
+      selection: 'current',
+    });
+    expect(completed.art_director.final_comparison).toMatchObject({
+      scope: 'compared',
+      preferred: 'current',
+      evidence_contract: 'composition-whole-frame',
+    });
+    expect(completed.art_director.final_comparison.reason).toBeUndefined();
+    expect(completed.art_director.final_comparison.criteria).toBeUndefined();
   });
 
   it('rejects final comparison when only local/crop evidence survives but the whole-frame artifact is missing', () => {
@@ -1945,6 +2366,7 @@ describe('Art Director / Painter controller contract', () => {
     const completed = s.setArtDirectorState({
       document_id: 42,
       action: 'complete',
+      ...completionReviewEvidence(s),
       final_comparison: {
         scope: 'compared',
         current_operation_id: restored.operation_id,
@@ -2100,6 +2522,7 @@ describe('Art Director / Painter controller contract', () => {
     const completed = s.setArtDirectorState({
       document_id: 42,
       action: 'complete',
+      ...completionReviewEvidence(s),
       final_comparison: {
         scope: 'no_previous',
         preferred: 'current',
@@ -2125,6 +2548,69 @@ describe('Art Director / Painter controller contract', () => {
     expect(replanned.art_director.completed_microplans).toBe(0);
   });
 
+  it('blocks Art Director completion on E.18 insufficient geometry but allows an explicit flat applicability opt-out', () => {
+    const s = store();
+    const frame = seedClassifiedFrame(s, 'e17c-final-frame', 1);
+    s.updatePaintingState(42, current => ({
+      ...current,
+      document_instance: {
+        protocol: 'photoshop.guard.document_instance.v1',
+        host_witness: {
+          protocol: 'photoshop.uxp.document_instance_witness.v1',
+          session_id: 'planner-e17c', token: 'planner-e17c:42',
+        },
+      },
+    }));
+    const d = directive('e17c-completion', 5);
+    d.tasks = [d.tasks[0]];
+    s.setArtDirectorState({ document_id: 42, action: 'review', directive: d });
+    s.updatePaintingState(42, current => ({
+      ...current,
+      art_director: {
+        ...current.art_director,
+        current_task_id: null,
+        review_reason: 'directive_tasks_completed',
+        tasks: current.art_director.tasks.map((task: any) => ({ ...task, status: 'completed' })),
+      },
+    }));
+    const writeGeometry = (id: string, sequence: number, model: any) => s.write({
+      id, tool: 'photoshop_execute_visual_microplan', args: { document_id: 42 }, summary: id, purpose: 'E17c final gate',
+      hash: `hash-${id}`, sequence, created_at: new Date().toISOString(), completed_at: new Date().toISOString(),
+      phase: 'completed', execution: 'completed', failed: false, visual: true, scene_geometry_model: model,
+    } as any);
+    writeGeometry('e17c-insufficient', 2, {
+      model_id: 'planner-e17c-scene', revision: 1, applicability: 'insufficient_evidence',
+      applicability_rationale: 'Current frame does not yet establish enough shared geometry for a completion claim.',
+      source_frame: { document_id: 42, document_incarnation: 'planner-e17c:42', width: 1000, height: 800 },
+      projection: { kind: 'custom', vanishing_points: [] },
+    });
+    const finalComparison = {
+      scope: 'no_previous', preferred: 'current',
+      reason: 'No earlier accepted whole-frame state exists in this isolated completion-gate regression.',
+      criteria: {
+        coherence: 'Current state is the only candidate.', expressiveness: 'No earlier candidate exists.',
+        color: 'No earlier candidate exists.', rhythm: 'No earlier candidate exists.', detail_selectivity: 'No earlier candidate exists.',
+      },
+    };
+    expect(() => s.setArtDirectorState({ document_id: 42, action: 'complete', final_comparison: finalComparison }))
+      .toThrow(/E\.18 geometry completion debt.*scene_geometry_insufficient_evidence/);
+
+    writeGeometry('e17c-flat-optout', 3, {
+      model_id: 'planner-e17c-scene', revision: 2, applicability: 'flat_or_collage',
+      applicability_rationale: 'The requested graphic is intentionally flat and does not claim coherent perspective depth.',
+      source_frame: { document_id: 42, document_incarnation: 'planner-e17c:42', width: 1000, height: 800 },
+      projection: { kind: 'custom', vanishing_points: [] },
+    });
+    const completed = s.setArtDirectorState({
+      document_id: 42,
+      action: 'complete',
+      ...completionReviewEvidence(s),
+      final_comparison: finalComparison,
+    });
+    expect(completed.art_director.status).toBe('completed');
+    expect(completed.final_artistic_frame).toMatchObject({ operation_id: frame.operation_id });
+  });
+
   it('supports Painter-declared unsafe execution as an event-driven interrupt without a Photoshop mutation', () => {
     const s = store();
     s.setArtDirectorState({ document_id: 42, action: 'review', directive: directive() });
@@ -2136,6 +2622,19 @@ describe('Art Director / Painter controller contract', () => {
     });
     expect(interrupted.art_director.status).toBe('interrupted');
     expect(interrupted.art_director.interrupt.reason).toBe('unsafe_to_execute_directive');
+  });
+
+  it('allows a structurally classified Art Director interrupt without narrative detail', () => {
+    const s = store();
+    s.setArtDirectorState({ document_id: 42, action: 'review', directive: directive() });
+    const interrupted = s.setArtDirectorState({
+      document_id: 42,
+      action: 'interrupt',
+      reason: 'serious_visual_error',
+    });
+    expect(interrupted.art_director.status).toBe('interrupted');
+    expect(interrupted.art_director.interrupt).toMatchObject({ reason: 'serious_visual_error' });
+    expect(interrupted.art_director.interrupt).not.toHaveProperty('detail');
   });
 });
 

@@ -42,6 +42,7 @@ export const PAINTING_VISUAL_INTENTS = [
 export type PaintingVisualIntent = (typeof PAINTING_VISUAL_INTENTS)[number];
 
 export const PAINTING_CONSTRUCTION_ROLES = [
+  'structured-mass',
   'continuous-field',
   'volumetric-soft-mass',
   'optical-veil',
@@ -519,6 +520,7 @@ export interface PaintingMethodSelection {
 }
 
 const CONSTRUCTION_ROLE_INTENT: Record<PaintingConstructionRole, PaintingVisualIntent> = {
+  'structured-mass': 'mass',
   'continuous-field': 'continuous-field',
   'volumetric-soft-mass': 'painted-mass',
   'optical-veil': 'atmospheric-mass',

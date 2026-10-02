@@ -1,11 +1,13 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { relative, resolve } from 'node:path';
+import { findCrossPathCloneBlocks } from './source-independence-clones.mjs';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const BASELINE = process.env.SOURCE_INDEPENDENCE_BASELINE || '7b635963f87b5b8ff5380c3156841f5253ec8063';
-const MAX_RUNTIME_EXACT = Number(process.env.SOURCE_INDEPENDENCE_MAX_EXACT || '0.05');
+const MAX_RUNTIME_EXACT = Number(process.env.SOURCE_INDEPENDENCE_MAX_EXACT || '0.005');
 const LARGE_BLOCK_LINES = Number(process.env.SOURCE_INDEPENDENCE_BLOCK_LINES || '12');
+const CROSS_PATH_BLOCK_LINES = Number(process.env.SOURCE_INDEPENDENCE_CROSS_PATH_BLOCK_LINES || '8');
 const HIGH_FILE_EXACT = Number(process.env.SOURCE_INDEPENDENCE_HIGH_FILE_EXACT || '0.50');
 
 function git(args, options = {}) {
@@ -73,6 +75,7 @@ function contiguousBlocks(current, upstream, path) {
 }
 
 const currentPaths = trackedCurrentFiles();
+const currentText = new Map();
 let runtimeLines = 0;
 let exactLines = 0;
 const files = [];
@@ -81,6 +84,7 @@ const identicalFiles = [];
 
 for (const path of currentPaths) {
   const text = readFileSync(resolve(ROOT, path), 'utf8').replace(/\r\n/g, '\n');
+  currentText.set(path, text);
   const currentLines = lines(text);
   const samePath = upstreamText.get(path);
   const exact = samePath === undefined ? 0 : alignedExactCount(text, samePath);
@@ -94,6 +98,8 @@ for (const path of currentPaths) {
   if (samePath !== undefined) largeBlocks.push(...contiguousBlocks(text, samePath, path));
 }
 
+const crossPathBlocks = findCrossPathCloneBlocks(currentText, upstreamText, CROSS_PATH_BLOCK_LINES);
+
 const exactRatio = runtimeLines ? exactLines / runtimeLines : 0;
 const highSimilarityFiles = files
   .filter((file) => file.lines >= LARGE_BLOCK_LINES && file.exact_ratio >= HIGH_FILE_EXACT)
@@ -106,8 +112,16 @@ const upstreamDependency = Object.entries(packageScripts).filter(([, command]) =
 const report = {
   protocol: 'photoshop.source_independence.v1', baseline: BASELINE,
   runtime: { files: currentPaths.length, lines: runtimeLines, exact_lines: exactLines, exact_ratio: exactRatio },
-  thresholds: { max_runtime_exact: MAX_RUNTIME_EXACT, large_block_lines: LARGE_BLOCK_LINES, high_file_exact: HIGH_FILE_EXACT },
-  identical_files: identicalFiles, large_blocks: largeBlocks, high_similarity_files: highSimilarityFiles,
+  thresholds: {
+    max_runtime_exact: MAX_RUNTIME_EXACT,
+    large_block_lines: LARGE_BLOCK_LINES,
+    cross_path_block_lines: CROSS_PATH_BLOCK_LINES,
+    high_file_exact: HIGH_FILE_EXACT,
+  },
+  identical_files: identicalFiles,
+  large_blocks: largeBlocks,
+  cross_path_blocks: crossPathBlocks,
+  high_similarity_files: highSimilarityFiles,
   retired_pack_entries: retiredPacked, upstream_script_dependencies: upstreamDependency,
   top_files: files.sort((a, b) => b.exact_lines - a.exact_lines).slice(0, 15),
 };
@@ -117,6 +131,7 @@ const failures = [];
 if (exactRatio >= MAX_RUNTIME_EXACT) failures.push(`runtime exact-line overlap ${(exactRatio * 100).toFixed(2)}% is not below ${(MAX_RUNTIME_EXACT * 100).toFixed(2)}%`);
 if (identicalFiles.length) failures.push(`${identicalFiles.length} byte-identical production file(s)`);
 if (largeBlocks.length) failures.push(`${largeBlocks.length} contiguous upstream-identical block(s) >= ${LARGE_BLOCK_LINES} lines`);
+if (crossPathBlocks.length) failures.push(`${crossPathBlocks.length} cross-path upstream-identical block(s) >= ${CROSS_PATH_BLOCK_LINES} normalized lines`);
 if (highSimilarityFiles.length) failures.push(`${highSimilarityFiles.length} high-similarity production file(s)`);
 if (retiredPacked.length) failures.push(`retired package entries: ${retiredPacked.join(', ')}`);
 if (upstreamDependency.length) failures.push('package scripts depend on upstream');

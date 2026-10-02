@@ -17,10 +17,10 @@ if (normalizeTextEol(eolProbeLf) !== normalizeTextEol(eolProbeCrlf)) {
 const skillPath = new URL('../docs/digital-painting-agent-skill.md', import.meta.url);
 const promptPath = new URL('../src/prompts/templates/digital-painting-control.ts', import.meta.url);
 const implementationPath = new URL('../docs/digital-painting.md', import.meta.url);
-const connectionPath = new URL('../src/platform/connection.ts', import.meta.url);
+const connectionPath = new URL('../src/platform/discovery-runtime.ts', import.meta.url);
 const backendRouterPath = new URL('../src/platform/photoshop-backend.ts', import.meta.url);
 const guardRuntimePath = new URL('../src/core/guard/runtime.ts', import.meta.url);
-const instructionsPath = new URL('../src/prompts/instructions.ts', import.meta.url);
+const instructionsPath = new URL('../src/prompts/host-guidance.ts', import.meta.url);
 
 const [
   kernel,
@@ -169,8 +169,10 @@ if (/### Live free-composition lessons/i.test(implementation)) {
   failures.push('digital-painting.md reintroduced a duplicate policy/lessons section');
 }
 
-if (!/Windows-only Photoshop discovery\/version facade/i.test(connection)) {
-  failures.push('PhotoshopConnection must remain the Windows-only discovery/version facade');
+if (!/class PhotoshopConnection/.test(connection)
+  || !/function enforceWindowsPlatform/.test(connection)
+  || !/host !== 'win32'/.test(connection)) {
+  failures.push('PhotoshopConnection must remain backed by the Windows-only discovery runtime');
 }
 if (/executeScript|ensurePhotoshopRunning|WindowsExecutor|MacOSExecutor|ScriptExecutor/.test(connection)) {
   failures.push('PhotoshopConnection must not expose the retired legacy script transport');

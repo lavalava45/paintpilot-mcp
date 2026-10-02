@@ -42,7 +42,7 @@ export function createMethodPaletteTools(registry: ToolRegistry): ToolDefinition
           properties: {
             construction_role: {
               type: 'string', enum: [...PAINTING_CONSTRUCTION_ROLES],
-              description: 'Optional subject-agnostic construction role. When supplied, the role is resolved to a visual intent before a concrete Photoshop method is selected.',
+              description: 'Subject-agnostic construction role. In broad nontrivial construction this classification must precede concrete Photoshop method selection.',
             },
             visual_intent: { type: 'string', enum: [...PAINTING_VISUAL_INTENTS] },
             impact_class: { type: 'string', enum: [...PAINTING_IMPACT_CLASSES] },

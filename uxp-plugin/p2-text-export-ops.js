@@ -56,6 +56,7 @@ function resolveFontPostScriptName(fontName) {
 
 async function listFonts(params = {}) {
   const query = typeof params.query === 'string' ? params.query : null;
+  const queryNeedle = query ? query.toLowerCase() : null;
   const limit = Number.isFinite(params.limit)
     ? Math.max(1, Math.min(1000, Math.trunc(params.limit)))
     : 200;
@@ -72,15 +73,12 @@ async function listFonts(params = {}) {
         family: font.family,
         style: font.style,
       };
-      if (query) {
-        const q = query.toLowerCase();
-        if (
-          entry.name.toLowerCase().indexOf(q) < 0 &&
-          entry.postScriptName.toLowerCase().indexOf(q) < 0 &&
-          entry.family.toLowerCase().indexOf(q) < 0
-        ) {
-          continue;
-        }
+      if (queryNeedle) {
+        const searchableNames = [entry.name, entry.postScriptName, entry.family];
+        const matches = searchableNames.some(
+          (value) => typeof value === 'string' && value.toLowerCase().includes(queryNeedle)
+        );
+        if (!matches) continue;
       }
       fonts.push(entry);
       if (fonts.length >= limit) {

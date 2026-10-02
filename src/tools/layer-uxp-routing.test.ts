@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PhotoshopConnection } from '../platform/connection.js';
 import type { PhotoshopBackendRouter } from '../platform/photoshop-backend.js';
+import { exactNotExecutedError } from '../core/execution-outcome.js';
 const bridge = vi.hoisted(() => ({
   create: vi.fn(), remove: vi.fn(), opacity: vi.fn(), blend: vi.fn(),
   visibility: vi.fn(), locked: vi.fn(), rename: vi.fn(), duplicate: vi.fn(), move: vi.fn(), fill: vi.fn(),
@@ -78,6 +79,27 @@ describe('basic layer tools UXP routing', () => {
     expect(result.isError).toBe(true);
     expect(textOf(result)).toContain('uxp_failed_after_dispatch');
     expect(executeScript).not.toHaveBeenCalled();
+  });
+  it('preserves exact pre-dispatch rejection through the public create-layer result', async () => {
+    const { connection, router } = fixture();
+    (router.backendFor as ReturnType<typeof vi.fn>).mockRejectedValueOnce(exactNotExecutedError(
+      'uxp_bridge_unavailable: layer.create requires the Photoshop UXP companion',
+      'backend_route_rejected_before_semantic_dispatch'
+    ));
+    const create = createLayerTools(connection, router).find((tool) => tool.tool.name === 'photoshop_create_layer')!;
+    const result = structured(await create.handler({ document_id: 91, name: 'Never Dispatched' }));
+    expect(result).toMatchObject({
+      ok: false,
+      code: 'uxp_bridge_unavailable',
+      execution: 'not-executed',
+      execution_proof: {
+        protocol: 'photoshop.execution_exact_outcome.v1',
+        dispatch: 'not-dispatched',
+        side_effects: 'none',
+        reason: 'backend_route_rejected_before_semantic_dispatch',
+      },
+    });
+    expect(bridge.create).not.toHaveBeenCalled();
   });
   it('routes layer ordering through one UXP primitive and preserves public envelopes', async () => {
     bridge.move

@@ -32,8 +32,9 @@ const packageJson = JSON.parse(read('package.json'));
 
 const requiredMarkers = new Map([
   ['docs/external-intake.md', [
-    'Upstream is an optional external source',
+    'not a synchronization authority, standing Git remote',
     'No synchronization baseline',
+    'canonical checkout should keep only the project\'s own `origin` remote',
     'source repository and exact source revision',
     'current project problem, compatibility need, or measured value',
     'affected project paths',
@@ -53,15 +54,17 @@ const requiredMarkers = new Map([
     'docs/external-intake.md',
   ]],
   ['docs/development.md', [
-    'An `upstream` remote is optional',
+    'canonical checkout keeps only this project\'s own repository remote (`origin`)',
+    'Do **not** configure a standing `upstream` remote',
     'external-intake.md',
   ]],
   ['docs/release-policy.md', [
-    'Upstream is an external source, not a synchronization authority',
+    'Historical upstream is an external source, not a synchronization authority',
     'external-intake.md',
   ]],
   ['RELEASE_CHECKLIST.md', [
     'npm run verify:external-intake',
+    'no persistent historical `upstream` remote',
     'No upstream baseline/version is required',
   ]],
   ['.github/pull_request_template.md', [
@@ -118,6 +121,8 @@ const maintainedWorkflow = [
   ['.github/pull_request_template.md', pullRequestTemplate],
 ];
 const forbiddenPatterns = [
+  /git\s+remote\s+add\s+upstream\b/i,
+  /git\s+remote\s+set-url\s+upstream\b/i,
   /git\s+pull\s+upstream\b/i,
   /git\s+merge\s+upstream(?:\/|\b)/i,
   /git\s+rebase\s+upstream(?:\/|\b)/i,
@@ -147,6 +152,7 @@ console.log(JSON.stringify({
   protocol: 'photoshop.external_intake.v1',
   policy: 'docs/external-intake.md',
   upstream_remote_required: false,
+  standing_upstream_remote_allowed: false,
   workflow_files_checked: maintainedWorkflow.map(([path]) => path),
   github_workflows_checked: workflowFiles.length,
   canonical_gate_wired: String(scripts['verify:canonical'] ?? '').includes('npm run verify:external-intake'),

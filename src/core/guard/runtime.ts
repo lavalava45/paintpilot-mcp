@@ -20,11 +20,16 @@ import {
   SessionStore,
   alive,
   isRead as isGuardReadTool,
+  isVisual as isGuardVisualTool,
   parseTexts,
   previewOf,
 } from './session-store.js';
 import { compactClosedPrevious, cycleEnvelope, executeLogicalOperation, preflightRejectionEnvelope } from './cycle.js';
-import { compileGuardCycle } from './cycle-compiler.js';
+import {
+  compileGuardCycle,
+  type GuardCompilerRepairAudit,
+  type GuardCompilerTelemetry,
+} from './cycle-compiler.js';
 import { guardCapabilities } from './guard-capabilities.js';
 import type { GuardProjectionContext } from './projection-context.js';
 import {
@@ -43,6 +48,7 @@ import {
 } from './async-job.js';
 import { operationNarrative, shouldUseAsyncJob } from './operation-narrative.js';
 import { paintingMethodCapabilities } from '../painting-method-palette.js';
+import { prepareProcessVideoCapture, stopProcessVideoCapture } from '../process-video-trace.js';
 import {
   COMPACT_GUARD_PROTOCOL_VERSION,
   RUNTIME_STATE_VERSION,
@@ -82,6 +88,11 @@ function semanticActionsFromRecord(record: Record<string, unknown> | undefined):
 }
 
 function cycleInputDocumentId(store: SessionStore, input: Record<string, unknown>): number | undefined {
+  const paintingIntent = input.painting_intent && typeof input.painting_intent === 'object' && !Array.isArray(input.painting_intent)
+    ? input.painting_intent as Record<string, unknown>
+    : undefined;
+  const intentDocumentId = Number(paintingIntent?.document_id);
+  if (Number.isSafeInteger(intentDocumentId) && intentDocumentId > 0) return intentDocumentId;
   const nextPass = input.next_pass && typeof input.next_pass === 'object' && !Array.isArray(input.next_pass)
     ? input.next_pass as Record<string, unknown>
     : undefined;
@@ -112,6 +123,11 @@ const runLogicalOperation = executeLogicalOperation as unknown as (input: {
   materializeArguments: (tool: string, args: Record<string, unknown>, id: string) => Record<string, unknown>;
   onProgress?: ((state: string) => Promise<void> | void) | undefined;
   projectionContext?: GuardProjectionContext;
+  compilerDeferredFromOperationId?: string;
+  mutationLifecycle?: {
+    beforeMutation?: (record: Record<string, unknown>) => Promise<unknown> | unknown;
+    afterMutation?: (record: Record<string, unknown>, token: unknown, error?: unknown) => Promise<void> | void;
+  };
 }) => Promise<GuardExecutionRun>;
 
 const shouldRunAsyncJob = shouldUseAsyncJob as unknown as (
@@ -163,14 +179,14 @@ export function describeToolForGuardMode(
 ): string | undefined {
   if (!shouldBlockRawTool(toolName, mode)) return description;
 
-  const guardNotice =
-    'GUARD-REQUIRED MUTATION: this raw Photoshop tool is exposed for planning/internal Guard execution only. ' +
-    'Do not call it directly in PHOTOSHOP_GUARD_MODE=required: a direct MCP call is guaranteed to fail with code=guard_required. ' +
-    'Submit the intended mutation through photoshop_guard_cycle_auto instead (normally as a next_pass action).';
+  const guardNotice = 'Guard-only mutation; dispatch via photoshop_guard_cycle_auto.';
+  const compactDescription = description
+    ?.replace(/\s+/g, ' ')
+    .trim()
+    .match(/^.*?(?:[.!?](?=\s|$)|$)/)?.[0]
+    .trim();
 
-  return description?.trim()
-    ? `${guardNotice}\n\n${description}`
-    : guardNotice;
+  return compactDescription ? `${guardNotice} ${compactDescription}` : guardNotice;
 }
 
 export interface EmbeddedGuardRuntimeOptions {
@@ -178,6 +194,7 @@ export interface EmbeddedGuardRuntimeOptions {
   previewBarrierDirectory?: string;
   executionLeaseFile?: string;
   workspaceRoot?: string;
+  processVideoTraceEnabled?: boolean;
   uxpReadinessProbe?: typeof getUxpBridgeReadiness;
   uxpStateProbe?: typeof invokeUxpGetState;
   uxpCommandReceiptProbe?: typeof probeUxpStableCommandReceipt;
@@ -338,6 +355,7 @@ export class EmbeddedGuardRuntime {
   private readonly uxpStateProbe: typeof invokeUxpGetState;
   private readonly uxpCommandReceiptProbe: typeof probeUxpStableCommandReceipt;
   private readonly uxpQueuedCommandCancel: typeof cancelUxpStableCommandIfQueued;
+  private readonly processVideoTraceEnabled: boolean | undefined;
   private readonly capabilitySnapshotCache = new Map<number, {
     dependencyKey: string;
     snapshot: Record<string, unknown>;
@@ -365,6 +383,7 @@ export class EmbeddedGuardRuntime {
     this.uxpStateProbe = options.uxpStateProbe ?? invokeUxpGetState;
     this.uxpCommandReceiptProbe = options.uxpCommandReceiptProbe ?? probeUxpStableCommandReceipt;
     this.uxpQueuedCommandCancel = options.uxpQueuedCommandCancel ?? cancelUxpStableCommandIfQueued;
+    this.processVideoTraceEnabled = options.processVideoTraceEnabled;
   }
 
   capabilities(): Record<string, unknown> {
@@ -513,6 +532,7 @@ export class EmbeddedGuardRuntime {
             visual_intents: Array.isArray(row.visual_intents) ? [...row.visual_intents] : [],
             preferred_preset: row.preferred_preset ?? null,
             alternative_presets: Array.isArray(row.alternative_presets) ? [...row.alternative_presets] : [],
+            candidate_evidence: Array.isArray(row.candidate_evidence) ? structuredClone(row.candidate_evidence) : [],
             effective_settings: row.effective_settings && typeof row.effective_settings === 'object'
               ? structuredClone(row.effective_settings)
               : null,
@@ -624,6 +644,7 @@ export class EmbeddedGuardRuntime {
   }
 
   async statusWithCapabilitySnapshots(): Promise<Record<string, unknown>> {
+    await this.autoAbandonMissingDocuments('guard_status_fallback');
     const status = this.status();
     const documents = status.documents && typeof status.documents === 'object' && !Array.isArray(status.documents)
       ? status.documents as Record<string, unknown>
@@ -633,6 +654,33 @@ export class EmbeddedGuardRuntime {
       const documentId = Number(key);
       if (Number.isSafeInteger(documentId) && documentId > 0) {
         snapshots[key] = await this.capabilitySnapshot(documentId);
+        const documentStatus = documents[key];
+        const snapshot = snapshots[key];
+        if (documentStatus && typeof documentStatus === 'object' && !Array.isArray(documentStatus)
+          && snapshot && typeof snapshot === 'object' && !Array.isArray(snapshot)) {
+          const usage = (documentStatus as Record<string, unknown>).method_usage;
+          const supported = (snapshot as Record<string, unknown>).supported_semantic_methods;
+          if (usage && typeof usage === 'object' && !Array.isArray(usage) && Array.isArray(supported)) {
+            const used = new Set(Object.keys(
+              ((usage as Record<string, unknown>).method_id_usage
+                && typeof (usage as Record<string, unknown>).method_id_usage === 'object'
+                && !Array.isArray((usage as Record<string, unknown>).method_id_usage))
+                ? (usage as Record<string, unknown>).method_id_usage as Record<string, unknown>
+                : {}
+            ));
+            const available = supported
+              .map(row => row && typeof row === 'object' && !Array.isArray(row)
+                ? String((row as Record<string, unknown>).id ?? '').trim()
+                : '')
+              .filter(Boolean);
+            Object.assign(usage as Record<string, unknown>, {
+              available_method_ids: available,
+              unused_available_method_ids: available.filter(id => !used.has(id)),
+              distinct_available_methods: available.length,
+              distinct_unused_available_methods: available.filter(id => !used.has(id)).length,
+            });
+          }
+        }
       }
     }
     return {
@@ -643,8 +691,29 @@ export class EmbeddedGuardRuntime {
   }
 
   async artRunWithCapabilitySnapshot(input: Record<string, unknown>): Promise<Record<string, unknown>> {
-    const response = this.artRun(input);
     const documentId = Number(input.document_id);
+    if (positiveDocumentId(documentId)) {
+      const readiness = await this.uxpReadinessProbe({ forceRefresh: true });
+      if (readiness.ready && readiness.revision_match && readiness.plugin_connected) {
+        const stateProbe = await this.uxpStateProbe().catch(() => undefined);
+        const document = stateProbe?.ok === true && stateProbe.data?.document
+          && typeof stateProbe.data.document === 'object' && !Array.isArray(stateProbe.data.document)
+          ? stateProbe.data.document as Record<string, unknown>
+          : undefined;
+        if (document && Number(document.id) === documentId) {
+          this.store.observeDocumentInstance(
+            documentId,
+            document.instanceWitness,
+            { observed_at: new Date().toISOString(), tool: 'photoshop_guard_set_art_run' }
+          );
+        }
+      }
+    }
+    // Bind the live document witness before writing the art run. If Photoshop has
+    // recycled the numeric id, observeDocumentInstance first clears stale
+    // document-scoped state; the new art run is then written onto the exact live
+    // incarnation rather than being immediately invalidated by first-pass preflight.
+    const response = this.artRun(input);
     return {
       ...response,
       paint_readiness: await this.paintReadiness(documentId),
@@ -661,19 +730,160 @@ export class EmbeddedGuardRuntime {
   }
 
   resume(documentId?: number): Record<string, unknown> {
+    if (documentId === undefined) {
+      const checkpoint = this.store.loadAndVerifyContinuationCheckpoint();
+      if (checkpoint.ok) {
+        const exact = checkpoint as Record<string, unknown>;
+        return {
+          ...exact,
+          resume_mode: 'exact_checkpoint',
+          inspect_delivered_frame: exact.visual_verdict_pending === true,
+          continuation_contract: exact.visual_verdict_pending === true
+            ? 'inspect delivered_preview, then call photoshop_guard_cycle_auto with previous_operation_id + previous_observation and optional next_pass'
+            : 'continue with canonical_next_command; do not replay current_operation_id',
+          guard_capabilities: this.capabilities(),
+          canonical_next_tool: exact.canonical_next_command ?? 'photoshop_guard_cycle_auto',
+        };
+      }
+      if (checkpoint.reason !== 'continuation_checkpoint_missing') {
+        return {
+          ...checkpoint,
+          resume_mode: 'checkpoint_rejected',
+          exact_resume_required: true,
+          guard_capabilities: this.capabilities(),
+          canonical_next_tool: 'photoshop_guard_status',
+          next_required_action: 'Checkpoint disagrees with durable Guard state. Run one bounded Guard status/recovery verification; do not replay the prior mutation.',
+        };
+      }
+    }
     const result = {
       ...this.store.resume(documentId),
+      resume_mode: documentId === undefined ? 'durable_state_fallback' : 'explicit_document',
       guard_capabilities: this.capabilities(),
       canonical_next_tool: 'photoshop_guard_cycle_auto',
     };
-    if (Number.isSafeInteger(documentId) && Number(documentId) > 0) {
-      this.store.recordArtisticThroughputEvent(Number(documentId), {
-        kind: 'recovery',
-        model_visible: true,
-        semantic_actions: 0,
-      });
-    }
     return result;
+  }
+
+  async handleUxpBridgeEvent(event: {
+    event?: unknown;
+    document_id?: unknown;
+    controlled?: unknown;
+    observed_at?: unknown;
+    command_id?: unknown;
+    document_instance_witness?: unknown;
+  }): Promise<Record<string, unknown>> {
+    if (event.event !== 'document_closed') return { handled: false, reason: 'unsupported_event' };
+    const documentId = Number(event.document_id);
+    if (!positiveDocumentId(documentId)) return { handled: false, reason: 'invalid_document_id' };
+    if (event.controlled === true) {
+      return { handled: true, ignored: true, reason: 'guard_controlled_close', document_id: documentId };
+    }
+    return this.store.abandonClosedDocument(documentId, {
+      evidence_mode: 'uxp_document_close_notification',
+      source: 'photoshop_uxp_notification',
+      observed_at: event.observed_at,
+      command_id: event.command_id,
+      document_instance_witness: event.document_instance_witness,
+    });
+  }
+
+  private async autoAbandonMissingDocuments(source: string): Promise<Array<Record<string, unknown>>> {
+    const records = this.store.records();
+    const state = this.store.paintingState();
+    const candidateIds = new Set<number>();
+    for (const record of records) {
+      const documentId = Number(record.args?.document_id);
+      if (!positiveDocumentId(documentId) || isGuardReadTool(String(record.tool ?? ''))) continue;
+      if (record.resolved?.outcome === 'abandoned' || record.execution === 'not-executed') continue;
+      if (record.tool === 'photoshop_close_document' && record.phase === 'completed' && record.failed === false) continue;
+      const hasClosureDebt = record.phase !== 'completed'
+        || !record.report
+        || (record.operation_receipt && !record.operation_ack)
+        || (record.visual && !record.verdict);
+      if (hasClosureDebt) candidateIds.add(documentId);
+    }
+    for (const [key, documentState] of Object.entries(state.documents ?? {})) {
+      const documentId = Number(key);
+      if (!positiveDocumentId(documentId)) continue;
+      const doc = documentState as Record<string, unknown>;
+      const lifecycle = doc.workflow_lifecycle as Record<string, unknown> | undefined;
+      if (lifecycle?.status === 'active' || doc.pending_rollback) candidateIds.add(documentId);
+    }
+    if (!candidateIds.size) return [];
+    const readiness = await this.uxpReadinessProbe({ forceRefresh: true });
+    if (!(readiness.ready && readiness.revision_match && readiness.plugin_connected)) return [];
+    const activeDocumentId = Number(readiness.active_document?.id);
+    if (positiveDocumentId(activeDocumentId)) candidateIds.delete(activeDocumentId);
+    if (!candidateIds.size) return [];
+    if (readiness.document_count === 0) {
+      return [...candidateIds].map(documentId => this.store.abandonClosedDocument(documentId, {
+        evidence_mode: 'bridge_registration_document_count_zero',
+        source,
+        observed_at: new Date().toISOString(),
+      }));
+    }
+    let result: ToolResult;
+    try { result = await this.invoke('photoshop_list_documents', {}, 5_000); }
+    catch { return []; }
+    const body = parseTexts(result).find((item: any) =>
+      Array.isArray(item?.documents)
+      || Array.isArray((item?.details as Record<string, unknown> | undefined)?.documents)
+    ) as Record<string, unknown> | undefined;
+    if (!body || result.isError === true || body.ok === false) return [];
+    const details = body.details && typeof body.details === 'object' && !Array.isArray(body.details)
+      ? body.details as Record<string, unknown>
+      : undefined;
+    const documents = Array.isArray(body.documents)
+      ? body.documents
+      : Array.isArray(details?.documents) ? details.documents : [];
+    const openIds = new Set(documents.map((document: any) => Number(document?.id ?? document?.document_id))
+      .filter((id: number) => positiveDocumentId(id)));
+    const abandoned = [];
+    for (const documentId of candidateIds) {
+      if (openIds.has(documentId)) continue;
+      abandoned.push(this.store.abandonClosedDocument(documentId, {
+        evidence_mode: 'fresh_documents_absence',
+        source,
+        observed_at: new Date().toISOString(),
+      }));
+    }
+    return abandoned;
+  }
+
+  async lintNextPass(nextPass: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const startedAt = Date.now();
+    const releaseController = this.store.lock();
+    try {
+      const projection = this.store.captureProjectionContext({
+        activeJobs: this.store.activeJobs(undefined),
+        capturedAt: Date.now(),
+      });
+      const compiled = await compileGuardCycle({ next_pass: nextPass }, this.store, this.registry, {
+        collectDynamicOperationViolations: (operation) => this.collectDynamicOperationViolations(operation),
+        projectionContext: projection,
+      });
+      const rejectionText = compiled.rejection?.content?.find((item) => item.type === 'text');
+      let rejection: Record<string, unknown> | null = null;
+      if (rejectionText?.type === 'text') {
+        try { rejection = JSON.parse(String(rejectionText.text)) as Record<string, unknown>; }
+        catch { rejection = { message: String(rejectionText.text) }; }
+      }
+      return {
+        ok: compiled.violations.length === 0,
+        protocol: 'photoshop.guard.next_pass_lint.v1',
+        execution: 'not-executed',
+        visual_mutation_started: false,
+        lint_ms: Date.now() - startedAt,
+        violations: compiled.violations,
+        error_codes: [...new Set(compiled.violations.map(item => item.code))],
+        normalizations: compiled.normalizations,
+        compiled_operation: compiled.nextOperation ?? null,
+        rejection,
+      };
+    } finally {
+      releaseController();
+    }
   }
 
   priorities(input: Record<string, unknown>): Record<string, unknown> {
@@ -688,7 +898,7 @@ export class EmbeddedGuardRuntime {
     return {
       ok: true,
       art_run: this.store.setArtRunState(input),
-      next: 'Use the returned project directory for frames/checkpoints/final. Visual art operations in artistic/mixed mode must carry the exact pre-operation artistic_commentary that was emitted as ordinary user-visible assistant prose.',
+      next: 'Use the returned project directory for frames/checkpoints/final. Artistic commentary is optional presentation metadata and does not authorize or block visual execution.',
     };
   }
 
@@ -1126,6 +1336,11 @@ export class EmbeddedGuardRuntime {
       : {};
     const documentId = Number(args.document_id);
     if (!positiveDocumentId(documentId)) return [];
+    const sceneGeometryModel = operation.scene_geometry_model
+      && typeof operation.scene_geometry_model === 'object'
+      && !Array.isArray(operation.scene_geometry_model)
+      ? operation.scene_geometry_model as Record<string, unknown>
+      : undefined;
 
     if (tool === 'photoshop_execute_visual_microplan') {
       const problemId = typeof operation.problem_id === 'string'
@@ -1189,10 +1404,34 @@ export class EmbeddedGuardRuntime {
     // Preserve the existing bounded COM fallback when UXP is not the selected
     // ready route, but never dispatch through a ready UXP route without proving
     // that the pinned numeric id still denotes the same live document object.
-    const readiness = await this.uxpReadinessProbe({ forceRefresh: true });
-    if (!(readiness.ready && readiness.revision_match && readiness.plugin_connected)) return [];
+    let readiness = await this.uxpReadinessProbe({ forceRefresh: true });
+    let warmedStateProbe: Awaited<ReturnType<typeof invokeUxpGetState>> | undefined;
+    // The companion uses a long-poll transport, so its health endpoint can briefly
+    // report disconnected while the exact read route is still healthy. Do one
+    // bounded read-only wake/probe before treating that transient health sample as
+    // authoritative. This does not relax the revision/readiness gate: readiness
+    // must still become fully ready before any mutation can proceed.
+    if (!(readiness.ready && readiness.revision_match && readiness.plugin_connected)) {
+      warmedStateProbe = await this.uxpStateProbe().catch(() => undefined);
+      if (warmedStateProbe?.ok === true) {
+        readiness = await this.uxpReadinessProbe({ forceRefresh: true });
+      }
+    }
+    if (!(readiness.ready && readiness.revision_match && readiness.plugin_connected)) {
+      if (sceneGeometryModel) {
+        return [{
+          scope: 'next_operation' as const,
+          code: 'scene_geometry_model_incarnation_unverified',
+          message:
+            `Cannot bind scene_geometry_model to the exact live document incarnation for document_id=${documentId}: ` +
+            `the matching UXP witness route is not ready (connected=${readiness.plugin_connected}, ready=${readiness.ready}, revision_match=${readiness.revision_match}). ` +
+            'No mutation was dispatched.',
+        }];
+      }
+      return [];
+    }
 
-    const stateProbe = await this.uxpStateProbe();
+    const stateProbe = warmedStateProbe?.ok === true ? warmedStateProbe : await this.uxpStateProbe();
     if (stateProbe.ok !== true) {
       return [{
         scope: 'next_operation' as const,
@@ -1233,7 +1472,99 @@ export class EmbeddedGuardRuntime {
           'Bind a new art run/current evidence for this document instance before continuing.',
       }];
     }
+    if (sceneGeometryModel) {
+      const sourceFrame = sceneGeometryModel.source_frame
+        && typeof sceneGeometryModel.source_frame === 'object'
+        && !Array.isArray(sceneGeometryModel.source_frame)
+        ? sceneGeometryModel.source_frame as Record<string, unknown>
+        : {};
+      const suppliedIncarnation = typeof sourceFrame.document_incarnation === 'string'
+        ? sourceFrame.document_incarnation.trim()
+        : '';
+      const observedWitness = observation.host_witness
+        && typeof observation.host_witness === 'object'
+        && !Array.isArray(observation.host_witness)
+        ? observation.host_witness as Record<string, unknown>
+        : {};
+      const observedIncarnation = typeof observedWitness.token === 'string'
+        ? observedWitness.token.trim()
+        : '';
+      if (!observedIncarnation || suppliedIncarnation !== observedIncarnation) {
+        return [{
+          scope: 'next_operation' as const,
+          code: 'scene_geometry_model_incarnation_mismatch',
+          message:
+            `scene_geometry_model_incarnation_mismatch: source_frame.document_incarnation=${suppliedIncarnation || 'missing'} ` +
+            `must match the exact freshly observed UXP document incarnation=${observedIncarnation || 'missing'}. No mutation was dispatched.`,
+        }];
+      }
+    }
     return [];
+  }
+
+  private async ensureAutomaticCheckpointBeforeVisualMutation(
+    operation: Record<string, unknown>
+  ): Promise<Record<string, unknown> | null> {
+    if (!isGuardVisualTool(String(operation.tool ?? ''))) return null;
+    const args = operation.args && typeof operation.args === 'object' && !Array.isArray(operation.args)
+      ? operation.args as Record<string, unknown>
+      : {};
+    const documentId = Number(args.document_id);
+    if (!positiveDocumentId(documentId)) return null;
+    const checkpoint = this.store.checkpointState(documentId, undefined, undefined);
+    if (!checkpoint.due) return null;
+    const projectDirectory = this.store.projectDirectory(documentId);
+    if (!projectDirectory) {
+      throw new Error('automatic_checkpoint_unavailable: checkpoint debt is due but the immutable art-run directory is not bound');
+    }
+    const source = this.store.records().filter((record: any) =>
+      Number(record?.args?.document_id) === documentId && record?.visual
+    ).at(-1);
+    if (!source?.id) {
+      throw new Error('automatic_checkpoint_unavailable: checkpoint debt is due but no source visual operation can be identified');
+    }
+    const sourceKey = createHash('sha256').update(String(source.id)).digest('hex').slice(0, 10);
+    const checkpointId = `auto-checkpoint-${documentId}-${sourceKey}`;
+    const checkpointPath = path.join(projectDirectory, 'checkpoints', `auto-${source.sequence ?? 'frame'}-${sourceKey}.psd`);
+    const run = await runLogicalOperation({
+      store: this.store,
+      input: {
+        id: checkpointId,
+        tool: 'photoshop_save_document',
+        args: { document_id: documentId, path: checkpointPath, format: 'PSD' },
+        summary: 'Persist the due layered PSD checkpoint internally before the next visual pass',
+        purpose: 'Satisfy Guard checkpoint debt without consuming a model-facing protocol turn',
+      },
+      invoke: (name, invokeArgs, timeout) => this.invoke(name, invokeArgs, timeout, { guardOperationId: checkpointId }),
+      materializeArguments: (tool, invokeArgs, id) => this.materializeArguments(tool, invokeArgs, id),
+    });
+    const saved = run.record?.id ? this.store.read(run.record.id) : run.record;
+    if (!saved || saved.failed === true || saved.phase !== 'completed' || !saved.checkpoint) {
+      throw new Error(
+        `automatic_checkpoint_failed: layered PSD was not durably verified at ${checkpointPath}; operation ${checkpointId} remains authoritative and must be reconciled before visual work`
+      );
+    }
+    if (!saved.report) {
+      this.store.report({
+        id: checkpointId,
+        did: 'Saved the due layered PSD checkpoint internally.',
+        why: 'Checkpoint debt reached its mutation-risk limit before the next visual pass.',
+        result: `Verified a non-empty PSD at ${checkpointPath}.`,
+      });
+    }
+    const acknowledged = this.store.read(checkpointId);
+    if (acknowledged?.operation_receipt && !acknowledged.operation_ack) {
+      this.store.ackOperation({ id: checkpointId, token: acknowledged.operation_receipt.token });
+    }
+    return {
+      protocol: 'photoshop.guard.automatic_checkpoint.v1',
+      operation_id: checkpointId,
+      path: checkpointPath,
+      source_operation_id: source.id,
+      debt_points: checkpoint.debt_points,
+      debt_limit: checkpoint.debt_limit,
+      verified: true,
+    };
   }
   async cycle(
     input: Record<string, unknown>,
@@ -1247,6 +1578,9 @@ export class EmbeddedGuardRuntime {
         cycleStartedAt: number;
         requestJsonBytes: number;
         closedPrevious?: Record<string, unknown>;
+        compilerTelemetry?: GuardCompilerTelemetry;
+        compilerRepairAudit?: GuardCompilerRepairAudit;
+        compilerDeferredFromOperationId?: string;
       };
     } = {}
   ): Promise<Record<string, unknown>> {
@@ -1258,6 +1592,9 @@ export class EmbeddedGuardRuntime {
     let nextOperation = options.prepared?.operation;
     let guardPreflightMs = options.prepared?.guardPreflightMs ?? 0;
     let compilerNormalizations: Array<{ code: string; message: string }> = [];
+    let compilerTelemetry = options.prepared?.compilerTelemetry;
+    let compilerRepairAudit = options.prepared?.compilerRepairAudit;
+    let compilerDeferredFromOperationId = options.prepared?.compilerDeferredFromOperationId;
 
     const releaseController = this.store.lock();
     let releaseExecution: (() => void) | undefined;
@@ -1266,6 +1603,7 @@ export class EmbeddedGuardRuntime {
       // lock used by startJob(). Otherwise a synchronous cycle can observe no
       // jobs, lose the race to an async reservation, and still execute later.
       const projectionCapturedAt = Date.now();
+      await this.autoAbandonMissingDocuments('guard_cycle_fallback');
       const activeJobSnapshotStartedAt = Date.now();
       const activeJobSnapshot = this.store.activeJobs(undefined, undefined, projectionCapturedAt);
       const activeJobSnapshotMs = Date.now() - activeJobSnapshotStartedAt;
@@ -1290,15 +1628,45 @@ export class EmbeddedGuardRuntime {
         cycleInput = compiledCycle.input;
         nextOperation = compiledCycle.nextOperation;
         compilerNormalizations = compiledCycle.normalizations;
+        compilerTelemetry = compiledCycle.compilerTelemetry;
+        compilerRepairAudit = compiledCycle.repairAudit;
+        compilerDeferredFromOperationId = compiledCycle.compilerDeferredFromOperationId;
 
         if (compiledCycle.rejection) {
+          // E.7a: closure and continuation are independent transactions. A
+          // deterministic next-operation rejection must not keep an otherwise
+          // valid delivered observation pending merely because both arrived in
+          // the compact combined call.
+          let rejectedCycleClosedPrevious: Record<string, unknown> = { closed: false };
+          const rejectedPreviousOperationId = typeof cycleInput.previous_operation_id === 'string'
+            ? cycleInput.previous_operation_id
+            : undefined;
+          if (rejectedPreviousOperationId) {
+            const rejectedPreviousRecord = this.store.read(rejectedPreviousOperationId);
+            const rejectedDeliveryDebt = rejectedPreviousRecord?.visual && !rejectedPreviousRecord?.verdict
+              ? this.store.visualDeliveryDebt(rejectedPreviousRecord)
+              : null;
+            if (rejectedPreviousRecord && !rejectedDeliveryDebt) {
+              const rejectedClosureSnapshot = this.store.snapshotClosureState(rejectedPreviousOperationId);
+              try {
+                rejectedCycleClosedPrevious = this.store.closePreviousCycle(cycleInput);
+              } catch {
+                // The rejection response remains about the deterministic
+                // compiler errors. Invalid closure evidence must not be
+                // partially persisted or replace those errors here; a valid
+                // closure is the only side effect admitted on this path.
+                this.store.restoreClosureState(rejectedClosureSnapshot);
+                rejectedCycleClosedPrevious = { closed: false };
+              }
+            }
+          }
           const envelope: GuardEnvelope = nextOperation
             ? buildPreflightRejectionEnvelope(nextOperation, compiledCycle.rejection, {
-                closed_previous: { closed: false },
+                closed_previous: compactClosedPrevious(rejectedCycleClosedPrevious),
               })
             : {
                 mode: 'photoshop-mcp-cycle',
-                closed_previous: { closed: false },
+                closed_previous: compactClosedPrevious(rejectedCycleClosedPrevious),
                 execution: null,
                 preflight_rejection: (() => {
                   const textItem = compiledCycle.rejection?.content?.find((item) => item.type === 'text');
@@ -1333,6 +1701,7 @@ export class EmbeddedGuardRuntime {
             closure_request_json_bytes: null,
             guard_invocation_count_observed: 1,
             model_call_count: null,
+            ...(compilerTelemetry ?? {}),
             unknown_components: [
               'decision/model/host time before this Guard invocation is not observable for a rejected cycle',
             ],
@@ -1340,6 +1709,7 @@ export class EmbeddedGuardRuntime {
           return {
             ...envelope,
             ...(compilerNormalizations.length ? { compiler_normalizations: compilerNormalizations } : {}),
+            ...(compilerRepairAudit ? { compiler_repair_audit: compilerRepairAudit } : {}),
             guard_transport: 'embedded_mcp',
           };
         }
@@ -1366,7 +1736,9 @@ export class EmbeddedGuardRuntime {
               read_only: true,
               mutation_replayed: false,
               next_mutation_dispatched: false,
-              action: 'redeliver_same_review_artifacts',
+              action: 'call_photoshop_guard_review_image',
+              review_tool: 'photoshop_guard_review_image',
+              review_operation_id: previousOperationId,
             },
             guard_transport: 'embedded_mcp',
           };
@@ -1455,10 +1827,32 @@ export class EmbeddedGuardRuntime {
           if (!nextOperation && closedPrevious.closed && !isGuardReadTool(previousRecordBeforeClosure?.tool)) {
             const documentId = previousRecordBeforeClosure?.args?.document_id;
             if (Number.isSafeInteger(documentId) && documentId > 0) {
+              const closedRecord = previousOperationId ? this.store.read(previousOperationId) : undefined;
+              const documentState = this.store.paintingState().documents?.[String(documentId)];
+              const hasOpenVisualProblem = Object.values(documentState?.visual_problems ?? {})
+                .some((problem: any) => problem?.status !== 'resolved');
+              const artDirector = documentState?.art_director;
+              const unfinishedDirectiveWork = !!artDirector
+                && artDirector.status !== 'completed'
+                && (
+                  artDirector.status === 'active'
+                  || (Array.isArray(artDirector.tasks)
+                    && artDirector.tasks.some((task: any) => task?.status !== 'completed'))
+                );
+              const artisticDebtRemains = !!closedRecord?.visual && (
+                closedRecord.verdict?.target_resolved !== 'yes'
+                || hasOpenVisualProblem
+                || unfinishedDirectiveWork
+                || artDirector?.review_due === true
+                || artDirector?.status === 'review_due'
+                || artDirector?.status === 'interrupted'
+              );
               this.store.setWorkflowLifecycle(
                 documentId,
-                'stopped',
-                'close_only_finalization',
+                artisticDebtRemains ? 'active' : 'stopped',
+                artisticDebtRemains
+                  ? 'close_only_artistic_debt_remains'
+                  : 'close_only_finalization',
                 previousOperationId
               );
             }
@@ -1487,6 +1881,7 @@ export class EmbeddedGuardRuntime {
             {
               projectionContext: cycleProjection,
               nextOperationValidation: 'state-only',
+              ...(compilerDeferredFromOperationId ? { compilerDeferredFromOperationId } : {}),
             }
           );
           guardPreflightMs += Date.now() - postClosureStartedAt;
@@ -1573,6 +1968,14 @@ export class EmbeddedGuardRuntime {
         throw new Error('Guard compiler invariant violated: executable cycle has no next operation');
       }
 
+      const automaticCheckpoint = await this.ensureAutomaticCheckpointBeforeVisualMutation(nextOperation);
+      if (automaticCheckpoint) {
+        cycleProjection = this.store.captureProjectionContext({
+          activeJobs: activeJobSnapshot,
+          capturedAt: Date.now(),
+        });
+      }
+
       const dispatchMode = options.dispatchMode ?? 'sync';
       const useAsyncJob = !options.prepared && (
         dispatchMode === 'async'
@@ -1587,11 +1990,19 @@ export class EmbeddedGuardRuntime {
           cycleStartedAt,
           requestJsonBytes,
           closedPrevious,
+          ...(compilerTelemetry ? { compilerTelemetry } : {}),
+          ...(compilerRepairAudit ? { compilerRepairAudit } : {}),
+          ...(compilerDeferredFromOperationId ? { compilerDeferredFromOperationId } : {}),
         });
       }
 
       releaseExecution = this.executionLease.acquire('photoshop_guard_cycle');
       const executionOperation = nextOperation;
+      const dispatchStartedAt = new Date().toISOString();
+      const traceDocumentId = Number((executionOperation?.args as Record<string, unknown> | undefined)?.document_id);
+      const traceProjectDirectory = Number.isSafeInteger(traceDocumentId) && traceDocumentId > 0
+        ? this.store.projectDirectory(traceDocumentId)
+        : undefined;
 
       const run = await runLogicalOperation({
         store: this.store,
@@ -1602,6 +2013,19 @@ export class EmbeddedGuardRuntime {
         materializeArguments: (tool: string, args: Record<string, unknown>, id: string) => this.materializeArguments(tool, args, id),
         onProgress: undefined,
         projectionContext: cycleProjection,
+        ...(compilerDeferredFromOperationId ? { compilerDeferredFromOperationId } : {}),
+        mutationLifecycle: traceProjectDirectory ? {
+          beforeMutation: async (record) => record.visual
+            ? (await prepareProcessVideoCapture(traceProjectDirectory, String(record.id), {
+                ...(this.processVideoTraceEnabled === undefined
+                  ? {}
+                  : { enabled: this.processVideoTraceEnabled }),
+              })).capture
+            : undefined,
+          afterMutation: async (record, token) => {
+            if (token) await stopProcessVideoCapture(traceProjectDirectory, token as any, record, { kind: 'attempt' });
+          },
+        } : undefined,
       });
       if (run.record?.id) {
         const previewTimingUnknown = run.record?.visual && run.timing?.preview_capture_materialization_ms == null
@@ -1610,6 +2034,9 @@ export class EmbeddedGuardRuntime {
         this.store.recordLatency(run.record.id, {
           cycle_received_at: cycleReceivedAt,
           guard_preflight_ms: guardPreflightMs,
+          ...(compilerTelemetry ?? {}),
+          dispatch_started_at: dispatchStartedAt,
+          ...(compilerRepairAudit ? { compiler_repair_audit: compilerRepairAudit } : {}),
           photoshop_dispatch_wall_ms: run.timing?.photoshop_dispatch_wall_ms ?? null,
           preview_capture_materialization_ms: run.timing?.preview_capture_materialization_ms ?? null,
           request_json_bytes: requestJsonBytes,
@@ -1723,6 +2150,7 @@ export class EmbeddedGuardRuntime {
         ...envelope,
         ...(acceptedAnchorRestoreResult ? { accepted_anchor_restore: acceptedAnchorRestoreResult } : {}),
         ...(compilerNormalizations.length ? { compiler_normalizations: compilerNormalizations } : {}),
+        ...(compilerRepairAudit ? { compiler_repair_audit: compilerRepairAudit } : {}),
         guard_transport: 'embedded_mcp',
       };
     } finally {
@@ -1734,6 +2162,48 @@ export class EmbeddedGuardRuntime {
   async cycleAuto(input: Record<string, unknown>): Promise<Record<string, unknown>> {
     const documentId = cycleInputDocumentId(this.store, input);
     const hasNextPass = !!(input.next_pass && typeof input.next_pass === 'object' && !Array.isArray(input.next_pass));
+    const hasPaintingIntent = !!(input.painting_intent && typeof input.painting_intent === 'object' && !Array.isArray(input.painting_intent));
+    const hasSemanticRequest = hasNextPass || hasPaintingIntent;
+    const hasPreviousOperation = typeof input.previous_operation_id === 'string'
+      && input.previous_operation_id.trim().length > 0;
+    const requestKey = hasPaintingIntent
+      ? (input.painting_intent as Record<string, unknown>).request_key
+      : hasNextPass
+        ? (input.next_pass as Record<string, unknown>).request_key
+        : undefined;
+    if (
+      documentId
+      && hasSemanticRequest
+      && !hasPreviousOperation
+      && !(typeof requestKey === 'string' && requestKey.trim() && this.store.read(requestKey))
+    ) {
+      try {
+        const resumable = this.resume(documentId);
+        const pendingVisual = resumable.pending_visual_verdict;
+        const continuationWatch = resumable.continuation_watch;
+        if (
+          pendingVisual
+          && typeof pendingVisual === 'object'
+          && !Array.isArray(pendingVisual)
+          && continuationWatch
+          && typeof continuationWatch === 'object'
+          && !Array.isArray(continuationWatch)
+          && (continuationWatch as Record<string, unknown>).silent_stall === true
+        ) {
+          return {
+            ...resumable,
+            ok: true,
+            mode: 'photoshop-guard-continuation-required',
+            next_pass_deferred: true,
+            next_mutation_dispatched: false,
+            next_required_action:
+              'Inspect the pending delivered frame, then call photoshop_guard_cycle_auto with previous_operation_id + previous_observation and include the intended next_pass in that same call.',
+          };
+        }
+      } catch {
+        // A not-yet-established document state must proceed through ordinary compiler/preflight.
+      }
+    }
     try {
       const result = await this.cycle(input, undefined, { dispatchMode: 'auto' });
       if (documentId) {
@@ -1747,13 +2217,40 @@ export class EmbeddedGuardRuntime {
         const rejected = !!result.preflight_rejection || execution?.execution === 'not-executed';
         const asyncStarting = result.mode === 'photoshop-guard-async'
           && (result.state === 'starting' || result.state === 'running');
+        const cycleLatency = result.cycle_latency && typeof result.cycle_latency === 'object' && !Array.isArray(result.cycle_latency)
+          ? result.cycle_latency as Record<string, unknown>
+          : {};
         this.store.recordArtisticThroughputEvent(documentId, {
-          kind: rejected ? 'rejected' : hasNextPass ? 'semantic-dispatch' : 'bookkeeping',
+          kind: rejected ? 'rejected' : hasSemanticRequest ? 'semantic-dispatch' : 'bookkeeping',
           model_visible: true,
           semantic_actions: asyncStarting ? 0 : semanticActionsFromRecord(record),
+          auto_repair_count: cycleLatency.auto_repair_count,
+          auto_split_count: cycleLatency.auto_split_count,
+          model_semantic_ambiguity_count: cycleLatency.model_semantic_ambiguity_count,
+          preflight_rejection_exposed_to_model_count: cycleLatency.preflight_rejection_exposed_to_model_count,
           ...(operationId ? { operation_id: operationId } : {}),
           ...(typeof result.job_id === 'string' ? { job_id: result.job_id } : {}),
         });
+        if (hasSemanticRequest) {
+          const semanticInput = hasPaintingIntent
+            ? input.painting_intent as Record<string, unknown>
+            : input.next_pass as Record<string, unknown>;
+          const rejection = result.preflight_rejection && typeof result.preflight_rejection === 'object'
+            && !Array.isArray(result.preflight_rejection)
+            ? result.preflight_rejection as Record<string, unknown>
+            : undefined;
+          this.store.recordCompilerAttemptAudit(documentId, {
+            outcome: rejected ? 'rejected' : asyncStarting ? 'accepted' : 'dispatched',
+            request_key: semanticInput.request_key,
+            problem_id: semanticInput.problem_id,
+            ...(operationId ? { operation_id: operationId } : {}),
+            cycle_fingerprint: rejection?.cycle_fingerprint,
+            rejection_fingerprint: rejection?.rejection_fingerprint,
+            error_codes: rejection?.error_codes,
+            repair_recipe: rejection?.compact_correction_recipe,
+            compiler_repair_audit: result.compiler_repair_audit,
+          });
+        }
       }
       return result;
     } catch (error) {
@@ -1778,6 +2275,9 @@ export class EmbeddedGuardRuntime {
       cycleStartedAt: number;
       requestJsonBytes: number;
       closedPrevious?: Record<string, unknown>;
+      compilerTelemetry?: GuardCompilerTelemetry;
+      compilerRepairAudit?: GuardCompilerRepairAudit;
+      compilerDeferredFromOperationId?: string;
     }
   ): Record<string, unknown> {
     const narrative = operationNarrative(operation, 'starting');
@@ -1849,6 +2349,7 @@ export class EmbeddedGuardRuntime {
           closure_request_json_bytes: null,
           guard_invocation_count_observed: 1,
           model_call_count: null,
+          ...(prepared.compilerTelemetry ?? {}),
           note: 'Execution continues in the durable job; total cycle latency is finalized with the job result.',
         },
       } : {}),

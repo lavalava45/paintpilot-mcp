@@ -1,6 +1,6 @@
 # Ownership, provenance and retirement
 
-Date: 2026-09-26
+Date: 2026-09-29
 
 This document is the canonical engineering ownership/retirement map for the independently maintained
 Photoshop MCP digital-painting project. It combines the P1-A reachability-based retirement record
@@ -25,7 +25,7 @@ The former external controller/daemon provider chain, raw-script execution layer
 runtime and generic Data Sets/mail-merge product breadth are not part of the current production
 architecture.
 
-The current public catalog is **129 semantic tools**, including **14 Guard tools**, plus **5 MCP guide
+The current public catalog is **131 semantic tools**, including **15 Guard tools**, plus **5 MCP guide
 prompts**.
 
 ## 2. Provenance snapshot
@@ -50,18 +50,18 @@ This snapshot is historical context for ownership decisions, not a current autho
 | --- | --- | --- | --- |
 | `src/core/guard/*`, VisualMicroPlan, artistic/recovery/review/state modules | project-owned core | compact-v2, journaling, no-replay, recovery, review, artistic state | **KEEP / project-owned core** |
 | `src/cos-plugin.ts` | project-owned entry | guarded CoS production route | **KEEP** |
-| `src/core/server.ts` + MCP bootstrap | upstream-derived, heavily modified | generic MCP server/bootstrap | **KEEP; simplify only where duplication is concrete** |
-| `src/core/session.ts` | upstream-derived, heavily modified | connection lifecycle | **KEEP; analytics hooks removed in P2.5** |
-| `src/core/tool-registry.ts`, `src/core/prompt-registry.ts` | upstream-identical but live | stable MCP registration | **KEEP** |
+| `src/core/photoshop-mcp-server.ts` + `server.ts` facade | project-owned composition root over standard MCP SDK calls | generic MCP server/bootstrap | **KEEP; compatibility facade stays thin** |
+| `src/core/runtime-session.ts` + `session.ts` facade | project-owned connection lifecycle | connection lifecycle | **KEEP MINIMAL** |
+| `src/core/runtime-registries.ts` + registry facades | project-owned registration substrate | stable MCP registration | **KEEP** |
 | `src/platform/photoshop-backend.ts` + route trace | project-owned routing authority | production semantic transport | **KEEP; UXP-only / fail-closed** |
 | UXP bridge client/server + `uxp-plugin/` | platform adapter, heavily modified | Photoshop execution and exact outcomes | **KEEP** |
-| `src/platform/connection.ts` + `windows-detector.ts` | Windows-only project-owned discovery facade | install detection, version/capability reporting | **KEEP MINIMAL; never production semantic dispatch** |
-| document/layer/mask/selection/filter/export/text/smart-object semantic tools | upstream-derived, heavily modified | core editing/compositing/persistence surface | **KEEP selectively according to product evidence** |
+| `src/platform/discovery-runtime.ts` + discovery facades | Windows-only project-owned discovery runtime | install detection, version/capability reporting | **KEEP MINIMAL; never production semantic dispatch** |
+| document/layer/mask/selection/filter/export/text/smart-object semantic tools | project-owned catalog/operation surface with documented historical provenance | core editing/compositing/persistence surface | **KEEP selectively according to product evidence** |
 | painting/measurement/color-sampling/brush-pack/method/value tools | project-owned or heavily modified | direct painting-product differentiation | **KEEP** |
 | former `src/ui/*` + `web/` | overwhelmingly upstream-identical optional standalone browser client | not required by canonical CoS/Guard product path | **RETIRED in P2.5** |
 | former `src/analytics/*` | overwhelmingly upstream-identical optional telemetry | no Photoshop/Guard correctness requirement | **RETIRED in P2.5; app-version lookup replaced by `src/core/app-version.ts`** |
-| `src/prompts/*` | mixed inherited + project-owned | five guide prompts and server instructions | **KEEP** |
-| small generic utility/error modules | mostly inherited but live | shared support substrate | **KEEP unless reachability proves dead** |
+| `src/prompts/host-guidance.ts`, `prompt-catalog.ts`, retained guide templates | project-owned prompt ownership surface | five guide prompts and server instructions | **KEEP; old paths are compatibility facades where retained** |
+| small generic utility/error modules | project-owned runtime substrate plus ordinary generic syntax | shared support substrate | **KEEP only where product-reachable; source-independence gate remains authoritative** |
 | accepted policy/evidence modules that are test-reachable but not currently on production entrypoints | project-owned accepted behavior/evidence | preserve prior acceptance claims | **DO NOT DELETE AS GENERIC CLEANUP; resolve integrate-vs-test-support explicitly** |
 
 For ordinary maintenance, provenance alone was previously not a reason to rewrite stable live code.
@@ -199,24 +199,23 @@ old primary fork branding or unrelated distribution identifiers from becoming th
 identity again.
 
 Historical origin is not erased: `NOTICE` records the original `alisaitteke/photoshop-mcp` project,
-the documented comparison baseline and the retained MIT license path. Historical changelog/audit text
+the documented comparison baseline and its historical MIT licensing. Historical changelog/audit text
 may continue to use “fork” descriptively. Current runtime/build/package operation has no dependency on
 that upstream repository or remote. Final runtime source-independence after this cutover is
 **626 / 39,850 = 1.57%**, with all strict residual lists empty.
 
 ### P2.7 provenance/license ownership closure (2026-09-28)
 
-Attribution ownership is now explicit and mechanically checked. The upstream MIT `LICENSE` is
-preserved unchanged against the documented baseline; project-authored additions are attributed through
-this repository's metadata/Git history without replacing or obscuring that notice. `NOTICE` is the
-single canonical provenance document for historical origin, current architectural divergence and the
-credit policy for future selective external ports.
+Attribution ownership is now explicit and mechanically checked. After the source-independence work
+removed substantial copied implementation, the root MIT `LICENSE` identifies the current PaintPilot
+project copyright. `NOTICE` is the canonical provenance document for historical origin, current
+architectural divergence and the credit policy for future selective external ports.
 
-`verify:provenance` is now a canonical gate. It requires the retained baseline license, `LICENSE` and
-`NOTICE` in distributions, MIT MCPB metadata, the architecture/provenance sections in `NOTICE`, and
-the contributor-facing source-revision/license recording policy. A rebuilt MCPB confirms the bundled
-license and notice are byte-identical to the repository copies. This closes P2.7; no new ownership
-exception is introduced. P2.8 was the next integration-governance item and is now closed below.
+`verify:provenance` is now a canonical gate. It requires the project-owned MIT `LICENSE`, historical
+origin in `NOTICE`, both files in distributions, MIT MCPB metadata, and the contributor-facing
+source-revision/license recording policy. A rebuilt MCPB confirms the bundled license and notice are
+the repository copies. This closes P2.7; no new ownership exception is introduced. P2.8 was the next
+integration-governance item and is now closed below.
 
 ### P2.8 selective external-intake ownership closure (2026-09-28)
 
@@ -234,7 +233,27 @@ remote. Canonical verification passes **73/73 files / 726/726 tests** with **130
 5 prompts**; source-independence remains **626 / 40,338 = 1.55%**, with all strict residual lists empty.
 This closes P2.8 without creating a new ownership exception.
 
-The aggregate P2 completion gate remains blocked solely by P2.4. The currently published
-`origin/digital-painting` revision `0f3363a976ae35277de324f52163b45cf35f9e58` still has the Unix-only
-MCPB `zip -rq` path, so the current Windows packaging repair cannot yet be proven from a fresh
-origin-only clone. No ownership/provenance/runtime work remains in P2.5–P2.8.
+### P2 aggregate release-autonomy closure (2026-09-28)
+
+P2.4 subsequently closed from published revision
+`2be5260012ce026da4fd6b79437ac4beb1fa6fb4`: a fresh Windows clone with only `origin` and no
+`upstream` completed dependency installation, canonical verification, MCPB packaging/archive checks
+and MCP stdio initialization. P2 is therefore closed as an independent-product cutover; GitHub
+fork-network presentation remains separate repository metadata rather than a runtime/build/release
+dependency.
+
+### P1-S residual source-independence closure (2026-09-29)
+
+The final ownership hardening pass moved maintained registry/session/log/error/document-target,
+Windows discovery/capability, server composition, prompt ownership and selected semantic declaration
+surfaces behind project-owned implementation modules and bounded compatibility facades. Neural Filter
+feature semantics no longer live in generic UXP transport plumbing. Working bridge transport code was
+left intact where change would have served only the overlap score.
+
+`verify:source-independence` now enforces a default **<0.50%** production-runtime threshold and passes
+at **206 / 42,057 = 0.4898% exact-line overlap**, with **0 byte-identical production files, 0 exact
+blocks >=12 lines, 0 production files >=50% exact similarity, 0 retired package entries and 0
+upstream-script dependencies**. Full canonical verification passes **74/74 test files / 755/755
+tests**, **150 packed dist JS files**, lint **0 errors / 30 existing warnings**, and the maintained
+catalog is **131 atomic tools / 15 Guard tools / 5 prompts**. Historical attribution remains in
+`LICENSE` and `NOTICE`; these overlap numbers are not an authorship percentage.

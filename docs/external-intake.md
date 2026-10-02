@@ -1,14 +1,17 @@
 # Selective External Source Intake
 
-This project reviews external code, documentation and ideas selectively. Upstream is an optional
-external source for discovery and comparison, not a synchronization authority or release baseline.
+This project reviews external code, documentation and ideas selectively. Historical upstream is an
+external source for discovery and comparison, not a synchronization authority, standing Git remote,
+or release baseline.
 
 ## No synchronization baseline
 
 Normal development, build, test, packaging and release work must not require an `upstream` remote or
-another repository checkout. Do not wholesale merge or rebase historical upstream history into the
-canonical project branch merely to keep pace with another project. A comparison remote may exist
-locally when useful, but its presence is optional.
+another repository checkout. The canonical checkout should keep only the project's own `origin` remote;
+do not configure a persistent historical-upstream remote. When comparison is justified, inspect the
+external repository/revision directly or use a disposable checkout outside the canonical project tree.
+Do not wholesale merge or rebase historical upstream history into the canonical project branch merely
+to keep pace with another project.
 
 ## Intake record
 
@@ -55,9 +58,10 @@ npm run verify:provenance
 npm run verify:canonical
 ```
 
-`verify:external-intake` protects the maintained workflow from drifting back toward routine upstream
-synchronization. `verify:source-independence` protects the production source boundary. `verify:provenance`
-protects attribution/license continuity. None of these gates require an `upstream` remote.
+`verify:external-intake` protects the maintained workflow from drifting back toward a persistent
+historical-upstream remote or routine synchronization. `verify:source-independence` protects the
+production source boundary. `verify:provenance` protects attribution/license continuity. None of these
+gates require or authorize an `upstream` remote.
 
 ## Relationship to provenance
 

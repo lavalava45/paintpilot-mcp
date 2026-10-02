@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  normalizeToolResultForPlaceholders,
   parseVisualMicroPlan,
   resolveVisualMicroPlanArgs,
 } from '../src/core/visual-microplan.js';
@@ -71,6 +72,20 @@ function materialResponsePlan(): Record<string, unknown> {
 }
 
 describe('parseVisualMicroPlan', () => {
+  it('parses JSON tool payloads that carry a native connector identity footer', () => {
+    const payload = {
+      ok: true,
+      details: { documents: [{ id: 42, width: 100, height: 100 }] },
+    };
+    const normalized = normalizeToolResultForPlaceholders({
+      content: [{
+        type: 'text',
+        text: `${JSON.stringify(payload)}\n\n--- Identity notice ---\nconnector metadata`,
+      }],
+    });
+    expect(normalized).toEqual(payload);
+  });
+
   it('requires qualitative material-response planning before MATERIAL execution', () => {
     expect(() => parseVisualMicroPlan(basePlan({ stage: 'MATERIAL' })))
       .toThrow(/MATERIAL VisualMicroPlan requires material_response decomposition/i);
@@ -412,7 +427,6 @@ describe('parseVisualMicroPlan', () => {
         material_role: 'aerial haze veil',
         visual_intent: 'soft-transition',
         fallback_from_method_id: 'gradient-mask',
-        fallback_reason: 'Mask-gradient path is unavailable for this direct raster target, so controlled dabs are a bounded fallback.',
         pressure_policy: 'none',
       },
     }));
@@ -420,6 +434,33 @@ describe('parseVisualMicroPlan', () => {
       constructionRole: 'optical-veil',
       fallbackFromMethodId: 'gradient-mask',
     });
+  });
+
+  it('treats fallback prose as optional guidance while retaining executable fallback identity', () => {
+    const parsed = parseVisualMicroPlan(basePlan({
+      paint_strategy: {
+        construction_role: 'optical-veil',
+        material_role: 'aerial haze veil',
+        visual_intent: 'soft-transition',
+        fallback_from_method_id: 'gradient-mask',
+        pressure_policy: 'none',
+      },
+    }));
+    expect(parsed.paintStrategy).toMatchObject({
+      constructionRole: 'optical-veil',
+      fallbackFromMethodId: 'gradient-mask',
+    });
+    expect(parsed.paintStrategy?.fallbackReason).toBeUndefined();
+
+    expect(() => parseVisualMicroPlan(basePlan({
+      paint_strategy: {
+        construction_role: 'optical-veil',
+        material_role: 'aerial haze veil',
+        visual_intent: 'soft-transition',
+        fallback_reason: 'audit guidance without executable fallback identity',
+        pressure_policy: 'none',
+      },
+    }))).toThrow(/fallback_reason requires fallback_from_method_id/i);
   });
 
   it('uses the same construction-tier contract across tree, architecture, and water domains', () => {
@@ -623,6 +664,32 @@ describe('parseVisualMicroPlan', () => {
     expect(parsed.logicalLayer?.decision).toBe('create-new');
   });
 
+  it('does not require narrative separation reasons when structured isolation semantics are complete', () => {
+    const parsed = parseVisualMicroPlan(basePlan({
+      layer_separation_check: {
+        change_kind: 'new-object',
+        substantial: true,
+        rollback_value: 'moderate',
+        independent_adjustment_expected: true,
+      },
+      logical_layer: {
+        decision: 'create-new',
+        hypothesis_id: 'structured-owner',
+        hypothesis: 'Independent semantic owner.',
+        rollback_value: 'moderate',
+        expected_independent_rollback: true,
+        layer_name: 'Structured owner',
+      },
+      steps: [
+        { id: 'layer', tool: 'photoshop_create_layer', args: { name: 'Structured owner' } },
+        { id: 'paint', tool: 'photoshop_paint_dabs', args: { layer_id: '$steps.layer.details.layerId', dabs: [{ x: 10, y: 20 }] } },
+        { id: 'preview', tool: 'photoshop_get_preview', args: {} },
+      ],
+    }));
+    expect(parsed.layerSeparationCheck.requiresIsolation).toBe(true);
+    expect(parsed.logicalLayer?.separationReasons).toEqual([]);
+  });
+
   it('does not force a new layer for low-value continuation or a tiny accent', () => {
     const continuation = parseVisualMicroPlan(basePlan());
     expect(continuation.layerSeparationCheck.requiresIsolation).toBe(false);
@@ -647,6 +714,47 @@ describe('parseVisualMicroPlan', () => {
       ],
     }));
     expect(tinyAccent.layerSeparationCheck.requiresIsolation).toBe(false);
+  });
+
+  it('keeps structural layer-separation authority without requiring prose reasons', () => {
+    const parsed = parseVisualMicroPlan(basePlan({
+      layer_separation_check: {
+        change_kind: 'continuation',
+        substantial: true,
+        rollback_value: 'low',
+        independent_adjustment_expected: false,
+      },
+    }));
+    expect(parsed.layerSeparationCheck).toMatchObject({
+      changeKind: 'continuation',
+      substantial: true,
+      rollbackValue: 'low',
+      independentAdjustmentExpected: false,
+      requiresIsolation: false,
+      reasons: [],
+    });
+
+    expect(() => parseVisualMicroPlan(basePlan({
+      layer_separation_check: {
+        change_kind: 'new-light',
+        substantial: true,
+        rollback_value: 'high',
+        independent_adjustment_expected: true,
+      },
+      logical_layer: {
+        decision: 'continue-logical-layer',
+        hypothesis_id: 'old-light-without-prose',
+        hypothesis: 'Continue an existing light layer.',
+        rollback_value: 'high',
+        expected_independent_rollback: true,
+        separation_reasons: [],
+        layer_id: 77,
+      },
+      steps: [
+        { id: 'paint', tool: 'photoshop_paint_dabs', args: { layer_id: 77, dabs: [{ x: 10, y: 20 }] } },
+        { id: 'preview', tool: 'photoshop_get_preview', args: {} },
+      ],
+    }))).toThrow(/Layer Separation Check.*create-new or temporary-hypothesis/);
   });
 
   it('rejects a required isolation that merely continues an existing layer', () => {
@@ -1472,6 +1580,125 @@ function knownGoodCreateNewRegionPlan(): Record<string, unknown> {
 }
 
 describe('photoshop_execute_visual_microplan', () => {
+  it('propagates exact not-executed proof when the first state-changing preparation is rejected before dispatch', async () => {
+    const registry = new ToolRegistry();
+    let paintCalls = 0;
+    let previewCalls = 0;
+    registry.register('photoshop_create_layer', definition('photoshop_create_layer', async () => ({
+      isError: true,
+      content: [{ type: 'text', text: JSON.stringify({
+        ok: false,
+        code: 'uxp_bridge_unavailable',
+        message: 'bridge unavailable before dispatch',
+        execution: 'not-executed',
+        execution_proof: {
+          protocol: 'photoshop.execution_exact_outcome.v1',
+          dispatch: 'not-dispatched',
+          side_effects: 'none',
+          reason: 'backend_route_rejected_before_semantic_dispatch',
+        },
+      }) }],
+    }), true));
+    registry.register('photoshop_paint_regions', definition('photoshop_paint_regions', async () => {
+      paintCalls++;
+      return { content: [{ type: 'text', text: '{"ok":true}' }] };
+    }, true));
+    registry.register('photoshop_get_preview', definition('photoshop_get_preview', async () => {
+      previewCalls++;
+      return { content: [{ type: 'text', text: '{"ok":true,"sha256":"never"}' }] };
+    }, true));
+
+    const result = await createVisualMicroPlanTools(registry)[0]!.handler(knownGoodCreateNewRegionPlan());
+    const text = result.content.find(item => item.type === 'text');
+    const body = JSON.parse(text && 'text' in text ? text.text : '{}');
+    expect(result.isError).toBe(true);
+    expect(body).toMatchObject({
+      code: 'microplan_prepare_failed',
+      execution: 'not-executed',
+      terminal: true,
+      visual_mutation_started: false,
+      preparation_execution: {
+        failed_step_class: 'preparation-only',
+        failed_step_invoked: true,
+        failed_step_execution: 'not-executed',
+        prior_side_effecting_preparation_completed: false,
+        side_effects_possible: false,
+      },
+    });
+    expect(body.pass_execution.actions[0].state).toBe('not-started');
+    expect(paintCalls).toBe(0);
+    expect(previewCalls).toBe(0);
+  });
+
+  it('keeps the pass uncertain when an earlier state-changing preparation succeeded before a later exact rejection', async () => {
+    const registry = new ToolRegistry();
+    let paintCalls = 0;
+    registry.register('photoshop_create_layer', definition('photoshop_create_layer', async () => ({
+      content: [{ type: 'text', text: '{"ok":true,"details":{"layerId":77,"layerName":"Atmosphere"}}' }],
+    }), true));
+    registry.register('photoshop_set_foreground_color', definition('photoshop_set_foreground_color', async () => ({
+      isError: true,
+      content: [{ type: 'text', text: JSON.stringify({
+        ok: false,
+        code: 'uxp_bridge_unavailable',
+        execution: 'not-executed',
+        message: 'second preparation rejected before dispatch',
+      }) }],
+    }), true));
+    registry.register('photoshop_paint_regions', definition('photoshop_paint_regions', async () => {
+      paintCalls++;
+      return { content: [{ type: 'text', text: '{"ok":true}' }] };
+    }, true));
+    registry.register('photoshop_get_preview', definition('photoshop_get_preview', async () => ({
+      content: [{ type: 'text', text: '{"ok":true,"sha256":"never"}' }],
+    }), true));
+
+    const plan = structuredClone(knownGoodCreateNewRegionPlan()) as any;
+    plan.plan_id = 'prepare-partial-side-effect';
+    plan.steps.splice(1, 0, { id: 'foreground', tool: 'photoshop_set_foreground_color', args: {} });
+    const result = await createVisualMicroPlanTools(registry)[0]!.handler(plan);
+    const text = result.content.find(item => item.type === 'text');
+    const body = JSON.parse(text && 'text' in text ? text.text : '{}');
+    expect(result.isError).toBe(true);
+    expect(body.code).toBe('microplan_prepare_failed');
+    expect(body.execution).toBeUndefined();
+    expect(body.preparation_execution).toMatchObject({
+      prior_side_effecting_preparation_completed: true,
+      side_effects_possible: true,
+    });
+    expect(paintCalls).toBe(0);
+  });
+
+  it('does not misclassify deferred post-create argument resolution failure as not-executed', async () => {
+    const registry = new ToolRegistry();
+    let paintCalls = 0;
+    registry.register('photoshop_create_layer', definition('photoshop_create_layer', async () => ({
+      content: [{ type: 'text', text: '{"ok":true,"details":{"layerName":"Atmosphere"}}' }],
+    }), true));
+    registry.register('photoshop_paint_regions', definition('photoshop_paint_regions', async () => {
+      paintCalls++;
+      return { content: [{ type: 'text', text: '{"ok":true}' }] };
+    }, true));
+    registry.register('photoshop_get_preview', definition('photoshop_get_preview', async () => ({
+      content: [{ type: 'text', text: '{"ok":true,"sha256":"never"}' }],
+    }), true));
+
+    const plan = structuredClone(knownGoodCreateNewRegionPlan()) as any;
+    plan.plan_id = 'deferred-resolution-after-create';
+    const result = await createVisualMicroPlanTools(registry)[0]!.handler(plan);
+    const text = result.content.find(item => item.type === 'text');
+    const body = JSON.parse(text && 'text' in text ? text.text : '{}');
+    expect(result.isError).toBe(true);
+    expect(body.code).toBe('mutation_argument_resolution_failed');
+    expect(body.execution).toBeUndefined();
+    expect(body.preparation_execution).toMatchObject({
+      prior_side_effecting_preparation_completed: true,
+      side_effects_possible: true,
+    });
+    expect(body.visual_mutation_started).toBe(false);
+    expect(paintCalls).toBe(0);
+  });
+
   it('gives every nested Guard step a distinct deterministic physical command identity', async () => {
     const registry = new ToolRegistry();
     const commandIds: Array<[string, string | undefined]> = [];
@@ -1932,7 +2159,7 @@ describe('photoshop_execute_visual_microplan', () => {
         'photoshop_paint_dabs',
         async (args) => {
           paintIds.push(String(args.tag));
-          return { content: [{ type: 'text', text: JSON.stringify({ ok: true, tag: args.tag }) }] };
+          return { content: [{ type: 'text', text: JSON.stringify({ ok: true, tag: args.tag, history_steps: 1 }) }] };
         },
         true
       )
@@ -1998,6 +2225,17 @@ describe('photoshop_execute_visual_microplan', () => {
         { step_id: 'light', tool: 'photoshop_paint_dabs', kind: 'visual-mutation', state: 'completed' },
         { step_id: 'turn', tool: 'photoshop_paint_dabs', kind: 'visual-mutation', state: 'completed' },
       ],
+      history_ownership: {
+        protocol: 'photoshop.guard.semantic_pass_history_ownership.v1',
+        status: 'exact',
+        completed_mutation_count: 2,
+        uncertain_mutation_present: false,
+        owned_history_steps: 2,
+        actions: [
+          { step_id: 'light', history_steps: 1 },
+          { step_id: 'turn', history_steps: 1 },
+        ],
+      },
     });
     expect(body.barrier.next_visual_mutation_allowed).toBe(false);
 
@@ -2145,6 +2383,7 @@ describe('photoshop_execute_visual_microplan', () => {
     const body = JSON.parse(text && 'text' in text ? text.text : '{}');
     expect(body.failed_mutation_step).toBe('middle');
     expect(body.failure_category).toBe('injected_middle_failure');
+    expect(body.execution).toBeUndefined();
     expect(body.pass_execution).toEqual({
       pass_id: 'partial-pass-1',
       state: 'failed-or-uncertain',
@@ -2153,6 +2392,14 @@ describe('photoshop_execute_visual_microplan', () => {
         { step_id: 'middle', tool: 'photoshop_paint_dabs', kind: 'visual-mutation', state: 'failed-or-uncertain' },
         { step_id: 'last', tool: 'photoshop_paint_dabs', kind: 'visual-mutation', state: 'not-started' },
       ],
+      history_ownership: {
+        protocol: 'photoshop.guard.semantic_pass_history_ownership.v1',
+        status: 'partial-or-uncertain',
+        completed_mutation_count: 1,
+        uncertain_mutation_present: true,
+        actions: [{ step_id: 'first', history_steps: null }],
+        reason: 'Exact rollback span is not proven until every completed visual mutation reports an explicit positive history_steps count.',
+      },
     });
   });
 });
