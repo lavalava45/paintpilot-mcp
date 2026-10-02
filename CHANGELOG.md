@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-10-03 — AUD-24 full-graph must-fix dependency selection
+
+- Fixed `largestOpenMustFix()` so must-fix completion debt is ranked first and then resolved through the full
+  visual-problem dependency graph instead of deleting lower-severity prerequisite nodes before eligibility is
+  computed. A global must-fix that depends on an unresolved should-fix now remains completion debt while the
+  prerequisite becomes the actionable blocker.
+- Added a focused Planner regression proving the lower-severity prerequisite is surfaced as `primary_blocker`, the
+  dependent must-fix remains in the backlog, and the next action points to the prerequisite rather than reporting no
+  must-fix blocker.
+- Verification: `npx vitest run tests/planner-painter.test.ts` **62/62 PASS**, TypeScript `--noEmit` PASS, and
+  touched-slice `git diff --check` PASS.
+
 ## 2026-10-03 — Repository provenance and GitHub identity cleanup
 
 - Updated the repository-facing GitHub URLs from the retired

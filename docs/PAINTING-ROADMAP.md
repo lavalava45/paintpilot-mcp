@@ -20,9 +20,9 @@ not faster production of the same primitive scaffold.
 
 ### Sequential engineering critical path
 
-1. **Completion truth and blocker correctness:** AUD-05 → AUD-24 → AUD-03 → AUD-04. A workflow must not expose
-   `closed/ready` while its durable artistic state still requires work, must-fix dependencies must be evaluated on
-   the full graph, and final review/critic authority must be evidence-bound rather than caller-downgradable.
+1. **Completion truth and blocker correctness:** AUD-05 → AUD-03 → AUD-04. A workflow must not expose
+   `closed/ready` while its durable artistic state still requires work, and final review/critic authority must be
+   evidence-bound rather than caller-downgradable. Full-graph must-fix dependency selection is now regression-protected.
 2. **Exact-frame review authority:** AUD-19 → AUD-17 → AUD-25. A required whole-image review must remain bound to
    the exact frame it was requested for, and structural/global-sensitive accepted changes must receive enough
    whole-frame relational review to create durable debt when a real defect is observed.
@@ -196,7 +196,6 @@ closed by concurrent 2026-10-02 hot-loop work, keep it as a regression invariant
 | AUD-21 | **P1 recognition quality** | Recognition evidence is required only when the pass is already in `RECOGNITION_BLOCK_IN`; later stages do not consume a durable recognition prerequisite. | **OPEN — E.7e/E.17:** for briefs requiring recognizable subjects, gate later polish on a current recognition milestone or explicit brief/style exemption. |
 | AUD-22 | **P1 imaging quality** | Imaging preflight `outcome=review-required` and `revalidate_edge_detail` do not create an enforced review obligation. | **OPEN — E.20/E.17:** review-required blocks/defers mutation as specified; post-effect edge/detail revalidation is bound to the exact resulting frame. |
 | AUD-23 | **P1 policy coherence** | `AGENTS.md` still describes forced early strategy re-review after 1–2 meaningful passes while runtime intentionally treats that threshold as telemetry/guidance. | **OPEN — E.7c docs/policy sync:** one canonical rule; tests and agent instructions must match runtime. |
-| AUD-24 | **P0 priority correctness** | `largestOpenMustFix()` filters to must-fix before resolving dependencies, so a must-fix depending on an unresolved lower-severity problem can disappear from blocker selection. | **OPEN — E.17:** evaluate dependency eligibility against the full problem graph, then rank/filter must-fix candidates. |
 | AUD-25 | **P1 cumulative review** | Whole-frame review is required only for `execution_effect=meaningful`; accepted smaller pixel changes can accumulate structural drift without a whole-frame observation. | **OPEN — E.17/E.7c:** any accepted pixel-changing structural/global-sensitive pass requires whole-frame inspection regardless of significance threshold. |
 | AUD-26 | **P1 benchmark truth** | Unkeyed throughput events are attributed by time window and benchmark can still report `complete=true`, so concurrent activity may contaminate selected-run counters. | **OPEN — E.8:** ambiguous/unkeyed attribution makes exact counters incomplete unless a durable run identity proves ownership. |
 | AUD-27 | **P1 benchmark truth** | `deterministic_violations_repaired_locally_percent` is unmeasurable because telemetry lacks a typed deterministic-violation denominator. | **OPEN — E.8e produces; E.8/AUD-S7 consumes:** record encountered deterministic violations by class/code in E.8e, then verify/report the real repair percentage in the benchmark. |
@@ -209,7 +208,7 @@ closed by concurrent 2026-10-02 hot-loop work, keep it as a regression invariant
 
 #### AUD-S1 — Truthful completion, blockers and exact-frame review authority
 
-Implement AUD-03/04/05/17/19/24/25 as one completion/review-hardening slice; do not add a second critic or
+Implement AUD-03/04/05/17/19/25 as one completion/review-hardening slice; do not add a second critic or
 parallel lifecycle state machine.
 
 Requirements:
@@ -224,9 +223,6 @@ Requirements:
   If unresolved visual problems, unfinished Planner tasks/directive work, pending whole-image review, unresolved
   hard brief debt or another explicit completion blocker remains, return an active/continue-required next action;
   do not emit a model-facing `ready` that contradicts durable lifecycle state.
-- Compute must-fix eligibility against the full visual-problem dependency graph. A must-fix blocked by a
-  should-fix prerequisite remains visible as completion debt and exposes the prerequisite as the actionable next
-  blocker; filtering by severity must not erase dependency nodes.
 - Pending `whole_image_glance` at stage/global/final boundaries is exact-frame debt. No later visual mutation may
   silently overwrite/supersede its required operation id/SHA before the glance is recorded or explicitly
   invalidated by a recovery/replan transition.
@@ -244,10 +240,9 @@ Focused regressions:
 1. hostile check=`defect` + caller soft label cannot finalize without exact allowed-deviation authority;
 2. forged/nonexistent `critic_result_id` cannot become independently validated;
 3. close-only after a locally resolved operation but an active remaining Planner task returns continue-required;
-4. must-fix A depending on unresolved should-fix B remains visible and directs work to B first;
-5. stage-boundary whole-image glance blocks mutation until the exact required frame is reviewed;
-6. accepted low-delta structural change still requires whole-frame observation;
-7. structural relation finding created during whole-frame review blocks cosmetic masking until resolved.
+4. stage-boundary whole-image glance blocks mutation until the exact required frame is reviewed;
+5. accepted low-delta structural change still requires whole-frame observation;
+6. structural relation finding created during whole-frame review blocks cosmetic masking until resolved.
 
 #### AUD-S2 — Executable geometry and geometry opt-out authority
 
