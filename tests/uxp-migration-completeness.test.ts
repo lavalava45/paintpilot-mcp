@@ -14,6 +14,13 @@ describe('full UXP migration completeness', () => {
       inventory.match(/across \*\*(\d+) registered tools\*\*/)?.[1]
     );
     expect(Number.isFinite(declaredTotal)).toBe(true);
+    // The generated table must agree with the public catalog total, not merely
+    // be internally consistent after silently omitting *-catalog.ts declarations.
+    const publicTotal = Number(inventory.match(/^\*\*(\d+) tools total\*\*/m)?.[1]);
+    expect(declaredTotal).toBe(publicTotal);
+    const classCounts = inventory.match(/Current totals: \*\*A=(\d+), B=(\d+), C=(\d+), D=(\d+)\*\*/);
+    expect(classCounts).not.toBeNull();
+    expect(classCounts!.slice(1).reduce((sum, count) => sum + Number(count), 0)).toBe(declaredTotal);
     expect(new Set(generatedRows).size).toBe(declaredTotal);
     expect(inventory).not.toContain('UXP migration pending');
     for (const tier of ['P1', 'P2', 'P3']) {

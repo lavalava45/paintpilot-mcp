@@ -66,6 +66,96 @@ export interface SceneCameraImagingModel {
   intentional_exceptions: Array<{ id: string; relation: string; rationale: string }>;
 }
 
+export const SCENE_CAMERA_IMAGING_MODEL_SCHEMA = {
+  type: 'object',
+  description: 'Incarnation-bound camera, focus, motion, optical response and capture-finish model. Updates preserve model_id and increase revision.',
+  properties: {
+    protocol: { type: 'string', enum: [SCENE_CAMERA_IMAGING_MODEL_PROTOCOL] },
+    model_id: { type: 'string' },
+    revision: { type: 'integer', minimum: 1 },
+    source_frame: {
+      type: 'object',
+      properties: {
+        document_id: { type: 'integer', minimum: 1 },
+        document_incarnation: { type: 'string', minLength: 1 },
+        operation_id: { type: 'string' },
+        preview_sha256: { type: 'string', pattern: '^[a-fA-F0-9]{64}$' },
+      },
+      required: ['document_id', 'document_incarnation'],
+      additionalProperties: false,
+    },
+    geometry_model_id: { type: 'string' },
+    geometry_model_revision: { type: 'integer', minimum: 1 },
+    lighting_color_model_id: { type: 'string' },
+    lighting_color_model_revision: { type: 'integer', minimum: 1 },
+    camera: {
+      type: 'object',
+      properties: {
+        framing: { type: 'string', minLength: 1 },
+        view_character: { type: 'string', enum: ['wide', 'normal', 'compressed', 'custom'] },
+        lens_character: { type: 'string', minLength: 1 },
+      },
+      required: ['framing', 'view_character', 'lens_character'],
+      additionalProperties: false,
+    },
+    focus: {
+      type: 'object',
+      properties: {
+        focal_depth_or_plane: { type: 'string', minLength: 1 },
+        depth_of_field_behavior: { type: 'string', minLength: 1 },
+        foreground_softness: { type: 'string', minLength: 1 },
+        background_softness: { type: 'string', minLength: 1 },
+      },
+      required: ['focal_depth_or_plane', 'depth_of_field_behavior', 'foreground_softness', 'background_softness'],
+      additionalProperties: false,
+    },
+    motion: {
+      type: 'object',
+      properties: {
+        camera_motion: { type: 'string', minLength: 1 },
+        subject_motion: { type: 'string', minLength: 1 },
+        shutter_character: { type: 'string', minLength: 1 },
+      },
+      required: ['camera_motion', 'subject_motion', 'shutter_character'],
+      additionalProperties: false,
+    },
+    optical_response: {
+      type: 'object',
+      properties: {
+        base_softness: { type: 'string', minLength: 1 },
+        bloom: { type: 'string', minLength: 1 },
+        halation: { type: 'string', minLength: 1 },
+      },
+      required: ['base_softness', 'bloom', 'halation'],
+      additionalProperties: false,
+    },
+    capture_finish: {
+      type: 'object',
+      properties: {
+        grain: { type: 'string', minLength: 1 },
+        vignette: { type: 'string', minLength: 1 },
+        film_or_sensor_character: { type: 'string', minLength: 1 },
+      },
+      required: ['grain', 'vignette', 'film_or_sensor_character'],
+      additionalProperties: false,
+    },
+    intentional_exceptions: {
+      type: 'array', maxItems: 16,
+      items: {
+        type: 'object',
+        properties: { id: { type: 'string' }, relation: { type: 'string', minLength: 1 }, rationale: { type: 'string', minLength: 1 } },
+        required: ['id', 'relation', 'rationale'],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: [
+    'model_id', 'revision', 'source_frame', 'geometry_model_id', 'geometry_model_revision',
+    'camera', 'focus', 'motion', 'optical_response', 'capture_finish',
+  ],
+  additionalProperties: false,
+} as const;
+
 const ID = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,79}$/;
 const SHA256 = /^[a-fA-F0-9]{64}$/;
 

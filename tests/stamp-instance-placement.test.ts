@@ -30,7 +30,7 @@ function dir(): string {
 function seedProfile(root: string) {
   process.env.PHOTOSHOP_BRUSH_PACK_RECORD_DIR = root;
   const brushPackId = `brush-pack-sha256:${'d'.repeat(64)}`;
-  const presetName = 'Bird Stamp';
+  const presetName = 'Organic Motif Stamp';
   const evidencePath = path.join(root, 'probe.jpg');
   const bytes = Buffer.from('stamp-placement-probe');
   writeFileSync(evidencePath, bytes);
@@ -47,7 +47,7 @@ function seedProfile(root: string) {
     brush_pack_id: brushPackId, preset_name: presetName, occurrence_index: 0,
     effective_settings: { size: 80, opacity: 100, flow: 100 },
     backend: 'uxp', runtime_revision: 'runtime-1', bridge_revision: 'bridge-1',
-    classification_status: 'classified', motif_category: 'bird', semantic_description: 'flying bird',
+    classification_status: 'classified', motif_category: 'organic-motif', semantic_description: 'asymmetric organic motif',
     canonical_footprint_bounds: { left: 10, top: 20, right: 90, bottom: 80 },
     canonical_orientation_degrees: 0, useful_scale_range: { min_px: 20, max_px: 180 },
     mirror_x: 'allowed', mirror_y: 'restricted', rotation_policy: 'restricted',
@@ -85,8 +85,8 @@ describe('P0-E.4 bounded stamp-instance placement', () => {
       data: {
         placement_status: 'complete', coordinate_space: 'canvas_pixels',
         completed_instances: [
-          { instance_id: 'bird-a', source_bounds: { left: 75, top: 75, right: 125, bottom: 125 } },
-          { instance_id: 'bird-b', source_bounds: { left: 250, top: 190, right: 350, bottom: 290 } },
+          { instance_id: 'motif-a', source_bounds: { left: 75, top: 75, right: 125, bottom: 125 } },
+          { instance_id: 'motif-b', source_bounds: { left: 250, top: 190, right: 350, bottom: 290 } },
         ],
         failed_or_uncertain_instance: null, not_started_instances: [],
       },
@@ -95,8 +95,8 @@ describe('P0-E.4 bounded stamp-instance placement', () => {
       document_id: 42, layer_id: 9, brush_pack_id: brushPackId,
       stamp_profile_id: profile.profile_id, preset_name: presetName,
       instances: [
-        { instance_id: 'bird-a', x: 100, y: 100, size: 50, angle: -18, flip_x: false, flip_y: false, opacity: 82 },
-        { instance_id: 'bird-b', x: 300, y: 240, size: 100, angle: 27, flip_x: true, flip_y: false, opacity: 55, color: { red: 50, green: 60, blue: 70 } },
+        { instance_id: 'motif-a', x: 100, y: 100, size: 50, angle: -18, flip_x: false, flip_y: false, opacity: 82 },
+        { instance_id: 'motif-b', x: 300, y: 240, size: 100, angle: 27, flip_x: true, flip_y: false, opacity: 55, color: { red: 50, green: 60, blue: 70 } },
       ],
     };
     const result = await withToolExecutionContext({ guardOperationId: 'guard-op-1' }, () => tool(router).handler(args));
@@ -105,8 +105,8 @@ describe('P0-E.4 bounded stamp-instance placement', () => {
     expect(spy.mock.calls[0]?.[0].instances).toEqual(args.instances);
     const parsed = body(result);
     expect(parsed.details.motif_instances).toEqual([
-      expect.objectContaining({ id: 'bird-a', category: 'bird', stamp_profile_id: profile.profile_id, region_bounds: { left: 75, top: 75, right: 125, bottom: 125 } }),
-      expect.objectContaining({ id: 'bird-b', category: 'bird', stamp_profile_id: profile.profile_id, region_bounds: { left: 250, top: 190, right: 350, bottom: 290 } }),
+      expect.objectContaining({ id: 'motif-a', category: 'organic-motif', stamp_profile_id: profile.profile_id, region_bounds: { left: 75, top: 75, right: 125, bottom: 125 } }),
+      expect.objectContaining({ id: 'motif-b', category: 'organic-motif', stamp_profile_id: profile.profile_id, region_bounds: { left: 250, top: 190, right: 350, bottom: 290 } }),
     ]);
   });
 

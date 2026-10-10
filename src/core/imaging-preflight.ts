@@ -20,6 +20,41 @@ export interface ImagingPreflight {
   findings: string[];
 }
 
+export const IMAGING_PREFLIGHT_SCHEMA = {
+  type: 'object',
+  description: 'Required before substantial blur or camera-post treatment; binds the exact active Scene Camera & Imaging Model revision and owner focus/depth expectations.',
+  properties: {
+    protocol: { type: 'string', enum: [IMAGING_PREFLIGHT_PROTOCOL] },
+    scene_camera_model_id: { type: 'string' },
+    scene_camera_revision: { type: 'integer', minimum: 1 },
+    effect_kind: { type: 'string', enum: ['depth-of-field', 'global-softness', 'motion-blur', 'camera-post'] },
+    motivation: { type: 'string', minLength: 1 },
+    scope: { type: 'string', enum: ['global', 'local-exception'] },
+    owner_expectations: {
+      type: 'array', minItems: 1, maxItems: 32,
+      items: {
+        type: 'object',
+        properties: {
+          owner_id: { type: 'string', minLength: 1 },
+          depth_role: { type: 'string', enum: ['near', 'focal', 'mid', 'far'] },
+          expected_focus_role: { type: 'string', enum: ['sharp', 'moderately_soft', 'soft', 'lost'] },
+          local_exception: { type: 'string', minLength: 1 },
+        },
+        required: ['owner_id', 'depth_role', 'expected_focus_role'],
+        additionalProperties: false,
+      },
+    },
+    revalidate_edge_detail: { type: 'boolean' },
+    outcome: { type: 'string', enum: ['supported', 'review-required', 'conflict'] },
+    findings: { type: 'array', items: { type: 'string' } },
+  },
+  required: [
+    'scene_camera_model_id', 'scene_camera_revision', 'effect_kind', 'motivation',
+    'scope', 'owner_expectations', 'revalidate_edge_detail',
+  ],
+  additionalProperties: false,
+} as const;
+
 function object(value: unknown, path: string): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${path} must be an object`);
   return value as Record<string, unknown>;

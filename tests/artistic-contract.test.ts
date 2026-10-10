@@ -8,6 +8,7 @@ import {
   globalCompletionAllowed,
   normalizeArtisticEvaluationContract,
   normalizeGlobalBriefAssessment,
+  normalizePreFinalHostileReview,
 } from '../src/core/guard/artistic-contract.js';
 
 function contract(overrides: Record<string, unknown> = {}) {
@@ -19,9 +20,19 @@ function contract(overrides: Record<string, unknown> = {}) {
     protected_qualities: ['Quiet negative space around the main path.'],
     stage_transition_expectations: ['Do not advance to decorative detail while the main spatial path is unresolved.'],
     final_evidence_requirements: ['Whole-frame evidence shows the requested spatial hierarchy.'],
-    provenance: [{ source: 'user_brief', detail: 'Derived from the requested winding mountain-stream composition.' }],
+    provenance: [{ source: 'user_brief', detail: 'Derived from the requested winding supportMass-stream composition.' }],
     ...overrides,
   });
+}
+
+function registeredCritic(active: ReturnType<typeof contract>, sha256: string, resultId: string) {
+  return {
+    result_id: resultId,
+    authority_class: 'authorized',
+    frame_sha256: sha256,
+    contract_id: active.contract_id,
+    contract_revision: active.revision,
+  };
 }
 
 describe('artistic contract semantics', () => {
@@ -104,12 +115,12 @@ describe('artistic contract semantics', () => {
       outcome: 'satisfied', contract_id: flatGraphic.contract_id, contract_revision: 1,
       frame_sha256: sha, critic_authority: 'authorized', critic_result_id: 'critic-flat-1',
       reason: 'The same frame matches the intentionally flat brief.',
-    }, { contract: flatGraphic, frame: { sha256: sha } });
+    }, { contract: flatGraphic, frame: { sha256: sha }, criticResult: registeredCritic(flatGraphic, sha, 'critic-flat-1') });
     const rejected = normalizeGlobalBriefAssessment({
       outcome: 'unsatisfied', contract_id: spatialPainting.contract_id, contract_revision: 1,
       frame_sha256: sha, critic_authority: 'authorized', critic_result_id: 'critic-spatial-1',
       reason: 'The same frame remains too flat for the spatial brief.',
-    }, { contract: spatialPainting, frame: { sha256: sha } });
+    }, { contract: spatialPainting, frame: { sha256: sha }, criticResult: registeredCritic(spatialPainting, sha, 'critic-spatial-1') });
     expect(accepted.outcome).toBe('satisfied');
     expect(rejected.outcome).toBe('unsatisfied');
   });
@@ -127,7 +138,7 @@ describe('artistic contract semantics', () => {
       frame_sha256: 'c'.repeat(64), critic_authority: 'authorized', critic_result_id: 'critic-relative-best',
       criteria: ['Current frame is stronger than the prior anchor but the stream still reads too flat.'],
       reason: 'Best so far remains materially short of the brief.',
-    }, { contract: active, frame: { sha256: 'c'.repeat(64) } });
+    }, { contract: active, frame: { sha256: 'c'.repeat(64) }, criticResult: registeredCritic(active, 'c'.repeat(64), 'critic-relative-best') });
     expect(assessment).toMatchObject({ outcome: 'unsatisfied', validation: 'independently-validated' });
     expect(globalCompletionAllowed(assessment)).toBe(false);
   });
@@ -135,7 +146,7 @@ describe('artistic contract semantics', () => {
   it('tracks hard-perceptual brief debt explicitly and blocks satisfied completion while hard debt remains', () => {
     const active = contract({
       brief_items: [
-        { item_id: 'guardian-lions', kind: 'hard_perceptual', requirement: 'Two guardian lion forms must read recognizably as lions.', provenance: 'user_brief:named required subjects' },
+        { item_id: 'guardian-targetForms', kind: 'hard_perceptual', requirement: 'Two guardian targetForm forms must read recognizably as targetForms.', provenance: 'user_brief:named required subjects' },
         { item_id: 'extra-snow', kind: 'soft_preference', requirement: 'Additional fine snow texture is welcome if it does not obscure form.', provenance: 'user_brief:secondary preference' },
       ],
     });
@@ -144,23 +155,23 @@ describe('artistic contract semantics', () => {
       outcome: 'satisfied', contract_id: active.contract_id, contract_revision: active.revision,
       frame_sha256: sha, critic_authority: 'authorized', critic_result_id: 'critic-hard-debt',
       brief_item_results: [
-        { item_id: 'guardian-lions', state: 'NOT_MET', reason: 'The crop remains an abstract symmetric stone mass.', evidence: ['OBJECT crop lacks a readable muzzle/body landmark pattern.'] },
+        { item_id: 'guardian-targetForms', state: 'NOT_MET', reason: 'The crop remains an abstract symmetric floatingForm mass.', evidence: ['OBJECT crop lacks a readable muzzle/body landmark pattern.'] },
         { item_id: 'extra-snow', state: 'MET', reason: 'Fine snow texture is visible.' },
       ],
       reason: 'Attempted final review.',
-    }, { contract: active, frame: { sha256: sha } })).toThrow(/unresolved hard brief debt/);
+    }, { contract: active, frame: { sha256: sha }, criticResult: registeredCritic(active, sha, 'critic-hard-debt') })).toThrow(/unresolved hard brief debt/);
 
     const uncertain = normalizeGlobalBriefAssessment({
       outcome: 'uncertain', contract_id: active.contract_id, contract_revision: active.revision,
       frame_sha256: sha, critic_authority: 'authorized', critic_result_id: 'critic-hard-uncertain',
       brief_item_results: [
-        { item_id: 'guardian-lions', state: 'UNCERTAIN', reason: 'Whole-frame read is ambiguous and needs an OBJECT crop.' },
+        { item_id: 'guardian-targetForms', state: 'UNCERTAIN', reason: 'Whole-frame read is ambiguous and needs an OBJECT crop.' },
         { item_id: 'extra-snow', state: 'MET', reason: 'Fine snow texture is visible.' },
       ],
       reason: 'Named-object identity is not yet proven.',
-    }, { contract: active, frame: { sha256: sha } });
+    }, { contract: active, frame: { sha256: sha }, criticResult: registeredCritic(active, sha, 'critic-hard-uncertain') });
     expect(uncertain.unresolved_hard_brief_debt).toEqual([
-      expect.objectContaining({ item_id: 'guardian-lions', state: 'UNCERTAIN', kind: 'hard_perceptual' }),
+      expect.objectContaining({ item_id: 'guardian-targetForms', state: 'UNCERTAIN', kind: 'hard_perceptual' }),
     ]);
     expect(globalCompletionAllowed(uncertain)).toBe(false);
 
@@ -168,15 +179,38 @@ describe('artistic contract semantics', () => {
       outcome: 'satisfied', contract_id: active.contract_id, contract_revision: active.revision,
       frame_sha256: sha, critic_authority: 'authorized', critic_result_id: 'critic-hard-met',
       brief_item_results: [
-        { item_id: 'guardian-lions', state: 'MET', reason: 'The held-out OBJECT crop visibly supports the required lion identity.' },
+        { item_id: 'guardian-targetForms', state: 'MET', reason: 'The held-out OBJECT crop visibly supports the required targetForm identity.' },
         { item_id: 'extra-snow', state: 'UNASSESSED', reason: 'Optional snow polish is not required for completion.' },
       ],
       reason: 'All hard perceptual requirements are independently validated.',
-    }, { contract: active, frame: { sha256: sha } });
+    }, { contract: active, frame: { sha256: sha }, criticResult: registeredCritic(active, sha, 'critic-hard-met') });
     expect(satisfied.unresolved_hard_brief_debt).toEqual([]);
     expect(globalCompletionAllowed(satisfied)).toBe(true);
   });
 
+  it('does not let a caller downgrade a hostile-review defect to completion-safe soft debt', () => {
+    const active = contract();
+    const frame = { sha256: 'e'.repeat(64) };
+    const review = normalizePreFinalHostileReview({
+      contract_id: active.contract_id,
+      contract_revision: active.revision,
+      frame_sha256: frame.sha256,
+      checks: [
+        { area: 'whole_frame_brief', status: 'defect' },
+        { area: 'named_subject_recognition', status: 'not_applicable' },
+        { area: 'geometry_completion', status: 'clear' },
+        { area: 'physical_effect_accountability', status: 'clear' },
+        { area: 'material_differentiation', status: 'clear' },
+        { area: 'style_realism', status: 'clear' },
+      ],
+      major_defects: [{ summary: 'The whole-frame composition still misses the requested brief.', debt_class: 'soft' }],
+    }, { contract: active, frame });
+    expect(review).toMatchObject({
+      completion_allowed: false,
+      hard_defects: [],
+      major_defects: [expect.objectContaining({ debt_class: 'soft' })],
+    });
+  });
   it('rewrites unsupported global claims as not independently validated', () => {
     const active = contract();
     const frame = { sha256: 'd'.repeat(64) };
@@ -188,5 +222,22 @@ describe('artistic contract semantics', () => {
       outcome: 'not-evaluated', requested_outcome: 'satisfied', validation: 'not-independently-validated',
     });
     expect((missingCritic.missing_evidence as string[])).toContain('authorized critic result');
+  });
+
+  it('requires a durable authorized critic record bound to the exact frame and contract revision', () => {
+    const active = contract();
+    const sha = 'f'.repeat(64);
+    const claim = {
+      outcome: 'satisfied', contract_id: active.contract_id, contract_revision: active.revision,
+      frame_sha256: sha, critic_authority: 'authorized', critic_result_id: 'critic-exact',
+    };
+    expect(normalizeGlobalBriefAssessment(claim, { contract: active, frame: { sha256: sha } }))
+      .toMatchObject({ outcome: 'not-evaluated', validation: 'not-independently-validated' });
+    expect(normalizeGlobalBriefAssessment(claim, {
+      contract: active, frame: { sha256: sha }, criticResult: registeredCritic(active, '0'.repeat(64), 'critic-exact'),
+    })).toMatchObject({ outcome: 'not-evaluated', validation: 'not-independently-validated' });
+    expect(normalizeGlobalBriefAssessment(claim, {
+      contract: active, frame: { sha256: sha }, criticResult: registeredCritic(active, sha, 'critic-exact'),
+    })).toMatchObject({ outcome: 'satisfied', validation: 'independently-validated' });
   });
 });

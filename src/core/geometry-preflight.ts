@@ -1,5 +1,6 @@
 import type { GeometryBinding, GeometryBounds } from './geometry-binding.js';
 import type { GeometryPoint, SceneGeometryModel, SceneLineMember } from './scene-geometry-model.js';
+import type { ExecutableGeometryProvenance } from './executable-geometry-validation.js';
 import {
   corridorContainsPoint,
   geometryDistance,
@@ -48,6 +49,7 @@ export interface GeometryPreflightReport {
   checks: GeometryPreflightCheck[];
   uncertainty: string[];
   uncertainty_acceptable: boolean;
+  executable_geometry?: ExecutableGeometryProvenance;
 }
 
 export interface GeometryPreflightResult {
@@ -257,8 +259,10 @@ export function runGeometryPreflight(
         const ordered = measurableSections
           .map(section => ({ section, distance: geometryDistance(section.at, vp), size: sectionSize(section.expected_bounds!) }))
           .sort((a, b) => a.distance - b.distance);
+        let scaleProgressionValid = true;
         for (let index = 1; index < ordered.length; index += 1) {
           if (ordered[index].size + tolerance < ordered[index - 1].size) {
+            scaleProgressionValid = false;
             issues.push({
               code: 'geometry_constraint_conflict',
               message: `geometry_constraint_conflict: owner=${binding.owner_id}; control-section scale decreases while moving farther from vanishing point ${vp.id}; recompute expected_bounds from the accepted depth relation`,
@@ -266,12 +270,16 @@ export function runGeometryPreflight(
             break;
           }
         }
-        checks.push({
-          id: `scale:${scaleAnchor.id}`,
-          kind: 'depth-scale',
-          status: 'pass',
-          detail: `control-section scale progression was checked against vanishing point ${vp.id} and scale anchor ${scaleAnchor.id}`,
-        });
+        // An issue and a positive check for the same depth-scale claim would
+        // produce contradictory durable provenance in the preflight report.
+        if (scaleProgressionValid) {
+          checks.push({
+            id: `scale:${scaleAnchor.id}`,
+            kind: 'depth-scale',
+            status: 'pass',
+            detail: `control-section scale progression was checked against vanishing point ${vp.id} and scale anchor ${scaleAnchor.id}`,
+          });
+        }
       }
     }
   }

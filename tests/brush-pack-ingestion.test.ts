@@ -74,12 +74,12 @@ describe('P0-E.1 brush-pack ingestion', () => {
 
   it('attributes only newly appearing preset occurrences, including duplicate names', () => {
     expect(attributeNewBrushPresets(
-      { total: 2, presets: ['Round', 'Leaf'] },
-      { total: 5, presets: ['Round', 'Leaf', 'Leaf', 'Cloud', 'Leaf'] }
+      { total: 2, presets: ['Preset A', 'Preset B'] },
+      { total: 5, presets: ['Preset A', 'Preset B', 'Preset B', 'Preset C', 'Preset B'] }
     )).toEqual([
-      { name: 'Leaf', occurrence_index: 1, inventory_ordinal: 2 },
-      { name: 'Cloud', occurrence_index: 0, inventory_ordinal: 3 },
-      { name: 'Leaf', occurrence_index: 2, inventory_ordinal: 4 },
+      { name: 'Preset B', occurrence_index: 1, inventory_ordinal: 2 },
+      { name: 'Preset C', occurrence_index: 0, inventory_ordinal: 3 },
+      { name: 'Preset B', occurrence_index: 2, inventory_ordinal: 4 },
     ]);
   });
 

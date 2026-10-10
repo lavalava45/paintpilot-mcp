@@ -65,7 +65,7 @@ function uncertainVisual(store: SessionStore, id: string, documentId: number) {
   store.setWorkflowLifecycle(documentId, 'active', 'operation_dispatched', id);
 }
 
-function runtimeWithDocuments(documents: Array<{ id: number; name?: string }> = []) {
+function runtimeWithDocuments(documents: Array<{ id: number; name?: string }> = [], onList = () => {}) {
   const root = mkdtempSync(path.join(tmpdir(), 'manual-document-close-runtime-'));
   roots.push(root);
   const registry = new ToolRegistry();
@@ -75,12 +75,12 @@ function runtimeWithDocuments(documents: Array<{ id: number; name?: string }> = 
       description: 'test document list',
       inputSchema: { type: 'object', properties: {}, additionalProperties: false },
     },
-    handler: async () => ({
+    handler: async () => { onList(); return ({
       content: [{
         type: 'text',
         text: JSON.stringify({ ok: true, count: documents.length, documents, active_document_id: documents[0]?.id ?? null }),
       }],
-    }),
+    }); },
   });
   const runtime = new EmbeddedGuardRuntime(registry, {
     runtimeDirectory: path.join(root, 'controller'),
@@ -108,6 +108,69 @@ function runtimeWithDocuments(documents: Array<{ id: number; name?: string }> = 
 }
 
 describe('manual Photoshop document close recovery', () => {
+  it('recovers a confirmed closed document in one public call with one internally closed evidence read', async () => {
+    let reads = 0;
+    const runtime = runtimeWithDocuments([{ id: 43 }], () => { reads++; });
+    uncertainVisual(runtime.store, 'closed42-explicit', 42);
+    uncertainVisual(runtime.store, 'still-open43-explicit', 43);
+
+    const result = await runtime.reconcile({
+      id: 'closed42-explicit', outcome: 'abandoned', document_closed_confirmed: true,
+      reason: 'The user confirmed closing the interrupted target document.',
+    });
+    expect(reads).toBe(1);
+    expect(result).toMatchObject({ recovery: 'abandoned', evidence_collected_internally: true });
+    const status = runtime.store.statusCompact();
+    expect(status.uncertain).not.toContain('closed42-explicit');
+    expect(status.pending_reports).not.toContain('closed42-explicit');
+    expect(status.uncertain).toContain('still-open43-explicit');
+    const evidence = runtime.store.records().find(record => record.tool === 'photoshop_list_documents');
+    expect(evidence.report).toBeTruthy();
+    expect(evidence.operation_ack).toBeTruthy();
+    expect(status.pending_reports).not.toContain(evidence.id);
+    expect(runtime.store.read('closed42-explicit').execution).toBe('uncertain');
+    expect(runtime.store.read('closed42-explicit').resolved.outcome).toBe('abandoned');
+  });
+
+  it('rejects abandonment when the confirmed target is still open without creating read closure debt', async () => {
+    let reads = 0;
+    const runtime = runtimeWithDocuments([{ id: 42 }], () => { reads++; });
+    uncertainVisual(runtime.store, 'actually-open42', 42);
+    await expect(runtime.reconcile({
+      id: 'actually-open42', outcome: 'abandoned', document_closed_confirmed: true,
+      reason: 'The user said the target was closed; verify current evidence.',
+    })).rejects.toThrow(/still open/);
+    expect(reads).toBe(1);
+    expect(runtime.store.statusCompact().uncertain).toContain('actually-open42');
+    const evidence = runtime.store.records().find(record => record.tool === 'photoshop_list_documents');
+    expect(runtime.store.statusCompact().pending_reports).not.toContain(evidence.id);
+  });
+
+  it('does not collect abandonment evidence without explicit closure confirmation', async () => {
+    let reads = 0;
+    const runtime = runtimeWithDocuments([], () => { reads++; });
+    uncertainVisual(runtime.store, 'unconfirmed42', 42);
+    await expect(runtime.reconcile({
+      id: 'unconfirmed42', outcome: 'abandoned', reason: 'The target may have been closed.',
+    })).rejects.toThrow(/document_closed_confirmed/);
+    expect(reads).toBe(0);
+    expect(runtime.store.statusCompact().uncertain).toContain('unconfirmed42');
+  });
+
+  it('closes an already executed operation with pending review when its document was confirmed closed', async () => {
+    const runtime = runtimeWithDocuments([]);
+    uncertainVisual(runtime.store, 'executed42-awaiting-review', 42);
+    const record = runtime.store.read('executed42-awaiting-review');
+    runtime.store.write({ ...record, phase: 'completed', execution: 'completed', failed: false });
+    const result = await runtime.reconcile({
+      id: record.id, outcome: 'abandoned', document_closed_confirmed: true,
+      reason: 'The user closed the executed document before the final frame review.',
+    });
+    expect(result.recovery).toBe('abandoned');
+    expect(runtime.store.statusCompact().pending_visual_verdicts).not.toContain(record.id);
+    expect(runtime.store.read(record.id).execution).toBe('completed');
+  });
+
   it('abandons only the closed document and clears its blocking Guard debt', () => {
     const store = makeStore();
     store.observeDocumentInstance(42, witness('doc-42'));

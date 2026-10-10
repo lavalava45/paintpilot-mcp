@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { VISUAL_MICROPLAN_MUTATION_TOOLS } from './visual-microplan.js';
 
 export const VISUAL_MICROPLAN_STAGES = [
   'RECOGNITION_BLOCK_IN',
@@ -80,15 +81,9 @@ export function compileVisualMicroPlan(input: Record<string, unknown>): Record<s
     }
   }
   const last = steps.at(-1);
-  if (last && [
-    'photoshop_paint_regions',
-    'photoshop_paint_strokes',
-    'photoshop_paint_dabs',
-    'photoshop_paint_color_gradient',
-    'photoshop_fill_layer',
-    'photoshop_create_layer_mask',
-    'photoshop_undo',
-  ].includes(String(last.tool))) {
+  // Stay aligned with the executor's mutation contract: transforms and stamps
+  // also require the exact final visual review, not only painting/filter tools.
+  if (last && VISUAL_MICROPLAN_MUTATION_TOOLS.has(String(last.tool))) {
     const ids = new Set(steps.map(step => step?.id));
     let id = 'after_preview';
     while (ids.has(id)) id += '_';

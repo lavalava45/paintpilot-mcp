@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { exactNotExecutedError, exactNotExecutedResultFields } from '../core/execution-outcome.js';
 import { ToolDefinition, ToolResult } from '../core/tool-registry.js';
 import { PhotoshopBackendRouter } from '../platform/photoshop-backend.js';
 import {
@@ -733,6 +734,31 @@ function chunkPaintStrokes(strokes: PaintStroke[], maxCost = 24): PaintStroke[][
   return batches;
 }
 
+export function strokeExecutionBudget(args: Record<string, unknown>, remainingMs?: number) {
+  if (!Array.isArray(args.strokes) || !args.strokes.length) throw new Error('strokes must be a non-empty array');
+  const strokes = args.strokes.map((row, index) => parseStroke(row, index));
+  const render = strokes.flatMap(expandDynamicStroke);
+  const autoBatches = chunkPaintStrokes(render);
+  const mode = String(args.batch_mode ?? 'AUTO').toUpperCase();
+  // This budget is also used by Guard preflight: never report an unsupported
+  // execution mode as admissible and defer its rejection to the atomic handler.
+  if (mode !== 'AUTO' && mode !== 'SINGLE_HISTORY') {
+    throw new Error('batch_mode must be AUTO or SINGLE_HISTORY');
+  }
+  const batchCount = autoBatches.length;
+  const estimatedMs = batchCount * 1500 + 2000;
+  const reserveMs = 12000;
+  const allowed = render.length <= 1000 && batchCount <= 8
+    && (mode !== 'SINGLE_HISTORY' || batchCount <= 1)
+    && (remainingMs === undefined || estimatedMs + reserveMs <= remainingMs);
+  const suggested = Math.max(1, Math.floor(strokes.length * Math.min(8, Math.max(1, Math.floor(((remainingMs ?? 26000) - reserveMs - 2000) / 1500))) / batchCount));
+  return { allowed, input_strokes: strokes.length, render_strokes: render.length, auto_batches: batchCount,
+    max_auto_batches: 8, estimated_dispatch_ms: estimatedMs, preview_reserve_ms: reserveMs,
+    suggested_max_input_strokes: suggested,
+    message: `Expanded strokes require ${batchCount} AUTO batches (${render.length} render segments). Limit is 8 bounded batches, with 12000ms reserved for final preview/closure. Split at original stroke boundaries into smaller same-component passes (start with at most ${suggested} input strokes, then validate). Do not disable dynamics, use SINGLE_HISTORY to bypass the limit, or replay uncertain strokes.`,
+  };
+}
+
 export function createPaintingTools(
   connection: PhotoshopConnection,
   backendRouter = new PhotoshopBackendRouter(connection)
@@ -877,7 +903,7 @@ export function createPaintingTools(
       tool: {
         name: 'photoshop_paint_strokes',
         description:
-          'Paint one or many raster strokes on the active layer using Photoshop path stroking. BRUSH supports optional Bezier handles, closed paths, simulated pressure, per-stroke color/size/opacity/flow overrides and interpolated dynamics. PENCIL, SMUDGE and ERASER use their current Photoshop tool settings; explicit size/opacity/flow/dynamics overrides are fail-closed until live-proven for those mechanisms, and SMUDGE/ERASER do not accept color overrides. AUTO batching proactively splits expensive mixed batches into short UXP commands; small batches remain one history step.',
+          'Paint one or many raster strokes on the active layer using Photoshop path stroking. BRUSH supports optional Bezier handles, closed paths, simulated pressure, per-stroke color/size/opacity/flow overrides and interpolated dynamics. Omitted size/opacity/flow use the prepared brush baseline, not the preceding stroke; local overrides are restored after each internal batch. Persistent settings belong to photoshop_set_brush. PENCIL, SMUDGE and ERASER use their current Photoshop tool settings; explicit size/opacity/flow/dynamics overrides are fail-closed until live-proven for those mechanisms, and SMUDGE/ERASER do not accept color overrides. AUTO batching proactively splits expensive mixed batches into short UXP commands; small batches remain one history step.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -951,12 +977,14 @@ export function createPaintingTools(
                         y: { type: 'number' },
                         left: {
                           type: 'array',
+                          description: 'Incoming control point in absolute canvas pixels.',
                           minItems: 2,
                           maxItems: 2,
                           items: { type: 'number' },
                         },
                         right: {
                           type: 'array',
+                          description: 'Outgoing control point in absolute canvas pixels.',
                           minItems: 2,
                           maxItems: 2,
                           items: { type: 'number' },
@@ -970,12 +998,16 @@ export function createPaintingTools(
                 required: ['points'],
               },
             },
+            paint_target: {
+              type: 'string', enum: ['layer-pixels', 'layer-mask'], default: 'layer-pixels',
+              description: 'layer-mask edits the pinned layer mask reversibly, preserving source pixels. Requires explicit document_id/layer_id and BRUSH strokes with grayscale color: black hides, white reveals. Creates a reveal-all mask if absent; respects an existing selection and mask. Size/opacity/flow and dynamics retain BRUSH semantics. Never apply/flatten the mask for ordinary edge repair.',
+            },
             batch_mode: {
               type: 'string',
               enum: ['AUTO', 'SINGLE_HISTORY'],
               default: 'AUTO',
               description:
-                'AUTO proactively chunks expensive batches for reliability. SINGLE_HISTORY preserves the legacy one-history-step behavior but can time out on large heterogeneous batches.',
+                'AUTO chunks expanded dynamics by cost, with at most 8 batches per call and a preview deadline reserve. Split larger work at original stroke boundaries. SINGLE_HISTORY is allowed only within one AUTO batch cost; it cannot bypass the bounded execution limit.',
             },
             layer_id: {
               type: 'number',
@@ -993,10 +1025,11 @@ export function createPaintingTools(
       tool: {
         name: 'photoshop_paint_regions',
         description:
-          'Fill one or more ordered raster color regions from closed Bezier contours. Intended for fast block-in, silhouettes and large color/value masses before brush modelling. Each region may target a stable layer_id; array order is paint/overlap order. Optional clip_bounds is an executable safety envelope: every anchor and Bezier handle must remain inside it. Coordinates are canvas pixels independent of document DPI.',
+          'Fill ordered raster color regions from closed Bezier contours. Each region may target layer_id; array order determines overlap. clip_bounds constrains the actual curve, not control handles. Coordinates are canvas pixels independent of DPI.',
         inputSchema: {
           type: 'object',
           properties: {
+            replace_contents: { type: 'boolean', description: 'Explicit replacement of the single pinned raster component: clear old pixels and paint regions in one reversible history transaction. Guard requires action_class=REPLACE and exact owned layer.' },
             regions: {
               type: 'array',
               minItems: 1,
@@ -1036,14 +1069,16 @@ export function createPaintingTools(
                           items: {
                             type: 'object',
                             properties: {
-                              x: { type: 'number' },
-                              y: { type: 'number' },
+                              x: { type: 'number', minimum: 0 },
+                              y: { type: 'number', minimum: 0 },
                               left: {
                                 type: 'array', minItems: 2, maxItems: 2,
+                                description: 'Incoming control point, absolute [x, y] canvas pixels. May be outside bounds when the curve stays inside.',
                                 items: { type: 'number' },
                               },
                               right: {
                                 type: 'array', minItems: 2, maxItems: 2,
+                                description: 'Outgoing control point, absolute [x, y] canvas pixels. May be outside bounds when the curve stays inside.',
                                 items: { type: 'number' },
                               },
                               smooth: { type: 'boolean', default: false },
@@ -1061,7 +1096,7 @@ export function createPaintingTools(
             },
             clip_bounds: {
               type: 'object',
-              description: 'Optional canvas-pixel safety bounds. All contour anchors and Bezier handles must lie inside.',
+              description: 'Optional canvas-pixel safety bounds for the actual contour, including cubic extrema.',
               properties: {
                 left: { type: 'number' },
                 top: { type: 'number' },
@@ -1080,7 +1115,7 @@ export function createPaintingTools(
       tool: {
         name: 'photoshop_paint_dabs',
         description:
-          'Paint many brush dabs/stamps efficiently on the active raster layer. Dabs with identical color/size/opacity/flow are grouped, then internally chunked into small Photoshop multi-subpath strokes for timeout resilience. Intended for stippling, overlapping dab chains, soft tonal buildup, texture, and photorealistic painting passes.',
+          'Paint many brush dabs/stamps efficiently on the active raster layer. Dabs with identical color/size/opacity/flow are grouped, then internally chunked into small Photoshop multi-subpath strokes for timeout resilience. Omitted size/opacity/flow use the prepared brush baseline, not the preceding dab group; local overrides are restored after each internal batch. Persistent settings belong to photoshop_set_brush. Intended for stippling, overlapping dab chains, soft tonal buildup, texture, and photorealistic painting passes.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -1331,6 +1366,7 @@ async function paintStrokes(
   backendRouter: PhotoshopBackendRouter,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
+  let dispatchStarted = false;
   try {
     if (!Array.isArray(args.strokes) || args.strokes.length === 0)
       throw new Error('strokes must be a non-empty array');
@@ -1338,7 +1374,21 @@ async function paintStrokes(
       throw new Error('strokes may contain at most 250 strokes per call');
     const inputStrokes = args.strokes.map((stroke, index) => parseStroke(stroke, index));
     validateStrokeMechanismReadiness(inputStrokes);
+    const paintTargetMode = args.paint_target ?? 'layer-pixels';
+    if (!['layer-pixels', 'layer-mask'].includes(String(paintTargetMode))) throw new Error('invalid paint_target');
     const layerId = optionalPositiveLayerId(args.layer_id, 'layer_id');
+    if (paintTargetMode === 'layer-mask') {
+      if (!layerId || !Number.isSafeInteger(args.document_id) || Number(args.document_id) <= 0) {
+        throw new Error('mask painting requires explicit positive document_id and layer_id');
+      }
+      if (inputStrokes.some(stroke => stroke.tool !== 'BRUSH' || !stroke.color
+        || stroke.color.red !== stroke.color.green || stroke.color.red !== stroke.color.blue)) {
+        throw new Error('mask painting requires BRUSH strokes with explicit grayscale color; black hides, white reveals');
+      }
+    }
+    const deadlineAt = currentToolExecutionContext()?.deadlineAt;
+    const budget = strokeExecutionBudget(args, deadlineAt ? deadlineAt - Date.now() : undefined);
+    if (!budget.allowed) throw exactNotExecutedError('stroke_batch_budget_exceeded: ' + budget.message, 'expanded_stroke_budget_rejected_before_dispatch');
     const renderStrokes = inputStrokes.flatMap((stroke) => expandDynamicStroke(stroke));
     if (renderStrokes.length > 1000) {
       throw new Error(`Dynamics expansion produced ${renderStrokes.length} render strokes; maximum is 1000 per call`);
@@ -1361,23 +1411,40 @@ async function paintStrokes(
     let documentResolutionDpi: unknown;
     let pathCoordinateScale: unknown;
     let strokeToolReadiness: unknown;
+    let paintTarget: unknown;
     let completed = 0;
     const stableCommandBase = currentStableCommandId();
     const stableCommandIds: string[] = [];
     for (let i = 0; i < batches.length; i++) {
       try {
+        if (deadlineAt && deadlineAt - Date.now() <= budget.preview_reserve_ms) {
+          if (completed === 0) throw exactNotExecutedError('stroke_preview_reserve_exhausted: split into a smaller pass', 'no_stroke_batch_dispatched');
+          throw new Error('stroke_preview_reserve_exhausted: stopping before the next batch so fresh preview/recovery can run; earlier batches remain applied');
+        }
         const stableCommandId = stableCommandBase
           ? `${stableCommandBase}:batch:${i}`
           : undefined;
+        dispatchStarted = true;
         const result = await invokeUxpPaintStrokes({
           ...(documentId !== undefined ? { document_id: documentId } : {}),
           ...(layerId !== undefined ? { layer_id: layerId } : {}),
           strokes: batches[i],
+          ...(paintTargetMode === 'layer-mask' ? { paint_target: 'layer-mask' as const } : {}),
         }, stableCommandId);
-        if (!result.ok || !result.data) throw new Error(result.error ?? 'uxp_paint_strokes_failed');
+        if (!result.ok || !result.data) {
+          if (completed === 0 && result.pre_dispatch_rejected === true) {
+            throw exactNotExecutedError(result.error ?? 'uxp_paint_strokes_failed', 'first_stroke_batch_rejected_before_dispatch');
+          }
+          throw new Error(result.error ?? 'uxp_paint_strokes_failed');
+        }
         if (stableCommandId) stableCommandIds.push(stableCommandId);
         const parsed = result.data;
+        if (paintTargetMode === 'layer-mask' && (parsed.original_preserved !== true
+          || parsed.paint_channel !== 'layer-mask' || parsed.layer_id !== layerId)) {
+          throw new Error('mask_paint_outcome_unconfirmed: exact mask target and original preservation required');
+        }
         layerName = parsed.layer_name;
+        paintTarget = parsed.paint_target;
         coordinateSpace = parsed.coordinate_space;
         documentResolutionDpi = parsed.document_resolution_dpi;
         pathCoordinateScale = parsed.path_coordinate_scale;
@@ -1386,6 +1453,7 @@ async function paintStrokes(
         }
         completed += batches[i].length;
       } catch (error) {
+        if (completed === 0 && exactNotExecutedResultFields(error)) throw error;
         throw new Error(
           `Painting batch ${i + 1}/${batches.length} failed after ${completed}/${renderStrokes.length} render strokes completed. ` +
             `Earlier AUTO batches remain applied as separate history steps. ${error instanceof Error ? error.message : String(error)}`
@@ -1408,9 +1476,13 @@ async function paintStrokes(
       document_resolution_dpi: documentResolutionDpi,
       path_coordinate_scale: pathCoordinateScale,
       ...(strokeToolReadiness === undefined ? {} : { stroke_tool_readiness: strokeToolReadiness }),
+      ...(paintTarget === undefined ? {} : { paint_target: paintTarget }),
+      ...(paintTargetMode === 'layer-mask' ? { paint_channel: 'layer-mask', original_preserved: true } : {}),
     });
   } catch (error) {
-    return atomicFailureFromError(error);
+    return atomicFailureFromError(dispatchStarted ? error : exactNotExecutedError(
+      error instanceof Error ? error.message : String(error), 'stroke_validation_or_readiness_rejected_before_dispatch'
+    ));
   }
 }
 
@@ -1437,6 +1509,7 @@ async function paintRegions(
     const result = await invokeUxpPaintRegions({
       ...(documentId !== undefined ? { document_id: documentId } : {}),
       regions,
+      ...(args.replace_contents === true ? { replace_contents: true } : {}),
       ...(clipBounds ? { clip_bounds: clipBounds } : {}),
     }, stableCommandId);
     if (!result.ok || !result.data) throw new Error(result.error ?? 'uxp_paint_regions_failed');
@@ -1481,6 +1554,7 @@ async function paintDabs(
     const batchDurationsMs: number[] = [];
     const startedAt = Date.now();
     let layerName: unknown;
+    let paintTarget: unknown;
     let coordinateSpace: unknown;
     let documentResolutionDpi: unknown;
     let pathCoordinateScale: unknown;
@@ -1503,6 +1577,7 @@ async function paintDabs(
         const parsed = result.data;
         batchDurationsMs.push(Date.now() - batchStartedAt);
         layerName = parsed.layer_name;
+        paintTarget = parsed.paint_target;
         coordinateSpace = parsed.coordinate_space;
         documentResolutionDpi = parsed.document_resolution_dpi;
         pathCoordinateScale = parsed.path_coordinate_scale;
@@ -1529,6 +1604,7 @@ async function paintDabs(
       center_bounds: centerBounds,
       execution_duration_ms: Date.now() - startedAt,
       batch_durations_ms: batchDurationsMs,
+      ...(paintTarget === undefined ? {} : { paint_target: paintTarget }),
       layer_name: layerName,
       layer_id: layerId ?? null,
       coordinate_space: coordinateSpace ?? 'canvas_pixels',

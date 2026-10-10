@@ -1,6 +1,8 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 
 export interface ToolExecutionContext {
+  /** Host-proven conversation identity; never supplied in model tool arguments. */
+  reviewContextId?: string;
   /** Absolute epoch deadline supplied by the controller/daemon. */
   deadlineAt?: number;
   /** Guard-owned logical operation id; absent for raw/direct MCP execution. */

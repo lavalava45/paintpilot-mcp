@@ -37,13 +37,29 @@ beforeEach(() => {
     ok: true,
     data: {
       action,
+      ...(action.startsWith('apply_guarded_') ? { original_preserved: true, smart_filter_mask: true, filter_mode: 'smart-filter', source_layer_id: payload.layer_id, layer_id: payload.layer_id } : {}),
       ...payload,
       ...(action.startsWith('adjust_') || action.startsWith('apply_') ? { layer_name: `${action} layer` } : {}),
       ...(action === 'apply_high_pass' ? { filter: 'high_pass' } : {}),
-      ...(action === 'apply_smart_blur' ? { filter: 'smart_blur' } : {}),
+      ...(action === 'apply_guarded_smart_blur' ? { filter: 'smart_blur' } : {}),
       ...(action === 'adjust_curves' ? { layer_name: 'Curves 1' } : {}),
     },
   }));
+});
+
+it('rejects unspecified targets and old UXP actions without dispatch fallback', async () => {
+  const {connection,router}=fixture(); const blur=createFilterTools(connection,router).find(x=>x.tool.name==='photoshop_apply_gaussian_blur')!;
+  expect(jsonOf(await blur.handler({radius:10}))).toMatchObject({ok:false});expect(bridge.operation).not.toHaveBeenCalled();
+  bridge.operation.mockResolvedValueOnce({ok:false,error:'Unknown action apply_guarded_gaussian_blur'});
+  expect(jsonOf(await blur.handler({radius:10,layer_id:7,document_id:42}))).toMatchObject({ok:false});
+  expect(bridge.operation).toHaveBeenCalledTimes(1);expect(bridge.operation.mock.calls[0][0]).toBe('apply_guarded_gaussian_blur');
+});
+it('keeps exact preserved-layer identity in the atomic result and rejects missing preservation evidence', async () => {
+  const {connection,router}=fixture(); const blur=createFilterTools(connection,router).find(x=>x.tool.name==='photoshop_apply_gaussian_blur')!;
+  bridge.operation.mockResolvedValueOnce({ok:true,data:{original_preserved:true,smart_filter_mask:true,filter_mode:'smart-filter',source_layer_id:7,layer_id:9}});
+  expect(jsonOf(await blur.handler({radius:10,layer_id:7}))).toMatchObject({ok:true,details:{source_layer_id:7,layer_id:9}});
+  bridge.operation.mockResolvedValueOnce({ok:true,data:{filter:'gaussian_blur'}});
+  expect(jsonOf(await blur.handler({radius:10,layer_id:7}))).toMatchObject({ok:false});expect(bridge.operation).toHaveBeenCalledTimes(2);
 });
 
 describe('filter + adjustment + color-adjustment public contract', () => {
@@ -75,25 +91,25 @@ describe('filter + adjustment + color-adjustment public contract', () => {
     ]);
   });
 
-  it('preserves basic filter payloads and plain-text confirmations', async () => {
+  it('routes protected blur with pinned targets while preserving other filter contracts', async () => {
     const { connection, router, executeScript, backendFor } = fixture();
     const tools = createFilterTools(connection, router);
     const byName = (name: string) => tools.find((item) => item.tool.name === name)!;
 
-    expect(textOf(await byName('photoshop_apply_gaussian_blur').handler({ radius: 4.5, document_id: 42 })))
-      .toBe('Gaussian Blur applied with radius 4.5px');
+    expect(jsonOf(await byName('photoshop_apply_gaussian_blur').handler({ radius: 4.5, layer_id: 7, document_id: 42 })))
+      .toMatchObject({ ok: true, details: { original_preserved: true, source_layer_id: 7, layer_id: 7 } });
     expect(textOf(await byName('photoshop_apply_sharpen').handler({ amount: 120, radius: 1.4, document_id: 42 })))
       .toBe('Unsharp Mask applied: amount 120%, radius 1.4px, threshold 0');
     expect(textOf(await byName('photoshop_apply_noise').handler({ amount: 12, distribution: 'GAUSSIAN', monochromatic: true, document_id: 42 })))
       .toBe('Add Noise applied: 12% (GAUSSIAN, monochromatic)');
-    expect(textOf(await byName('photoshop_apply_motion_blur').handler({ angle: 30, radius: 20, document_id: 42 })))
-      .toBe('Motion Blur applied: angle 30°, radius 20px');
+    expect(jsonOf(await byName('photoshop_apply_motion_blur').handler({ angle: 30, radius: 20, layer_id: 7, document_id: 42 })))
+      .toMatchObject({ ok: true, details: { original_preserved: true, source_layer_id: 7 } });
 
     expect(bridge.operation.mock.calls.slice(0, 4)).toEqual([
-      ['apply_gaussian_blur', { radius: 4.5 }, 'uxp_apply_gaussian_blur_failed'],
+      ['apply_guarded_gaussian_blur', { radius: 4.5, layer_id: 7, document_id: 42 }, 'uxp_guarded_blur_failed'],
       ['apply_sharpen', { amount: 120, radius: 1.4, threshold: 0 }, 'uxp_apply_sharpen_failed'],
       ['apply_noise', { amount: 12, distribution: 'GAUSSIAN', monochromatic: true }, 'uxp_apply_noise_failed'],
-      ['apply_motion_blur', { angle: 30, radius: 20 }, 'uxp_apply_motion_blur_failed'],
+      ['apply_guarded_motion_blur', { angle: 30, radius: 20, layer_id: 7, document_id: 42 }, 'uxp_guarded_blur_failed'],
     ]);
     expect(backendFor.mock.calls.map(([primitive]) => primitive)).toEqual([
       'filter.gaussian_blur', 'filter.sharpen', 'filter.noise', 'filter.motion_blur',
@@ -113,16 +129,16 @@ describe('filter + adjustment + color-adjustment public contract', () => {
     });
     expect(jsonOf(await byName('photoshop_apply_high_pass').handler({ radius: 300 }))).toMatchObject({ ok: false });
 
-    expect(jsonOf(await byName('photoshop_apply_smart_blur').handler({ radius: 4, threshold: 8, mode: 'INVALID', quality: 'INVALID' })))
+    expect(jsonOf(await byName('photoshop_apply_smart_blur').handler({ radius: 4, threshold: 8, layer_id: 7, mode: 'INVALID', quality: 'INVALID' })))
       .toMatchObject({
         ok: true,
         summary: 'Smart Blur applied (radius 4px, threshold 8)',
         details: { filter: 'smart_blur', radius: 4, threshold: 8, mode: 'NORMAL', quality: 'MEDIUM' },
       });
     expect(bridge.operation).toHaveBeenLastCalledWith(
-      'apply_smart_blur',
-      { radius: 4, threshold: 8, mode: 'NORMAL', quality: 'MEDIUM' },
-      'uxp_apply_smart_blur_failed'
+      'apply_guarded_smart_blur',
+      { radius: 4, threshold: 8, mode: 'NORMAL', quality: 'MEDIUM', layer_id: 7 },
+      'uxp_guarded_blur_failed'
     );
   });
 

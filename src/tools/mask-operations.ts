@@ -103,6 +103,7 @@ export async function runApplyGradientMask(router: PhotoshopBackendRouter, args:
     const id = selectionDocumentId(args);
     const outcome = await invokeUxpApplyGradientMask({
       ...(id === undefined ? {} : { document_id: id }),
+      ...(args.layer_id === undefined ? {} : { layer_id: args.layer_id as number }),
       direction,
       start_pct: startPct,
       end_pct: endPct,

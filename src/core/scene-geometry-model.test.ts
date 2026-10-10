@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeSceneGeometryModel, SCENE_GEOMETRY_MODEL_PROTOCOL } from './scene-geometry-model.js';
+import { geometryOptOutAuthorityIssue, normalizeSceneGeometryModel, SCENE_GEOMETRY_MODEL_PROTOCOL } from './scene-geometry-model.js';
 
 function coherentModel(): any {
   return {
@@ -31,6 +31,26 @@ describe('scene geometry model', () => {
     expect(withoutRationale).not.toHaveProperty('applicability_rationale');
     value.applicability_rationale = 'Intentional flat poster-space composition.';
     expect(normalizeSceneGeometryModel(value).applicability_rationale).toBe('Intentional flat poster-space composition.');
+  });
+  it('requires a non-3D opt-out to bind exactly to the active durable style contract', () => {
+    const value = coherentModel();
+    value.applicability = 'flat_or_collage';
+    value.applicability_rationale = 'The brief intentionally uses flat poster space.';
+    const unsupported = normalizeSceneGeometryModel(value);
+    expect(geometryOptOutAuthorityIssue(unsupported, { spatial_treatment: 'coherent perspective depth' }))
+      .toMatch(/requires applicability_style_contract_basis/);
+
+    value.applicability_style_contract_basis = {
+      field: 'spatial_treatment',
+      criterion: 'intentional flat collage space with no shared 3D projection',
+    };
+    const authorized = normalizeSceneGeometryModel(value);
+    expect(geometryOptOutAuthorityIssue(authorized, {
+      spatial_treatment: 'intentional flat collage space with no shared 3D projection',
+    })).toBeUndefined();
+    expect(geometryOptOutAuthorityIssue(authorized, {
+      spatial_treatment: 'orthographic technical diagram',
+    })).toMatch(/does not exactly match/);
   });
   it('requires at least two declared source lines for derived vanishing evidence', () => {
     const value = coherentModel(); value.projection.vanishing_points[0].derived_from = ['left_rail'];

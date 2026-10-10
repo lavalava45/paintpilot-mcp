@@ -5,6 +5,9 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { SessionStore } from '../src/core/guard/session-store.js';
 import { guardCapabilities } from '../src/core/guard/guard-capabilities.js';
+import { visualReviewPackage } from '../src/core/guard/cycle.js';
+import { createGuardTools } from '../src/tools/guard-tools.js';
+import type { EmbeddedGuardRuntime } from '../src/core/guard/runtime.js';
 
 const dirs: string[] = [];
 
@@ -84,6 +87,10 @@ function capturedPreview(dir: string, capture: any, patch: Record<string, unknow
   };
 }
 
+function reviewImageTool(store: SessionStore) {
+  return createGuardTools({ store } as EmbeddedGuardRuntime).find(tool => tool.tool.name === 'photoshop_guard_review_image')!;
+}
+
 describe('durable multiscale review escalation state', () => {
   it('carries named-object brief identity through OBJECT crop capture provenance', () => {
     const { dir, store } = fixture();
@@ -91,19 +98,19 @@ describe('durable multiscale review escalation state', () => {
       kind: 'object_readability',
       severity: 'must-fix',
       region_bounds: { left: 40, top: 50, right: 180, bottom: 210 },
-      brief_item_id: 'guardian-lion',
+      brief_item_id: 'guardian-targetForm',
       brief_state: 'UNCERTAIN',
     }], { persist: true }) as any;
     expect(plan.captures).toHaveLength(1);
     expect(plan.captures[0]).toMatchObject({
       level: 'object',
-      brief_item_id: 'guardian-lion',
+      brief_item_id: 'guardian-targetForm',
       brief_state: 'UNCERTAIN',
     });
     const evidence = store.attachReviewEvidence('review-op', plan.captures[0], capturedPreview(dir, plan.captures[0])) as any;
     expect(evidence).toMatchObject({
       review_level: 'object',
-      brief_item_id: 'guardian-lion',
+      brief_item_id: 'guardian-targetForm',
       brief_state: 'UNCERTAIN',
       bound_whole_sha256: expect.any(String),
       artifact_id: expect.any(String),
@@ -440,6 +447,147 @@ describe('durable multiscale review escalation state', () => {
     expect(restartedRecord.review_capture_sequence).toBe(3);
     expect((restarted.planReviewEscalation as any)('review-op', [], { persist: false }).required).toBe(false);
   });
+
+  it('delivers two crops then a distinct third crop after restart without closing review early', async () => {
+    const { dir, controller, store } = fixture();
+    const record = store.read('review-op') as any;
+    record.preview.sha256 = createHash('sha256').update(readFileSync(record.preview.materialized_path)).digest('hex');
+    store.write(record);
+    const findings = [20, 150, 280].map(left => ({
+      kind: 'proportion', severity: 'must-fix',
+      region_bounds: { left, top: 30, right: left + 70, bottom: 120 },
+    }));
+    const first = store.planReviewEscalation('review-op', findings, { persist: true }) as any;
+    expect(first.captures.map((capture: any) => capture.role)).toEqual(['object_after_1', 'object_after_2']);
+    for (const capture of first.captures) {
+      store.attachReviewEvidence('review-op', capture, capturedPreview(dir, capture, { sha256: record.preview.sha256 }));
+    }
+    const initialReview = await reviewImageTool(store).handler({ operation_id: 'review-op' });
+    expect(JSON.parse((initialReview.content[0] as any).text).delivery.delivery_complete).toBe(true);
+    expect(initialReview.content.filter(item => item.type === 'image')).toHaveLength(3);
+    expect((store.read('review-op') as any).pending_review.requirements.filter((item: any) => item.status === 'pending')).toHaveLength(1);
+    expect(store.read('review-op')?.verdict).toBeUndefined();
+
+    const restarted = new SessionStore(controller, { visualBarrierDirectory: path.join(dir, 'barriers'), workspaceRoot: dir });
+    const second = restarted.planReviewEscalation('review-op', [], { persist: true }) as any;
+    expect(second.captures).toHaveLength(1);
+    expect(second.captures[0].role).toBe('object_after_3');
+    const third = restarted.attachReviewEvidence('review-op', second.captures[0],
+      capturedPreview(dir, second.captures[0], { sha256: record.preview.sha256 })) as any;
+    expect(restarted.visualDeliveryDebt(restarted.read('review-op'))).toMatchObject({ undelivered_roles: ['object_after_3'] });
+
+    const review = await reviewImageTool(restarted).handler({ operation_id: 'review-op', roles: ['object_after_3'] });
+    const body = JSON.parse((review.content[0] as any).text);
+    expect(body.delivery).toMatchObject({ delivery_complete: true, undelivered_roles: [] });
+    expect(body.delivery.delivered).toContainEqual(expect.objectContaining({ role: 'object_after_3', sha256: third.sha256 }));
+    const images = review.content.filter(item => item.type === 'image') as Array<{ data: string }>;
+    expect(images).toHaveLength(1);
+    expect(Buffer.from(images[0].data, 'base64')).toEqual(readFileSync(third.materialized_path));
+    expect(restarted.visualDeliveryDebt(restarted.read('review-op'))).toBeNull();
+    expect(restarted.read('review-op')?.verdict).toBeUndefined();
+    expect(restarted.read('review-op')?.phase).toBe('completed');
+  });
+
+  it('redelivers colliding legacy crop roles without changing saved evidence', async () => {
+    const { dir, store } = fixture();
+    const record = store.read('review-op') as any;
+    record.preview.sha256 = createHash('sha256').update(readFileSync(record.preview.materialized_path)).digest('hex');
+    store.write(record);
+    const findings = [20, 150, 280].map(left => ({
+      kind: 'proportion', severity: 'must-fix',
+      region_bounds: { left, top: 30, right: left + 70, bottom: 120 },
+    }));
+    const first = store.planReviewEscalation('review-op', findings, { persist: true }) as any;
+    for (const capture of first.captures) {
+      store.attachReviewEvidence('review-op', capture, capturedPreview(dir, capture, { sha256: record.preview.sha256 }));
+    }
+    await reviewImageTool(store).handler({ operation_id: 'review-op' });
+    const second = store.planReviewEscalation('review-op', [], { persist: true }) as any;
+    store.attachReviewEvidence('review-op', second.captures[0],
+      capturedPreview(dir, second.captures[0], { sha256: record.preview.sha256 }));
+    const legacy = store.read('review-op') as any;
+    legacy.review_evidence[2].role = 'object_after_1';
+    store.write(legacy);
+    const evidenceBefore = structuredClone(legacy.review_evidence);
+    const third = evidenceBefore[2];
+    expect(store.visualDeliveryDebt(legacy)).toMatchObject({ undelivered_roles: ['object_after_3'] });
+    expect(visualReviewPackage(legacy, null)?.delivery_policy.preferred_content_order).toEqual([
+      'after', 'object_after_1', 'object_after_2', 'object_after_3',
+    ]);
+
+    const review = await reviewImageTool(store).handler({ operation_id: 'review-op', roles: ['object_after_3'] });
+    expect(review.isError).not.toBe(true);
+    const image = review.content.find(item => item.type === 'image') as { data: string };
+    expect(Buffer.from(image.data, 'base64')).toEqual(readFileSync(third.materialized_path));
+    expect(store.read('review-op')?.review_evidence).toEqual(evidenceBefore);
+    expect(store.visualDeliveryDebt(store.read('review-op'))).toBeNull();
+    expect(store.read('review-op')?.verdict).toBeUndefined();
+  });
+
+  it('preserves exact delivery receipts for legacy crops when their review level changes', () => {
+    const { dir, store } = fixture();
+    const first = store.planReviewEscalation('review-op', [{
+      kind: 'proportion', region_bounds: { left: 20, top: 30, right: 90, bottom: 120 },
+    }], { persist: true }) as any;
+    store.attachReviewEvidence('review-op', first.captures[0], capturedPreview(dir, first.captures[0]));
+    const second = store.planReviewEscalation('review-op', [{
+      kind: 'edge_transition', region_bounds: { left: 280, top: 30, right: 350, bottom: 120 },
+    }], { persist: true }) as any;
+    store.attachReviewEvidence('review-op', second.captures[0], capturedPreview(dir, second.captures[0]));
+    const legacy = store.read('review-op') as any;
+    legacy.review_evidence[1].role = 'micro_after_1';
+    legacy.visual_delivery = {
+      protocol: 'photoshop.guard.visual_delivery.v1',
+      bound_whole_sha256: legacy.preview.sha256, delivery_complete: true,
+      expected_roles: ['after', 'object_after_1', 'micro_after_1'], undelivered_roles: [],
+      delivered: [
+        { role: 'after', sha256: legacy.preview.sha256, image_delivered_for_review: true },
+        ...legacy.review_evidence.map((frame: any) => ({ role: frame.role, sha256: frame.sha256, image_delivered_for_review: true })),
+      ],
+    };
+    store.write(legacy);
+    expect(store.visualDeliveryDebt(store.read('review-op'))).toBeNull();
+    const receipt = store.recordVisualDeliveryReceipt('review-op', { expected_roles: ['after', 'object_after_1', 'micro_after_2'], delivered: [] });
+    expect(receipt).toMatchObject({ delivery_complete: true, undelivered_roles: [] });
+    expect(receipt.expected_roles).toEqual(['after', 'object_after_1', 'micro_after_2']);
+    expect(receipt.delivered).toContainEqual(expect.objectContaining({ role: 'micro_after_2', sha256: legacy.review_evidence[1].sha256 }));
+    expect(store.read('review-op')?.review_evidence).toEqual(legacy.review_evidence);
+  });
+
+
+  it.each(['wrong crop SHA', 'reference only', 'wrong whole SHA'] as const)(
+    'rejects a %s receipt even when a cached receipt claims complete delivery', reason => {
+      const { dir, store } = fixture();
+      const plan = store.planReviewEscalation('review-op', [{
+        kind: 'proportion', severity: 'must-fix',
+        region_bounds: { left: 20, top: 30, right: 90, bottom: 120 },
+      }], { persist: true }) as any;
+      const evidence = store.attachReviewEvidence('review-op', plan.captures[0], capturedPreview(dir, plan.captures[0])) as any;
+      const delivered = [
+        { role: 'after', sha256: reason === 'wrong whole SHA' ? 'b'.repeat(64) : 'a'.repeat(64), image_delivered_for_review: true },
+        { role: evidence.role, sha256: reason === 'wrong crop SHA' ? 'b'.repeat(64) : evidence.sha256, image_delivered_for_review: reason !== 'reference only' },
+      ];
+      const receipt = store.recordVisualDeliveryReceipt('review-op', {
+        expected_roles: ['after', evidence.role], delivered,
+      });
+      const missingRole = reason === 'wrong whole SHA' ? 'after' : evidence.role;
+      expect(receipt).toMatchObject({ delivery_complete: false, undelivered_roles: [missingRole] });
+      const persisted = store.read('review-op') as any;
+      persisted.visual_delivery.delivery_complete = true;
+      persisted.visual_delivery.undelivered_roles = [];
+      store.write(persisted);
+      expect(store.visualDeliveryDebt(store.read('review-op'))).toMatchObject({ undelivered_roles: [missingRole] });
+      expect(store.recordVisualDeliveryReceipt('review-op', {
+        expected_roles: ['after', evidence.role],
+        delivered: [
+          { role: 'after', sha256: 'a'.repeat(64), image_delivered_for_review: true },
+          { role: evidence.role, sha256: evidence.sha256, image_delivered_for_review: true },
+        ],
+      }).delivery_complete).toBe(true);
+      expect(store.visualDeliveryDebt(store.read('review-op'))).toBeNull();
+    }
+  );
+
 
   it('reports review_findings as an additive compact-v2 capability rather than a protocol replacement', () => {
     const caps = guardCapabilities() as any;

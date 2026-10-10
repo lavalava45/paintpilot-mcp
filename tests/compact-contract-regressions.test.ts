@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import jpeg from 'jpeg-js';
@@ -12,6 +12,7 @@ import { createLayerTools } from '../src/tools/layer-tools.js';
 import { createDocumentTools } from '../src/tools/document-tools.js';
 import { createStateTools } from '../src/tools/state-tools.js';
 import { createSelectionTools } from '../src/tools/selection-tools.js';
+import { createFilterTools } from '../src/tools/filter-catalog.js';
 import { createVisualMicroPlanTools } from '../src/tools/visual-microplan-tools.js';
 import { createValueCheckTools } from '../src/tools/value-check-tools.js';
 import { createGuardTools } from '../src/tools/guard-tools.js';
@@ -59,6 +60,7 @@ function realDefinition(name: string): ToolDefinition {
     ...createDocumentTools(connection),
     ...createStateTools(connection),
     ...createSelectionTools(connection),
+    ...createFilterTools(connection),
   ];
   const found = definitions.find(definition => definition.tool.name === name);
   if (!found) throw new Error(`missing real tool definition for ${name}`);
@@ -67,6 +69,7 @@ function realDefinition(name: string): ToolDefinition {
 
 function fixture(options: {
   stickyAfter?: boolean;
+  establishedLegacyScene?: boolean;
   brushInventory?: boolean;
   sceneGeometry?: false | 'coherent_3d' | 'orthographic_or_diagrammatic' | 'flat_or_collage' | 'intentional_non_euclidean';
 } = {}) {
@@ -214,6 +217,11 @@ function fixture(options: {
       },
     }),
   });
+  // Method-only fixtures may continue an existing pre-contract FORM scene.
+  // Fresh transitions are exercised through ordinary physical review below.
+  if (options.establishedLegacyScene) runtime.store.updatePaintingState(42, current => ({
+    ...current, current_stage: 'FORM',
+  }));
   const guard = createGuardTools(runtime);
   const rawCycle = guard.find(definition => definition.tool.name === 'photoshop_guard_cycle_auto')!;
   const reviewImage = guard.find(definition => definition.tool.name === 'photoshop_guard_review_image')!;
@@ -261,6 +269,7 @@ function fixture(options: {
   const keepLogicalLayer = guard.find(definition => definition.tool.name === 'photoshop_guard_keep_logical_layer')!;
   return {
     dir,
+    registry,
     runtime,
     cycle,
     status,
@@ -481,11 +490,21 @@ function semanticSceneOwnershipPlan(
     ownerId?: string;
     role?: string;
     editability?: 'independent' | 'shared-owner' | 'continuous-field' | 'temporary';
+    subjectKind?: 'single-component' | 'continuous-field';
   }>,
   shared: Array<{ ownerId: string; semanticIds: string[]; rationale?: string }> = []
 ) {
   return {
     plan_id: planId,
+    objects: units.map(entry => {
+      const item = typeof entry === 'string' ? { semanticId: entry } : entry;
+      return {
+        object_id: item.semanticId,
+        subject_kind: item.subjectKind ?? (item.editability === 'continuous-field' ? 'continuous-field' : 'single-component'),
+        kind: 'single-part',
+        component_semantic_ids: [item.semanticId],
+      };
+    }),
     units: units.map(entry => {
       const item = typeof entry === 'string' ? { semanticId: entry } : entry;
       return {
@@ -506,15 +525,51 @@ function semanticSceneOwnershipPlan(
   };
 }
 
+async function establishBlurOwner(f: ReturnType<typeof fixture>) {
+  const prepared = await body(await f.cycle.handler({ next_pass: {
+    request_key: 'blur-owner-setup', problem_id: 'blur-owner-setup', document_id: 42,
+    goal: 'Establish an independently editable surface before optical treatment.',
+    stage: 'GLOBAL_BLOCK_IN', scale: 'global', region: 'whole-canvas',
+    scene_geometry_model: sceneGeometryModel('coherent_3d'),
+    scene_camera_imaging_model: sceneCameraModel(),
+    scene_ownership_plan: semanticSceneOwnershipPlan('blur-scene-owners', [
+      { semanticId: 'blur-surface', editability: 'continuous-field', subjectKind: 'continuous-field' },
+    ]),
+    construction_role: 'continuous-field', material_role: 'background surface',
+    visual_intent: 'continuous-field', impact_class: 'construct',
+    layer_separation_check: semanticLayerSeparation('new-object', 'moderate', true),
+    logical_layer: semanticLogicalLayer('blur-surface', 'create-new', { layerName: 'Blur Surface' }),
+    actions: [
+      { id: 'blur-owner-layer', tool: 'photoshop_create_layer', args: { name: 'Blur Surface' } },
+      { id: 'blur-owner-gradient', tool: 'photoshop_paint_color_gradient', method_id: 'continuous-color-field', args: {
+        layer_id: '$steps.blur-owner-layer.details.layerId', from: { x: 0, y: 0 }, to: { x: 400, y: 300 },
+        stops: [{ position: 0, red: 70, green: 80, blue: 90 }, { position: 1, red: 110, green: 120, blue: 130 }],
+      } },
+    ],
+  } }));
+  expect(prepared.preflight_rejection).toBeUndefined();
+  if (prepared.job_id) await vi.waitFor(() => expect(f.runtime.pollJob(String(prepared.job_id)).state).toBe('completed'));
+  return {
+    previous_operation_id: 'blur-owner-setup',
+    previous_observation: { observed: 'The independent surface and camera basis are retained.', target: 'resolved' },
+    imaging_preflight: {
+      scene_camera_model_id: 'compact-contract-camera', scene_camera_revision: 1,
+      effect_kind: 'global-softness', motivation: 'Controlled softness on the known background surface.',
+      scope: 'global', revalidate_edge_detail: true,
+      owner_expectations: [{ owner_id: 'blur-surface', depth_role: 'mid', expected_focus_role: 'moderately_soft' }],
+    },
+  };
+}
+
 function proseFreeSharedSceneOwnershipPlan(planId: string) {
   return {
     plan_id: planId,
     units: [
-      { semantic_id: 'left-house', owner_id: 'village', role: 'Left distant house', editability: 'shared-owner' },
-      { semantic_id: 'right-house', owner_id: 'village', role: 'Right distant house', editability: 'shared-owner' },
+      { semantic_id: 'left-supportedStructure', owner_id: 'village', role: 'Left distant supportedStructure', editability: 'shared-owner' },
+      { semantic_id: 'right-supportedStructure', owner_id: 'village', role: 'Right distant supportedStructure', editability: 'shared-owner' },
     ],
     shared_owner_justifications: [
-      { owner_id: 'village', semantic_ids: ['left-house', 'right-house'] },
+      { owner_id: 'village', semantic_ids: ['left-supportedStructure', 'right-supportedStructure'] },
     ],
   };
 }
@@ -524,8 +579,8 @@ describe('scene ownership normalization', () => {
     const { normalizeSceneOwnershipPlan } = await import('../src/core/scene-ownership-plan.js');
     const normalized = normalizeSceneOwnershipPlan(proseFreeSharedSceneOwnershipPlan('prose-free-shared-scene'));
     expect(normalized.units).toEqual(expect.arrayContaining([
-      expect.objectContaining({ semantic_id: 'left-house', owner_id: 'village', editability: 'shared-owner' }),
-      expect.objectContaining({ semantic_id: 'right-house', owner_id: 'village', editability: 'shared-owner' }),
+      expect.objectContaining({ semantic_id: 'left-supportedStructure', owner_id: 'village', editability: 'shared-owner' }),
+      expect.objectContaining({ semantic_id: 'right-supportedStructure', owner_id: 'village', editability: 'shared-owner' }),
     ]));
     expect(normalized.units[0]).not.toHaveProperty('rationale');
     expect(normalized.shared_owner_justifications[0]).not.toHaveProperty('rationale');
@@ -536,7 +591,7 @@ describe('scene ownership normalization', () => {
   });
 });
 
-function materialBrushPreflight(options: { filtered?: boolean; ambiguous?: boolean; probeStatus?: 'pass' | 'cached' | 'not-needed'; candidateDynamics?: boolean } = {}) {
+function materialBrushPreflight(options: { filtered?: boolean; ambiguous?: boolean; scaleSeparated?: boolean; probeStatus?: 'pass' | 'cached' | 'not-needed'; candidateDynamics?: boolean } = {}) {
   const settings = {
     size: 80, hardness: 65, roundness: 100, opacity: 75, flow: 55, spacing: 12,
     use_pressure_size: true, use_pressure_opacity: false, airbrush: false,
@@ -584,6 +639,7 @@ function materialBrushPreflight(options: { filtered?: boolean; ambiguous?: boole
       role_id: 'fur-breakup-alt',
       preferred_preset: 'Fur Bristle Alt',
       alternative_presets: [],
+      ...(options.scaleSeparated ? { working_scale: 'detail' } : {}),
     });
   }
   return {
@@ -623,7 +679,8 @@ async function body(result: Awaited<ReturnType<ToolDefinition['handler']>>) {
 async function createHotLoopOwner(
   f: ReturnType<typeof fixture>,
   requestKey: string,
-  ownerId = 'hot-loop-owner'
+  ownerId = 'hot-loop-owner',
+  artisticCommentary?: string
 ) {
   await body(await f.setArtRun.handler({
     document_id: 42,
@@ -637,6 +694,7 @@ async function createHotLoopOwner(
       problem_id: `${requestKey}-problem`,
       document_id: 42,
       goal: 'Create one stable semantic owner for hot-loop compiler integration coverage.',
+      ...(artisticCommentary ? { artistic_commentary: artisticCommentary } : {}),
       stage: 'SHAPE',
       scale: 'global',
       ...structuredMassContract('stable painted structural mass'),
@@ -667,7 +725,263 @@ async function closeHotLoopOwner(f: ReturnType<typeof fixture>, operationId: str
   return closed;
 }
 
+function physicalStackObservation() {
+  return {
+    status: 'pass', observed: true,
+    criteria: Object.fromEntries([
+      'depth_order', 'occlusion_integrity', 'opaque_mass_coverage', 'transparency_intent', 'layer_stack_alignment',
+    ].map(key => [key, { status: 'resolved', note: key + ' is coherent on the delivered fixture whole frame.' }])),
+  };
+}
+
 describe('public compact Guard contract regressions', () => {
+  it.each([true, false])('localizes frame narration with initial commentary=%s and no additional painting or review', async initialCommentary => {
+    const f = fixture({ stickyAfter: true });
+    vi.spyOn(f.runtime.store, 'presentationContext').mockReturnValue({ language: 'ru', commentary_mode: 'artistic', commentary_detail: 'detailed' } as any);
+    const narration = 'Хочу построить основную массу, сохранив место для дальнейшего моделирования объёма.';
+    const operationId = 'localized-owner';
+    const pending = await createHotLoopOwner(f, operationId, 'hot-loop-owner', initialCommentary ? narration : undefined);
+    const counts = f.counts();
+    if (initialCommentary) expect(pending.commentary_notice).toBeUndefined();
+    else expect(pending.commentary_notice).toMatchObject({ code: 'commentary_language_mismatch', expected_language: 'ru' });
+    const closed = await body(await f.cycle.handler({ previous_operation_id: operationId,
+      previous_observation: { observed: 'Масса появилась, но её объём пока не проработан.', target: 'unresolved',
+        ...(!initialCommentary ? { artistic_commentary: narration } : {}) } }));
+    expect(closed.preflight_rejection).toBeUndefined();
+    const record = f.runtime.store.read(operationId)!;
+    expect(record.summary).toBe('Create one stable semantic owner for hot-loop compiler integration coverage.');
+    expect(record.args.expected_visual_delta).toBe(record.summary);
+    const text = readFileSync(record.preview.commentary_path, 'utf8');
+    expect(text.split('\n')[0]).toBe(narration);
+    expect(text).toContain('Масса появилась, но её объём пока не проработан.');
+    expect(f.counts()).toEqual(counts);
+  });
+  it.each(['sync', 'async'] as const)('delivers bounded strategy history through combined closure and %s execution', async dispatchMode => {
+    const f = fixture({ stickyAfter: true });
+    await createHotLoopOwner(f, 'history-owner-baseline');
+    await closeHotLoopOwner(f, 'history-owner-baseline');
+    expect(f.runtime.store.compactPassContext(42).logical_layer_owners.find(owner => owner.hypothesis_id === 'hot-loop-owner')?.geometry_binding).toBeDefined();
+    const action = regionAction('history-owner-model');
+    action.args.regions[0].layer_id = 9;
+    const pass = {
+      document_id: 42, problem_id: 'history-owner-problem', stage: 'SHAPE', scale: 'medium', region: 'subject',
+      ...structuredMassContract('stable painted structural mass'),
+      layer_separation_check: semanticLayerSeparation('continuation', 'low', false),
+      logical_layer: semanticLogicalLayer('hot-loop-owner', 'continue-logical-layer', { layerId: 9 }),
+      actions: [action],
+    };
+    const pending = await body(await f.cycle.handler({ next_pass: {
+      ...pass, request_key: 'history-owner-no-effect', goal: 'Model the subject with a bounded tonal correction.',
+    } }));
+    expect(pending.preflight_rejection).toBeUndefined();
+    expect(pending.compiler_normalizations).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'geometry_binding_inherited' }),
+    ]));
+    expect(f.runtime.store.read('history-owner-no-effect')?.args.logical_layer.geometry_binding).toMatchObject({
+      owner_id: 'hot-loop-owner', scene_geometry_model_id: 'compact-contract-scene', scene_geometry_revision: 1,
+    });
+    const recoverySpy = vi.spyOn(f.runtime.store, 'artisticRecoveryForProblem');
+    const before = f.counts();
+    let result = await f.runtime.cycle({
+      previous_operation_id: 'history-owner-no-effect',
+      previous_observation: {
+        observed: 'The frame did not change; the subject remains flat and the tonal modeling problem is unresolved.', target: 'unresolved',
+      },
+      next_pass: {
+        ...pass, request_key: 'history-owner-next', goal: 'Retry one bounded tonal correction after confirmed no effect.',
+      },
+    }, undefined, { dispatchMode });
+    if (dispatchMode === 'async') {
+      expect(result.job_id).toBeTruthy();
+      for (let index = 0; index < 100; index++) {
+        const job = f.runtime.pollJob(String(result.job_id));
+        if (job.state === 'completed') {
+          const calls = recoverySpy.mock.calls.length;
+          const secondPoll = f.runtime.pollJob(String(result.job_id));
+          expect(recoverySpy.mock.calls).toHaveLength(calls);
+          result = secondPoll.result as Record<string, any>;
+          break;
+        }
+        expect(['starting', 'running']).toContain(job.state);
+        await new Promise(resolve => setTimeout(resolve, 5));
+      }
+    }
+    expect(result.preflight_rejection).toBeUndefined();
+    expect(result.closed_previous).toMatchObject({ closed: true, operation_id: 'history-owner-no-effect' });
+    expect(result.continuation_recovery).toMatchObject({
+      problem_id: 'history-owner-problem', attempt_count: 1,
+      strategy_feedback: { failed: { families: expect.any(Array) }, required_change: 'one_bounded_retry' },
+    });
+    expect(recoverySpy.mock.calls.some(call => call[2]?.id === 'history-owner-next'
+      && call[4] && call[3] === call[4].records)).toBe(true);
+    expect(f.counts().regionCalls - before.regionCalls).toBe(1);
+    expect(f.counts().previewCalls - before.previewCalls).toBe(1);
+  });
+
+  it.each([
+    { mode: 'continue-logical-layer', assessment: undefined },
+    { mode: 'adjust', assessment: undefined },
+    { mode: 'continue-logical-layer', assessment: 'low' },
+    { mode: 'adjust', assessment: 'low' },
+  ] as const)('inherits omitted owner hypothesis and rollback value before parsing: $mode/$assessment', async ({ mode, assessment }) => {
+    const f = fixture();
+    await createHotLoopOwner(f, 'owner-facts-baseline');
+    await closeHotLoopOwner(f, 'owner-facts-baseline');
+    const owner = f.runtime.store.compactPassContext(42).logical_layer_owners.find(row => row.hypothesis_id === 'hot-loop-owner');
+    const action = regionAction('owner-facts-refine');
+    action.args.regions[0].layer_id = 9;
+    const logicalLayer = semanticLogicalLayer('hot-loop-owner', mode, { layerId: 9 });
+    delete logicalLayer.hypothesis;
+    delete logicalLayer.rollback_value;
+    const separation = semanticLayerSeparation('continuation', 'low', false);
+    const before = f.counts();
+    const result = await body(await f.cycle.handler({ next_pass: {
+      request_key: 'owner-facts-continue', document_id: 42, problem_id: 'owner-facts-refine',
+      goal: 'Model the known owner without repeating its saved description and rollback value.',
+      stage: 'SHAPE', scale: 'medium', region: 'subject', ...structuredMassContract('stable painted structural mass'),
+      ...(assessment === undefined ? {} : { layer_separation_check: separation }),
+      logical_layer: logicalLayer, actions: [action],
+    } }));
+    expect(result.preflight_rejection).toBeUndefined();
+    // Successful-cycle timing is omitted from the compact public response;
+    // the journal retains the complete diagnostic counters.
+    expect(f.runtime.store.read('owner-facts-continue')?.latency?.auto_repair_count).toBe(0);
+    expect(f.runtime.store.read('owner-facts-continue').args.logical_layer).toMatchObject({
+      hypothesis: owner.hypothesis, rollback_value: assessment ?? owner.rollback_value,
+    });
+    if (assessment === undefined) {
+      expect(result.compiler_normalizations).toEqual(expect.arrayContaining([
+        expect.objectContaining({ code: 'layer_separation_inherited' }),
+      ]));
+    }
+    expect(f.counts().regionCalls - before.regionCalls).toBe(1);
+    expect(f.counts().previewCalls - before.previewCalls).toBe(1);
+  });
+
+  it('preserves an explicit owner reassessment instead of overwriting it with inherited facts', async () => {
+    const f = fixture();
+    await createHotLoopOwner(f, 'owner-reassessment-baseline');
+    await closeHotLoopOwner(f, 'owner-reassessment-baseline');
+    const action = regionAction('owner-reassessment-refine');
+    action.args.regions[0].layer_id = 9;
+    const logicalLayer = semanticLogicalLayer('hot-loop-owner', 'adjust', { layerId: 9, rollbackValue: 'high' });
+    logicalLayer.hypothesis = 'Model the same opaque subject with revised tonal relationships.';
+    for (const change of [{ ...logicalLayer }, { ...logicalLayer, rollback_value: 'low', construction_change: true }]) {
+      const refused = await body(await f.cycle.handler({ next_pass: {
+        request_key: 'owner-reassessment-missing-check', document_id: 42, problem_id: 'owner-reassessment-refine',
+        goal: logicalLayer.hypothesis, stage: 'SHAPE', scale: 'medium', region: 'subject',
+        ...structuredMassContract('stable painted structural mass'), logical_layer: change, actions: [action],
+      } }));
+      expect(refused.preflight_rejection).toBeDefined();
+      expect(f.counts().regionCalls).toBe(1); // Only the baseline owner was painted.
+    }
+    const result = await body(await f.cycle.handler({ next_pass: {
+      request_key: 'owner-reassessment', document_id: 42, problem_id: 'owner-reassessment-refine',
+      goal: logicalLayer.hypothesis, stage: 'SHAPE', scale: 'medium', region: 'subject',
+      ...structuredMassContract('stable painted structural mass'),
+      layer_separation_check: semanticLayerSeparation('continuation', 'high', false),
+      logical_layer: logicalLayer, actions: [action],
+    } }));
+    expect(result.preflight_rejection).toBeUndefined();
+    expect(f.runtime.store.read('owner-reassessment').args.logical_layer).toMatchObject({
+      hypothesis: logicalLayer.hypothesis, rollback_value: 'high',
+    });
+  });
+
+  it.each([
+    { mode: 'continue-logical-layer', suppliedId: undefined, multiple: false, ambiguous: false, accepted: true },
+    { mode: 'adjust', suppliedId: undefined, multiple: false, ambiguous: false, accepted: true },
+    { mode: 'continue-logical-layer', suppliedId: undefined, multiple: true, ambiguous: false, accepted: true },
+    { mode: 'continue-logical-layer', suppliedId: 77, multiple: false, ambiguous: false, accepted: false },
+    { mode: 'continue-logical-layer', suppliedId: undefined, multiple: true, ambiguous: true, accepted: false },
+  ] as const)('inherits only a unique durable owner target: $mode/$suppliedId/$multiple/$ambiguous', async ({ mode, suppliedId, multiple, ambiguous, accepted }) => {
+    const f = fixture();
+    await createHotLoopOwner(f, 'owner-target-baseline');
+    await closeHotLoopOwner(f, 'owner-target-baseline');
+    if (multiple) {
+      const context = f.runtime.store.compactPassContext.bind(f.runtime.store);
+      vi.spyOn(f.runtime.store, 'compactPassContext').mockImplementation((...args) => {
+        const current = context(...args);
+        return { ...current, logical_layer_owners: current.logical_layer_owners.map(owner => ({
+          ...owner, ...(ambiguous ? { layer_id: undefined } : {}), physical_layer_ids: [9, 10],
+        })) };
+      });
+    }
+    const action = regionAction('owner-target-refine');
+    action.args.regions[0].layer_id = 9;
+    const before = f.counts();
+    const result = await body(await f.cycle.handler({ next_pass: {
+      request_key: 'owner-target-continue', document_id: 42, problem_id: 'owner-target-refine',
+      goal: 'Refine the known owner without repeating its physical layer binding.', stage: 'SHAPE', scale: 'medium',
+      region: 'subject', ...structuredMassContract('stable painted structural mass'),
+      layer_separation_check: semanticLayerSeparation('continuation', 'low', false),
+      logical_layer: semanticLogicalLayer('hot-loop-owner', mode, { ...(suppliedId ? { layerId: suppliedId } : {}) }),
+      actions: [action],
+    } }));
+    if (!accepted) {
+      expect(result.preflight_rejection).toMatchObject({ next_operation_dispatched: false });
+      expect(f.counts()).toEqual(before);
+      return;
+    }
+    expect(result.preflight_rejection).toBeUndefined();
+    expect(result.execution).toMatchObject({ phase: 'completed', failed: false });
+    expect(f.runtime.store.read('owner-target-continue')?.latency?.auto_repair_count).toBe(0);
+    expect(result.compiler_normalizations).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'semantic_owner_target_inherited' }),
+    ]));
+    const record = f.runtime.store.read('owner-target-continue');
+    expect(record.args.logical_layer).toMatchObject({ layer_id: 9, layer_name: 'Hot Loop Owner' });
+    expect(record.args.steps.find(step => step.tool === 'photoshop_paint_regions').args.regions[0].layer_id).toBe(9);
+    expect(f.counts().regionCalls - before.regionCalls).toBe(1);
+    expect(f.counts().previewCalls - before.previewCalls).toBe(1);
+  });
+
+  it('rejects an invalid physical-stack pass in combined closure+continuation before Photoshop dispatch', async () => {
+    const f = fixture();
+    await createHotLoopOwner(f, 'invalid-physical-owner');
+    const before = f.counts();
+    const check = physicalStackObservation();
+    check.criteria.occlusion_integrity.status = 'debt';
+    const region = regionAction('invalid-physical-model');
+    region.args.regions[0].layer_id = 9;
+    const result = await body(await f.cycle.handler({
+      previous_operation_id: 'invalid-physical-owner',
+      previous_observation: { observed: 'The subject still leaks the background through its opaque body.',
+        target: 'resolved', physical_stack_check: check },
+      next_pass: { request_key: 'invalid-physical-value', document_id: 42, goal: 'Develop the subject values.',
+        stage: 'VALUE', scale: 'medium', region: 'subject', ...structuredMassContract('painted subject values'),
+        layer_separation_check: semanticLayerSeparation('continuation', 'low', false),
+        logical_layer: semanticLogicalLayer('hot-loop-owner', 'continue-logical-layer', { layerId: 9 }),
+        actions: [region] },
+    }));
+    expect(result.preflight_rejection?.finalization_errors.join(' ')).toMatch(/cannot leave physical-stack debt/);
+    expect(f.counts()).toEqual(before);
+    expect(f.runtime.store.paintingState().documents['42'].physical_stack_check.status).toBe('pending');
+  });
+  it('records physical-stack review through the compact hot loop without Director or extra Photoshop calls', async () => {
+    const f = fixture();
+    await createHotLoopOwner(f, 'ordinary-physical-owner');
+    const callsBeforeClosure = f.counts();
+    const closed = await body(await f.cycle.handler({
+      previous_operation_id: 'ordinary-physical-owner',
+      previous_observation: {
+        observed: 'The opaque subject retains complete coverage and coherent depth above the background.',
+        target: 'resolved',
+        physical_stack_check: physicalStackObservation(),
+      },
+    }));
+    expect(closed.preflight_rejection).toBeUndefined();
+    expect(f.counts()).toEqual(callsBeforeClosure);
+    const state = f.runtime.store.paintingState().documents['42'];
+    expect(state.painting_profile).toBe('nontrivial_painting');
+    expect(state.art_director?.directive_id).toBeUndefined();
+    expect(state.physical_stack_check).toMatchObject({
+      status: 'pass', evidence_operation_id: 'ordinary-physical-owner', preview_sha256: state.current_frame.sha256,
+    });
+    expect(() => f.runtime.store.plannerGate(42, {
+      tool: 'photoshop_execute_visual_microplan', args: { document_id: 42, stage: 'VALUE' },
+    })).not.toThrow();
+  });
   it('lints a proposed next pass through status without dispatching Photoshop', async () => {
     const f = fixture();
     const before = f.counts();
@@ -813,10 +1127,10 @@ describe('public compact Guard contract regressions', () => {
       ...current,
       art_director: {
         directive_id: 'deep-local-directive',
-        current_task_id: 'T-house',
+        current_task_id: 'T-supportedStructure',
         status: 'active',
         tasks: [{
-          task_id: 'T-house',
+          task_id: 'T-supportedStructure',
           status: 'active',
           allowed_scales: ['medium'],
         }],
@@ -825,14 +1139,14 @@ describe('public compact Guard contract regressions', () => {
 
     const missingPlan = await body(await f.cycle.handler({
       next_pass: {
-        request_key: 'house-mass-without-plan',
-        problem_id: 'house-form',
+        request_key: 'supportedStructure-mass-without-plan',
+        problem_id: 'supportedStructure-form',
         document_id: 42,
-        goal: 'Construct the cottage as one broad but irregular architectural mass.',
+        goal: 'Construct the structureA as one broad but irregular architectural mass.',
         stage: 'GLOBAL_BLOCK_IN',
         scale: 'medium',
-        ...structuredMassContract('weathered cottage architecture'),
-        actions: [regionAction('house-irregular')],
+        ...structuredMassContract('weathered structureA architecture'),
+        actions: [regionAction('supportedStructure-irregular')],
       },
     }));
     expect(missingPlan.preflight_rejection).toBeUndefined();
@@ -915,11 +1229,17 @@ describe('public compact Guard contract regressions', () => {
           actions: [regionAction(`geometry-model-${applicability}-region`)],
         },
       }));
-      expect(accepted.preflight_rejection).toBeUndefined();
-      expect(accepted.execution).toMatchObject({ phase: 'completed', failed: false });
-      expect(acceptedFixture.runtime.store.compactPassContext(42).scene_geometry_model)
-        .toMatchObject({ applicability, source_operation_id: `geometry-model-${applicability}` });
-      expect(acceptedFixture.counts().regionCalls).toBe(1);
+      if (applicability === 'coherent_3d') {
+        expect(accepted.preflight_rejection).toBeUndefined();
+        expect(accepted.execution).toMatchObject({ phase: 'completed', failed: false });
+        expect(acceptedFixture.runtime.store.compactPassContext(42).scene_geometry_model)
+          .toMatchObject({ applicability, source_operation_id: `geometry-model-${applicability}` });
+        expect(acceptedFixture.counts().regionCalls).toBe(1);
+      } else {
+        expect(accepted.preflight_rejection?.error_codes).toContain('scene_geometry_opt_out_unauthorized');
+        expect(accepted.preflight_rejection?.next_operation_dispatched).toBe(false);
+        expect(acceptedFixture.counts().regionCalls).toBe(0);
+      }
     }
 
     const temporary = fixture({ sceneGeometry: false });
@@ -940,6 +1260,9 @@ describe('public compact Guard contract regressions', () => {
         stage: 'SHAPE',
         scale: 'global',
         ...structuredMassContract('temporary spatial hypothesis'),
+        scene_ownership_plan: semanticSceneOwnershipPlan('geometry-temporary-owners', [
+          { semanticId: 'geometry-temp-owner', editability: 'temporary' },
+        ]),
         layer_separation_check: semanticLayerSeparation('new-object', 'moderate', true),
         logical_layer: semanticLogicalLayer('geometry-temp-owner', 'temporary-hypothesis', {
           layerName: 'Geometry Temp',
@@ -1108,6 +1431,7 @@ describe('public compact Guard contract regressions', () => {
     const continued = await body(await f.cycle.handler({
       previous_operation_id: 'e18c-valid-create',
       previous_observation: {
+        physical_stack_check: physicalStackObservation(),
         observed: 'The bound owner is established against the accepted scene geometry revision.',
         target: 'resolved',
       },
@@ -1199,9 +1523,8 @@ describe('public compact Guard contract regressions', () => {
         ],
       },
     }));
-    expect(flatOwner.preflight_rejection).toBeUndefined();
-    expect(flatOwner.execution).toMatchObject({ phase: 'completed', failed: false });
-    expect(flat.runtime.store.semanticLayerOwners(42)[0]).not.toHaveProperty('geometry_binding');
+    expect(flatOwner.preflight_rejection?.error_codes).toContain('scene_geometry_opt_out_unauthorized');
+    expect(flat.runtime.store.semanticLayerOwners(42)).toHaveLength(0);
   });
 
   it('binds focus/depth treatment to the exact current camera model and accepted owner geometry', async () => {
@@ -1303,6 +1626,9 @@ describe('public compact Guard contract regressions', () => {
           material_role: 'camera post optical field',
           visual_intent: 'continuous-field',
           impact_class: 'transition',
+          scene_ownership_plan: semanticSceneOwnershipPlan('camera-post-owners', [
+            { semanticId: 'camera-post-owner', editability: 'continuous-field', subjectKind: 'continuous-field' },
+          ]),
           layer_separation_check: semanticLayerSeparation('new-plane', 'moderate', true),
           logical_layer: semanticLogicalLayer('camera-post-owner', 'create-new', {
             layerName: 'Camera Post', physicalRole: 'camera-post', opacityRole: 'effect-only',
@@ -1369,7 +1695,11 @@ describe('public compact Guard contract regressions', () => {
         goal: 'Increase local focal contrast only inside the authorized primary attention zone.',
         stage: 'FORM', scale: 'medium', region: 'hero',
         construction_role: 'continuous-field', material_role: 'local focal value field', visual_intent: 'continuous-field', impact_class: 'transition',
+        scene_ownership_plan: semanticSceneOwnershipPlan(`attention-${tag}-owners`, [
+          { semanticId: 'hero-field', ownerId: 'hero-owner', editability: 'continuous-field', subjectKind: 'continuous-field' },
+        ]),
         affected_qualities: ['local contrast', 'edge emphasis'],
+        causal_strategy_id: 'attention-volume', strategy_family: 'form-light', causal_escalation_level: 2,
         layer_separation_check: semanticLayerSeparation('new-plane', 'moderate', true),
         logical_layer: semanticLogicalLayer('hero-owner', 'create-new', { layerName: 'Hero Emphasis', ...(attentionBinding ? { attentionBinding } : {}) }),
         actions: [
@@ -1384,8 +1714,21 @@ describe('public compact Guard contract regressions', () => {
     };
 
     const missing = await run('missing');
-    expect(missing.result.preflight_rejection?.error_codes).toContain('attention_binding_required');
-    expect(missing.f.counts().gradientCalls).toBe(0);
+    expect(missing.result.preflight_rejection, JSON.stringify(missing.result.preflight_rejection?.error_codes)).toBeUndefined();
+    if (missing.result.job_id) {
+      for (let i = 0; i < 100; i += 1) {
+        const polled = missing.f.runtime.pollJob(String(missing.result.job_id)) as any;
+        if (['completed', 'failed', 'uncertain'].includes(String(polled.state))) break;
+        await new Promise(resolve => setTimeout(resolve, 5));
+      }
+    }
+    expect(missing.f.counts().gradientCalls).toBe(1);
+    const record = missing.f.runtime.store.read('perceptual-missing') as any;
+    expect(record.causal_escalation_level).toBe(2);
+    expect(record.causal_strategy_id).toBe('attention-volume');
+    expect(record.args.causal_escalation_level).toBeUndefined();
+    expect(record.args.strategy_family).toBeUndefined();
+    expect(record.args.logical_layer.attention_binding).toEqual({ hierarchy_revision: 1, zone_id: 'hero-zone', dimensions: ['contrast', 'edge'] });
 
     const wrongZone = await run('wrong-zone', { hierarchy_revision: 1, zone_id: 'support-zone', dimensions: ['contrast', 'edge'] });
     expect(wrongZone.result.preflight_rejection?.error_codes).toContain('attention_binding_zone_owner_mismatch');
@@ -1498,6 +1841,75 @@ describe('public compact Guard contract regressions', () => {
       owner_id: 'preflight-owner',
       source_operation_id: 'e18d-accepted',
     });
+  });
+
+  it('executes initial layer toning without scene geometry but retains exact review and declared construction gates', async () => {
+    const setup = async () => {
+      const f = fixture({ sceneGeometry: false });
+      await f.setArtRun.handler({ document_id: 42,
+        process_dir: 'processes/initial-tone-process/run-01', painting_profile: 'nontrivial_painting', commentary_mode: 'technical' });
+      return f;
+    };
+    const pass = {
+      request_key: 'initial-tone', problem_id: 'initial-tone', document_id: 42,
+      goal: 'Apply the initial neutral ground; this does not model objects or finish the scene.',
+      stage: 'GLOBAL_BLOCK_IN', scale: 'global',
+      scene_ownership_plan: semanticSceneOwnershipPlan('initial-tone-plan', ['ground']),
+      layer_separation_check: semanticLayerSeparation('other', 'moderate', true),
+      logical_layer: semanticLogicalLayer('ground', 'create-new', { layerName: 'Ground' }),
+      actions: [
+        { id: 'ground-layer', tool: 'photoshop_create_layer', args: { name: 'Ground' } },
+        { id: 'ground-fill', tool: 'photoshop_fill_layer', args: { red: 90, green: 83, blue: 70, layer_id: '$steps.ground-layer.details.layerId' } },
+      ],
+    };
+    const f = await setup();
+    const fill = vi.spyOn(f.registry.get('photoshop_fill_layer')!, 'handler');
+    const result = await body(await f.cycle.handler({ next_pass: pass }));
+    expect(result.preflight_rejection).toBeUndefined();
+    await vi.waitFor(() => expect(f.runtime.pollJob(String(result.job_id)).state).toBe('completed'));
+    expect(fill).toHaveBeenCalledOnce();
+    const record = f.runtime.store.read('initial-tone')!;
+    expect(record.visual).toBe(true);
+    expect(record.preview?.sha256).toBeTruthy();
+    const delivery = await createGuardTools(f.runtime)
+      .find(definition => definition.tool.name === 'photoshop_guard_review_image')!
+      .handler({ operation_id: 'initial-tone' });
+    expect(delivery.isError).not.toBe(true);
+    expect(delivery.content.some(item => item.type === 'image')).toBe(true);
+    expect(f.runtime.store.read('initial-tone')?.verdict).toBeUndefined();
+    expect(f.runtime.store.sceneGeometryModel(42)).toBeNull();
+
+    const declared = await setup();
+    const blocked = await body(await declared.cycle.handler({ next_pass: {
+      ...pass, logical_layer: { ...pass.logical_layer, construction_change: true },
+    } }));
+    expect(blocked.preflight_rejection?.error_codes).toContain('scene_geometry_model_required');
+    const wrongTarget = await setup();
+    const targeted = await body(await wrongTarget.cycle.handler({ next_pass: {
+      ...pass, actions: [pass.actions[0], { ...pass.actions[1], args: { ...pass.actions[1]!.args, layer_id: 7 } }],
+    } }));
+    expect(targeted.preflight_rejection?.error_codes).toContain('scene_geometry_model_required');
+  });
+
+  it('executes an explicitly uniform continuous field as fill without gradient preflight or substitution', async () => {
+    const f = fixture();
+    await f.setArtRun.handler({ document_id: 42,
+      process_dir: 'processes/uniform-field-process/run-01', painting_profile: 'nontrivial_painting', commentary_mode: 'technical' });
+    const fill = vi.spyOn(f.registry.get('photoshop_fill_layer')!, 'handler');
+    const gradient = vi.spyOn(f.registry.get('photoshop_paint_color_gradient')!, 'handler');
+    const result = await body(await f.cycle.handler({ next_pass: {
+      request_key: 'uniform-field-fill', document_id: 42, goal: 'Apply an explicitly uniform base tone.',
+      stage: 'GLOBAL_BLOCK_IN', scale: 'global', region: 'whole-canvas',
+      construction_role: 'continuous-field', material_role: 'uniform base tone',
+      visual_intent: 'continuous-field', impact_class: 'construct', preferred_method_id: 'continuous-color-field',
+      actions: [{ tool: 'photoshop_fill_layer', method_id: 'continuous-color-field',
+        args: { document_id: 42, layer_id: 7, red: 126, green: 146, blue: 146 } }],
+    } }));
+    expect(result.preflight_rejection).toBeUndefined();
+    if (result.job_id) await vi.waitFor(() => expect(f.runtime.pollJob(String(result.job_id)).state).toBe('completed'));
+    expect(fill).toHaveBeenCalledOnce();
+    expect(gradient).not.toHaveBeenCalled();
+    expect(f.runtime.store.read('uniform-field-fill').preview?.sha256).toBeTruthy();
   });
 
   it('requires scene geometry for committed spatial owners even when the paint mechanism is not structured-mass', async () => {
@@ -1656,48 +2068,80 @@ describe('public compact Guard contract regressions', () => {
     expect(counts().strokeCalls).toBe(0);
   });
 
-  it('normalizes only a unique semantics-preserving artistic classification without changing the Photoshop tool', async () => {
-    const { cycle, runtime, counts } = fixture();
-    runtime.store.setArtRunState({
-      document_id: 42,
-      process_dir: 'processes/unique-classification-normalization-process/run-01',
-      painting_profile: 'nontrivial_painting',
-      commentary_mode: 'technical',
-    });
-
-    const result = await body(await cycle.handler({
-      next_pass: {
-        request_key: 'normalize-structural-line',
-        problem_id: 'structural-line',
-        document_id: 42,
-        goal: 'Reinforce one structural line stroke without changing its target or risk.',
-        stage: 'FORM',
-        scale: 'medium',
-        region: 'subject',
-        action_class: 'REFINE',
-        visual_intent: 'tonal-contrast',
-        impact_class: 'construct',
-        actions: [strokeAction('structural-line-stroke', 7, 'PENCIL')],
-      },
-    }));
-
-    expect(result.preflight_rejection).toBeUndefined();
-    expect(result.compiler_normalizations).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        code: 'artistic_classification_normalized',
-        message: expect.stringContaining('visual_intent=line, impact_class=construct'),
-      }),
-    ]));
-    expect(result.execution).toMatchObject({ phase: 'completed', failed: false });
-    expect(counts().strokeCalls).toBe(1);
+  it('derives only missing classification from executable commands for direct and bundled passes in either language', async () => {
+    for (const goal of ['Improve the chosen area.', 'Исправить выбранный участок.']) {
+      for (const bundled of [false, true]) {
+        const f = fixture();
+        await f.setArtRun.handler({ document_id: 42,
+          process_dir: 'processes/unique-classification-normalization-process/run-01',
+          painting_profile: 'simple_graphic', commentary_mode: 'technical' });
+        const blur = vi.fn(async () => ({ content: [{ type: 'text' as const, text: JSON.stringify({ ok: true }) }] }));
+        f.registry.register('photoshop_apply_gaussian_blur', { ...realDefinition('photoshop_apply_gaussian_blur'), handler: blur });
+        const setup = bundled ? undefined : await establishBlurOwner(f);
+        const result = await body(await f.cycle.handler({
+          ...(setup ? { previous_operation_id: setup.previous_operation_id, previous_observation: setup.previous_observation } : {}),
+          next_pass: {
+          request_key: 'derive-missing-classification', problem_id: 'classification', document_id: 42,
+          goal, stage: bundled ? 'SHAPE' : 'FORM', scale: 'small', region: 'subject', action_class: 'REFINE',
+          region_bounds: { left: 0, top: 0, right: 400, bottom: 300 },
+          visual_intent: bundled ? 'mass' : 'soft-transition',
+          ...(setup ? { imaging_preflight: setup.imaging_preflight } : {}),
+          actions: bundled ? [
+            { id: 'select-paint', tool: 'photoshop_select_layer_by_name', args: { name: 'Paint' } }, regionAction(),
+          ] : [{ id: 'blur', tool: 'photoshop_apply_gaussian_blur', args: { radius: 2, layer_id: 9 } }],
+        } }));
+        expect(result.preflight_rejection).toBeUndefined();
+        expect(result.compiler_normalizations).toEqual(expect.arrayContaining([
+          expect.objectContaining({ code: 'artistic_classification_normalized', message: expect.stringContaining('goal prose is not used') }),
+        ]));
+        expect(result.execution).toMatchObject({ phase: 'completed', failed: false });
+        expect(blur).toHaveBeenCalledTimes(bundled ? 0 : 1);
+        expect(f.counts().regionCalls).toBe(bundled ? 1 : 0);
+        expect(f.counts().strokeCalls).toBe(0);
+      }
+    }
+    for (const hints of [{ impact_class: 'transition' }, { preferred_method_id: 'gaussian-blur' }, { visual_intent: 'line' }]) {
+      const bundled = 'visual_intent' in hints;
+      const f = fixture({ establishedLegacyScene: true });
+      await f.setArtRun.handler({ document_id: 42,
+        process_dir: 'processes/optional-classification-process/run-01',
+        painting_profile: 'simple_graphic', commentary_mode: 'technical' });
+      const blur = vi.fn(async () => ({ content: [{ type: 'text' as const, text: JSON.stringify({ ok: true }) }] }));
+      f.registry.register('photoshop_apply_gaussian_blur', { ...realDefinition('photoshop_apply_gaussian_blur'), handler: blur });
+      const setup = bundled ? undefined : await establishBlurOwner(f);
+      const result = await body(await f.cycle.handler({
+        ...(setup ? { previous_operation_id: setup.previous_operation_id, previous_observation: setup.previous_observation } : {}),
+        next_pass: {
+        request_key: 'optional-classification', problem_id: 'optional-classification', document_id: 42,
+        goal: 'Исполнить выбранное действие.', stage: 'FORM', scale: 'small', region: 'subject', action_class: 'REFINE',
+        region_bounds: { left: 0, top: 0, right: 400, bottom: 300 }, ...hints,
+        ...(setup ? { imaging_preflight: setup.imaging_preflight } : {}),
+        actions: bundled ? [strokeAction('partial-line', 7, 'PENCIL')]
+          : [{ id: 'blur', tool: 'photoshop_apply_gaussian_blur', args: { radius: 2, layer_id: 9 } }],
+      } }));
+      expect(result.preflight_rejection).toBeUndefined();
+      expect(result.execution).toMatchObject({ phase: 'completed', failed: false });
+      expect(result.compiler_normalizations ?? []).not.toEqual(expect.arrayContaining([
+        expect.objectContaining({ code: 'artistic_classification_normalized' }),
+      ]));
+      expect(blur).toHaveBeenCalledTimes(bundled ? 0 : 1);
+      expect(f.counts().strokeCalls).toBe(bundled ? 1 : 0);
+    }
   });
 
   it('keeps ambiguous or destructive classification mismatches fail-closed before mutation', async () => {
     for (const row of [
-      { key: 'ambiguous', goal: 'Improve the subject.', action_class: 'REFINE' },
-      { key: 'destructive', goal: 'Replace the structural line stroke.', action_class: 'REPLACE' },
+      { key: 'ambiguous', goal: 'Improve the subject.', action_class: 'REFINE', visual_intent: 'tonal-contrast', impact_class: 'construct', blur: false, avoid: [] },
+      { key: 'destructive', goal: 'Replace the structural line stroke.', action_class: 'REPLACE', visual_intent: 'tonal-contrast', impact_class: 'construct', blur: false, avoid: [] },
+      { key: 'partial-incompatible', goal: 'Провести выбранный штрих.', action_class: 'REFINE', visual_intent: 'line', impact_class: undefined, blur: true, avoid: [] },
+      { key: 'partial-destructive', goal: 'Исправить переход.', action_class: 'REPLACE', visual_intent: 'soft-transition', impact_class: undefined, blur: true, avoid: [] },
+      { key: 'partial-excluded', goal: 'Исправить переход.', action_class: 'REFINE', visual_intent: 'soft-transition', impact_class: undefined, blur: true, avoid: ['gaussian-blur'] },
+      { key: 'exclusion-only', goal: 'Исправить переход.', action_class: 'REFINE', visual_intent: undefined, impact_class: undefined, blur: true, avoid: ['gaussian-blur'] },
+      { key: 'excluded-step', goal: 'Провести штрих.', action_class: 'REFINE', visual_intent: undefined, impact_class: undefined, blur: false, avoid: ['pencil-line'] },
     ]) {
-      const { cycle, runtime, counts } = fixture();
+      const { cycle, runtime, registry, counts } = fixture();
+      const blur = vi.fn(async () => ({ content: [{ type: 'text' as const, text: JSON.stringify({ ok: true }) }] }));
+      registry.register('photoshop_apply_gaussian_blur', { ...realDefinition('photoshop_apply_gaussian_blur'), handler: blur });
       runtime.store.setArtRunState({
         document_id: 42,
         process_dir: `processes/${row.key}-classification-process/run-01`,
@@ -1714,16 +2158,22 @@ describe('public compact Guard contract regressions', () => {
           scale: 'medium',
           region: 'subject',
           action_class: row.action_class,
-          visual_intent: 'tonal-contrast',
-          impact_class: 'construct',
-          actions: [strokeAction(`${row.key}-stroke`, 7, 'PENCIL')],
+          visual_intent: row.visual_intent,
+          impact_class: row.impact_class,
+          avoid_method_ids: row.avoid,
+          actions: row.blur
+            ? [{ id: 'blur', tool: 'photoshop_apply_gaussian_blur', args: { radius: 2 } }]
+            : [{ ...strokeAction(`${row.key}-stroke`, 7, 'PENCIL'), ...(row.key === 'excluded-step' ? { method_id: 'pencil-line' } : {}) }],
         },
       }));
-      expect(result.preflight_rejection?.error_codes).toContain('artistic_method_unavailable');
+      expect(result.preflight_rejection?.error_codes).not.toContain('artistic_method_contract_incomplete');
+      if (row.key === 'partial-destructive') expect(result.preflight_rejection).toBeDefined();
+      else expect(result.preflight_rejection?.error_codes).toContain('artistic_method_unavailable');
       expect(result.compiler_normalizations ?? []).not.toEqual(expect.arrayContaining([
         expect.objectContaining({ code: 'artistic_classification_normalized' }),
       ]));
       expect(counts().strokeCalls).toBe(0);
+      expect(blur).not.toHaveBeenCalled();
     }
   });
 
@@ -1784,6 +2234,119 @@ describe('public compact Guard contract regressions', () => {
     expect(f.counts().regionCalls).toBe(0);
   });
 
+  it.each(['Refine the transition.', 'Смягчить переход без смены действий.'])(
+    'derives a unique executed method despite stale descriptive metadata: %s', async goal => {
+      const f = fixture();
+      await f.setArtRun.handler({ document_id: 42,
+        process_dir: 'processes/derived-execution-method-process/run-01',
+        painting_profile: 'simple_graphic', commentary_mode: 'technical' });
+      const blur = vi.fn(async () => ({ content: [{ type: 'text' as const, text: JSON.stringify({ ok: true }) }] }));
+      f.registry.register('photoshop_apply_gaussian_blur', { ...realDefinition('photoshop_apply_gaussian_blur'), handler: blur });
+      const setup = await establishBlurOwner(f);
+      const action = { id: 'transition-blur', tool: 'photoshop_apply_gaussian_blur', args: { radius: 2, layer_id: 9 } };
+      const result = await body(await f.cycle.handler({
+        previous_operation_id: setup.previous_operation_id,
+        previous_observation: setup.previous_observation,
+        next_pass: {
+        request_key: 'derive-blur-method', problem_id: 'transition-method', document_id: 42,
+        goal, stage: 'FORM', scale: 'small', region: 'subject',
+        region_bounds: { left: 0, top: 0, right: 400, bottom: 300 },
+        visual_intent: 'soft-transition', impact_class: 'transition', preferred_method_id: 'smudge-shape',
+        imaging_preflight: setup.imaging_preflight,
+        actions: [action],
+      } }));
+      expect(result.preflight_rejection).toBeUndefined();
+      expect(result.compiler_normalizations).toEqual(expect.arrayContaining([
+        expect.objectContaining({ code: 'artistic_method_derived_from_execution' }),
+      ]));
+      expect(result.execution).toMatchObject({ phase: 'completed', failed: false });
+      expect(blur).toHaveBeenCalledOnce();
+      expect(f.counts().strokeCalls).toBe(0);
+      expect(f.runtime.store.read('derive-blur-method')).toMatchObject({
+        tool: action.tool, args: { ...action.args, document_id: 42 },
+      });
+    }
+  );
+
+  it.each([
+    { preferredMethod: 'soft-brush-build', actionClass: 'REFINE', avoid: [], accepted: true },
+    { preferredMethod: 'smudge-shape', actionClass: 'REFINE', avoid: [], accepted: true },
+    { preferredMethod: 'smudge-shape', actionClass: 'REPLACE', avoid: [], accepted: false },
+    { preferredMethod: 'smudge-shape', actionClass: 'REFINE', avoid: ['soft-brush-build'], accepted: false },
+  ])('derives a bundled dab method without changing execution: $preferredMethod/$actionClass/$accepted', async ({ preferredMethod, actionClass, avoid, accepted }) => {
+    const f = fixture({ brushInventory: true, establishedLegacyScene: true });
+    const preflight = materialBrushPreflight();
+    preflight.roles[0]!.visual_intents = ['soft-transition'];
+    preflight.roles[0]!.working_scale = 'small';
+    preflight.roles[0]!.alternative_presets = [];
+    preflight.roles[0]!.effective_settings.hardness = 0;
+    preflight.roles[0]!.effective_settings.flow = 10;
+    await f.setArtRun.handler({ document_id: 42,
+      process_dir: 'processes/derived-bundled-method-process/run-01',
+      painting_profile: 'nontrivial_painting', commentary_mode: 'technical', brush_preflight: preflight });
+    const paint = vi.fn(async () => ({ content: [{ type: 'text' as const, text: JSON.stringify({ ok: true }) }] }));
+    f.registry.register('photoshop_paint_dabs', { ...realDefinition('photoshop_paint_dabs'), handler: paint });
+    const args = { layer_id: 7, dabs: [{ x: 50, y: 50, size: 12, color: { red: 120, green: 90, blue: 60 } }] };
+    const result = await body(await f.cycle.handler({ next_pass: {
+      request_key: 'derive-bundled-method', problem_id: 'soft-transition', document_id: 42,
+      goal: 'Develop this bounded transition.', stage: 'FORM', scale: 'small', region: 'subject',
+      region_bounds: { left: 20, top: 20, right: 100, bottom: 100 },
+      visual_intent: 'soft-transition', impact_class: 'transition', preferred_method_id: preferredMethod,
+      action_class: actionClass, avoid_method_ids: avoid, material_role: 'fur',
+      actions: [
+        { id: 'prepare-soft-brush', tool: 'photoshop_set_brush', args: { size: 12, hardness: 0, flow: 10 } },
+        { id: 'soft-dab', tool: 'photoshop_paint_dabs', method_id: 'soft-brush-build', args },
+      ],
+    } }));
+    if (!accepted) {
+      expect(result.preflight_rejection?.error_codes).toContain('artistic_method_execution_mismatch');
+      expect(paint).not.toHaveBeenCalled();
+      return;
+    }
+    expect(result.preflight_rejection).toBeUndefined();
+    expect(result.execution).toMatchObject({ phase: 'completed', failed: false });
+    expect(paint).toHaveBeenCalledOnce();
+    expect(f.counts().strokeCalls).toBe(0);
+    expect(f.runtime.store.read('derive-bundled-method')?.args).toMatchObject({
+      method_class: 'paint', steps: expect.arrayContaining([
+        expect.objectContaining({ tool: 'photoshop_paint_dabs', method_id: 'soft-brush-build', args: expect.objectContaining(args) }),
+      ]),
+    });
+  });
+
+  it.each([undefined, 'installed-brush-preset'])('executes a brush-built continuous field without forcing a gradient: %s', async preferredMethod => {
+    const f = fixture({ brushInventory: true });
+    const preflight = materialBrushPreflight();
+    preflight.roles[0]!.role_id = 'area-variation';
+    preflight.roles[0]!.visual_intents = ['continuous-field'];
+    preflight.roles[0]!.material_roles = ['atmosphere'];
+    preflight.roles[0]!.working_scale = 'broad-to-small';
+    await f.setArtRun.handler({
+      document_id: 42, process_dir: 'processes/brush-field-choice-process/run-01',
+      painting_profile: 'nontrivial_painting', commentary_mode: 'artistic', brush_preflight: preflight,
+    });
+    const action = { ...strokeAction('field-variation'), method_id: 'installed-brush-preset' };
+    const result = await body(await f.cycle.handler({ next_pass: {
+      request_key: 'brush-field-variation', document_id: 42,
+      goal: 'Develop broad spatial color/value variation while preserving the established large-area structure.',
+      stage: 'SHAPE', scale: 'global', region: 'background-area',
+      construction_role: 'continuous-field', visual_intent: 'continuous-field', impact_class: 'construct',
+      ...(preferredMethod ? { preferred_method_id: preferredMethod } : {}),
+      actions: [
+        { id: 'select-field-brush', tool: 'photoshop_select_brush_preset', args: { name: 'Fur Bristle' } },
+        action,
+      ],
+    } }));
+    expect(result.preflight_rejection).toBeUndefined();
+    expect(result.execution).toMatchObject({ phase: 'completed', failed: false });
+    expect(f.counts()).toMatchObject({ strokeCalls: 1, gradientCalls: 0, regionCalls: 0 });
+    const steps = f.runtime.store.read('brush-field-variation')?.args.steps;
+    expect(steps).toEqual(expect.arrayContaining([
+      expect.objectContaining({ tool: 'photoshop_paint_strokes', method_id: 'installed-brush-preset', args: expect.objectContaining(action.args) }),
+    ]));
+    expect(steps?.at(-1)?.tool).toBe('photoshop_get_preview');
+  });
+
   it('does not let a continuous field silently downgrade to region block-in', async () => {
     const f = fixture();
     await f.setArtRun.handler({
@@ -1813,7 +2376,7 @@ describe('public compact Guard contract regressions', () => {
     expect(f.counts().regionCalls).toBe(0);
   });
 
-  it('rejects an icon-like compound while preserving an irregular structured-mass block-in', async () => {
+  it('allows an early icon-like scaffold without confusing it with resolved representation, and preserves irregular structured-mass block-in', async () => {
     const f = fixture();
     await f.setArtRun.handler({
       document_id: 42,
@@ -1837,7 +2400,7 @@ describe('public compact Guard contract regressions', () => {
         layer_id: 7,
       },
     ];
-    const rejected = await body(await f.cycle.handler({
+    const scaffold = await body(await f.cycle.handler({
       next_pass: {
         request_key: 'structured-mass-iconic-compound',
         problem_id: 'structured-mass-iconic-compound',
@@ -1850,15 +2413,26 @@ describe('public compact Guard contract regressions', () => {
         actions: [iconic],
       },
     }));
-    expect(rejected.preflight_rejection?.error_codes).toContain('structured_mass_iconic_primitive_compound');
-    expect(f.counts().regionCalls).toBe(0);
+    expect(scaffold.preflight_rejection).toBeUndefined();
+    expect(scaffold.execution).toMatchObject({ phase: 'completed', failed: false });
+    expect(f.counts().regionCalls).toBe(1);
 
+    // The admitted scaffold now correctly owns a visual-review barrier. Use a
+    // fresh fixture to prove that irregular structured mass remains admitted;
+    // representation-fidelity closure is covered by the owner-local verdict tests.
+    const g = fixture();
+    await g.setArtRun.handler({
+      document_id: 42,
+      process_dir: 'processes/structured-mass-irregular-guard-process/run-01',
+      painting_profile: 'nontrivial_painting',
+      commentary_mode: 'technical',
+    });
     const irregular = regionAction('irregular-structured-mass');
     irregular.args.regions[0].contours = [{ points: [
       { x: 20, y: 50 }, { x: 55, y: 25 }, { x: 105, y: 30 },
       { x: 145, y: 65 }, { x: 130, y: 135 }, { x: 45, y: 145 },
     ] }];
-    const accepted = await body(await f.cycle.handler({
+    const accepted = await body(await g.cycle.handler({
       next_pass: {
         request_key: 'structured-mass-irregular',
         problem_id: 'structured-mass-irregular',
@@ -1873,7 +2447,31 @@ describe('public compact Guard contract regressions', () => {
     }));
     expect(accepted.preflight_rejection).toBeUndefined();
     expect(accepted.execution).toMatchObject({ phase: 'completed', failed: false });
+    expect(g.counts().regionCalls).toBe(1);
+  });
+
+  it.each([3, 4, 5, 6])('does not use %i contour vertices as a form-quality certificate or refusal', async vertexCount => {
+    const f = fixture();
+    await f.setArtRun.handler({ document_id: 42,
+      process_dir: 'processes/contour-complexity-review-process/run-01',
+      painting_profile: 'nontrivial_painting', commentary_mode: 'technical' });
+    const action = regionAction('planar-construction');
+    action.args.regions[0].contours = [{ points: [
+      { x: 20, y: 40 }, { x: 80, y: 30 }, { x: 140, y: 40 },
+      { x: 150, y: 90 }, { x: 140, y: 140 }, { x: 20, y: 140 },
+    ].slice(0, vertexCount) }];
+    action.args.regions.push({ ...action.args.regions[0], id: 'second-plane' });
+    const result = await body(await f.cycle.handler({ next_pass: {
+      request_key: 'contour-complexity', document_id: 42,
+      goal: 'Construct bounded planes without claiming final form quality.',
+      stage: 'SHAPE', scale: 'global', region: 'subject',
+      ...structuredMassContract('form-bearing subject mass'), actions: [action],
+    } }));
+    expect(result.preflight_rejection).toBeUndefined();
+    expect(result.execution).toMatchObject({ phase: 'completed', failed: false });
     expect(f.counts().regionCalls).toBe(1);
+    expect(result.next_state).toBe('awaiting_visual_review');
+    expect(f.runtime.store.read('contour-complexity')?.verdict).toBeUndefined();
   });
 
   it('still blocks brush-dependent painting until brush preflight exists', async () => {
@@ -1904,7 +2502,7 @@ describe('public compact Guard contract regressions', () => {
   });
 
   it('does not require installed-brush preflight for a non-BRUSH stroke mechanism', async () => {
-    const { cycle, setArtRun, counts } = fixture();
+    const { cycle, setArtRun, counts } = fixture({ establishedLegacyScene: true });
     await setArtRun.handler({
       document_id: 42,
       process_dir: 'processes/pencil-without-brush-preflight-process/run-01',
@@ -1928,6 +2526,105 @@ describe('public compact Guard contract regressions', () => {
     expect(result.preflight_rejection).toBeUndefined();
     expect(result.execution).toMatchObject({ phase: 'completed', failed: false });
     expect(counts().strokeCalls).toBe(1);
+  });
+
+  it('propagates compact edge intents into the VisualMicroPlan and closes them with edge observations', async () => {
+    const f = fixture({ establishedLegacyScene: true });
+    await f.setArtRun.handler({
+      document_id: 42,
+      process_dir: 'processes/compact-edge-intent-process/run-01',
+      painting_profile: 'nontrivial_painting',
+      commentary_mode: 'technical',
+    });
+    const action = strokeAction('edge-stroke', 7, 'PENCIL') as Record<string, unknown>;
+    action.method_id = 'pencil-line';
+    action.edge_boundary_ids = ['subject-background'];
+
+    const pending = await body(await f.cycle.handler({
+      next_pass: {
+        request_key: 'compact-edge-intent',
+        problem_id: 'subject-edge',
+        document_id: 42,
+        goal: 'Establish one crisp subject boundary with explicit edge intent.',
+        stage: 'EDGE',
+        scale: 'medium',
+        region: 'subject-edge',
+        edges: [{
+          boundary_id: 'subject-background',
+          region_a: 'subject',
+          region_b: 'background',
+          class: 'hard',
+          expected_behavior: 'The subject boundary remains crisp and clearly separated from the background.',
+        }],
+        actions: [action],
+      },
+    }));
+
+    expect(pending.preflight_rejection).toBeUndefined();
+    expect(pending.execution).toMatchObject({ phase: 'completed', failed: false });
+    expect(f.counts().strokeCalls).toBe(1);
+    expect(f.runtime.store.read('compact-edge-intent')?.args?.edges).toEqual([{
+      boundary_id: 'subject-background',
+      region_a: 'subject',
+      region_b: 'background',
+      class: 'hard',
+      expected_behavior: 'The subject boundary remains crisp and clearly separated from the background.',
+    }]);
+
+    const closed = await body(await f.cycle.handler({
+      previous_operation_id: 'compact-edge-intent',
+      previous_observation: {
+        observed: 'The subject boundary is visibly crisp and separated from the background.',
+        target: 'resolved',
+        edge_observations: [{
+          boundary_id: 'subject-background',
+          observed_behavior: 'The boundary is crisp and clearly separated without unintended feathering.',
+          target_met: 'yes',
+        }],
+      },
+    }));
+
+    expect(closed.preflight_rejection).toBeUndefined();
+    expect(f.runtime.store.read('compact-edge-intent')?.verdict?.edge_observations).toEqual([{
+      boundary_id: 'subject-background',
+      observed_behavior: 'The boundary is crisp and clearly separated without unintended feathering.',
+      target_met: 'yes',
+    }]);
+  });
+
+  it('rejects compact edge boundary references that are not declared before mutation dispatch', async () => {
+    const f = fixture({ establishedLegacyScene: true });
+    await f.setArtRun.handler({
+      document_id: 42,
+      process_dir: 'processes/compact-edge-reference-process/run-01',
+      painting_profile: 'nontrivial_painting',
+      commentary_mode: 'technical',
+    });
+    const action = strokeAction('edge-stroke-invalid', 7, 'PENCIL') as Record<string, unknown>;
+    action.method_id = 'pencil-line';
+    action.edge_boundary_ids = ['undeclared-edge'];
+
+    const rejected = await body(await f.cycle.handler({
+      next_pass: {
+        request_key: 'compact-edge-reference-invalid',
+        problem_id: 'subject-edge',
+        document_id: 42,
+        goal: 'Reject an edge mutation whose boundary binding is not declared.',
+        stage: 'EDGE',
+        scale: 'medium',
+        region: 'subject-edge',
+        edges: [{
+          boundary_id: 'declared-edge',
+          region_a: 'subject',
+          region_b: 'background',
+          class: 'hard',
+        }],
+        actions: [action],
+      },
+    }));
+
+    expect(rejected.preflight_rejection?.error_codes).toContain('compact_edge_boundary_unknown');
+    expect(f.counts().strokeCalls).toBe(0);
   });
 
   it('compiles an ordinary local pass with matching BEFORE/AFTER focus previews without subtle_local', async () => {
@@ -2102,7 +2799,10 @@ describe('public compact Guard contract regressions', () => {
     expect(withoutRegion.counts().strokeCalls).toBe(0);
   });
 
-  it('derives an unambiguous continuous-field construction role and keeps mandatory AFTER preview', async () => {
+  it.each([
+    { visualIntent: 'continuous-field', preferredMethod: 'continuous-color-field' },
+    { visualIntent: 'soft-transition', preferredMethod: 'smudge-shape' },
+  ])('derives an unambiguous continuous-field construction role and keeps mandatory AFTER preview: $visualIntent', async ({ visualIntent, preferredMethod }) => {
     const f = fixture();
     await f.setArtRun.handler({
       document_id: 42,
@@ -2121,9 +2821,9 @@ describe('public compact Guard contract regressions', () => {
         scale: 'global',
         region: 'whole-canvas',
         material_role: 'broad background value field',
-        visual_intent: 'continuous-field',
+        visual_intent: visualIntent,
         impact_class: 'construct',
-        preferred_method_id: 'continuous-color-field',
+        preferred_method_id: preferredMethod,
         actions: [{
           id: 'continuous-field-gradient',
           tool: 'photoshop_paint_color_gradient',
@@ -2174,14 +2874,43 @@ describe('public compact Guard contract regressions', () => {
         pressure_policy: 'none',
       },
       steps: expect.arrayContaining([
-        expect.objectContaining({ tool: 'photoshop_paint_color_gradient', method_id: 'continuous-color-field' }),
+        expect.objectContaining({ tool: 'photoshop_paint_color_gradient', method_id: 'continuous-color-field', args: expect.objectContaining({
+          layer_id: 7, from: { x: 0, y: 0 }, to: { x: 400, y: 300 },
+          stops: [{ position: 0, red: 20, green: 40, blue: 80 }, { position: 0.5, red: 120, green: 100, blue: 100 }, { position: 1, red: 220, green: 180, blue: 140 }],
+        }) }),
         expect.objectContaining({ tool: 'photoshop_get_preview' }),
       ]),
     });
   });
 
-  it('requires material-fit brush evidence for substantial nontrivial form/material work', async () => {
+  it.each([
+    { name: 'declared role', constructionRole: 'continuous-field', actionClass: 'ADD', avoid: [] },
+    { name: 'destructive action', constructionRole: undefined, actionClass: 'REPLACE', avoid: [] },
+    { name: 'avoided method', constructionRole: undefined, actionClass: 'ADD', avoid: ['continuous-color-field'] },
+  ])('keeps $name authority while deriving continuous-field metadata', async ({ constructionRole, actionClass, avoid }) => {
     const f = fixture();
+    await f.setArtRun.handler({ document_id: 42,
+      process_dir: 'processes/derived-construction-authority-process/run-01',
+      painting_profile: 'simple_graphic', commentary_mode: 'technical' });
+    const result = await f.runtime.lintNextPass({
+      request_key: 'derived-construction-authority', problem_id: 'field', document_id: 42,
+      goal: 'Preserve construction authority.', stage: 'GLOBAL_BLOCK_IN', scale: 'global', region: 'whole-canvas',
+      material_role: 'background value field', construction_role: constructionRole, action_class: actionClass,
+      visual_intent: 'soft-transition', impact_class: 'construct', preferred_method_id: 'smudge-shape', avoid_method_ids: avoid,
+      actions: [{ id: 'field', tool: 'photoshop_paint_color_gradient', args: {
+        layer_id: 7, from: { x: 0, y: 0 }, to: { x: 400, y: 300 },
+        stops: [{ position: 0, red: 20, green: 40, blue: 80 }, { position: 1, red: 220, green: 180, blue: 140 }],
+      } }],
+    });
+    expect(result.error_codes.length).toBeGreaterThan(0);
+    expect(result.normalizations ?? []).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'artistic_method_derived_from_execution' }),
+    ]));
+    expect(f.counts().gradientCalls).toBe(0);
+  });
+
+  it('requires material-fit brush evidence for substantial nontrivial form/material work', async () => {
+    const f = fixture({ establishedLegacyScene: true });
     await f.setArtRun.handler({
       document_id: 42,
       process_dir: 'processes/material-fitness-process/run-01',
@@ -2195,10 +2924,10 @@ describe('public compact Guard contract regressions', () => {
         request_key: 'fur-material-missing-role',
         problem_id: 'fur-material',
         document_id: 42,
-        goal: 'Develop the rabbit fur with directional material texture.',
+        goal: 'Develop the secondaryOwner fur with directional material texture.',
         stage: 'FORM_AND_LIGHT',
         scale: 'medium',
-        region: 'rabbit',
+        region: 'secondaryOwner',
         visual_intent: 'directional-mass',
         impact_class: 'construct',
         actions: [strokeAction('fur-stroke')],
@@ -2208,8 +2937,8 @@ describe('public compact Guard contract regressions', () => {
     expect(missingMaterial.preflight_rejection?.error_codes).toContain('brush_preset_choice_required');
 
     const ambiguousMaterialPreflight = materialBrushPreflight({ ambiguous: true });
-    ambiguousMaterialPreflight.roles[1].material_roles = ['skin'];
-    const ambiguousMaterial = fixture();
+    ambiguousMaterialPreflight.roles[1].material_roles = ['baseMaterial'];
+    const ambiguousMaterial = fixture({ establishedLegacyScene: true });
     await ambiguousMaterial.setArtRun.handler({
       document_id: 42,
       process_dir: 'processes/material-ambiguous-process/run-01',
@@ -2238,10 +2967,10 @@ describe('public compact Guard contract regressions', () => {
         request_key: 'fur-material-fit',
         problem_id: 'fur-material-fit',
         document_id: 42,
-        goal: 'Develop the rabbit fur with directional material texture.',
+        goal: 'Develop the secondaryOwner fur with directional material texture.',
         stage: 'FORM_AND_LIGHT',
         scale: 'medium',
-        region: 'rabbit',
+        region: 'secondaryOwner',
         material_role: 'fur',
         visual_intent: 'directional-mass',
         impact_class: 'construct',
@@ -2257,7 +2986,7 @@ describe('public compact Guard contract regressions', () => {
         goal: 'Try to select a familiar fur preset without explaining its evidence fit.',
         stage: 'FORM_AND_LIGHT',
         scale: 'medium',
-        region: 'rabbit',
+        region: 'secondaryOwner',
         material_role: 'fur',
         visual_intent: 'directional-mass',
         impact_class: 'construct',
@@ -2273,10 +3002,10 @@ describe('public compact Guard contract regressions', () => {
         request_key: 'fur-material-fit-explicit',
         problem_id: 'fur-material-fit-explicit',
         document_id: 42,
-        goal: 'Develop the rabbit fur with the explicitly selected evidence-fit alternative mark.',
+        goal: 'Develop the secondaryOwner fur with the explicitly selected evidence-fit alternative mark.',
         stage: 'FORM_AND_LIGHT',
         scale: 'medium',
-        region: 'rabbit',
+        region: 'secondaryOwner',
         material_role: 'fur',
         brush_preset_choice_reason: 'Dry Fur provides the more broken directional footprint needed for fur breakup at this scale.',
         visual_intent: 'directional-mass',
@@ -2308,7 +3037,7 @@ describe('public compact Guard contract regressions', () => {
       goal: 'Retry the same dry mark after rollback.',
       stage: 'FORM_AND_LIGHT',
       scale: 'medium',
-      region: 'rabbit',
+      region: 'secondaryOwner',
       material_role: 'fur',
       brush_preset_choice_reason: 'Dry Fur still matches the requested broken directional footprint.',
       visual_intent: 'directional-mass',
@@ -2327,7 +3056,7 @@ describe('public compact Guard contract regressions', () => {
       goal: 'Use the same dry mark on a different fur problem after its recent rollback.',
       stage: 'FORM_AND_LIGHT',
       scale: 'medium',
-      region: 'rabbit-neck',
+      region: 'secondaryOwner-neck',
       material_role: 'fur',
       brush_preset_choice_reason: 'Dry Fur has the broken directional footprint requested for this fur area.',
       visual_intent: 'directional-mass',
@@ -2346,7 +3075,7 @@ describe('public compact Guard contract regressions', () => {
       goal: 'Retry the same dry mark because the rollback cause was spatial targeting, not mark fit.',
       stage: 'FORM_AND_LIGHT',
       scale: 'medium',
-      region: 'rabbit',
+      region: 'secondaryOwner',
       material_role: 'fur',
       brush_preset_choice_reason: 'Dry Fur still matches the requested broken directional footprint.',
       brush_retry_reason: 'The prior rollback corrected misplaced stroke targeting; the dry broken footprint itself remains the required mark.',
@@ -2361,7 +3090,7 @@ describe('public compact Guard contract regressions', () => {
   });
 
   it('binds pressure policy to the selected brush candidate and requires executable simulated dynamics', async () => {
-    const f = fixture({ brushInventory: true });
+    const f = fixture({ brushInventory: true, establishedLegacyScene: true });
     await f.setArtRun.handler({
       document_id: 42,
       process_dir: 'processes/candidate-pressure-process/run-01',
@@ -2376,7 +3105,7 @@ describe('public compact Guard contract regressions', () => {
       goal: 'Use the dry broken candidate with its probed simulated-size response.',
       stage: 'FORM_AND_LIGHT',
       scale: 'medium',
-      region: 'rabbit',
+      region: 'secondaryOwner',
       material_role: 'fur',
       brush_preset_choice_reason: 'Dry Fur provides the granular broken footprint and simulated taper required for this pass.',
       visual_intent: 'directional-mass',
@@ -2413,7 +3142,7 @@ describe('public compact Guard contract regressions', () => {
   });
 
   it('classifies a validated installed-brush method by semantic method id rather than stroke transport', async () => {
-    const f = fixture({ brushInventory: true });
+    const f = fixture({ brushInventory: true, establishedLegacyScene: true });
     await f.setArtRun.handler({
       document_id: 42,
       process_dir: 'processes/preset-method-class-process/run-01',
@@ -2432,7 +3161,7 @@ describe('public compact Guard contract regressions', () => {
         goal: 'Use the preflighted installed bristle preset as a causally distinct material method.',
         stage: 'FORM_AND_LIGHT',
         scale: 'medium',
-        region: 'rabbit',
+        region: 'secondaryOwner',
         material_role: 'fur',
         brush_preset_choice_reason: 'Fur Bristle provides the directional bristle buildup required for this form-bearing fur pass.',
         visual_intent: 'directional-mass',
@@ -2488,55 +3217,69 @@ describe('public compact Guard contract regressions', () => {
     expect(f.counts().strokeCalls).toBe(0);
   });
 
-  it('requires and forwards qualitative material response for compact MATERIAL passes', async () => {
-    const missing = fixture();
-    await missing.setArtRun.handler({
-      document_id: 42,
-      process_dir: 'processes/material-response-missing-process/run-01',
-      painting_profile: 'simple_graphic',
-      commentary_mode: 'technical',
-    });
-    const rejected = await body(await missing.cycle.handler({
-      next_pass: {
-        request_key: 'material-response-missing',
-        problem_id: 'material-response-missing',
-        document_id: 42,
-        goal: 'Develop the surface response before adding texture.',
-        stage: 'MATERIAL',
-        scale: 'medium',
-        region: 'surface',
-        actions: [strokeAction('material-response-missing-stroke')],
-      },
-    }));
-    expect(rejected.preflight_rejection?.error_codes).toContain('material_response_plan_required');
-    expect(missing.counts().strokeCalls).toBe(0);
+  it.each(['stroke', 'blur'])('enforces MATERIAL %s representation readiness without requiring a prose plan', async mechanism => {
+    let baseline: ReturnType<ReturnType<typeof fixture>['counts']> | undefined;
+    for (const supplied of [false, true]) {
+      const f = fixture();
+      const blur = vi.fn(async () => ({ content: [{ type: 'text' as const, text: JSON.stringify({ ok: true }) }] }));
+      f.registry.register('photoshop_apply_gaussian_blur', { ...realDefinition('photoshop_apply_gaussian_blur'), handler: blur });
+      await f.setArtRun.handler({ document_id: 42, process_dir: 'processes/material-response-optional-process/run-01',
+        painting_profile: 'simple_graphic', commentary_mode: 'technical' });
+      const setup = mechanism === 'blur' ? await establishBlurOwner(f) : undefined;
+      const accepted = await body(await f.cycle.handler({
+        ...(setup ? { previous_operation_id: setup.previous_operation_id, previous_observation: setup.previous_observation } : {}),
+        next_pass: {
+        request_key: 'material-response-optional', problem_id: 'material-response-optional', document_id: 42,
+        goal: 'Develop the surface response before adding texture.', stage: 'MATERIAL', scale: 'medium', region: 'surface',
+        ...(supplied ? { material_response: compactMaterialResponse() } : {}),
+        ...(setup ? { imaging_preflight: setup.imaging_preflight } : {}),
+        actions: [mechanism === 'stroke' ? strokeAction('material-stroke')
+          : { id: 'material-blur', tool: 'photoshop_apply_gaussian_blur', args: { radius: 2, layer_id: 9 } }],
+      } }));
+      if (mechanism === 'blur') {
+        // An executable optical preflight cannot waive unfinished form debt.
+        // A positive, already-represented FORM blur is exercised above.
+        expect(accepted.preflight_rejection?.message).toContain('refinement_owner_representation_debt');
+        expect(blur).not.toHaveBeenCalled();
+        continue;
+      }
+      expect(accepted.preflight_rejection).toBeUndefined();
+      expect(accepted.execution).toMatchObject({ phase: 'completed', failed: false });
+      expect(mechanism === 'stroke' ? f.counts().strokeCalls : blur.mock.calls.length).toBe(1);
+      const record = f.runtime.store.read('material-response-optional');
+      expect(record?.preview?.sha256).toBeTruthy();
+      expect(record?.verdict).toBeUndefined();
+      const plan = mechanism === 'stroke' ? record?.args?.material_response : record?.material_response;
+      const calls = f.counts();
+      // Temporary output destinations differ between fixtures; read specs must not.
+      calls.previewArgs.forEach(args => { delete args.materialize_path; });
+      if (supplied) {
+        expect(plan).toMatchObject(mechanism === 'stroke'
+          ? { response_role: 'base-material', microtexture: { policy: 'deferred' } }
+          : { responseRole: 'base-material', microtexture: { policy: 'deferred' } });
+        expect(calls).toEqual(baseline);
+      } else {
+        expect(plan).toBeUndefined();
+        baseline = calls;
+      }
+    }
+  });
 
-    const valid = fixture();
-    await valid.setArtRun.handler({
-      document_id: 42,
-      process_dir: 'processes/material-response-valid-process/run-01',
-      painting_profile: 'simple_graphic',
-      commentary_mode: 'technical',
-    });
-    const accepted = await body(await valid.cycle.handler({
-      next_pass: {
-        request_key: 'material-response-valid',
-        problem_id: 'material-response-valid',
-        document_id: 42,
-        goal: 'Develop the surface response before adding texture.',
-        stage: 'MATERIAL',
-        scale: 'medium',
-        region: 'surface',
-        material_response: compactMaterialResponse(),
-        actions: [strokeAction('material-response-valid-stroke')],
-      },
-    }));
-    expect(accepted.preflight_rejection).toBeUndefined();
-    expect(accepted.execution).toMatchObject({ phase: 'completed', failed: false });
-    expect(valid.runtime.store.read('material-response-valid')?.args?.material_response).toMatchObject({
-      response_role: 'base-material',
-      microtexture: { policy: 'deferred' },
-    });
+  it.each(['stroke', 'blur'])('rejects an explicitly invalid MATERIAL plan before %s dispatch', async mechanism => {
+    const f = fixture();
+    const blur = vi.fn(async () => ({ content: [{ type: 'text' as const, text: JSON.stringify({ ok: true }) }] }));
+    f.registry.register('photoshop_apply_gaussian_blur', { ...realDefinition('photoshop_apply_gaussian_blur'), handler: blur });
+    await f.setArtRun.handler({ document_id: 42, process_dir: 'processes/material-response-invalid-process/run-01',
+      painting_profile: 'simple_graphic', commentary_mode: 'technical' });
+    const rejected = await body(await f.cycle.handler({ next_pass: {
+      request_key: 'material-response-invalid', problem_id: 'material-response-invalid', document_id: 42,
+      goal: 'Preserve validation of supplied material metadata.', stage: 'MATERIAL', scale: 'medium', region: 'surface',
+      material_response: {}, actions: [mechanism === 'stroke' ? strokeAction('invalid-material-stroke')
+        : { id: 'invalid-material-blur', tool: 'photoshop_apply_gaussian_blur', args: { radius: 2 } }],
+    } }));
+    expect(rejected.preflight_rejection?.error_codes).toContain('material_response_plan_invalid');
+    expect(f.counts().strokeCalls).toBe(0);
+    expect(blur).not.toHaveBeenCalled();
   });
 
   it('rejects a MATERIAL lighting/color binding when no active scene model can prove it', async () => {
@@ -2572,6 +3315,129 @@ describe('public compact Guard contract regressions', () => {
     expect(rejected.preflight_rejection?.error_codes).toContain('material_lighting_color_scene_model_missing');
     expect(f.counts().strokeCalls).toBe(0);
   });
+
+  it.each(['supported', 'conflict', 'missing'] as const)(
+    'keeps %s atmospheric color preflight in Guard while validating real microplan schemas',
+    async outcome => {
+      const f = fixture();
+      const execute = async (input: Record<string, unknown>) => {
+        const result = await body(await f.cycle.handler(input));
+        if (!result.job_id) return result;
+        await vi.waitFor(() => expect(f.runtime.pollJob(result.job_id).state).toBe('completed'));
+        return f.runtime.pollJob(result.job_id).result as any;
+      };
+      await f.setArtRun.handler({
+        document_id: 42,
+        process_dir: 'processes/color-preflight-routing-process/run-01',
+        painting_profile: 'nontrivial_painting',
+        commentary_mode: 'technical',
+      });
+      const gradient = (id: string, layerId: number | string) => ({
+        id, tool: 'photoshop_paint_color_gradient', method_id: 'continuous-color-field',
+        args: {
+          document_id: 42, layer_id: layerId,
+          from: { x: 0, y: 0 }, to: { x: 400, y: 300 },
+          stops: [
+            { position: 0, red: 105, green: 119, blue: 116 },
+            { position: 1, red: 145, green: 157, blue: 154 },
+          ],
+        },
+      });
+      const initial = await execute({ next_pass: {
+        request_key: 'color-preflight-base', document_id: 42,
+        goal: 'Establish the first visible scene field before adding an atmospheric veil.',
+        stage: 'GLOBAL_BLOCK_IN', scale: 'global', region: 'whole frame',
+        construction_role: 'continuous-field', material_role: 'background environment',
+        visual_intent: 'continuous-field', impact_class: 'construct',
+        preferred_method_id: 'continuous-color-field',
+        actions: [gradient('base-gradient', 7)],
+      } });
+      expect(initial.preflight_rejection).toBeUndefined();
+      await closeHotLoopOwner(f, 'color-preflight-base');
+
+      const sceneModel = {
+        model_id: 'color-preflight-scene', revision: 1,
+        source_frame: {
+          document_id: 42, document_incarnation: 'compact-contract-fixture:42',
+          operation_id: 'color-preflight-base',
+          preview_sha256: f.runtime.store.read('color-preflight-base')!.preview!.sha256,
+        },
+        global_value_structure: { key: 'mid' },
+        ambient_environment: {
+          id: 'overcast', role: 'ambient', family: 'cool_teal_grey',
+          provenance: 'user-or-prompt', chroma: 'low', value_role: 'diffuse_fill',
+        },
+        emitters: [],
+        atmosphere: {
+          id: 'fog', density_role: 'distance_veil', color_bias: 'cool_teal_grey',
+          contrast_effect: 'decreases_with_depth', provenance: 'user-or-prompt',
+        },
+        palette_relations: ['distant_contrast_lower_than_foreground'],
+        sampled_anchors: [{
+          id: 'mist-sample', role: 'mist', family: 'cool_teal_grey',
+          provenance: 'accepted-frame', sample: { rgb: [105, 119, 116], source: 'accepted base frame' },
+        }],
+        intentional_exceptions: [],
+      };
+      const preflight = {
+        scene_model_id: sceneModel.model_id, scene_model_revision: sceneModel.revision,
+        field_role: 'cold damp atmospheric veil', interaction: 'Reduce contrast with depth.',
+        stops: [{
+          id: 'mist', role: 'mist', family: 'cool_teal_grey', provenance: 'accepted-frame',
+          source_anchor_id: 'mist-sample', rgb: outcome === 'conflict' ? [200, 20, 20] : [105, 119, 116],
+        }],
+        required_relations: sceneModel.palette_relations,
+        artistic_choices: [],
+      };
+      const requestKey = 'color-preflight-' + outcome;
+      const result = await execute({ next_pass: {
+        request_key: requestKey, problem_id: 'atmospheric-depth', document_id: 42,
+        goal: 'Add a separately editable atmospheric field preserving the established light and color.',
+        stage: 'GLOBAL_BLOCK_IN', scale: 'global', region: 'whole frame', action_class: 'ADD',
+        construction_role: 'continuous-field', material_role: 'fog',
+        visual_intent: 'continuous-field', impact_class: 'construct',
+        preferred_method_id: 'continuous-color-field',
+        scene_geometry_model: sceneGeometryModel(), scene_lighting_color_model: sceneModel,
+        scene_ownership_plan: semanticSceneOwnershipPlan('color-preflight-owners', ['fog-overlay']),
+        ...(outcome === 'missing' ? {} : { color_gradient_preflight: preflight }),
+        layer_separation_check: semanticLayerSeparation('new-light'),
+        logical_layer: semanticLogicalLayer('fog-overlay', 'create-new', {
+          layerName: 'Cold Fog Veil', physicalRole: 'atmosphere', opacityRole: 'transparent-overlay',
+          geometryBinding: geometryBinding('fog-overlay'),
+        }),
+        actions: [
+          { id: 'fog-layer', tool: 'photoshop_create_layer', args: { name: 'Cold Fog Veil' } },
+          gradient('fog-gradient', '$steps.fog-layer.details.layerId'),
+        ],
+      } });
+
+      if (outcome === 'supported') {
+        expect(result.preflight_rejection).toBeUndefined();
+        expect(result.execution).toMatchObject({ phase: 'completed', failed: false });
+        expect(f.counts().gradientCalls).toBe(2);
+        const record = f.runtime.store.read(requestKey)!;
+        expect(record.color_gradient_preflight).toMatchObject({
+          ...preflight, protocol: 'photoshop.guard.color_gradient_preflight.v1',
+          outcome: 'supported', findings: [],
+        });
+        expect(record.args).not.toHaveProperty('color_gradient_preflight');
+        expect(record.args.logical_layer).toMatchObject({ physical_role: 'atmosphere' });
+        expect(record.preview?.sha256).toBeTruthy();
+        expect(record.verdict).toBeUndefined();
+        expect(result.next_state).toBe('awaiting_visual_review');
+      } else {
+        expect(result.preflight_rejection?.error_codes).toContain(
+          outcome === 'conflict' ? 'color_gradient_preflight_conflict' : 'color_gradient_preflight_required',
+        );
+        expect(result.preflight_rejection).toMatchObject({
+          next_operation_dispatched: false, visual_mutation_started: false,
+        });
+        expect(f.counts().gradientCalls).toBe(1);
+        expect(f.runtime.store.read(requestKey)).toBeUndefined();
+      }
+    },
+  );
+
 
   it('compiles explicit selection preparation plus layer-mask creation as one selection-mask VisualMicroPlan', async () => {
     const missingSelection = fixture();
@@ -2683,7 +3549,7 @@ describe('public compact Guard contract regressions', () => {
           goal: 'Develop the fur material with appropriate visible brush structure.',
           stage: row.stage ?? 'FORM_AND_LIGHT',
           scale: 'medium',
-          region: 'rabbit',
+          region: 'secondaryOwner',
           material_role: 'fur',
           visual_intent: 'directional-mass',
           impact_class: 'construct',
@@ -2693,6 +3559,52 @@ describe('public compact Guard contract regressions', () => {
       expect(result.preflight_rejection?.error_codes).toContain(row.expected);
       expect(f.counts().strokeCalls).toBe(0);
     }
+  });
+
+  it('resolves brush roles only from the requested working scale and rejects an explicit scale mismatch', async () => {
+    const f = fixture();
+    await f.setArtRun.handler({
+      document_id: 42,
+      process_dir: 'processes/material-scale-role-process/run-01',
+      painting_profile: 'nontrivial_painting',
+      commentary_mode: 'technical',
+      brush_preflight: materialBrushPreflight({ ambiguous: true, scaleSeparated: true }),
+    });
+    const medium = await body(await f.cycle.handler({
+      next_pass: {
+        request_key: 'material-scale-medium',
+        problem_id: 'material-scale-medium',
+        document_id: 42,
+        goal: 'Develop medium-scale fur masses with the preflighted scale-compatible role.',
+        stage: 'FORM_AND_LIGHT',
+        scale: 'medium',
+        region: 'secondaryOwner',
+        material_role: 'fur',
+        visual_intent: 'directional-mass',
+        impact_class: 'construct',
+        actions: [strokeAction('material-scale-medium-stroke')],
+      },
+    }));
+    expect(medium.preflight_rejection?.error_codes ?? []).not.toContain('brush_role_ambiguous');
+    expect(medium.preflight_rejection?.error_codes).toContain('brush_preset_choice_required');
+
+    const mismatch = await body(await f.cycle.handler({
+      next_pass: {
+        request_key: 'material-scale-mismatch',
+        problem_id: 'material-scale-mismatch',
+        document_id: 42,
+        goal: 'Attempt to force the detail-only brush role into a medium-scale pass.',
+        stage: 'FORM_AND_LIGHT',
+        scale: 'medium',
+        region: 'secondaryOwner',
+        material_role: 'fur',
+        visual_intent: 'directional-mass',
+        brush_role: 'fur-breakup-alt',
+        impact_class: 'construct',
+        actions: [strokeAction('material-scale-mismatch-stroke')],
+      },
+    }));
+    expect(mismatch.preflight_rejection?.error_codes).toContain('brush_role_material_fitness_mismatch');
   });
 
   it('preserves exact object context for a direct MICRO pass without adding a second artistic mutation', async () => {
@@ -3063,6 +3975,7 @@ describe('public compact Guard contract regressions', () => {
       observed: false,
       owner_signature: null,
     });
+    expect(state.physical_stack_check).toMatchObject({ status: 'pending', observed: false, owner_signature: null });
   });
 
   it('does not let a direct visual stage label downgrade durable stage and keeps priority current_stage non-authoritative', async () => {
@@ -3158,8 +4071,8 @@ describe('public compact Guard contract regressions', () => {
     expect(f.runtime.store.compactPassContext(42).logical_layer_owners).toEqual([]);
 
     const invalidSharedPlan = semanticSceneOwnershipPlan('invalid-shared-scene', [
-      { semanticId: 'left-house', ownerId: 'village', editability: 'shared-owner' },
-      { semanticId: 'right-house', ownerId: 'village', editability: 'shared-owner' },
+      { semanticId: 'left-supportedStructure', ownerId: 'village', editability: 'shared-owner' },
+      { semanticId: 'right-supportedStructure', ownerId: 'village', editability: 'shared-owner' },
     ]);
     const invalid = await body(await ownerPass('e1-invalid-sharing', 'village', undefined, invalidSharedPlan));
     expect(invalid.preflight_rejection?.error_codes).toContain('scene_ownership_plan_invalid');
@@ -3167,47 +4080,43 @@ describe('public compact Guard contract regressions', () => {
       repeat_same_semantic_cycle: true,
       photoshop_mutation_started: false,
       correction_mode: 'payload-only-first',
-      repository_or_schema_investigation: 'defer-until-corrected-resubmit-repeats-or-systemic-defect-is-explicit',
+      repository_or_schema_investigation: 'forbidden-during-painting-including-recovery-and-repeat-rejections',
     });
     expect(invalid.preflight_rejection?.next_required_action).toMatch(
       /artistic or structural decision.*not recovery.*no Photoshop mutation was dispatched.*no fresh state\/preview read/i
     );
 
-    const scenePlan = semanticSceneOwnershipPlan('homestead-scene-owners', [
-      { semanticId: 'hero-tree', ownerId: 'hero-tree', role: 'Hero organic form' },
+    const scenePlan = semanticSceneOwnershipPlan('sceneA-scene-owners', [
+      { semanticId: 'hero-primaryForm', ownerId: 'hero-primaryForm', role: 'Hero organic form' },
       { semanticId: 'architecture', ownerId: 'architecture', role: 'Main architecture' },
       { semanticId: 'distant-terrain', ownerId: 'distant-terrain', role: 'Distant terrain plane' },
       { semanticId: 'ground', ownerId: 'ground', role: 'Foreground ground plane' },
-      { semanticId: 'sky', ownerId: 'sky-field', role: 'Continuous sky field', editability: 'continuous-field' },
-      { semanticId: 'left-house', ownerId: 'village', role: 'Left distant house', editability: 'shared-owner' },
-      { semanticId: 'right-house', ownerId: 'village', role: 'Right distant house', editability: 'shared-owner' },
-    ], [{
-      ownerId: 'village',
-      semanticIds: ['left-house', 'right-house'],
-      rationale: 'The two distant houses intentionally share correction and rollback as one low-detail village mass.',
-    }]);
+      { semanticId: 'continuousField', ownerId: 'continuousField-field', role: 'Continuous continuousField field', editability: 'continuous-field' },
+      { semanticId: 'left-supportedStructure', role: 'Left distant supportedStructure' },
+      { semanticId: 'right-supportedStructure', role: 'Right distant supportedStructure' },
+    ]);
 
-    const hero = await body(await ownerPass('e1-hero-create', 'hero-tree', undefined, scenePlan));
+    const hero = await body(await ownerPass('e1-hero-create', 'hero-primaryForm', undefined, scenePlan));
     expect(hero.preflight_rejection).toBeUndefined();
     expect(hero.execution).toMatchObject({ phase: 'completed', failed: false });
 
     const durablePlan = f.runtime.store.statusCompact().documents['42'].scene_ownership_plan;
     expect(durablePlan).toMatchObject({
       protocol: 'photoshop.guard.scene_ownership_plan.v1',
-      plan_id: 'homestead-scene-owners',
+      plan_id: 'sceneA-scene-owners',
       source_operation_id: 'e1-hero-create',
     });
     expect(durablePlan.units).toEqual(expect.arrayContaining([
-      expect.objectContaining({ semantic_id: 'sky', owner_id: 'sky-field', editability: 'continuous-field' }),
-      expect.objectContaining({ semantic_id: 'left-house', owner_id: 'village', editability: 'shared-owner' }),
-      expect.objectContaining({ semantic_id: 'right-house', owner_id: 'village', editability: 'shared-owner' }),
+      expect.objectContaining({ semantic_id: 'continuousField', owner_id: 'continuousField-field', editability: 'continuous-field' }),
+      expect.objectContaining({ semantic_id: 'left-supportedStructure', owner_id: 'left-supportedStructure', editability: 'independent' }),
+      expect.objectContaining({ semantic_id: 'right-supportedStructure', owner_id: 'right-supportedStructure', editability: 'independent' }),
     ]));
 
-    const village = await body(await ownerPass('e1-village-create', 'village', 'e1-hero-create'));
+    const village = await body(await ownerPass('e1-village-create', 'left-supportedStructure', 'e1-hero-create'));
     expect(village.preflight_rejection).toBeUndefined();
     expect(f.runtime.store.compactPassContext(42).logical_layer_owners).toEqual(expect.arrayContaining([
-      expect.objectContaining({ hypothesis_id: 'hero-tree', temporary: false }),
-      expect.objectContaining({ hypothesis_id: 'village', temporary: false }),
+      expect.objectContaining({ hypothesis_id: 'hero-primaryForm', temporary: false }),
+      expect.objectContaining({ hypothesis_id: 'left-supportedStructure', temporary: false }),
     ]));
 
     const reactive = await body(await ownerPass('e1-reactive-extra', 'reactive-extra', 'e1-village-create'));
@@ -3241,22 +4150,22 @@ describe('public compact Guard contract regressions', () => {
     }));
     expect(missing.preflight_rejection?.error_codes).toContain('semantic_layer_owner_missing');
 
-    const createCatRegion = regionAction('cat-owner-region');
-    createCatRegion.args.regions[0].layer_id = '$steps.cat-owner-layer.details.layerId';
+    const createCatRegion = regionAction('primaryOwner-owner-region');
+    createCatRegion.args.regions[0].layer_id = '$steps.primaryOwner-owner-layer.details.layerId';
     const created = await body(await f.cycle.handler({
       next_pass: {
-        request_key: 'cat-owner-create-attempt-01',
-        problem_id: 'cat-owner',
+        request_key: 'primaryOwner-owner-create-attempt-01',
+        problem_id: 'primaryOwner-owner',
         document_id: 42,
-        goal: 'Create the independently editable cat owner during structural development.',
+        goal: 'Create the independently editable primaryOwner owner during structural development.',
         stage: 'SHAPE',
         scale: 'global',
-        scene_ownership_plan: semanticSceneOwnershipPlan('animal-scene-owners', ['cat', 'rabbit']),
+        scene_ownership_plan: semanticSceneOwnershipPlan('animal-scene-owners', ['primaryOwner', 'secondaryOwner']),
         ...structuredMassContract('character structural mass'),
         layer_separation_check: semanticLayerSeparation('new-object', 'moderate', true),
-        logical_layer: semanticLogicalLayer('cat', 'create-new', { layerName: 'Cat' }),
+        logical_layer: semanticLogicalLayer('primaryOwner', 'create-new', { layerName: 'PrimaryOwner' }),
         actions: [
-          { id: 'cat-owner-layer', tool: 'photoshop_create_layer', args: { name: 'Cat' } },
+          { id: 'primaryOwner-owner-layer', tool: 'photoshop_create_layer', args: { name: 'PrimaryOwner' } },
           createCatRegion,
         ],
       },
@@ -3264,96 +4173,97 @@ describe('public compact Guard contract regressions', () => {
     expect(created.preflight_rejection).toBeUndefined();
     expect(created.execution).toMatchObject({ phase: 'completed', failed: false });
     expect(f.runtime.store.compactPassContext(42).logical_layer_owners).toEqual([
-      expect.objectContaining({ hypothesis_id: 'cat', layer_id: 9, temporary: false }),
+      expect.objectContaining({ hypothesis_id: 'primaryOwner', layer_id: 9, temporary: false }),
     ]);
 
-    const catRefine = regionAction('cat-owner-refine');
+    const catRefine = regionAction('primaryOwner-owner-refine');
     catRefine.args.regions[0].layer_id = 9;
     catRefine.args.clip_bounds = { left: 0, top: 0, right: 180, bottom: 180 };
     const continued = await body(await f.cycle.handler({
-      previous_operation_id: 'cat-owner-create-attempt-01',
+      previous_operation_id: 'primaryOwner-owner-create-attempt-01',
       previous_observation: {
-        observed: 'The cat owner layer is present and structurally readable.',
+        physical_stack_check: physicalStackObservation(),
+        observed: 'The primaryOwner owner layer is present and structurally readable.',
         target: 'resolved',
       },
       next_pass: {
-        request_key: 'cat-owner-form-attempt-02',
-        problem_id: 'cat-owner-form',
+        request_key: 'primaryOwner-owner-form-attempt-02',
+        problem_id: 'primaryOwner-owner-form',
         document_id: 42,
-        goal: 'Refine the same cat owner without creating a pass-named layer.',
+        goal: 'Refine the same primaryOwner owner without creating a pass-named layer.',
         stage: 'FORM',
         scale: 'medium',
-        region: 'cat',
+        region: 'primaryOwner',
         region_bounds: { left: 0, top: 0, right: 180, bottom: 180 },
         action_class: 'REPLACE',
         layer_separation_check: semanticLayerSeparation('continuation', 'low', false),
-        logical_layer: semanticLogicalLayer('cat', 'continue-logical-layer', { layerId: 9, layerName: 'Cat', rollbackValue: 'low' }),
+        logical_layer: semanticLogicalLayer('primaryOwner', 'continue-logical-layer', { layerId: 9, layerName: 'PrimaryOwner', rollbackValue: 'low' }),
         actions: [catRefine],
       },
     }));
     expect(continued.preflight_rejection).toBeUndefined();
     expect(continued.execution).toMatchObject({ phase: 'completed', failed: false });
     expect(f.runtime.store.compactPassContext(42).logical_layer_owners).toEqual([
-      expect.objectContaining({ hypothesis_id: 'cat', layer_id: 9, temporary: false }),
+      expect.objectContaining({ hypothesis_id: 'primaryOwner', layer_id: 9, temporary: false }),
     ]);
-    const continuedRecord = f.runtime.store.records().find((record: any) => record.id === 'cat-owner-form-attempt-02');
+    const continuedRecord = f.runtime.store.records().find((record: any) => record.id === 'primaryOwner-owner-form-attempt-02');
     expect(continuedRecord?.correction_scope).toEqual(expect.objectContaining({
-      problem_id: 'cat-owner-form',
-      semantic_owner_ids: ['cat'],
+      problem_id: 'primaryOwner-owner-form',
+      semantic_owner_ids: ['primaryOwner'],
       physical_layer_ids: [9],
-      region: 'cat',
+      region: 'primaryOwner',
       method_class: 'region',
       mutation_tools: ['photoshop_paint_regions'],
       owner_binding: 'durable',
     }));
 
-    const mismatchedAction = regionAction('cat-declared-owner-wrong-action-layer');
+    const mismatchedAction = regionAction('primaryOwner-declared-owner-wrong-action-layer');
     mismatchedAction.args.regions[0].layer_id = 77;
     mismatchedAction.args.clip_bounds = { left: 0, top: 0, right: 180, bottom: 180 };
     const mismatchedTarget = await body(await f.cycle.handler({
-      previous_operation_id: 'cat-owner-form-attempt-02',
+      previous_operation_id: 'primaryOwner-owner-form-attempt-02',
       previous_observation: {
-        observed: 'The cat form refinement is retained on the same semantic owner.',
+        observed: 'The primaryOwner form refinement is retained on the same semantic owner.',
         target: 'resolved',
       },
       next_pass: {
-        request_key: 'cat-owner-action-target-mismatch',
-        problem_id: 'cat-owner-form',
+        request_key: 'primaryOwner-owner-action-target-mismatch',
+        problem_id: 'primaryOwner-owner-form',
         document_id: 42,
         goal: 'Attempt a medium correction whose concrete action silently targets another physical layer.',
         stage: 'FORM',
         scale: 'medium',
-        region: 'cat',
+        region: 'primaryOwner',
         region_bounds: { left: 0, top: 0, right: 180, bottom: 180 },
         action_class: 'REPLACE',
         layer_separation_check: semanticLayerSeparation('continuation', 'low', false),
-        logical_layer: semanticLogicalLayer('cat', 'continue-logical-layer', { layerId: 9, layerName: 'Cat', rollbackValue: 'low' }),
+        logical_layer: semanticLogicalLayer('primaryOwner', 'continue-logical-layer', { layerId: 9, layerName: 'PrimaryOwner', rollbackValue: 'low' }),
         actions: [mismatchedAction],
       },
     }));
     expect(mismatchedTarget.preflight_rejection?.error_codes).toContain('semantic_mutation_target_owner_mismatch');
 
-    const wrongOwner = regionAction('rabbit-on-cat-layer');
+    const wrongOwner = regionAction('secondaryOwner-on-primaryOwner-layer');
     wrongOwner.args.regions[0].layer_id = 9;
     wrongOwner.args.clip_bounds = { left: 0, top: 0, right: 180, bottom: 180 };
     const polluted = await body(await f.cycle.handler({
-      previous_operation_id: 'cat-owner-form-attempt-02',
+      previous_operation_id: 'primaryOwner-owner-form-attempt-02',
       previous_observation: {
-        observed: 'The cat form refinement is retained on the same semantic owner.',
+        observed: 'The primaryOwner form refinement is retained on the same semantic owner.',
         target: 'resolved',
       },
       next_pass: {
-        request_key: 'rabbit-wrong-owner-attempt',
-        problem_id: 'rabbit-owner',
+        request_key: 'secondaryOwner-wrong-owner-attempt',
+        problem_id: 'secondaryOwner-owner',
         document_id: 42,
-        goal: 'Incorrectly try to paint the rabbit into the cat-owned layer.',
+        goal: 'Incorrectly try to paint the secondaryOwner into the primaryOwner-owned layer.',
         stage: 'FORM',
         scale: 'medium',
-        region: 'rabbit',
+        region: 'secondaryOwner',
         region_bounds: { left: 0, top: 0, right: 180, bottom: 180 },
         action_class: 'REPLACE',
         layer_separation_check: semanticLayerSeparation('continuation', 'low', false),
-        logical_layer: semanticLogicalLayer('rabbit', 'continue-logical-layer', { layerId: 9, layerName: 'Cat', rollbackValue: 'low' }),
+        logical_layer: semanticLogicalLayer('secondaryOwner', 'continue-logical-layer', { layerId: 9, layerName: 'PrimaryOwner', rollbackValue: 'low' }),
         actions: [wrongOwner],
       },
     }));
@@ -3363,57 +4273,53 @@ describe('public compact Guard contract regressions', () => {
     ]));
   });
 
-  it('rejects a tree-only correction aimed at a different shared scene owner', async () => {
+  it('rejects a primaryForm-only correction aimed at a different independently owned component', async () => {
     const f = fixture();
     await f.setArtRun.handler({
-      document_id: 42, process_dir: 'processes/homestead-owner-process/run-01',
+      document_id: 42, process_dir: 'processes/scene-a-owner-process/run-01',
       painting_profile: 'nontrivial_painting', commentary_mode: 'technical',
     });
-    const plan = semanticSceneOwnershipPlan('homestead-owners', [
-      { semanticId: 'hills', ownerId: 'hills-houses', editability: 'shared-owner' },
-      { semanticId: 'houses', ownerId: 'hills-houses', editability: 'shared-owner' },
-      'tree',
-    ], [{ ownerId: 'hills-houses', semanticIds: ['hills', 'houses'] }]);
+    const plan = semanticSceneOwnershipPlan('scene-a-owners', ['hills', 'houses', 'primaryForm']);
     const sharedAction = regionAction('shared-region');
     sharedAction.args.regions[0].layer_id = '$steps.shared-layer.details.layerId';
     const shared = await body(await f.cycle.handler({ next_pass: {
       request_key: 'shared-create', problem_id: 'shared-owner', document_id: 42,
-      goal: 'Create the coupled distant owner.', stage: 'SHAPE', scale: 'global',
-      scene_ownership_plan: plan, ...structuredMassContract('distant shared mass'),
+      goal: 'Create the independently editable hill component.', stage: 'SHAPE', scale: 'global',
+      scene_ownership_plan: plan, ...structuredMassContract('distant hill mass'),
       layer_separation_check: semanticLayerSeparation('new-object', 'moderate', false),
-      logical_layer: semanticLogicalLayer('hills-houses', 'create-new', { layerName: 'Hills Houses' }),
-      actions: [{ id: 'shared-layer', tool: 'photoshop_create_layer', args: { name: 'Hills Houses' } }, sharedAction],
+      logical_layer: semanticLogicalLayer('hills', 'create-new', { layerName: 'Hills' }),
+      actions: [{ id: 'shared-layer', tool: 'photoshop_create_layer', args: { name: 'Hills' } }, sharedAction],
     }}));
     expect(shared.preflight_rejection).toBeUndefined();
 
-    const treeAction = regionAction('tree-region');
-    treeAction.args.regions[0].layer_id = '$steps.tree-layer.details.layerId';
-    const tree = await body(await f.cycle.handler({
+    const treeAction = regionAction('primaryForm-region');
+    treeAction.args.regions[0].layer_id = '$steps.primaryForm-layer.details.layerId';
+    const primaryForm = await body(await f.cycle.handler({
       previous_operation_id: 'shared-create',
       previous_observation: { observed: 'Shared owner retained.', target: 'resolved' },
       next_pass: {
-        request_key: 'tree-create', problem_id: 'tree-owner', document_id: 42,
-        goal: 'Create the independent tree owner.', stage: 'SHAPE', scale: 'global',
-        ...structuredMassContract('tree mass'),
+        request_key: 'primaryForm-create', problem_id: 'primaryForm-owner', document_id: 42,
+        goal: 'Create the independent primaryForm owner.', stage: 'SHAPE', scale: 'global',
+        ...structuredMassContract('primaryForm mass'),
         layer_separation_check: semanticLayerSeparation('new-object', 'moderate', true),
-        logical_layer: semanticLogicalLayer('tree', 'create-new', { layerName: 'Tree' }),
-        actions: [{ id: 'tree-layer', tool: 'photoshop_create_layer', args: { name: 'Tree' } }, treeAction],
+        logical_layer: semanticLogicalLayer('primaryForm', 'create-new', { layerName: 'PrimaryForm' }),
+        actions: [{ id: 'primaryForm-layer', tool: 'photoshop_create_layer', args: { name: 'PrimaryForm' } }, treeAction],
       },
     }));
-    expect(tree.preflight_rejection).toBeUndefined();
+    expect(primaryForm.preflight_rejection).toBeUndefined();
 
-    const wrongTarget = regionAction('tree-on-shared');
+    const wrongTarget = regionAction('primaryForm-on-shared');
     wrongTarget.args.regions[0].layer_id = 9;
     wrongTarget.args.clip_bounds = { left: 0, top: 0, right: 180, bottom: 180 };
     const rejected = await body(await f.cycle.handler({
-      previous_operation_id: 'tree-create',
-      previous_observation: { observed: 'Tree owner retained.', target: 'resolved' },
+      previous_operation_id: 'primaryForm-create',
+      previous_observation: { observed: 'PrimaryForm owner retained.', target: 'resolved' },
       next_pass: {
-        request_key: 'tree-wrong-target', problem_id: 'tree-correction', document_id: 42,
-        goal: 'Correct only the tree.', stage: 'FORM', scale: 'medium', region: 'tree',
+        request_key: 'primaryForm-wrong-target', problem_id: 'primaryForm-correction', document_id: 42,
+        goal: 'Correct only the primaryForm.', stage: 'FORM', scale: 'medium', region: 'primaryForm',
         region_bounds: { left: 0, top: 0, right: 180, bottom: 180 }, action_class: 'REPLACE',
         layer_separation_check: semanticLayerSeparation('continuation', 'low', false),
-        logical_layer: semanticLogicalLayer('tree', 'continue-logical-layer', { layerId: 10, layerName: 'Tree' }),
+        logical_layer: semanticLogicalLayer('primaryForm', 'continue-logical-layer', { layerId: 10, layerName: 'PrimaryForm' }),
         actions: [wrongTarget],
       },
     }));
@@ -3427,51 +4333,53 @@ describe('public compact Guard contract regressions', () => {
       document_id: 42, process_dir: 'processes/historical-owner-correction-process/run-01',
       painting_profile: 'nontrivial_painting', commentary_mode: 'technical',
     });
-    const createAction = regionAction('tree-base-region');
-    createAction.args.regions[0].layer_id = '$steps.tree-base-layer.details.layerId';
+    const createAction = regionAction('primaryForm-base-region');
+    createAction.args.regions[0].layer_id = '$steps.primaryForm-base-layer.details.layerId';
     const created = await body(await f.cycle.handler({ next_pass: {
-      request_key: 'tree-base-create', problem_id: 'tree-owner', document_id: 42,
-      goal: 'Create the durable tree owner.', stage: 'SHAPE', scale: 'global',
-      scene_ownership_plan: semanticSceneOwnershipPlan('historical-owner-scene', ['tree']),
-      ...structuredMassContract('tree structural mass'),
+      request_key: 'primaryForm-base-create', problem_id: 'primaryForm-owner', document_id: 42,
+      goal: 'Create the durable primaryForm owner.', stage: 'SHAPE', scale: 'global',
+      scene_ownership_plan: semanticSceneOwnershipPlan('historical-owner-scene', ['primaryForm']),
+      ...structuredMassContract('primaryForm structural mass'),
       layer_separation_check: semanticLayerSeparation('new-object', 'moderate', true),
-      logical_layer: semanticLogicalLayer('tree', 'create-new', { layerName: 'Tree Base' }),
-      actions: [{ id: 'tree-base-layer', tool: 'photoshop_create_layer', args: { name: 'Tree Base' } }, createAction],
+      logical_layer: semanticLogicalLayer('primaryForm', 'create-new', { layerName: 'PrimaryForm Base' }),
+      actions: [{ id: 'primaryForm-base-layer', tool: 'photoshop_create_layer', args: { name: 'PrimaryForm Base' } }, createAction],
     }}));
     expect(created.preflight_rejection).toBeUndefined();
     expect(f.runtime.store.compactPassContext(42).logical_layer_owners[0]).toMatchObject({
-      hypothesis_id: 'tree', layer_id: 9, physical_layer_ids: [9],
+      hypothesis_id: 'primaryForm', layer_id: 9, physical_layer_ids: [9],
     });
 
     // Simulate an already completed owner migration/continuation from an earlier public pass. The
     // SessionStore projection is the durable source consumed by the next real compact execution.
     f.runtime.store.write({
-      id: 'tree-current-binding', tool: 'photoshop_execute_visual_microplan',
+      id: 'primaryForm-current-binding', tool: 'photoshop_execute_visual_microplan',
       args: { document_id: 42 }, sequence: 50,
       created_at: new Date(50000).toISOString(), completed_at: new Date(50001).toISOString(),
       phase: 'completed', failed: false, visual: false, report: true, ack: true, verdict: true,
       result: { content: [{ type: 'text', text: JSON.stringify({
         ok: true,
-        continuation_layers: [{ layer_id: 10, hypothesis_id: 'tree', decision: 'continue-logical-layer' }],
+        continuation_layers: [{ layer_id: 10, hypothesis_id: 'primaryForm', decision: 'continue-logical-layer',
+          physical_role: 'opaque-mass', opacity_role: 'opaque', depth_relations: [] }],
       }) }] },
     });
     expect(f.runtime.store.compactPassContext(42).logical_layer_owners[0]).toMatchObject({
-      hypothesis_id: 'tree', layer_id: 10, physical_layer_ids: [9, 10],
+      hypothesis_id: 'primaryForm', layer_id: 10, physical_layer_ids: [9, 10],
     });
 
-    const correction = regionAction('tree-historical-correction');
+    const correction = regionAction('primaryForm-historical-correction');
     correction.args.regions[0].layer_id = 9;
     correction.args.clip_bounds = { left: 0, top: 0, right: 180, bottom: 180 };
     const corrected = await body(await f.cycle.handler({
-      previous_operation_id: 'tree-base-create',
-      previous_observation: { observed: 'The tree owner remains structurally valid.', target: 'resolved' },
+      previous_operation_id: 'primaryForm-base-create',
+      previous_observation: { observed: 'The primaryForm owner remains structurally valid.', target: 'resolved',
+        physical_stack_check: physicalStackObservation() },
       next_pass: {
-        request_key: 'tree-correct-history', problem_id: 'tree-correction', document_id: 42,
-        goal: 'Correct only the historical tree underpaint while preserving current owner authority.',
-        stage: 'FORM', scale: 'medium', region: 'tree',
+        request_key: 'primaryForm-correct-history', problem_id: 'primaryForm-correction', document_id: 42,
+        goal: 'Correct only the historical primaryForm underpaint while preserving current owner authority.',
+        stage: 'FORM', scale: 'medium', region: 'primaryForm',
         region_bounds: { left: 0, top: 0, right: 180, bottom: 180 }, action_class: 'REPLACE',
         layer_separation_check: semanticLayerSeparation('continuation', 'low', false),
-        logical_layer: semanticLogicalLayer('tree', 'continue-logical-layer', { layerId: 10, layerName: 'Tree Current' }),
+        logical_layer: semanticLogicalLayer('primaryForm', 'continue-logical-layer', { layerId: 10, layerName: 'PrimaryForm Current' }),
         cross_layer_correction: {
           mode: 'correction', current_layer_id: 10, target_layer_ids: [9],
           post_authoritative_layer_id: 10,
@@ -3482,7 +4390,7 @@ describe('public compact Guard contract regressions', () => {
     expect(corrected.preflight_rejection).toBeUndefined();
     expect(f.counts().regionCalls).toBe(2);
     expect(f.runtime.store.compactPassContext(42).logical_layer_owners[0]).toMatchObject({
-      hypothesis_id: 'tree', layer_id: 10, physical_layer_ids: [9, 10],
+      hypothesis_id: 'primaryForm', layer_id: 10, physical_layer_ids: [9, 10],
     });
   });
 
@@ -3495,11 +4403,11 @@ describe('public compact Guard contract regressions', () => {
       commentary_mode: 'technical',
     });
     const constructionScenePlan = semanticSceneOwnershipPlan('construction-graph-scene', [
-      'building-mass',
+      'primaryStructure-mass',
       'facade-plane',
-      'window-opening',
+      'openingForm-opening',
       'ripple-specular',
-      { semanticId: 'sky-field', editability: 'continuous-field', role: 'Continuous atmospheric field' },
+      { semanticId: 'continuousField-field', editability: 'continuous-field', role: 'Continuous atmospheric field' },
       'facade-finish',
       'temp-detail',
     ]);
@@ -3545,24 +4453,24 @@ describe('public compact Guard contract regressions', () => {
       }));
     };
 
-    // Architecture domain: building mass -> facade plane -> opening.
-    const primary = await createOwner('cg-building', 'building-mass', 'primary', undefined);
+    // Architecture domain: primaryStructure mass -> facade plane -> opening.
+    const primary = await createOwner('cg-primaryStructure', 'primaryStructure-mass', 'primary', undefined);
     expect(primary.preflight_rejection).toBeUndefined();
-    const secondary = await createOwner('cg-facade', 'facade-plane', 'secondary', 'building-mass', 'cg-building');
+    const secondary = await createOwner('cg-facade', 'facade-plane', 'secondary', 'primaryStructure-mass', 'cg-primaryStructure');
     expect(secondary.preflight_rejection).toBeUndefined();
-    const tertiary = await createOwner('cg-opening', 'window-opening', 'tertiary', 'facade-plane', 'cg-facade', {
+    const tertiary = await createOwner('cg-opening', 'openingForm-opening', 'tertiary', 'facade-plane', 'cg-facade', {
       relation: 'aperture-of', parent_hypothesis_id: 'facade-plane',
       topology: 'Rectangular through-opening remains bounded by the facade reveal on all four sides.',
       evidence: ['Visible reveal boundary and through-opening silhouette establish a structural void.'],
     });
     expect(tertiary.preflight_rejection).toBeUndefined();
     expect(f.runtime.store.compactPassContext(42).logical_layer_owners).toEqual(expect.arrayContaining([
-      expect.objectContaining({ hypothesis_id: 'building-mass', construction_tier: 'primary' }),
-      expect.objectContaining({ hypothesis_id: 'facade-plane', construction_tier: 'secondary', parent_hypothesis_id: 'building-mass' }),
-      expect.objectContaining({ hypothesis_id: 'window-opening', construction_tier: 'tertiary', parent_hypothesis_id: 'facade-plane' }),
+      expect.objectContaining({ hypothesis_id: 'primaryStructure-mass', construction_tier: 'primary' }),
+      expect.objectContaining({ hypothesis_id: 'facade-plane', construction_tier: 'secondary', parent_hypothesis_id: 'primaryStructure-mass' }),
+      expect.objectContaining({ hypothesis_id: 'openingForm-opening', construction_tier: 'tertiary', parent_hypothesis_id: 'facade-plane' }),
     ]));
     expect(f.runtime.store.compactPassContext(42).logical_layer_owners).toEqual(expect.arrayContaining([
-      expect.objectContaining({ hypothesis_id: 'window-opening', negative_space: expect.objectContaining({ relation: 'aperture-of', parent_hypothesis_id: 'facade-plane' }) }),
+      expect.objectContaining({ hypothesis_id: 'openingForm-opening', negative_space: expect.objectContaining({ relation: 'aperture-of', parent_hypothesis_id: 'facade-plane' }) }),
     ]));
 
     const facadeOwner = f.runtime.store.compactPassContext(42).logical_layer_owners.find((owner: any) => owner.hypothesis_id === 'facade-plane');
@@ -3574,7 +4482,7 @@ describe('public compact Guard contract regressions', () => {
         request_key: 'cg-facade-texture-unreviewed', problem_id: 'facade-material', document_id: 42,
         goal: 'Repaint the facade without reviewing its opening.', stage: 'SHAPE', scale: 'medium',
         layer_separation_check: semanticLayerSeparation('continuation', 'low', false),
-        logical_layer: semanticLogicalLayer('facade-plane', 'continue-logical-layer', { layerId: facadeOwner.layer_id, layerName: 'facade-plane', rollbackValue: 'low', constructionTier: 'secondary', parentHypothesisId: 'building-mass' }),
+        logical_layer: semanticLogicalLayer('facade-plane', 'continue-logical-layer', { layerId: facadeOwner.layer_id, layerName: 'facade-plane', rollbackValue: 'low', constructionTier: 'secondary', parentHypothesisId: 'primaryStructure-mass' }),
         actions: [facadeTexture],
       },
     }));
@@ -3587,33 +4495,33 @@ describe('public compact Guard contract regressions', () => {
         goal: 'Repaint the facade while preserving the reviewed opening topology.', stage: 'SHAPE', scale: 'medium',
         ...structuredMassContract('facade structural mass'),
         layer_separation_check: semanticLayerSeparation('continuation', 'low', false),
-        logical_layer: semanticLogicalLayer('facade-plane', 'continue-logical-layer', { layerId: facadeOwner.layer_id, layerName: 'facade-plane', rollbackValue: 'low', constructionTier: 'secondary', parentHypothesisId: 'building-mass', preserveNegativeSpaceIds: ['window-opening'] }),
+        logical_layer: semanticLogicalLayer('facade-plane', 'continue-logical-layer', { layerId: facadeOwner.layer_id, layerName: 'facade-plane', rollbackValue: 'low', constructionTier: 'secondary', parentHypothesisId: 'primaryStructure-mass', preserveNegativeSpaceIds: ['openingForm-opening'] }),
         actions: [facadeTexture],
       },
     }));
     expect(preservedOpening.preflight_rejection).toBeUndefined();
 
-    // Surface work cannot jump to an absent prerequisite (same contract also applies to tree/water owners).
+    // Surface work cannot jump to an absent prerequisite (same contract also applies to primaryForm/receiverSurface owners).
     const missing = await createOwner('cg-missing-surface', 'ripple-specular', 'surface', 'wave-group', 'cg-facade-texture-preserved');
     expect(missing.preflight_rejection?.error_codes).toContain('construction_graph_parent_missing');
 
-    const unrelated = await createOwner('cg-unrelated-primary', 'sky-field', 'primary', undefined, 'cg-facade-texture-preserved');
+    const unrelated = await createOwner('cg-unrelated-primary', 'continuousField-field', 'primary', undefined, 'cg-facade-texture-preserved');
     expect(unrelated.preflight_rejection).toBeUndefined();
 
     // A structural correction to the primary invalidates its dependent branch, but not unrelated owners.
-    const primaryOwner = f.runtime.store.compactPassContext(42).logical_layer_owners.find((owner: any) => owner.hypothesis_id === 'building-mass');
-    const refine = regionAction('cg-building-refine-region');
+    const primaryOwner = f.runtime.store.compactPassContext(42).logical_layer_owners.find((owner: any) => owner.hypothesis_id === 'primaryStructure-mass');
+    const refine = regionAction('cg-primaryStructure-refine-region');
     refine.args.regions[0].layer_id = primaryOwner.layer_id;
     const corrected = await body(await f.cycle.handler({
       previous_operation_id: 'cg-unrelated-primary',
       previous_observation: { observed: 'The unrelated primary owner is established.', target: 'resolved' },
       next_pass: {
-        request_key: 'cg-building-structural-correction', problem_id: 'cg-building-correction', document_id: 42,
-        goal: 'Correct the primary building silhouette.', stage: 'SHAPE', scale: 'global', change_domains: ['silhouette'],
+        request_key: 'cg-primaryStructure-structural-correction', problem_id: 'cg-primaryStructure-correction', document_id: 42,
+        goal: 'Correct the primary primaryStructure silhouette.', stage: 'SHAPE', scale: 'global', change_domains: ['silhouette'],
         ...structuredMassContract('primary structural mass'),
         layer_separation_check: semanticLayerSeparation('continuation', 'low', false),
-        logical_layer: semanticLogicalLayer('building-mass', 'continue-logical-layer', {
-          layerId: primaryOwner.layer_id, layerName: 'building-mass', rollbackValue: 'low', constructionTier: 'primary',
+        logical_layer: semanticLogicalLayer('primaryStructure-mass', 'continue-logical-layer', {
+          layerId: primaryOwner.layer_id, layerName: 'primaryStructure-mass', rollbackValue: 'low', constructionTier: 'primary',
           constructionChange: true,
         }),
         actions: [refine],
@@ -3622,30 +4530,30 @@ describe('public compact Guard contract regressions', () => {
     expect(corrected.preflight_rejection).toBeUndefined();
 
     // Checkpoint cadence is orthogonal to this construction-graph dependency fixture.
-    const checkpointedCorrection = f.runtime.store.read('cg-building-structural-correction')!;
+    const checkpointedCorrection = f.runtime.store.read('cg-primaryStructure-structural-correction')!;
     checkpointedCorrection.checkpoint = 'fixture://construction-graph-midpoint.psd';
     f.runtime.store.write(checkpointedCorrection);
 
-    const skyOwner = f.runtime.store.compactPassContext(42).logical_layer_owners.find((owner: any) => owner.hypothesis_id === 'sky-field');
-    const skyContinue = regionAction('cg-sky-continue-region');
+    const skyOwner = f.runtime.store.compactPassContext(42).logical_layer_owners.find((owner: any) => owner.hypothesis_id === 'continuousField-field');
+    const skyContinue = regionAction('cg-continuousField-continue-region');
     skyContinue.args.regions[0].layer_id = skyOwner.layer_id;
     const unrelatedStillValid = await body(await f.cycle.handler({
-      previous_operation_id: 'cg-building-structural-correction',
-      previous_observation: { observed: 'The building silhouette correction is established.', target: 'resolved' },
+      previous_operation_id: 'cg-primaryStructure-structural-correction',
+      previous_observation: { observed: 'The primaryStructure silhouette correction is established.', target: 'resolved' },
       next_pass: {
-        request_key: 'cg-unrelated-continue', problem_id: 'cg-sky-tone', document_id: 42,
-        goal: 'Continue unrelated sky tone without structural invalidation.', stage: 'SHAPE', scale: 'global',
+        request_key: 'cg-unrelated-continue', problem_id: 'cg-continuousField-tone', document_id: 42,
+        goal: 'Continue unrelated continuousField tone without structural invalidation.', stage: 'SHAPE', scale: 'global',
         ...structuredMassContract('unrelated structural mass'),
         layer_separation_check: semanticLayerSeparation('continuation', 'low', false),
-        logical_layer: semanticLogicalLayer('sky-field', 'continue-logical-layer', {
-          layerId: skyOwner.layer_id, layerName: 'sky-field', rollbackValue: 'low', constructionTier: 'primary',
+        logical_layer: semanticLogicalLayer('continuousField-field', 'continue-logical-layer', {
+          layerId: skyOwner.layer_id, layerName: 'continuousField-field', rollbackValue: 'low', constructionTier: 'primary',
         }),
         actions: [skyContinue],
       },
     }));
     expect(unrelatedStillValid.preflight_rejection).toBeUndefined();
 
-    const staleSurface = await createOwner('cg-stale-surface', 'facade-finish', 'surface', 'window-opening', 'cg-unrelated-continue');
+    const staleSurface = await createOwner('cg-stale-surface', 'facade-finish', 'surface', 'openingForm-opening', 'cg-unrelated-continue');
     expect(staleSurface.preflight_rejection?.error_codes).toContain('construction_graph_parent_stale');
 
     const tempLayerStep = 'cg-temp-primary-layer';
@@ -3653,7 +4561,7 @@ describe('public compact Guard contract regressions', () => {
     tempRegion.args.regions[0].layer_id = `$steps.${tempLayerStep}.details.layerId`;
     const tempPrimary = await body(await f.cycle.handler({
       previous_operation_id: 'cg-unrelated-continue',
-      previous_observation: { observed: 'The unrelated sky continuation remains valid.', target: 'resolved' },
+      previous_observation: { observed: 'The unrelated continuousField continuation remains valid.', target: 'resolved' },
       next_pass: {
         request_key: 'cg-temp-primary', problem_id: 'cg-temp-primary', document_id: 42,
         goal: 'Try a temporary primary construction hypothesis.', stage: 'SHAPE', scale: 'global',
@@ -3672,7 +4580,7 @@ describe('public compact Guard contract regressions', () => {
     const f = fixture();
     await f.setArtRun.handler({ document_id: 42, process_dir: 'processes/causal-effects-process/run-01', painting_profile: 'nontrivial_painting', commentary_mode: 'technical' });
     const causalScenePlan = semanticSceneOwnershipPlan('causal-effects-scene', [
-      'tower', 'water-plane', 'tower-reflection',
+      'tower', 'receiverSurface-plane', 'tower-reflection',
     ]);
     const create = async (key: string, id: string, previous?: string, causalEffect?: Record<string, unknown>) => {
       const layerStep = `${key}-layer`; const region = regionAction(`${key}-region`);
@@ -3693,16 +4601,16 @@ describe('public compact Guard contract regressions', () => {
       }));
     };
     expect((await create('cause-source', 'tower')).preflight_rejection).toBeUndefined();
-    expect((await create('cause-receiver', 'water-plane', 'cause-source')).preflight_rejection).toBeUndefined();
+    expect((await create('cause-receiver', 'receiverSurface-plane', 'cause-source')).preflight_rejection).toBeUndefined();
     const effect = await create('cause-reflection', 'tower-reflection', 'cause-receiver', {
-      relation: 'reflection_of', source_hypothesis_id: 'tower', receiver_hypothesis_id: 'water-plane',
-      causal_statement: 'Tower reflection is registered to the source and transformed by the water plane.',
+      relation: 'reflection_of', source_hypothesis_id: 'tower', receiver_hypothesis_id: 'receiverSurface-plane',
+      causal_statement: 'Tower reflection is registered to the source and transformed by the receiverSurface plane.',
       evidence: ['The reflected mass aligns with the source footprint and receiving plane direction.'],
     });
     expect(effect.preflight_rejection).toBeUndefined();
     const effectOwner = f.runtime.store.compactPassContext(42).logical_layer_owners.find((owner: any) => owner.hypothesis_id === 'tower-reflection');
     expect(effectOwner.causal_effect).toMatchObject({
-      relation: 'reflection_of', source_hypothesis_id: 'tower', receiver_hypothesis_id: 'water-plane',
+      relation: 'reflection_of', source_hypothesis_id: 'tower', receiver_hypothesis_id: 'receiverSurface-plane',
       source_construction_revision: 'cause-source', receiver_construction_revision: 'cause-receiver',
     });
 
@@ -3841,28 +4749,28 @@ describe('public compact Guard contract regressions', () => {
       commentary_mode: 'technical',
     });
 
-    const rearRegion = regionAction('rear-house-region');
-    rearRegion.args.regions[0].layer_id = '$steps.rear-house-layer.details.layerId';
+    const rearRegion = regionAction('rear-supportedStructure-region');
+    rearRegion.args.regions[0].layer_id = '$steps.rear-supportedStructure-layer.details.layerId';
     const rear = await body(await f.cycle.handler({
       next_pass: {
-        request_key: 'rear-house-shape',
-        problem_id: 'rear-house-shape',
+        request_key: 'rear-supportedStructure-shape',
+        problem_id: 'rear-supportedStructure-shape',
         document_id: 42,
-        goal: 'Establish the rear house as an opaque structural mass.',
+        goal: 'Establish the rear supportedStructure as an opaque structural mass.',
         stage: 'SHAPE',
         scale: 'global',
         scene_ownership_plan: semanticSceneOwnershipPlan('physical-stack-scene', [
-          'rear-house', 'front-house', 'wrong-order-house', 'late-opaque',
+          'rear-supportedStructure', 'front-supportedStructure', 'wrong-order-supportedStructure', 'late-opaque',
         ]),
         ...structuredMassContract('rear opaque structural mass'),
         layer_separation_check: semanticLayerSeparation('new-object', 'moderate', true),
-        logical_layer: semanticLogicalLayer('rear-house', 'create-new', {
-          layerName: 'Rear house',
+        logical_layer: semanticLogicalLayer('rear-supportedStructure', 'create-new', {
+          layerName: 'Rear supportedStructure',
           physicalRole: 'opaque-mass',
           opacityRole: 'opaque',
         }),
         actions: [
-          { id: 'rear-house-layer', tool: 'photoshop_create_layer', args: { name: 'Rear house' } },
+          { id: 'rear-supportedStructure-layer', tool: 'photoshop_create_layer', args: { name: 'Rear supportedStructure' } },
           rearRegion,
         ],
       },
@@ -3870,41 +4778,41 @@ describe('public compact Guard contract regressions', () => {
     expect(rear.preflight_rejection).toBeUndefined();
     expect(f.runtime.store.compactPassContext(42).logical_layer_owners).toEqual([
       expect.objectContaining({
-        hypothesis_id: 'rear-house',
+        hypothesis_id: 'rear-supportedStructure',
         layer_id: 9,
         physical_role: 'opaque-mass',
         opacity_role: 'opaque',
       }),
     ]);
 
-    const frontRegion = regionAction('front-house-region');
-    frontRegion.args.regions[0].layer_id = '$steps.front-house-layer.details.layerId';
+    const frontRegion = regionAction('front-supportedStructure-region');
+    frontRegion.args.regions[0].layer_id = '$steps.front-supportedStructure-layer.details.layerId';
     const front = await body(await f.cycle.handler({
-      previous_operation_id: 'rear-house-shape',
+      previous_operation_id: 'rear-supportedStructure-shape',
       previous_observation: {
-        observed: 'The rear house is established as the first opaque depth anchor.',
+        observed: 'The rear supportedStructure is established as the first opaque depth anchor.',
         target: 'resolved',
       },
       next_pass: {
-        request_key: 'front-house-shape',
-        problem_id: 'front-house-shape',
+        request_key: 'front-supportedStructure-shape',
+        problem_id: 'front-supportedStructure-shape',
         document_id: 42,
-        goal: 'Establish the foreground house in front of the rear house.',
+        goal: 'Establish the foreground supportedStructure in front of the rear supportedStructure.',
         stage: 'SHAPE',
         scale: 'global',
         ...structuredMassContract('front opaque structural mass'),
         layer_separation_check: semanticLayerSeparation('new-object', 'moderate', true),
-        logical_layer: semanticLogicalLayer('front-house', 'create-new', {
-          layerName: 'Front house',
+        logical_layer: semanticLogicalLayer('front-supportedStructure', 'create-new', {
+          layerName: 'Front supportedStructure',
           physicalRole: 'opaque-mass',
           opacityRole: 'opaque',
-          depthRelations: [{ relation: 'in-front-of', target_hypothesis_id: 'rear-house' }],
+          depthRelations: [{ relation: 'in-front-of', target_hypothesis_id: 'rear-supportedStructure' }],
         }),
         actions: [
           {
-            id: 'front-house-layer',
+            id: 'front-supportedStructure-layer',
             tool: 'photoshop_create_layer',
-            args: { name: 'Front house', above_layer_id: 9 },
+            args: { name: 'Front supportedStructure', above_layer_id: 9 },
           },
           frontRegion,
         ],
@@ -3913,37 +4821,37 @@ describe('public compact Guard contract regressions', () => {
     expect(front.preflight_rejection).toBeUndefined();
     expect(f.runtime.store.compactPassContext(42).logical_layer_owners).toEqual(expect.arrayContaining([
       expect.objectContaining({
-        hypothesis_id: 'front-house',
+        hypothesis_id: 'front-supportedStructure',
         layer_id: 10,
-        depth_relations: [{ relation: 'in-front-of', target_hypothesis_id: 'rear-house' }],
+        depth_relations: [{ relation: 'in-front-of', target_hypothesis_id: 'rear-supportedStructure' }],
       }),
     ]));
 
-    const wrongRegion = regionAction('wrong-order-house-region');
+    const wrongRegion = regionAction('wrong-order-supportedStructure-region');
     wrongRegion.args.regions[0].layer_id = '$steps.wrong-order-layer.details.layerId';
     const wrong = await body(await f.cycle.handler({
-      previous_operation_id: 'front-house-shape',
+      previous_operation_id: 'front-supportedStructure-shape',
       previous_observation: {
-        observed: 'The front house correctly occludes the rear house and the layer stack matches depth.',
+        observed: 'The front supportedStructure correctly occludes the rear supportedStructure and the layer stack matches depth.',
         target: 'resolved',
       },
       next_pass: {
-        request_key: 'wrong-order-house-shape',
-        problem_id: 'wrong-order-house-shape',
+        request_key: 'wrong-order-supportedStructure-shape',
+        problem_id: 'wrong-order-supportedStructure-shape',
         document_id: 42,
         goal: 'Try to add another foreground mass without matching its declared stack order.',
         stage: 'SHAPE',
         scale: 'global',
         ...structuredMassContract('foreground opaque structural mass'),
         layer_separation_check: semanticLayerSeparation('new-object', 'moderate', true),
-        logical_layer: semanticLogicalLayer('wrong-order-house', 'create-new', {
-          layerName: 'Wrong order house',
+        logical_layer: semanticLogicalLayer('wrong-order-supportedStructure', 'create-new', {
+          layerName: 'Wrong order supportedStructure',
           physicalRole: 'opaque-mass',
           opacityRole: 'opaque',
-          depthRelations: [{ relation: 'in-front-of', target_hypothesis_id: 'front-house' }],
+          depthRelations: [{ relation: 'in-front-of', target_hypothesis_id: 'front-supportedStructure' }],
         }),
         actions: [
-          { id: 'wrong-order-layer', tool: 'photoshop_create_layer', args: { name: 'Wrong order house' } },
+          { id: 'wrong-order-layer', tool: 'photoshop_create_layer', args: { name: 'Wrong order supportedStructure' } },
           wrongRegion,
         ],
       },
@@ -3984,86 +4892,92 @@ describe('public compact Guard contract regressions', () => {
       painting_profile: 'nontrivial_painting',
       commentary_mode: 'technical',
     });
-    const tempRegion = regionAction('temporary-cat-region');
-    tempRegion.args.regions[0].layer_id = '$steps.temporary-cat-layer.details.layerId';
+    const tempRegion = regionAction('temporary-primaryOwner-region');
+    tempRegion.args.regions[0].layer_id = '$steps.temporary-primaryOwner-layer.details.layerId';
     const temporary = await body(await f.cycle.handler({
       next_pass: {
-        request_key: 'temporary-cat-create',
-        problem_id: 'temporary-cat',
+        request_key: 'temporary-primaryOwner-create',
+        problem_id: 'temporary-primaryOwner',
         document_id: 42,
-        goal: 'Keep one provisional cat structure independently reversible during shape exploration.',
+        goal: 'Keep one provisional primaryOwner structure independently reversible during shape exploration.',
         stage: 'SHAPE',
         scale: 'global',
         ...structuredMassContract('provisional character structural mass'),
+        scene_ownership_plan: semanticSceneOwnershipPlan('temporary-primaryOwner-owners', [
+          { semanticId: 'primaryOwner-temp', editability: 'temporary' },
+        ]),
         layer_separation_check: semanticLayerSeparation('new-object', 'moderate', true),
-        logical_layer: semanticLogicalLayer('cat-temp', 'temporary-hypothesis', { layerName: 'Cat Temp' }),
+        logical_layer: semanticLogicalLayer('primaryOwner-temp', 'temporary-hypothesis', { layerName: 'PrimaryOwner Temp' }),
         actions: [
-          { id: 'temporary-cat-layer', tool: 'photoshop_create_layer', args: { name: 'Cat Temp' } },
+          { id: 'temporary-primaryOwner-layer', tool: 'photoshop_create_layer', args: { name: 'PrimaryOwner Temp' } },
           tempRegion,
         ],
       },
     }));
     expect(temporary.preflight_rejection).toBeUndefined();
     expect(f.runtime.store.compactPassContext(42).logical_layer_owners).toEqual([
-      expect.objectContaining({ hypothesis_id: 'cat-temp', layer_id: 9, temporary: true }),
+      expect.objectContaining({ hypothesis_id: 'primaryOwner-temp', layer_id: 9, temporary: true }),
     ]);
 
-    const continueTemp = regionAction('temporary-cat-continue');
+    const continueTemp = regionAction('temporary-primaryOwner-continue');
     continueTemp.args.regions[0].layer_id = 9;
     continueTemp.args.clip_bounds = { left: 0, top: 0, right: 180, bottom: 180 };
     const blocked = await body(await f.cycle.handler({
-      previous_operation_id: 'temporary-cat-create',
+      previous_operation_id: 'temporary-primaryOwner-create',
       previous_observation: {
         observed: 'The provisional owner remains useful but is still explicitly temporary.',
         target: 'resolved',
       },
       next_pass: {
-        request_key: 'temporary-cat-form',
-        problem_id: 'temporary-cat-form',
+        request_key: 'temporary-primaryOwner-form',
+        problem_id: 'temporary-primaryOwner-form',
         document_id: 42,
         goal: 'Attempt committed form refinement without resolving the temporary layer hypothesis.',
         stage: 'FORM_AND_LIGHT',
         scale: 'medium',
-        region: 'cat',
+        region: 'primaryOwner',
         region_bounds: { left: 0, top: 0, right: 180, bottom: 180 },
         action_class: 'REPLACE',
         layer_separation_check: semanticLayerSeparation('continuation', 'low', false),
-        logical_layer: semanticLogicalLayer('cat-temp', 'continue-logical-layer', { layerId: 9, layerName: 'Cat Temp', rollbackValue: 'low' }),
+        logical_layer: semanticLogicalLayer('primaryOwner-temp', 'continue-logical-layer', { layerId: 9, layerName: 'PrimaryOwner Temp', rollbackValue: 'low' }),
         actions: [continueTemp],
       },
     }));
     expect(blocked.preflight_rejection?.error_codes).toContain('semantic_layer_stage_gate');
     expect(f.runtime.store.compactPassContext(42).logical_layer_owners).toEqual([
-      expect.objectContaining({ hypothesis_id: 'cat-temp', layer_id: 9, temporary: true }),
+      expect.objectContaining({ hypothesis_id: 'primaryOwner-temp', layer_id: 9, temporary: true }),
     ]);
 
-    const missingPlanKeep = await body(await f.keepLogicalLayer.handler({
-      request_key: 'temporary-cat-keep-missing-plan',
+    const unplannedKeep = await body(await f.keepLogicalLayer.handler({
+      request_key: 'temporary-primaryOwner-keep-missing-plan',
       document_id: 42,
-      hypothesis_id: 'cat-temp',
+      hypothesis_id: 'primaryOwner-temp',
       layer_id: 9,
-      rationale: 'The provisional cat is now accepted and should become a persistent independently editable owner.',
+      rationale: 'The provisional primaryOwner is now accepted and should become a persistent independently editable owner.',
     }));
-    expect(missingPlanKeep.code).toBe('semantic_layer_lifecycle_rejected');
-    expect(missingPlanKeep.message).toMatch(/scene_ownership_plan_required/);
+    expect(unplannedKeep.code).toBe('semantic_layer_lifecycle_rejected');
+    // The temporary unit is predeclared, but promotion still requires a
+    // committed, independently editable owner plan; a temporary-only plan
+    // cannot authorize a persistent owner implicitly.
+    expect(unplannedKeep.message).toMatch(/scene_ownership_owner_unplanned/);
 
     const kept = await body(await f.keepLogicalLayer.handler({
-      request_key: 'temporary-cat-keep',
+      request_key: 'temporary-primaryOwner-keep',
       document_id: 42,
-      hypothesis_id: 'cat-temp',
+      hypothesis_id: 'primaryOwner-temp',
       layer_id: 9,
-      scene_ownership_plan: semanticSceneOwnershipPlan('temporary-promotion-scene', [
-        { semanticId: 'cat', ownerId: 'cat-temp', role: 'Accepted character form' },
+      scene_ownership_plan: semanticSceneOwnershipPlan('temporary-primaryOwner-owners', [
+        { semanticId: 'primaryOwner-temp', editability: 'independent' },
       ]),
     }));
     expect(kept.ok).toBe(true);
     expect(kept.semantic_layer_lifecycle).not.toHaveProperty('rationale');
     expect(f.runtime.store.compactPassContext(42).logical_layer_owners).toEqual([
-      expect.objectContaining({ hypothesis_id: 'cat-temp', layer_id: 9, temporary: false, decision: 'keep' }),
+      expect.objectContaining({ hypothesis_id: 'primaryOwner-temp', layer_id: 9, temporary: false, decision: 'keep' }),
     ]);
     expect(f.runtime.store.statusCompact().documents['42'].scene_ownership_plan).toMatchObject({
-      plan_id: 'temporary-promotion-scene',
-      source_operation_id: 'temporary-cat-keep',
+      plan_id: 'temporary-primaryOwner-owners',
+      source_operation_id: 'temporary-primaryOwner-keep',
     });
   });
 });
@@ -4098,7 +5012,7 @@ describe('hot-loop compiler integration', () => {
 
     expect(result.preflight_rejection).toBeUndefined();
     expect(f.counts().regionCalls - before.regionCalls).toBe(1);
-    expect(result.cycle_latency).toEqual(expect.objectContaining({
+    expect(f.runtime.store.read('hot-loop-intent-refine')?.latency).toEqual(expect.objectContaining({
       painting_intent_compile_ms: expect.any(Number),
       durable_state_injection_ms: expect.any(Number),
       local_validation_ms: expect.any(Number),
@@ -4140,7 +5054,7 @@ describe('hot-loop compiler integration', () => {
 
     expect(result.preflight_rejection).toBeUndefined();
     expect(f.counts().regionCalls - before.regionCalls).toBe(1);
-    expect(result.compiler_repair_audit).toMatchObject({
+    expect(f.runtime.store.read('hot-loop-auto-repair')?.latency?.compiler_repair_audit).toMatchObject({
       protocol: 'photoshop.guard.compiler_repair.v1',
       final_validation: 'valid',
       repairs: expect.arrayContaining([expect.objectContaining({
@@ -4148,7 +5062,70 @@ describe('hot-loop compiler integration', () => {
         path: 'next_pass.logical_layer.layer_id',
       })]),
     });
-    expect(result.cycle_latency.auto_repair_count).toBeGreaterThanOrEqual(1);
+    expect(f.runtime.store.read('hot-loop-auto-repair')?.latency?.auto_repair_count).toBeGreaterThanOrEqual(1);
+  });
+
+  it('never overwrites an explicitly different known-owner region target during local repair', async () => {
+    const f = fixture();
+    await createHotLoopOwner(f, 'hot-loop-explicit-target-owner');
+    await closeHotLoopOwner(f, 'hot-loop-explicit-target-owner');
+    const before = f.counts();
+    const region = regionAction('explicit-wrong-target-region');
+    region.args.regions[0].layer_id = 77;
+
+    const result = await body(await f.cycle.handler({
+      next_pass: {
+        request_key: 'hot-loop-explicit-wrong-target',
+        problem_id: 'hot-loop-explicit-wrong-target-problem',
+        document_id: 42,
+        goal: 'Refuse a caller-selected foreign physical layer for the durable owner.',
+        stage: 'SHAPE',
+        scale: 'global',
+        ...structuredMassContract('stable painted structural mass'),
+        layer_separation_check: semanticLayerSeparation('continuation', 'low', false),
+        logical_layer: semanticLogicalLayer('hot-loop-owner', 'continue-logical-layer', {
+          layerName: 'Hot Loop Owner', rollbackValue: 'low',
+        }),
+        actions: [region],
+      },
+    }));
+
+    expect(result.preflight_rejection?.error_codes).toContain('invalid_visual_microplan');
+    // Even if an unrelated deterministic repair is attempted, its no-progress
+    // diagnostic must not hide the original actionable foreign-owner rejection.
+    expect(result.preflight_rejection?.error_codes).not.toEqual(['deterministic_repair_repeat']);
+    expect(f.counts().regionCalls).toBe(before.regionCalls);
+    expect(result.compiler_repair_audit?.repairs ?? []).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ path: 'next_pass.actions[0].args.regions[0].layer_id' }),
+    ]));
+
+    const omitted = regionAction('mixed-omitted-region');
+    delete omitted.args.regions[0].layer_id;
+    const foreign = regionAction('mixed-foreign-region');
+    foreign.args.regions[0].layer_id = 77;
+    const mixed = await body(await f.cycle.handler({
+      next_pass: {
+        request_key: 'hot-loop-mixed-wrong-target',
+        problem_id: 'hot-loop-mixed-wrong-target-problem',
+        document_id: 42,
+        goal: 'Refuse mixed omitted and explicitly foreign owner targets.',
+        stage: 'SHAPE',
+        scale: 'global',
+        ...structuredMassContract('stable painted structural mass'),
+        layer_separation_check: semanticLayerSeparation('continuation', 'low', false),
+        logical_layer: semanticLogicalLayer('hot-loop-owner', 'continue-logical-layer', {
+          layerName: 'Hot Loop Owner', rollbackValue: 'low',
+        }),
+        actions: [omitted, foreign],
+      },
+    }));
+    expect(mixed.preflight_rejection).toBeDefined();
+    expect(mixed.preflight_rejection?.error_codes).not.toContain('deterministic_repair_repeat');
+    expect(mixed.preflight_rejection?.error_codes).toContain('semantic_mutation_target_owner_mismatch');
+    expect(mixed.compiler_repair_audit?.repairs ?? []).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ path: 'next_pass.actions[0].args.regions[0].layer_id' }),
+    ]));
+    expect(f.counts().regionCalls).toBe(before.regionCalls);
   });
 
   it('repairs a stale supplied scene-model incarnation inside the public cycle before exposing any remaining violation', async () => {

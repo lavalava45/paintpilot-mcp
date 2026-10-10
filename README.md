@@ -51,9 +51,22 @@ Digital Painting Edition combines broad Photoshop automation with a focused pain
 - a Photoshop-side UXP companion on localhost long-poll for Neural Filters, foreground-safe `asCopy` PSD/JPEG/PNG persistence, and low-latency fast-lane development/diagnostics;
 - an agent visual-control workflow with semantic passes, previews, measurement checkpoints, occlusion reasoning, cleanup, sticky Photoshop routing, and a state-based Definition of Done.
 
-The current build exposes **133 tools** (**133 atomic/non-recipe**) and **5 prompts**.
+The current build exposes **132 tools** (**132 atomic/non-recipe**) and **5 prompts**.
 
 The dedicated Chat On Steroids entry point is `dist/cos-plugin.js`. It starts the same MCP server with `PHOTOSHOP_GUARD_MODE=required`, so read-only tools remain directly callable while raw mutating tools fail closed and must be dispatched through `photoshop_guard_cycle_auto`. This native Plugins route has passed dedicated live acceptance and is the canonical Chat On Steroids path. The retired external Core/controller/daemon provider chain has been removed from the repository.
+
+## Geometry, kinematics and painterly algorithms
+
+- **[IK.ts](https://github.com/goldst/IK.ts) / FABRIK** — articulated joints, fixed limb lengths and contact targets.
+- **[Clipper2](https://github.com/AngusJohnson/Clipper2)** (via the [TypeScript port](https://github.com/countertype/clipper2-ts)) — contour clipping, exclusions and brush-safe offsets.
+- **[Bezier.js](https://github.com/Pomax/bezierjs)** — smooth, adaptively subdivided construction contours.
+- **[Aaron Hertzmann's painterly rendering research](https://mrl.cs.nyu.edu/publications/painterly98/)** — inspiration for our own bounded brush-stroke algorithm; no upstream implementation code was copied.
+
+These techniques support construction and rendering; they do **not** independently guarantee anatomical correctness or artistic quality. Authors, versions, licenses and usage details: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+Implementation and workflow details: [object construction and articulated pose](docs/object-construction.md),
+[reference-guided painterly strokes](docs/painterly-strokes.md), and
+[same-chat visual criticism and its evidence limits](docs/artistic-evaluator.md).
 
 ## Research directions
 
@@ -252,7 +265,7 @@ npm run test:document-targeting-live
 The current verified tool-count result is:
 
 ```text
-catalog counts consistent: 133 = 133 atomic + 0 recipes; 16 Guard tools; 5 MCP prompt templates
+catalog counts consistent: 132 = 132 atomic + 0 recipes; 15 Guard tools; 5 MCP prompt templates
 ```
 
 The project has been live-tested primarily on **Photoshop 2026 for Windows**. During the current validation, 123 installed brush presets were enumerated and the painting smoke test completed with `PAINTING_TEST_OK`.

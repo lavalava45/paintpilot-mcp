@@ -30,6 +30,45 @@ export interface AttentionBinding {
   dimensions: AttentionDimension[];
 }
 
+export const ATTENTION_BINDING_SCHEMA = {
+  type: 'object',
+  description: 'Bind an owner to an authorized Director attention zone. Omitted technical identity/dimensions may be derived only from the unique authorized zone and actual pass effects; explicit values remain authoritative.',
+  properties: {
+    hierarchy_revision: { type: 'integer', minimum: 1 },
+    zone_id: { type: 'string' },
+    dimensions: { type: 'array', minItems: 1, maxItems: 4,
+      items: { type: 'string', enum: ['contrast', 'detail', 'edge', 'chroma'] } },
+  },
+  required: ['hierarchy_revision', 'zone_id', 'dimensions'], additionalProperties: false,
+};
+
+export function prepareAttentionBinding(value: unknown, hierarchy: PerceptualHierarchy,
+  ownerId: string, authorizedZones: string[], changeDomains: string[], affectedQualities: string[]) {
+  const candidate = value === undefined ? {} : value;
+  if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return candidate;
+  const binding = { ...(candidate as Record<string, unknown>) };
+  const zones = hierarchy.zones.filter(zone => zone.owner_ids.includes(ownerId) && authorizedZones.includes(zone.id));
+  // An explicit foreign/stale identity is never repaired, and authorization is never expanded.
+  if (zones.length !== 1 || (binding.zone_id !== undefined && binding.zone_id !== zones[0].id)
+    || (binding.hierarchy_revision !== undefined && binding.hierarchy_revision !== hierarchy.revision)) return binding;
+  if (binding.zone_id === undefined) binding.zone_id = zones[0].id;
+  if (binding.hierarchy_revision === undefined) binding.hierarchy_revision = hierarchy.revision;
+  if (binding.dimensions === undefined) {
+    const dimensions = new Set<AttentionDimension>();
+    if (changeDomains.some(domain => ['local-tone', 'lighting-structure'].includes(domain))) dimensions.add('contrast');
+    if (changeDomains.includes('local-edge')) dimensions.add('edge');
+    if (changeDomains.includes('local-texture')) dimensions.add('detail');
+    for (const quality of affectedQualities) {
+      if (/contrast|value|tone|light/.test(quality)) dimensions.add('contrast');
+      if (/detail|texture/.test(quality)) dimensions.add('detail');
+      if (/edge/.test(quality)) dimensions.add('edge');
+      if (/chroma|saturation|color|colour/.test(quality)) dimensions.add('chroma');
+    }
+    if (dimensions.size) binding.dimensions = [...dimensions];
+  }
+  return binding;
+}
+
 const ID = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,79}$/;
 
 function obj(value: unknown, path: string): Record<string, unknown> {

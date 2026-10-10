@@ -125,7 +125,7 @@ function verdictInput(sha: string, softnessReview?: Record<string, unknown>) {
 }
 
 describe('soft-dominance / over-smoothing review', () => {
-  it('accepts intentional optical haze when underlying mass/form/focal readability stays resolved', () => {
+  it('accepts intentional optical opticalVeil when underlying mass/form/focal readability stays resolved', () => {
     const result = normalizeSoftDominanceReview(
       passingReview({
         edge_hierarchy: 'not-applicable',
@@ -208,12 +208,51 @@ describe('soft-dominance / over-smoothing review', () => {
     expect(local.required).toBe(false);
   });
 
-  it('fails closed when a nontrivial broad soft pass is classified without softness_review', () => {
+  it.each(['soft-brush-build', 'gaussian-blur', 'atmospheric-veil'])('closes ordinary %s review without a duplicate softness certificate', method => {
     const fixture = store();
     const sha = seedBroadSoftOperation(fixture.store, fixture.dir);
-    expect(() => fixture.store.validateVerdictInput(verdictInput(sha))).toThrow(
-      /soft_dominance_review_required/i
-    );
+    const record = fixture.store.read('soft-op')!;
+    record.args.steps[0].method_id = method;
+    if (method === 'gaussian-blur') record.args.steps[0].tool = 'photoshop_apply_gaussian_blur';
+    if (method === 'atmospheric-veil') record.args.paint_strategy.construction_role = 'optical-veil';
+    fixture.store.write(record);
+    const input = {
+      ...verdictInput(sha), disposition: 'accept',
+      primary_mismatch: 'None observed in the inspected soft treatment.',
+      observations: [{ region: 'whole frame', visible: 'Soft transitions preserve mass separation, large forms, focal edges and varied silhouettes.' }],
+    };
+    fixture.store.verdict(input);
+    expect(fixture.store.read('soft-op')?.verdict.softness_review).toBeUndefined();
+    expect(fixture.store.paintingState().documents['42'].last_critique.softness_review).toBeUndefined();
+    expect(fixture.store.read('soft-op')?.verdict.observations).toEqual(input.observations);
+  });
+
+  it('still requires the whole-frame observation for broad soft work', () => {
+    const fixture = store();
+    const sha = seedBroadSoftOperation(fixture.store, fixture.dir);
+    expect(() => fixture.store.validateVerdictInput({
+      ...verdictInput(sha), observations: [{ region: 'small highlight', visible: 'This highlight is soft.' }],
+    })).toThrow(/whole_frame_review_required/i);
+  });
+
+  it.each(['mass-separation-lost', 'soft-round-footprint'])('keeps ordinary observed %s debt actionable without softness_review', signal => {
+    const fixture = store();
+    const sha = seedBroadSoftOperation(fixture.store, fixture.dir);
+    const input = {
+      ...verdictInput(sha),
+      primitive_footprint: signal === 'soft-round-footprint' ? 'suspect' : 'none',
+      review_findings: [{ kind: 'soft_dominance', severity: 'must-fix', trend_signals: [signal] }],
+    };
+    expect(() => fixture.store.validateVerdictInput({ ...input, disposition: 'accept' })).toThrow(/soft_dominance_detected/i);
+    expect(() => fixture.store.validateVerdictInput({ ...input, target_resolved: 'yes' })).toThrow(/soft_dominance_detected/i);
+    fixture.store.verdict(input);
+    expect(fixture.store.read('soft-op')?.verdict.trend_signals).toEqual(expect.arrayContaining(['soft-dominance', signal]));
+    expect(fixture.store.paintingState().documents['42'].visual_problems['review-soft_dominance']).toMatchObject({
+      severity: 'must-fix', status: 'open', scale: 'global', evidence_sha256: sha,
+    });
+    expect(() => fixture.store.priorityGate(42, {
+      tool: 'photoshop_execute_visual_microplan', args: { document_id: 42, scale: 'small' },
+    })).toThrow(/stage_priority_gate/i);
   });
 
   it('opens a global must-fix blocker on failed soft-dominance review and blocks finer work', () => {

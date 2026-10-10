@@ -16,7 +16,10 @@
     "LICENSE",
     "NOTICE",
     "llms.txt",
-    "AGENTS.md"
+    "AGENTS.md",
+    "THIRD_PARTY_NOTICES.md",
+    "third-party-components.json",
+    "licenses"
   ],
   "scripts": {
     "dev": "tsc --watch",
@@ -43,17 +46,19 @@
     "prepare": "node scripts/prepare.mjs",
     "sync:server-version": "tsx scripts/sync-server-version.ts",
     "build:mcpb": "tsx scripts/build-mcpb.ts",
-    "prepublishOnly": "npm run build && npm run sync:server-version && npm run verify:pack",
+    "prepublishOnly": "npm run build && npm run verify:guard-public-contract && npm run sync:server-version && npm run verify:third-party-notices && npm run verify:pack",
     "test:unit": "vitest run",
     "verify:tool-counts": "tsx scripts/verify-tool-counts.ts",
     "verify:acceptance-matrix": "node scripts/verify-acceptance-matrix.mjs",
     "verify:compact-v2-contract": "node scripts/verify-compact-v2-contract-audit.mjs",
+    "verify:guard-public-contract": "node scripts/dev/audit-guard-public-contract.mjs --self-test",
     "verify:live-evidence-ledger": "node scripts/verify-live-evidence-ledger.mjs",
     "verify:source-independence": "node scripts/verify-source-independence.mjs",
     "verify:product-identity": "node scripts/verify-product-identity.mjs",
     "verify:provenance": "node scripts/verify-provenance.mjs",
     "verify:external-intake": "node scripts/verify-external-intake.mjs",
-    "verify:canonical": "npm run build:server && npm run verify:pack && npm run lint && npm run test:acceptance && npm run verify:compact-v2-contract && npm run verify:painting-policy && npm run verify:photoshop-prompts && npm run verify:source-independence && npm run verify:product-identity && npm run verify:provenance && npm run verify:external-intake && npm run verify:tool-counts && npm run verify:live-evidence-ledger"
+    "verify:canonical": "npm run build:server && npm run verify:guard-public-contract && npm run verify:third-party-notices && npm run verify:pack && npm run lint && npm run test:acceptance && npm run verify:compact-v2-contract && npm run verify:painting-policy && npm run verify:photoshop-prompts && npm run verify:source-independence && npm run verify:product-identity && npm run verify:provenance && npm run verify:external-intake && npm run verify:tool-counts && npm run verify:live-evidence-ledger",
+    "verify:third-party-notices": "node scripts/verify-third-party-notices.mjs"
   },
   "keywords": [
     "mcp",
@@ -85,6 +90,9 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.4",
+    "bezier-js": "6.1.4",
+    "clipper2-ts": "2.0.1-18",
+    "ikts": "1.3.7",
     "jpeg-js": "^0.4.4"
   },
   "devDependencies": {

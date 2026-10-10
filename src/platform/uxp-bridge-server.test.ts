@@ -242,13 +242,140 @@ describe('UXP bridge long-poll transport', () => {
     await expect(cleanupInvoke).resolves.toMatchObject({ ok: true });
   });
 
+  it('invalidates cached readiness immediately when the registered document route changes', async () => {
+    const client = await import('./uxp-bridge-client.js');
+    client.clearUxpBridgeReadinessCache();
+
+    const firstPoll = fetch(
+      `${base}/poll?protocol=${encodeURIComponent(TEST_REGISTRATION_PROTOCOL)}&revision=${encodeURIComponent(client.EXPECTED_UXP_BRIDGE_REVISION)}`
+        + '&photoshopVersion=27.0.1&documentCount=1&activeDocumentId=42&activeDocumentName=Before.psd'
+    );
+    await waitForPendingPoll(base);
+    const first = await client.getUxpBridgeReadiness({ forceRefresh: true });
+    expect(first.active_document).toMatchObject({ id: 42, name: 'Before.psd' });
+
+    const wakeFirst = bridge.invokeUxpBridge('diagnostic_ping', {}, 2_000);
+    const firstCommand = await (await firstPoll).json() as { id: string };
+    await fetch(`${base}/result`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: firstCommand.id, ok: true, data: { transport: 'uxp-test' } }),
+    });
+    await expect(wakeFirst).resolves.toMatchObject({ ok: true });
+
+    const secondPoll = fetch(
+      `${base}/poll?protocol=${encodeURIComponent(TEST_REGISTRATION_PROTOCOL)}&revision=${encodeURIComponent(client.EXPECTED_UXP_BRIDGE_REVISION)}`
+        + '&photoshopVersion=27.0.1&documentCount=1&activeDocumentId=42&activeDocumentName=Replacement.psd'
+    );
+    await waitForPendingPoll(base);
+    const replaced = await client.getUxpBridgeReadiness();
+    expect(replaced.cache.hit).toBe(false);
+    expect(replaced.active_document).toMatchObject({ id: 42, name: 'Replacement.psd' });
+
+    const wakeSecond = bridge.invokeUxpBridge('diagnostic_ping', {}, 2_000);
+    const secondCommand = await (await secondPoll).json() as { id: string };
+    await fetch(`${base}/result`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: secondCommand.id, ok: true, data: { transport: 'uxp-test' } }),
+    });
+    await expect(wakeSecond).resolves.toMatchObject({ ok: true });
+    client.clearUxpBridgeReadinessCache();
+  });
+
+  it('invalidates cached readiness when the same numeric document id belongs to a new instance', async () => {
+    const client = await import('./uxp-bridge-client.js');
+    client.clearUxpBridgeReadinessCache();
+
+    const register = (witness: string) => {
+      return fetch(
+        `${base}/poll?protocol=${encodeURIComponent(TEST_REGISTRATION_PROTOCOL)}&revision=${encodeURIComponent(client.EXPECTED_UXP_BRIDGE_REVISION)}`
+          + `&photoshopVersion=27.0.1&documentCount=1&activeDocumentId=42&activeDocumentName=Same.psd&activeDocumentInstanceWitness=${encodeURIComponent(witness)}`
+      );
+    };
+
+    const firstPoll = register('session-a:1');
+    await waitForPendingPoll(base);
+    const first = await client.getUxpBridgeReadiness({ forceRefresh: true });
+    expect(first.active_document).toMatchObject({ id: 42, name: 'Same.psd', instance_witness: 'session-a:1' });
+
+    const wakeFirst = bridge.invokeUxpBridge('diagnostic_ping', {}, 2_000);
+    const firstCommand = await (await firstPoll).json() as { id: string };
+    await fetch(`${base}/result`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: firstCommand.id, ok: true, data: { transport: 'uxp-test' } }),
+    });
+    await expect(wakeFirst).resolves.toMatchObject({ ok: true });
+
+    const secondPoll = register('session-a:2');
+    await waitForPendingPoll(base);
+    const replaced = await client.getUxpBridgeReadiness();
+    expect(replaced.cache.hit).toBe(false);
+    expect(replaced.active_document).toMatchObject({ id: 42, name: 'Same.psd', instance_witness: 'session-a:2' });
+
+    const wakeSecond = bridge.invokeUxpBridge('diagnostic_ping', {}, 2_000);
+    const secondCommand = await (await secondPoll).json() as { id: string };
+    await fetch(`${base}/result`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: secondCommand.id, ok: true, data: { transport: 'uxp-test' } }),
+    });
+    await expect(wakeSecond).resolves.toMatchObject({ ok: true });
+    client.clearUxpBridgeReadinessCache();
+  });
+
+  it('invalidates cached readiness immediately after a document resize notification', async () => {
+    const client = await import('./uxp-bridge-client.js');
+    client.clearUxpBridgeReadinessCache();
+
+    const pendingPoll = fetch(
+      `${base}/poll?protocol=${encodeURIComponent(TEST_REGISTRATION_PROTOCOL)}&revision=${encodeURIComponent(client.EXPECTED_UXP_BRIDGE_REVISION)}`
+        + '&photoshopVersion=27.0.1&documentCount=1&activeDocumentId=42&activeDocumentName=Resize.psd&activeDocumentInstanceWitness=session-a%3A1'
+    );
+    await waitForPendingPoll(base);
+    const first = await client.getUxpBridgeReadiness({ forceRefresh: true });
+    expect(first.cache.hit).toBe(false);
+    expect((await client.getUxpBridgeReadiness()).cache.hit).toBe(true);
+
+    const resizeEvent = await nativeFetch(`${base}/event`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        protocol: bridge.UXP_BRIDGE_EVENT_PROTOCOL,
+        event: 'document_geometry_changed',
+        document_id: 42,
+        observed_at: new Date().toISOString(),
+      }),
+    });
+    expect(resizeEvent.status).toBe(200);
+
+    const afterResize = await client.getUxpBridgeReadiness();
+    expect(afterResize.cache.hit).toBe(false);
+    expect(afterResize.active_document).toMatchObject({
+      id: 42,
+      name: 'Resize.psd',
+      instance_witness: 'session-a:1',
+    });
+
+    const wake = bridge.invokeUxpBridge('diagnostic_ping', {}, 2_000);
+    const command = await (await pendingPoll).json() as { id: string };
+    await fetch(`${base}/result`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: command.id, ok: true, data: { transport: 'uxp-test' } }),
+    });
+    await expect(wake).resolves.toMatchObject({ ok: true });
+    client.clearUxpBridgeReadinessCache();
+  });
+
   it('uses long-poll registration metadata for readiness without an extra diagnostic command', async () => {
     const client = await import('./uxp-bridge-client.js');
     client.clearUxpBridgeReadinessCache();
 
     const pendingPoll = fetch(
       `${base}/poll?protocol=${encodeURIComponent(TEST_REGISTRATION_PROTOCOL)}&revision=${encodeURIComponent(client.EXPECTED_UXP_BRIDGE_REVISION)}`
-        + '&photoshopVersion=27.0.1&documentCount=1&activeDocumentId=77&activeDocumentName=Metadata.psd'
+        + '&runtimeInstanceWitness=runtime-a&photoshopVersion=27.0.1&documentCount=1&activeDocumentId=77&activeDocumentName=Metadata.psd'
     );
     await waitForPendingPoll(base);
 
@@ -258,6 +385,7 @@ describe('UXP bridge long-poll transport', () => {
       bridge_revision: client.EXPECTED_UXP_BRIDGE_REVISION,
       revision_match: true,
       photoshop_version: '27.0.1',
+      runtime_instance_witness: 'runtime-a',
       document_count: 1,
       active_document: { id: 77, name: 'Metadata.psd' },
       cache: { hit: false },

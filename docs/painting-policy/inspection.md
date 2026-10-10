@@ -1,5 +1,14 @@
 ### Visual checkpoints and execution sanity
 
+### Independent artistic assessment
+
+At the existing exact-frame review consume [the isolated evaluator](../artistic-evaluator.md).
+The Painter's intent and self-verdict cannot establish goal/stage/global completion. Missing or
+contradictory assessment remains unresolved/uncertain; useful intermediate pixels can stay and another
+safe pass can proceed. Scoped suggestions are advisory pending calibration, never new style quotas or
+per-stroke certificates. Preserve the original brief and intentional stylization.
+
+
 Reasoning previews are required after major semantic passes and risky local corrections.
 
 Use before/after image-delta only as **execution sanity**, not as an artistic score:
@@ -122,7 +131,7 @@ When available, show the critic a separate diagnostic composite such as `referen
 
 #### Measurement and spatial anchors
 
-For proportion-sensitive work (portrait, architecture, repeated geometry, perspective), use explicit measurement when useful:
+For proportion-sensitive reference work, repeated geometry and perspective, use explicit measurement when useful:
 
 ```text
 inspect → choose semantic landmarks → optional guides → measure_points
@@ -133,16 +142,16 @@ The tools do not detect semantic landmarks automatically. `photoshop_compare_lan
 
 For coordinate-sensitive local work, define semantic bounds `{left, top, right, bottom}`, plan points in local normalized `u/v`, convert to document coordinates at execution time, and update anchors after structural changes.
 
-### Photorealistic reference portrait
+### High-fidelity proportion-sensitive reference study
 
 Keep the reference read-only and the target separate. Apply these stricter rules:
 
-- establish/compare facial landmarks before detailed rendering; likeness errors are structural must-fix;
-- measure brush scale against visible **face width**, not canvas width: value masses about 8–12%, form modeling 2–6%, feature edges/hair groups 0.5–2%, micro-accents below ~0.5%;
-- broad facial planes use 2D patches; elongated structures may use dab chains; reserve path strokes for deliberately linear edges/details;
-- do not use `PathItem.strokePath()` / broad `photoshop_paint_strokes` as the default primitive for facial volume;
+- establish/compare semantic landmarks before detailed rendering; reference-fidelity errors are structural must-fix;
+- measure brush scale against a stable visible **subject anchor width**, not canvas width: value masses about 8–12%, form modeling 2–6%, feature edges 0.5–2%, micro-accents below ~0.5%;
+- broad form planes use 2D patches; elongated structures may use dab chains; reserve path strokes for deliberately linear edges/details;
+- do not use `PathItem.strokePath()` / broad `photoshop_paint_strokes` as the default primitive for volumetric form;
 - use soft/firmer marks according to plane/edge needs; avoid global blur;
-- completion requires likeness plus believable continuous form, not merely recognizability or tube/blob construction.
+- completion requires reference fidelity plus believable continuous form, not merely recognizability or tube/blob construction.
 
 If the same systemic failure repeats, diagnose whether the cause is visual planning, missing Photoshop control or inadequate agent guidance before retrying the same strategy.
 

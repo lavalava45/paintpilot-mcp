@@ -13,6 +13,31 @@ export const OPERATION_PROGRESS_PROTOCOL = 'operation.progress.v1';
 export function guardCapabilities(env = process.env) {
   return {
     protocol: GUARD_CAPABILITIES_PROTOCOL,
+    implementation_revision: '2026-10-10-chat-critic-journal-boundary',
+    contour_geometry: { bezier_js: '6.1.4', clipper2_ts: '2.0.1-18', curve_tolerance_pixels: 0.25, explicit_clip_exclusions: true, new_mcp_tools: 0 },
+    chat_critic: { default: 'same-chat-role', response: 'previous_observation.critic_review',
+      checkpoints: ['after-3-visual-passes', 'every-6-further-visual-passes', 'stage-boundary', 'final-review'],
+      optional_delegation: 'exposed authorized Core agents status/message/spawn',
+      automatic_local_model_calls: false, calibrated_independent_authority: false },
+    painterly_strokes: {
+      input: 'next_pass.painterly', algorithm: 'hertzmann-1998-bounded',
+      source: 'exactly one aligned materialized JPEG OR explicit authored form_field (ellipsoid/light-field)',
+      reference_free_input: 'next_pass.painterly.form_field',
+      analytic_target_is_not_reference_or_anatomy_proof: true, baseline: 'current Guard whole-frame preview',
+      owner: 'one existing editable component', max_strokes: 32, requires_pixel_review: true,
+      new_mcp_tools: 0, native_render_equivalence_claimed: false,
+    },
+    articulated_construction: { input: 'construction.model.ik_chains', library: 'ikts@1.3.7', dimensions: ['2d','3d'], preserves_authored_lengths: true, max_chains: 8, max_bones_per_chain: 16, max_iterations: 64, unreachable_targets_rejected: true, new_mcp_tools: 0 },
+    object_construction: {
+      input: 'next_pass.construction', read_only_solve: 'photoshop_guard_status(construction_model=...)',
+      supports: ['distance', 'ratio', 'coincident', 'parallel', 'perpendicular', 'angle', 'midpoint', 'symmetric', 'object-pose', 'orthographic', 'perspective'],
+      requires_pixel_review: true, artistic_proportions_not_invented: true,
+      proportion_checks: 'explicit bounded length ratios in intrinsic object units',
+      rigid_objects: 'shared object pose; fixed local component geometry; explicit reshape for corrections',
+      fresh_nontrivial_compound_geometry: 'enforced',
+      rebuild: 'REPLACE one owned raster component in one reversible transaction',
+      manual_model_bound_pose_transform: 'rejected; execute the revised construction',
+    },
     operation_ack: {
       required: true,
       receipt_protocol: OPERATION_RECEIPT_PROTOCOL,
@@ -108,7 +133,7 @@ export function guardCapabilities(env = process.env) {
         optional_previous_observation: [
           'regression', 'action', 'planner_task_assessment',
           'affected_relations', 'affected_qualities', 'preservation_facts', 'independent_region',
-          'review_findings', 'uncertainty_review', 'softness_review',
+          'review_findings', 'uncertainty_review', 'softness_review', 'physical_stack_check',
         ],
         multiscale_visual_review: {
           levels: ['composition', 'object', 'micro'],

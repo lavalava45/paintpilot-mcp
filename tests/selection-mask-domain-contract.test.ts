@@ -192,6 +192,7 @@ describe('selection + mask public contract', () => {
     expect(jsonOf(await byName('photoshop_apply_gradient_mask').handler({
       document_id: 42,
       direction: 'invalid',
+      layer_id: 7,
       start_pct: -5,
       end_pct: 105,
       angle_deg: 30,
@@ -199,6 +200,7 @@ describe('selection + mask public contract', () => {
     expect(bridge.gradientMask).toHaveBeenCalledWith({
       document_id: 42,
       direction: 'bottom_to_top',
+      layer_id: 7,
       start_pct: 0,
       end_pct: 100,
       angle_deg: 30,

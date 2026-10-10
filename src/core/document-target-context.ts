@@ -25,7 +25,6 @@ export const DOCUMENT_ID_SCHEMA_EXCLUDES = new Set([
   'photoshop_guard_brush_pack_profile',
   'photoshop_guard_status',
   'photoshop_guard_resume',
-  'photoshop_guard_cycle',
   'photoshop_guard_cycle_auto',
   'photoshop_guard_job_poll',
   'photoshop_guard_report',

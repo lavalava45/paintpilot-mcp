@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 export const VIOLATION_REPAIR_CLASSES = [
   'AUTO_NORMALIZE',
   'AUTO_PATCH',
+  'CONTRACT_CORRECTION',
   'SPLIT_DEFER',
   'MODEL_SEMANTIC_DECISION',
   'SYSTEMIC_FAILURE',
@@ -49,12 +50,16 @@ const MODEL_DECISION_CODES = new Set([
   'semantic_layer_isolation_required',
   'scene_ownership_plan_required',
   'scene_ownership_owner_unplanned',
+  'scene_component_plan_required',
+  'scene_component_scope_required',
+  'scene_component_decomposition_required',
+  'scene_component_layer_conflict',
+  'stroke_batch_budget_exceeded',
   'construction_role_material_role_required',
   'painting_stage_reset_required',
   'compact_local_region_bounds_required',
   'compact_review_region_bounds_required',
   'geometry_binding_required',
-  'material_response_plan_required',
 ]);
 
 const SYSTEMIC_CODES = new Set([
@@ -85,15 +90,19 @@ const PATCH_CODES = new Set([
 ]);
 
 export function classifyViolation(violation: RepairableViolation): ViolationRepairClass {
-  if (
-    violation.code === 'invalid_visual_microplan'
-    && /mutation budget exceeded/i.test(violation.message)
-  ) return 'SPLIT_DEFER';
   if (SYSTEMIC_CODES.has(violation.code) || /_state_invalid$/.test(violation.code)) return 'SYSTEMIC_FAILURE';
   if (SPLIT_CODES.has(violation.code)) return 'SPLIT_DEFER';
+  if (['geometry_contract_invalid', 'attention_binding_invalid'].includes(violation.code)) return 'CONTRACT_CORRECTION';
+  if (violation.code === 'geometry_contract_retry_exhausted') return 'SYSTEMIC_FAILURE';
   if (MODEL_DECISION_CODES.has(violation.code)) return 'MODEL_SEMANTIC_DECISION';
   if (NORMALIZE_CODES.has(violation.code)) return 'AUTO_NORMALIZE';
   if (PATCH_CODES.has(violation.code)) return 'AUTO_PATCH';
+  if (['compact_actions_required','compact_action_schema_invalid','compact_request_key_required',
+    'compact_goal_required','guard_tool_contract_unknown','construction_role_intent_mismatch',
+    'previous_operation_finalization_invalid'].includes(violation.code)) return 'CONTRACT_CORRECTION';
+  if (violation.code === 'invalid_visual_microplan'
+    && /final VisualMicroPlan step|mutations must target logical_layer/.test(violation.message)) return 'AUTO_PATCH';
+  if (violation.code === 'invalid_visual_microplan' && /immediately-before preview/.test(violation.message)) return 'CONTRACT_CORRECTION';
   if (violation.scope === 'finalization' || violation.scope === 'cycle') return 'MODEL_SEMANTIC_DECISION';
   return 'MODEL_SEMANTIC_DECISION';
 }
@@ -124,6 +133,9 @@ function patchKnownOwner(
     ? structuredClone(pass.logical_layer) as Record<string, unknown>
     : undefined;
   if (!logicalLayer) return;
+  // Only an existing semantic owner can supply a unique physical mutation target.
+  // Never infer a target for create-new or lifecycle decisions.
+  if (!['continue-logical-layer', 'adjust'].includes(nonEmptyText(logicalLayer.decision) ?? '')) return;
   const ownerId = nonEmptyText(logicalLayer.hypothesis_id);
   const owner = ownerId ? ownerMap(context).get(ownerId) : undefined;
   if (!owner) return;
@@ -147,7 +159,8 @@ function patchKnownOwner(
         : undefined;
       if (!args) return nextAction;
       if (
-        ['photoshop_paint_strokes', 'photoshop_paint_dabs', 'photoshop_fill_layer',
+        ['photoshop_move_layer', 'photoshop_rotate_layer', 'photoshop_scale_layer',
+          'photoshop_paint_strokes', 'photoshop_paint_dabs', 'photoshop_fill_layer',
           'photoshop_transform_layer', 'photoshop_set_layer_opacity', 'photoshop_delete_layer'].includes(tool ?? '')
         && args.layer_id === undefined
       ) {
@@ -241,8 +254,82 @@ export function applyDeterministicPassRepairs(
   const repairs: StructuredRepairOperation[] = [];
   const classified = classifyViolations(violations);
 
-  if (classified.some(item => item.repair_class === 'AUTO_PATCH')) {
+  const autoPatch = classified.some(item => item.repair_class === 'AUTO_PATCH');
+  // A missing region target is reported by the visual-plan validator as a
+  // generic error. Only retry this *specific* unambiguous omission locally;
+  // unrelated semantic failures and explicit foreign targets must retain their
+  // original rejection code, not turn into deterministic_repair_repeat.
+  const owner = repairedPass.logical_layer && typeof repairedPass.logical_layer === 'object'
+    && !Array.isArray(repairedPass.logical_layer)
+    ? repairedPass.logical_layer as Record<string, unknown>
+    : undefined;
+  const actions = Array.isArray(repairedPass.actions) ? repairedPass.actions : [];
+  const durableOwner = ownerMap(context).get(nonEmptyText(owner?.hypothesis_id) ?? '');
+  const ownerLayerId = Number(durableOwner?.layer_id);
+  const regionTargets = actions.flatMap(action => {
+    if (!action || typeof action !== 'object' || Array.isArray(action)) return [];
+    const item = action as Record<string, unknown>;
+    const args = item.args as Record<string, unknown> | undefined;
+    return item.tool === 'photoshop_paint_regions' && Array.isArray(args?.regions)
+      ? args.regions.filter((region): region is Record<string, unknown> =>
+        !!region && typeof region === 'object' && !Array.isArray(region))
+      : [];
+  });
+  // One explicitly foreign target makes the pass ambiguous even when another
+  // action omitted its target. Do not repair the logical owner or any sibling
+  // action as a side effect: preserve the caller's exact conflicting payload
+  // for an actionable fail-closed rejection.
+  const explicitForeignTarget = Number.isSafeInteger(ownerLayerId) && ownerLayerId > 0
+    && (regionTargets.some(region => region.layer_id !== undefined && region.layer_id !== ownerLayerId)
+      || actions.some(action => {
+        if (!action || typeof action !== 'object' || Array.isArray(action)) return false;
+        const item = action as Record<string, unknown>;
+        const args = item.args && typeof item.args === 'object' && !Array.isArray(item.args)
+          ? item.args as Record<string, unknown> : undefined;
+        return args?.layer_id !== undefined && args.layer_id !== ownerLayerId;
+      }));
+  const unambiguousRegionTargets = Number.isSafeInteger(ownerLayerId) && ownerLayerId > 0
+    && actions.length > 0 && actions.every(action =>
+      action && typeof action === 'object' && !Array.isArray(action)
+      && (action as Record<string, unknown>).tool === 'photoshop_paint_regions')
+    && regionTargets.some(region => region.layer_id === undefined)
+    && regionTargets.every(region => region.layer_id === undefined || region.layer_id === ownerLayerId);
+  const targetViolation = violations.find(item => item.code === 'invalid_visual_microplan');
+  const missingKnownOwnerTarget = (targetViolation?.code === 'invalid_visual_microplan'
+    && targetViolation.message.startsWith('continue-logical-layer/adjust mutations must target logical_layer.layer_id=')
+    || classified.some(item => item.repair_class === 'SPLIT_DEFER'))
+    && ['continue-logical-layer', 'adjust'].includes(nonEmptyText(owner?.decision) ?? '')
+    && unambiguousRegionTargets;
+  if (!explicitForeignTarget && (autoPatch || missingKnownOwnerTarget)) {
     patchKnownOwner(repairedPass, context, repairs);
+  }
+  if (autoPatch) {
+    // A nested explicitly authored microplan keeps all mutations and artistic choices.
+    // Repair only omitted technical envelope/preview/pins, never a conflicting target.
+    for (const unknownItem of (repairedPass.actions as unknown[] ?? [])) {
+      const item = unknownItem as Record<string, any>;
+      if (item?.tool !== 'photoshop_execute_visual_microplan' || !Array.isArray(item.args?.steps)) continue;
+      const plan = item.args;
+      if (plan.document_id === undefined && repairedPass.document_id !== undefined) {
+        plan.document_id = repairedPass.document_id;
+        repairs.push({ kind: 'inject_from_context', path: 'next_pass.actions.args.document_id', source: 'pinned_pass', reason: 'Nested plan omitted its explicitly pinned document' });
+      }
+      if (Number.isSafeInteger(ownerLayerId) && ownerLayerId > 0 && ['continue-logical-layer','adjust'].includes(nonEmptyText(owner?.decision) ?? '')) {
+        for (const step of plan.steps) {
+          if (['photoshop_move_layer','photoshop_rotate_layer','photoshop_scale_layer'].includes(step?.tool)
+            && step.args && step.args.layer_id === undefined) {
+            step.args.layer_id = ownerLayerId;
+            repairs.push({ kind: 'inject_from_context', path: 'next_pass.actions.args.steps.args.layer_id', source: 'durable_owner', reason: 'Pin the authored transform to the one durable owner' });
+          }
+        }
+      }
+      if (plan.steps.at(-1)?.tool !== 'photoshop_get_preview' && plan.steps.some((s: any) => VISUAL_MUTATION_TOOLS.has(s?.tool) || ['photoshop_move_layer','photoshop_rotate_layer','photoshop_scale_layer'].includes(s?.tool))) {
+        const ids = new Set(plan.steps.map((s: any) => s?.id));
+        let id = 'guard_after'; while (ids.has(id)) id += '_';
+        plan.steps.push({ id, tool: 'photoshop_get_preview', args: { document_id: plan.document_id, include_image: false } });
+        repairs.push({ kind: 'normalize', path: 'next_pass.actions.args.steps', normalizer: 'terminal_preview', reason: 'The final exact preview is a technical requirement of the existing authored microplan' });
+      }
+    }
     patchAuthoritativeModelIncarnation(repairedPass, context, violations, repairs);
   }
 
@@ -264,12 +351,8 @@ function deferredRequestKey(base: string, actions: Array<Record<string, unknown>
 function allowedMutationCount(violations: RepairableViolation[]): number | undefined {
   for (const violation of violations) {
     if (!SPLIT_CODES.has(violation.code)) continue;
-    const match = violation.message.match(/allows\s+(\d+)/i)
-      ?? violation.message.match(/at most\s+(\d+)/i);
-    if (match) {
-      const parsed = Number(match[1]);
-      if (Number.isSafeInteger(parsed) && parsed > 0) return parsed;
-    }
+    const parsed = Number(violation.details?.allowed_mutations);
+    if (Number.isSafeInteger(parsed) && parsed > 0) return parsed;
   }
   return undefined;
 }

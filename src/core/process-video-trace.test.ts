@@ -7,6 +7,8 @@ import {
   assembleProcessTraceVideo,
   buildProcessTraceAssemblyPlan,
   deterministicTraceAssemblyInputs,
+  PROCESS_VIDEO_TRACE_FPS,
+  PROCESS_VIDEO_TRACE_OUTPUT_FPS,
   photoshopHwndCaptureTarget,
   readProcessTraceManifest,
   processVideoFfmpegArgs,
@@ -37,7 +39,9 @@ describe('E.22 process video trace manifest', () => {
     expect(startProcessVideoCapture(project(), 'op-disabled', { enabled: false })).toEqual({ enabled: false });
     const args = processVideoFfmpegArgs('hwnd=0xA10CFA', 'clip.mp4');
     expect(args).toContain('lavfi');
-    expect(args).toContain('gfxcapture=hwnd=10554618:capture_cursor=0:capture_border=0:max_framerate=30');
+    expect(PROCESS_VIDEO_TRACE_FPS).toBe(120);
+    expect(args).toContain('gfxcapture=hwnd=10554618:capture_cursor=0:capture_border=0:max_framerate=120');
+    expect(args).toContain('120');
     expect(args).toContain('hwdownload,format=bgra,format=yuv420p');
     expect(args).toContain('pipe:1');
     expect(args).toContain('0.05');
@@ -51,6 +55,7 @@ describe('E.22 process video trace manifest', () => {
   it('keeps legacy/manual non-HWND capture targets on gdigrab as an explicit debug fallback', () => {
     const args = processVideoFfmpegArgs('title=Manual Photoshop Target', 'clip.mp4');
     expect(args).toContain('gdigrab');
+    expect(args).toContain('120');
     expect(args).toContain('title=Manual Photoshop Target');
     expect(args.join(' ')).not.toContain('gfxcapture=');
   });
@@ -153,7 +158,7 @@ describe('E.22 process video trace manifest', () => {
 
   it('stops FFmpeg with an interactive q write without closing stdin before gfxcapture can process it', async () => {
     const dir = project();
-    const relativeClip = 'video-trace/clips/0001-op-stop.mp4';
+    const relativeClip = 'export/videos/0001_op-stop.mp4';
     const absoluteClip = path.join(dir, ...relativeClip.split('/'));
     fs.mkdirSync(path.dirname(absoluteClip), { recursive: true });
     fs.writeFileSync(absoluteClip, Buffer.from('mock-video'));
@@ -189,7 +194,7 @@ describe('E.22 process video trace manifest', () => {
   it('does not attempt a Windows redraw wake for non-HWND capture targets', () => {
     const result = wakeProcessVideoCaptureWindow({
       operation_id: 'manual-target',
-      clip_path: 'video-trace/clips/manual.mp4',
+      clip_path: 'export/videos/manual.mp4',
       absolute_clip_path: 'manual.mp4',
       started_at: '2026-10-02T00:00:00.000Z',
       capture_target: 'title=Manual Photoshop Target',
@@ -201,7 +206,7 @@ describe('E.22 process video trace manifest', () => {
   it('does not attempt a Windows redraw wake outside Windows even for an HWND target', () => {
     const result = wakeProcessVideoCaptureWindow({
       operation_id: 'hwnd-target',
-      clip_path: 'video-trace/clips/hwnd.mp4',
+      clip_path: 'export/videos/hwnd.mp4',
       absolute_clip_path: 'hwnd.mp4',
       started_at: '2026-10-02T00:00:00.000Z',
       capture_target: 'hwnd=0x1234',
@@ -229,7 +234,7 @@ describe('E.22 process video trace manifest', () => {
     };
     const capture = {
       operation_id: 'op-ready',
-      clip_path: 'video-trace/clips/0001-op-ready.mp4',
+      clip_path: 'export/videos/0001_op-ready.mp4',
       absolute_clip_path: 'unused.mp4',
       started_at: '2026-10-02T00:00:00.000Z',
       process: child as never,
@@ -246,7 +251,7 @@ describe('E.22 process video trace manifest', () => {
 
   it('does not append a trace entry when no captured frame advances during the agent mutation', async () => {
     const dir = project();
-    const relativeClip = 'video-trace/clips/0001-op-static.mp4';
+    const relativeClip = 'export/videos/0001_op-static.mp4';
     const absoluteClip = path.join(dir, ...relativeClip.split('/'));
     fs.mkdirSync(path.dirname(absoluteClip), { recursive: true });
     fs.writeFileSync(absoluteClip, Buffer.from('mock-video'));
@@ -279,13 +284,13 @@ describe('E.22 process video trace manifest', () => {
     const dir = project();
     appendProcessTraceEntry(dir, {
       operation_id: 'op-attempt', kind: 'attempt', artistic_intent: 'Try a broader left silhouette.',
-      clip_path: 'video-trace/clips/0001-op-attempt.mp4',
+      clip_path: 'export/videos/0001_op-attempt.mp4',
       started_at: '2026-10-01T00:00:00.000Z', stopped_at: '2026-10-01T00:00:02.000Z',
       outcome_note: 'Too broad; correct on the next pass.',
     });
     appendProcessTraceEntry(dir, {
       operation_id: 'op-correction', kind: 'correction', artistic_intent: 'Narrow the silhouette while keeping asymmetry.',
-      clip_path: 'video-trace/clips/0002-op-correction.mp4',
+      clip_path: 'export/videos/0002_op-correction.mp4',
       started_at: '2026-10-01T00:00:03.000Z', stopped_at: '2026-10-01T00:00:05.000Z',
       outcome_operation_id: 'op-attempt',
     });
@@ -297,7 +302,7 @@ describe('E.22 process video trace manifest', () => {
     const dir = project();
     const input = {
       operation_id: 'op-1', kind: 'accepted-continuation' as const, artistic_intent: 'Strengthen the focal edge.',
-      clip_path: 'video-trace/clips/0001-op-1.mp4',
+      clip_path: 'export/videos/0001_op-1.mp4',
       started_at: '2026-10-01T00:00:00.000Z', stopped_at: '2026-10-01T00:00:01.000Z',
     };
     const first = appendProcessTraceEntry(dir, input);
@@ -306,35 +311,39 @@ describe('E.22 process video trace manifest', () => {
     expect(readProcessTraceManifest(dir).entries).toHaveLength(1);
   });
 
-  it('builds deterministic concat and SRT inputs from Guard chronology while retaining correction notes', () => {
+  it('aligns captions to slowed clip duration and preserves legacy timing without slowing twice', () => {
     const dir = project();
-    const clipDir = path.join(dir, 'video-trace', 'clips');
+    const clipDir = path.join(dir, 'export', 'videos');
     fs.mkdirSync(clipDir, { recursive: true });
-    fs.writeFileSync(path.join(clipDir, '0001-attempt.mp4'), 'clip-one');
-    fs.writeFileSync(path.join(clipDir, '0002-correction.mp4'), 'clip-two');
+    fs.writeFileSync(path.join(clipDir, '0001_attempt.mp4'), 'clip-one');
+    fs.writeFileSync(path.join(clipDir, '0002_correction.mp4'), 'clip-two');
     appendProcessTraceEntry(dir, {
       operation_id: 'attempt', kind: 'attempt', artistic_intent: 'Try the wider silhouette.',
-      clip_path: 'video-trace/clips/0001-attempt.mp4',
+      clip_path: 'export/videos/0001_attempt.mp4',
       started_at: '2026-10-01T00:00:00.000Z', stopped_at: '2026-10-01T00:00:01.250Z',
+      playback_duration_ms: 5000,
       outcome_note: 'Too wide; correct it.',
     });
     appendProcessTraceEntry(dir, {
       operation_id: 'correction', kind: 'correction', artistic_intent: 'Narrow the silhouette.',
-      clip_path: 'video-trace/clips/0002-correction.mp4',
+      clip_path: 'export/videos/0002_correction.mp4',
       started_at: '2026-10-01T00:10:00.000Z', stopped_at: '2026-10-01T00:10:02.000Z',
       outcome_operation_id: 'attempt',
     });
     const plan = buildProcessTraceAssemblyPlan(dir);
-    expect(plan.total_duration_ms).toBe(3250);
-    expect(fs.readFileSync(plan.concat_list_path, 'utf8')).toContain('0001-attempt.mp4');
+    expect(plan.total_duration_ms).toBe(7000);
+    expect(fs.readFileSync(plan.concat_list_path, 'utf8')).toContain('0001_attempt.mp4');
     const srt = fs.readFileSync(plan.subtitles_path, 'utf8');
-    expect(srt).toContain('00:00:00,000 --> 00:00:01,250');
+    expect(srt).toContain('00:00:00,000 --> 00:00:05,000');
     expect(srt).toContain('Try the wider silhouette. — Too wide; correct it.');
-    expect(srt).toContain('00:00:01,250 --> 00:00:03,250');
+    expect(srt).toContain('00:00:05,000 --> 00:00:07,000');
     expect(srt).not.toContain('00:10:00');
     const args = processTraceAssemblyFfmpegArgs(plan);
     expect(args).toContain('concat');
     expect(args.some(arg => arg.startsWith('subtitles='))).toBe(true);
+    expect(PROCESS_VIDEO_TRACE_OUTPUT_FPS).toBe(30);
+    expect(args[args.indexOf('-r') + 1]).toBe('30');
+    expect(args.some(arg => arg.includes('setpts='))).toBe(false);
     expect(args).toContain('-an');
   });
 
@@ -342,7 +351,7 @@ describe('E.22 process video trace manifest', () => {
     const dir = project();
     appendProcessTraceEntry(dir, {
       operation_id: 'missing', kind: 'attempt', artistic_intent: 'Visible attempt.',
-      clip_path: 'video-trace/clips/missing.mp4',
+      clip_path: 'export/videos/missing.mp4',
       started_at: '2026-10-01T00:00:00.000Z', stopped_at: '2026-10-01T00:00:01.000Z',
     });
     expect(() => buildProcessTraceAssemblyPlan(dir))
@@ -351,18 +360,18 @@ describe('E.22 process video trace manifest', () => {
 
   it('exposes a controlled assembler entry point and fails closed when FFmpeg cannot start', async () => {
     const dir = project();
-    const clipDir = path.join(dir, 'video-trace', 'clips');
+    const clipDir = path.join(dir, 'export', 'videos');
     fs.mkdirSync(clipDir, { recursive: true });
-    fs.writeFileSync(path.join(clipDir, '0001-attempt.mp4'), 'placeholder');
+    fs.writeFileSync(path.join(clipDir, '0001_attempt.mp4'), 'placeholder');
     appendProcessTraceEntry(dir, {
       operation_id: 'attempt', kind: 'attempt', artistic_intent: 'Strengthen the focal silhouette.',
-      clip_path: 'video-trace/clips/0001-attempt.mp4',
+      clip_path: 'export/videos/0001_attempt.mp4',
       started_at: '2026-10-01T00:00:00.000Z', stopped_at: '2026-10-01T00:00:01.000Z',
     });
     await expect(assembleProcessTraceVideo(dir, { ffmpegPath: path.join(dir, 'missing-ffmpeg.exe') }))
       .rejects.toThrow('process_video_trace_assembly_spawn_failed');
-    expect(fs.existsSync(path.join(dir, 'video-trace', 'process-trace-captioned.mp4'))).toBe(false);
-    expect(fs.existsSync(path.join(dir, 'video-trace', 'assembly.ffconcat'))).toBe(true);
-    expect(fs.existsSync(path.join(dir, 'video-trace', 'captions.srt'))).toBe(true);
+    expect(fs.existsSync(path.join(dir, 'export', 'process-trace-captioned.mp4'))).toBe(false);
+    expect(fs.existsSync(path.join(dir, 'export', 'assembly.ffconcat'))).toBe(true);
+    expect(fs.existsSync(path.join(dir, 'export', 'captions.srt'))).toBe(true);
   });
 });

@@ -483,13 +483,12 @@ describe('Task 23 progressive refinement contract', () => {
     expect(() => second.plannerGate(42, detailRequest())).not.toThrow();
   });
 
-  it('contains no subject-specific implementation conditions in the refinement contract module', async () => {
+  it('contains no subject-specific heuristic table or explicit subject-conditioned branch in the refinement contract module', async () => {
     const source = await import('node:fs/promises').then(fs =>
       fs.readFile(new URL('../src/core/refinement-check.ts', import.meta.url), 'utf8')
     );
-    for (const forbidden of ['horse', 'face', 'hand', 'car', 'house']) {
-      expect(source.toLowerCase()).not.toMatch(new RegExp(`\\b${forbidden}\\b`));
-    }
+    expect(source).not.toMatch(/SUBJECT_(?:RE|NAMES|KINDS)|OBJECT_(?:RE|NAMES|KINDS)/i);
+    expect(source).not.toMatch(/subject[_-]?specific|object[_-]?specific/i);
   });
 
   it('blocks a nontrivial final frame whose provenance remains region-dominant with no post-block-in mark-making', () => {

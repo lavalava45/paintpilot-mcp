@@ -56,7 +56,7 @@ describe('PaintingIntent', () => {
       action: 'refine',
       visual_intent: 'hard-edge',
       scale: 'medium',
-      preserve: ['sky-owner', 'ground-owner'],
+      preserve: ['continuousField-owner', 'ground-owner'],
       actions: [{
         id: 'edge-pass',
         tool: 'photoshop_paint_strokes',
@@ -69,7 +69,7 @@ describe('PaintingIntent', () => {
         tool: 'photoshop_paint_strokes',
         id: 'edge-pass',
       }],
-      preserve: ['sky-owner', 'ground-owner'],
+      preserve: ['continuousField-owner', 'ground-owner'],
       scale: 'medium',
       visual_intent: 'hard-edge',
       action: 'refine',

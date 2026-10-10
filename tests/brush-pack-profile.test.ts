@@ -98,15 +98,15 @@ function state(name: string, size = 64, bridge = 'bridge-1'): BrushPresetState {
 describe('P0-E.2 evidence-based media brush profiling', () => {
   it('plans a bounded deterministic probe set from attributed presets instead of names', () => {
     const root = dir();
-    seedPack(root, ['Cloud Master', 'Hard Pencil', 'Mystery 03']);
+    seedPack(root, ['SoftMass Master', 'Hard Pencil', 'Mystery 03']);
     const result = planBrushPackProfiling({
       brush_pack_id: packId,
-      preset_states: [state('Cloud Master'), state('Hard Pencil'), state('Mystery 03')],
+      preset_states: [state('SoftMass Master'), state('Hard Pencil'), state('Mystery 03')],
       candidate_limit: 2,
     }, { recordDirectory: root });
     expect(result.complete).toBe(false);
     expect(result.candidates).toHaveLength(2);
-    expect(result.candidates.map(row => row.preset_name)).toEqual(['Cloud Master', 'Hard Pencil']);
+    expect(result.candidates.map(row => row.preset_name)).toEqual(['SoftMass Master', 'Hard Pencil']);
     expect(result.candidates[0]?.probe_cell).toMatchObject({
       isolated_dab: true,
       scales: ['small', 'medium', 'large'],
@@ -174,13 +174,13 @@ describe('P0-E.2 evidence-based media brush profiling', () => {
 
   it('records classification from a durable probe receipt without retyping preset/settings/provenance', () => {
     const root = dir();
-    seedPack(root, ['Misleading Cloud']);
+    seedPack(root, ['Misleading SoftMass']);
     const ev = evidence(root, 'receipt');
     writeBrushProbeReceipt({
       protocol: 'photoshop.brush_pack.probe_receipt.v1',
       brush_pack_id: packId,
       probe_operation_id: 'probe:receipt',
-      ...state('Misleading Cloud'),
+      ...state('Misleading SoftMass'),
       evidence: ev,
       layout: { isolated_dabs: {} },
       recorded_at: '2026-09-26T00:00:02.000Z',
@@ -200,18 +200,18 @@ describe('P0-E.2 evidence-based media brush profiling', () => {
         known_caveats: ['Poor for atmosphere'],
       },
     }, { recordDirectory: root }) as any;
-    expect(result.profile.preset_name).toBe('Misleading Cloud');
+    expect(result.profile.preset_name).toBe('Misleading SoftMass');
     expect(result.profile.effective_settings).toEqual(fullSettings());
     expect(result.profile.evidence.preview_sha256).toBe(ev.preview_sha256);
   });
 
   it('builds durable brush_preflight roles from visual evidence and does not infer role from a misleading name', () => {
     const root = dir();
-    const names = ['Cloud Supreme', 'Knife Soft', 'Detail Wash', 'Texture Smooth'];
+    const names = ['SoftMass Supreme', 'Knife Soft', 'Detail Wash', 'Texture Smooth'];
     seedPack(root, names);
     const profiles = [
-      ['Cloud Supreme', ['hard-edge'], ['detail'], ['hard'], 'hard', 'opaque'],
-      ['Knife Soft', ['atmospheric-mass', 'soft-transition'], ['air', 'fog'], ['soft'], 'soft', 'glazing'],
+      ['SoftMass Supreme', ['hard-edge'], ['detail'], ['hard'], 'hard', 'opaque'],
+      ['Knife Soft', ['atmospheric-mass', 'soft-transition'], ['air', 'opticalVeil'], ['soft'], 'soft', 'glazing'],
       ['Detail Wash', ['mass', 'painted-mass'], ['form'], ['smooth'], 'variable', 'layered'],
       ['Texture Smooth', ['broken-mass', 'texture'], ['surface'], ['broken', 'textural'], 'broken', 'granular'],
     ] as const;
@@ -238,7 +238,7 @@ describe('P0-E.2 evidence-based media brush profiling', () => {
       preset_states: states,
     }, { recordDirectory: root }) as any;
     expect(built.complete).toBe(true);
-    expect(built.brush_preflight.roles.find((role: any) => role.role_id === 'detail-edge').preferred_preset).toBe('Cloud Supreme');
+    expect(built.brush_preflight.roles.find((role: any) => role.role_id === 'detail-edge').preferred_preset).toBe('SoftMass Supreme');
     expect(built.brush_preflight.roles.find((role: any) => role.role_id === 'atmosphere-soft').preferred_preset).toBe('Knife Soft');
     expect(built.brush_preflight.brush_pack_id).toBe(packId);
     expect(built.brush_preflight.roles.every((role: any) => role.profile_id.startsWith('media-profile-sha256:'))).toBe(true);
@@ -288,14 +288,14 @@ describe('P0-E.2 evidence-based media brush profiling', () => {
     seedPack(root, ['Generic First', 'Broken Bristle']);
     recordMediaBrushProfile({
       brush_pack_id: packId, ...state('Generic First'),
-      usable_visual_intents: ['texture'], material_roles: ['foliage'], mark_character: ['smooth'],
+      usable_visual_intents: ['texture'], material_roles: ['organicInstances'], mark_character: ['smooth'],
       useful_scale_range: { min_px: 12, max_px: 180 }, edge_behavior: 'soft', buildup_behavior: 'glazing',
       rotation_meaningful: false, recommended_pressure_policy: 'none', known_caveats: [],
       evidence: evidence(root, 'generic-first'),
     }, { recordDirectory: root });
     recordMediaBrushProfile({
       brush_pack_id: packId, ...state('Broken Bristle'),
-      usable_visual_intents: ['texture'], material_roles: ['foliage'], mark_character: ['broken', 'bristly', 'textural'],
+      usable_visual_intents: ['texture'], material_roles: ['organicInstances'], mark_character: ['broken', 'bristly', 'textural'],
       useful_scale_range: { min_px: 12, max_px: 180 }, edge_behavior: 'broken', buildup_behavior: 'granular',
       rotation_meaningful: true, recommended_pressure_policy: 'native-preset', known_caveats: [],
       evidence: evidence(root, 'broken-bristle'),

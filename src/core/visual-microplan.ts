@@ -49,6 +49,8 @@ export const VISUAL_MICROPLAN_METHOD_CLASSES = [
   'fill',
   'gradient',
   'mask',
+  'filter',
+  'transform',
   'rollback',
 ] as const;
 export type VisualMicroPlanMethodClass = (typeof VISUAL_MICROPLAN_METHOD_CLASSES)[number];
@@ -209,6 +211,10 @@ export const VISUAL_MICROPLAN_MUTATION_TOOLS = new Set([
   'photoshop_fill_layer',
   'photoshop_paint_color_gradient',
   'photoshop_create_layer_mask',
+  'photoshop_apply_gaussian_blur',
+  'photoshop_move_layer',
+  'photoshop_scale_layer',
+  'photoshop_rotate_layer',
   'photoshop_undo',
 ]);
 
@@ -446,6 +452,8 @@ export function visualMicroPlanMethodClassForStep(
   if (step.tool === 'photoshop_fill_layer') return 'fill';
   if (step.tool === 'photoshop_paint_color_gradient') return 'gradient';
   if (step.tool === 'photoshop_create_layer_mask') return 'mask';
+  if (step.tool === 'photoshop_apply_gaussian_blur') return 'filter';
+  if (step.tool === 'photoshop_move_layer' || step.tool === 'photoshop_scale_layer' || step.tool === 'photoshop_rotate_layer') return 'transform';
   if (step.tool === 'photoshop_paint_regions') return 'region';
   if (step.tool === 'photoshop_paint_dabs') return 'paint';
   if (step.tool === 'photoshop_paint_stamp_instances') return 'paint';
@@ -663,6 +671,61 @@ function validateBackwardReferences(steps: VisualMicroPlanStep[]): void {
   });
 }
 
+/** Collect independent construction requirements even when an earlier field is invalid. */
+export function collectVisualMicroPlanConstructionErrors(args: Record<string, unknown>): string[] {
+  const errors: string[] = [];
+  const steps = Array.isArray(args.steps)
+    ? args.steps.filter((step): step is Record<string, unknown> => !!step && typeof step === 'object' && !Array.isArray(step))
+    : [];
+  const mutations = steps.filter(step => VISUAL_MICROPLAN_MUTATION_TOOLS.has(String(step.tool)));
+  const strategy = args.paint_strategy && typeof args.paint_strategy === 'object' && !Array.isArray(args.paint_strategy)
+    ? args.paint_strategy as Record<string, unknown> : undefined;
+  const firstMutation = steps.findIndex(step => VISUAL_MICROPLAN_MUTATION_TOOLS.has(String(step.tool)));
+  const softPreparation = firstMutation >= 0 && steps.slice(0, firstMutation).some(step => {
+    if (step.tool !== 'photoshop_set_brush' || !step.args || typeof step.args !== 'object') return false;
+    const brush = step.args as Record<string, unknown>;
+    return (typeof brush.hardness === 'number' && brush.hardness <= 10)
+      || (typeof brush.flow === 'number' && brush.flow <= 20);
+  });
+  const sensitiveIntents = new Set(['continuous-field', 'atmospheric-mass', 'soft-transition', 'lost-edge', 'smooth', 'light-sculpt']);
+  const sensitiveMethods = new Set(['continuous-color-field', 'soft-brush-build', 'smudge-shape', 'gaussian-blur', 'smart-blur', 'radial-gradient']);
+  const sensitive = softPreparation || sensitiveIntents.has(String(strategy?.visual_intent))
+    || mutations.some(step => step.tool === 'photoshop_paint_color_gradient' || sensitiveMethods.has(String(step.method_id)));
+  const logical = args.logical_layer as Record<string, unknown> | undefined;
+  const bounds = args.region_bounds as Record<string, unknown> | undefined;
+  // A bounded black-brush subtraction on an existing owner's mask creates no
+  // environmental mass. Its target/selection/rollback gates still run normally.
+  const scopedMaskSubtraction = args.action_class === 'ERASE'
+    && logical?.decision === 'continue-logical-layer'
+    && typeof logical.layer_id === 'number' && Number.isSafeInteger(logical.layer_id) && logical.layer_id > 0
+    && bounds && ['left', 'top', 'right', 'bottom'].every(key => typeof bounds[key] === 'number' && Number.isFinite(bounds[key]))
+    && Number(bounds.right) > Number(bounds.left) && Number(bounds.bottom) > Number(bounds.top)
+    && mutations.length > 0 && mutations.every(step => {
+      const payload = step.args as Record<string, unknown> | undefined;
+      return step.tool === 'photoshop_paint_strokes' && payload?.paint_target === 'layer-mask'
+        && payload.layer_id === logical.layer_id && Array.isArray(payload.strokes) && payload.strokes.length > 0
+        && payload.strokes.every(stroke => stroke?.tool === 'BRUSH'
+          && stroke.color?.red === 0 && stroke.color?.green === 0 && stroke.color?.blue === 0);
+    });
+  if (!scopedMaskSubtraction && args.method_class !== 'filter' && ['global', 'medium'].includes(String(args.scale).trim().toLowerCase()) && sensitive && !strategy?.construction_role) {
+    errors.push('broad/global soft or environmental VisualMicroPlan requires paint_strategy.construction_role classification before mechanism selection');
+  }
+  if (strategy?.construction_role === 'continuous-field' && mutations.some(step =>
+    step.tool !== 'photoshop_paint_color_gradient'
+    && step.tool !== 'photoshop_fill_layer'
+    && !(step.tool === 'photoshop_paint_dabs' && (!step.method_id || step.method_id === 'soft-brush-build'))
+    && !(step.tool === 'photoshop_paint_strokes' && step.method_id === 'installed-brush-preset')
+  ) && strategy.fallback_from_method_id !== 'continuous-color-field') {
+    errors.push('construction_role=continuous-field requires a continuous color field or brush construction; other mechanisms require fallback_from_method_id=continuous-color-field');
+  }
+  if (strategy?.construction_role === 'optical-veil'
+    && mutations.some(step => step.tool === 'photoshop_paint_dabs' || step.method_id === 'soft-brush-build')
+    && (!strategy.fallback_from_method_id || strategy.fallback_from_method_id === 'soft-brush-build')) {
+    errors.push('construction_role=optical-veil cannot silently degrade to Soft Round/soft-brush dab-chain; declare a different preferred fallback_from_method_id');
+  }
+  return errors;
+}
+
 export function parseVisualMicroPlan(args: Record<string, unknown>): VisualMicroPlan {
   const documentId = args.document_id;
   if (
@@ -773,9 +836,6 @@ export function parseVisualMicroPlan(args: Record<string, unknown>): VisualMicro
       : requireString(raw.fallback_reason, 'paint_strategy.fallback_reason');
     // E.7c: fallback_from_method_id is executable routing authority; fallback_reason is
     // optional artistic/audit guidance and must not be a mutation-admission certificate.
-    if (fallbackReason && !fallbackFromMethodId) {
-      throw new Error('paint_strategy.fallback_reason requires fallback_from_method_id');
-    }
     paintStrategy = {
       ...(constructionRole ? { constructionRole } : {}),
       materialRole: requireString(raw.material_role, 'paint_strategy.material_role'),
@@ -1166,7 +1226,6 @@ export function parseVisualMicroPlan(args: Record<string, unknown>): VisualMicro
   if (!VISUAL_MICROPLAN_ACTION_CLASSES.includes(actionClassRaw as VisualMicroPlanActionClass)) {
     throw new Error(`action_class must be one of ${VISUAL_MICROPLAN_ACTION_CLASSES.join(', ')}`);
   }
-  const materialStage = stage.trim().toUpperCase().replace(/[\s-]+/g, '_') === 'MATERIAL';
   const materialResponse = args.material_response === undefined
     ? undefined
     : normalizeMaterialResponsePlan(args.material_response, {
@@ -1174,11 +1233,8 @@ export function parseVisualMicroPlan(args: Record<string, unknown>): VisualMicro
         opacityRole: logicalLayer?.opacityRole,
         constructionRole: paintStrategy?.constructionRole,
       });
-  if (materialStage && actionClassRaw !== 'ROLLBACK' && !materialResponse) {
-    throw new Error(
-      'MATERIAL VisualMicroPlan requires material_response decomposition before texture/brush execution'
-    );
-  }
+  // Planning prose is optional; a supplied plan still validates against owner roles.
+  // Exact-frame material assessment remains the authority for refinement completion.
   const expectedVisualResult = requireString(
     args.expected_visual_result,
     'expected_visual_result'
@@ -1206,9 +1262,8 @@ export function parseVisualMicroPlan(args: Record<string, unknown>): VisualMicro
     if (scale.toLowerCase() !== 'global') {
       throw new Error('recognition block-in must use scale=global because recognizability is a whole-image objective');
     }
-    if (recognitionFeatures.length < 3 || recognitionFeatures.length > 7) {
-      throw new Error('recognition block-in requires 3-7 recognition_features');
-    }
+    // Compact passes do not expose this legacy prose list. Optional annotations
+    // remain useful, but their count cannot establish image recognizability.
   }
 
   if (!Array.isArray(args.steps)) throw new Error('steps must be an array');
@@ -1217,6 +1272,14 @@ export function parseVisualMicroPlan(args: Record<string, unknown>): VisualMicro
   }
 
   const seenIds = new Set<string>();
+  for (const step of args.steps as Array<Record<string, any>>) {
+    if (step?.tool !== 'photoshop_paint_regions' || step.args?.replace_contents !== true) continue;
+    const layerId = Number((args.logical_layer as Record<string, unknown>)?.layer_id);
+    const regions = step.args.regions;
+    if (args.action_class !== 'REPLACE' || !Number.isSafeInteger(layerId) || layerId <= 0
+      || !Array.isArray(regions) || !regions.length || regions.some((r: any) => r.layer_id !== layerId))
+      throw new Error('component_rebuild_target_required: REPLACE requires one exact owned layer and every region pinned to it');
+  }
   const steps = args.steps.map((value, index): VisualMicroPlanStep => {
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
       throw new Error(`steps[${index}] must be an object`);
@@ -1260,6 +1323,14 @@ export function parseVisualMicroPlan(args: Record<string, unknown>): VisualMicro
   if (mutationIndexes.length < 1 || mutationIndexes.length > VISUAL_MICROPLAN_MAX_MUTATIONS) {
     throw new Error(`VisualMicroPlan requires 1-${VISUAL_MICROPLAN_MAX_MUTATIONS} visual mutations; found ${mutationIndexes.length}`);
   }
+  if (methodClass === 'filter') {
+    if (mutationIndexes.length !== 1 || steps[mutationIndexes[0]!]!.tool !== 'photoshop_apply_gaussian_blur'
+      || steps.some(step => step.tool === 'photoshop_create_layer')) {
+      throw new Error('filter pass permits preparation plus exactly one Gaussian filter on an existing owner');
+    }
+    const target = steps[mutationIndexes[0]!]!.args.layer_id;
+    if (typeof target !== 'number' || !Number.isSafeInteger(target) || target <= 0) throw new Error('filter pass requires an explicit numeric layer_id');
+  }
   const mutationBudget = resolveVisualMicroPlanMutationBudget({
     risk,
     stage,
@@ -1276,65 +1347,8 @@ export function parseVisualMicroPlan(args: Record<string, unknown>): VisualMicro
   }
   const mutationIndex = mutationIndexes[0]!;
   const lastMutationIndex = mutationIndexes[mutationIndexes.length - 1]!;
-  const broadScale = ['global', 'medium'].includes(scale.trim().toLowerCase());
-  const roleSensitiveVisualIntents = new Set<PaintingVisualIntent>([
-    'continuous-field',
-    'atmospheric-mass',
-    'soft-transition',
-    'lost-edge',
-    'smooth',
-    'light-sculpt',
-  ]);
-  const roleSensitiveMethodIds = new Set([
-    'continuous-color-field',
-    'soft-brush-build',
-    'smudge-shape',
-    'gaussian-blur',
-    'smart-blur',
-    'radial-gradient',
-  ]);
-  const mutationSteps = mutationIndexes.map(index => steps[index]!);
-  const hasSoftBrushPreparation = steps.slice(0, mutationIndex).some(step => {
-    if (step.tool !== 'photoshop_set_brush') return false;
-    return Number(step.args.hardness) <= 10 || Number(step.args.flow) <= 20;
-  });
-  const hasRoleSensitiveExecution =
-    (paintStrategy ? roleSensitiveVisualIntents.has(paintStrategy.visualIntent) : false)
-    || mutationSteps.some(step => step.tool === 'photoshop_paint_color_gradient')
-    || mutationSteps.some(step => step.methodId ? roleSensitiveMethodIds.has(step.methodId) : false)
-    || hasSoftBrushPreparation;
-  if (broadScale && hasRoleSensitiveExecution && !paintStrategy?.constructionRole) {
-    throw new Error(
-      'broad/global soft or environmental VisualMicroPlan requires paint_strategy.construction_role classification before mechanism selection'
-    );
-  }
-
-  if (paintStrategy?.constructionRole === 'continuous-field') {
-    const nonDefaultFieldMutation = mutationSteps.some(step =>
-      step.tool !== 'photoshop_paint_color_gradient' && step.methodId !== 'continuous-color-field'
-    );
-    if (nonDefaultFieldMutation) {
-      if (paintStrategy.fallbackFromMethodId !== 'continuous-color-field') {
-        throw new Error(
-          'construction_role=continuous-field defaults to method_id=continuous-color-field; any alternate mechanism requires fallback_from_method_id=continuous-color-field'
-        );
-      }
-    }
-  }
-
-  if (paintStrategy?.constructionRole === 'optical-veil') {
-    const usesLegacySoftDabChain = mutationSteps.some(step =>
-      step.tool === 'photoshop_paint_dabs' || step.methodId === 'soft-brush-build'
-    );
-    if (usesLegacySoftDabChain) {
-      if (!paintStrategy.fallbackFromMethodId
-          || paintStrategy.fallbackFromMethodId === 'soft-brush-build') {
-        throw new Error(
-          'construction_role=optical-veil cannot silently degrade to Soft Round/soft-brush dab-chain; declare a different preferred fallback_from_method_id'
-        );
-      }
-    }
-  }
+  const constructionErrors = collectVisualMicroPlanConstructionErrors(args);
+  if (constructionErrors.length) throw new Error(constructionErrors.join('\n'));
   const captureIndex = steps.length - 1;
   if (steps[captureIndex]!.tool !== VISUAL_MICROPLAN_CAPTURE_TOOL) {
     throw new Error('the final VisualMicroPlan step must be photoshop_get_preview');

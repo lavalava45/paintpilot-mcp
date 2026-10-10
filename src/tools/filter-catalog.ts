@@ -38,9 +38,9 @@ export function createFilterTools(
   return [
     filterTool(
       'photoshop_apply_gaussian_blur',
-      'Apply Gaussian Blur to the active layer.',
-      { radius: { type: 'number', description: 'Blur radius in pixels (0.1-250)', minimum: 0.1, maximum: 250 } },
-      ['radius'],
+      'Apply editable Gaussian Smart Filter to one explicit layer, preserving embedded source pixels. Raster input is converted to Smart Object atomically. For selective softening prepare a selection for the Smart Filter mask. Requires Guard imaging preflight; never substitute whole-layer blur for rebuilding a defective shape.',
+      { layer_id: { type: 'integer', minimum: 1, description: 'Exact current owner layer. Must be the sole selected layer. Original pixels are preserved in a Smart Object; blur remains a Smart Filter with its Photoshop filter mask.' }, radius: { type: 'number', description: 'Blur radius in pixels (0.1-250)', minimum: 0.1, maximum: 250 } },
+      ['radius', 'layer_id'],
       (args) => runGaussianBlur(router, args)
     ),
     filterTool(
@@ -67,12 +67,13 @@ export function createFilterTools(
     ),
     filterTool(
       'photoshop_apply_motion_blur',
-      'Apply Motion Blur to the active layer.',
+      'Apply editable Motion Blur Smart Filter to one explicit layer, preserving source pixels; requires motion imaging preflight.',
       {
+        layer_id: { type: 'integer', minimum: 1, description: 'Exact current owner layer; must be the sole selected layer.' },
         angle: { type: 'number', description: 'Blur angle in degrees (-360 to 360)', minimum: -360, maximum: 360 },
         radius: { type: 'number', description: 'Blur distance in pixels (1-999)', minimum: 1, maximum: 999 },
       },
-      ['angle', 'radius'],
+      ['angle', 'radius', 'layer_id'],
       (args) => runMotionBlur(router, args)
     ),
     filterTool(
@@ -84,14 +85,15 @@ export function createFilterTools(
     ),
     filterTool(
       'photoshop_apply_smart_blur',
-      'Apply Smart Blur to the active raster layer for edge-preserving smoothing.',
+      'Apply editable Smart Blur Smart Filter to one explicit layer, preserving source pixels. Smart Blur is a filter type; editability is provided by the Smart Object, not its name.',
       {
+        layer_id: { type: 'integer', minimum: 1, description: 'Exact current owner layer; must be the sole selected layer.' },
         radius: { type: 'number', description: 'Blur radius (0.1-100)', minimum: 0.1, maximum: 100 },
         threshold: { type: 'number', description: 'Blur threshold — higher values restrict blur to stronger edges (0.1-100)', minimum: 0.1, maximum: 100 },
         mode: { type: 'string', enum: [...SMART_BLUR_MODES], description: 'Smart blur mode (default: NORMAL)', default: 'NORMAL' },
         quality: { type: 'string', enum: [...SMART_BLUR_QUALITIES], description: 'Blur quality / smoothness (default: MEDIUM)', default: 'MEDIUM' },
       },
-      ['radius', 'threshold'],
+      ['radius', 'threshold', 'layer_id'],
       (args) => runSmartBlur(router, args)
     ),
   ];

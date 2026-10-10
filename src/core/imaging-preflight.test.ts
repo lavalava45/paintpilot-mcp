@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { normalizeSceneCameraImagingModel } from './scene-camera-imaging-model.js';
-import { normalizeImagingPreflight } from './imaging-preflight.js';
+import { IMAGING_PREFLIGHT_SCHEMA, normalizeImagingPreflight } from './imaging-preflight.js';
+import { collectSchemaErrors } from './guard/cycle-compiler.js';
 
 const camera = normalizeSceneCameraImagingModel({
   model_id: 'camera', revision: 2,
@@ -28,6 +29,18 @@ const base = {
 describe('E.20c imaging preflight', () => {
   it('accepts one coherent depth/focus allocation across multiple owners', () => {
     expect(normalizeImagingPreflight(base, camera).outcome).toBe('supported');
+  });
+  it('publishes a round-trip schema with the runtime-required imaging preflight fields', () => {
+    const normalized = normalizeImagingPreflight(base, camera);
+    expect(collectSchemaErrors(normalized, IMAGING_PREFLIGHT_SCHEMA, 'imaging_preflight')).toEqual([]);
+    expect(IMAGING_PREFLIGHT_SCHEMA.required).toEqual(expect.arrayContaining([
+      'scene_camera_model_id', 'scene_camera_revision', 'effect_kind', 'motivation',
+      'scope', 'owner_expectations', 'revalidate_edge_detail',
+    ]));
+    const missingOwners = { ...normalized } as Record<string, unknown>;
+    delete missingOwners.owner_expectations;
+    expect(collectSchemaErrors(missingOwners, IMAGING_PREFLIGHT_SCHEMA, 'imaging_preflight'))
+      .toContain('imaging_preflight.owner_expectations is required');
   });
   it('flags contradictory focus at the same depth without an explicit local exception', () => {
     const result = normalizeImagingPreflight({ ...base, owner_expectations: [

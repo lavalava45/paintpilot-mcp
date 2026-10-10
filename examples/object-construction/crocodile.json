@@ -1,0 +1,209 @@
+{
+  "model_id": "crocodile-study",
+  "revision": 1,
+  "basis": "Artist-selected illustrative proportions; these examples do not certify biological or manufactured dimensions.",
+  "objects": [
+    {
+      "id": "croc",
+      "subject_kind": "animal",
+      "origin": [
+        -5,
+        0,
+        0
+      ]
+    }
+  ],
+  "points": [
+    {
+      "id": "nose",
+      "object_id": "croc",
+      "position": [
+        0,
+        0,
+        0
+      ],
+      "fixed": true
+    },
+    {
+      "id": "neck",
+      "object_id": "croc",
+      "position": [
+        2,
+        0,
+        0
+      ],
+      "fixed": true
+    },
+    {
+      "id": "tail-root",
+      "object_id": "croc",
+      "position": [
+        6,
+        0,
+        0
+      ],
+      "fixed": true
+    },
+    {
+      "id": "tail-tip",
+      "object_id": "croc",
+      "position": [
+        9,
+        0,
+        0
+      ],
+      "fixed": false
+    },
+    {
+      "id": "head-top",
+      "object_id": "croc",
+      "position": [
+        2,
+        -0.5,
+        0
+      ],
+      "fixed": true
+    },
+    {
+      "id": "head-bottom",
+      "object_id": "croc",
+      "position": [
+        2,
+        0.5,
+        0
+      ],
+      "fixed": true
+    },
+    {
+      "id": "body-top-left",
+      "object_id": "croc",
+      "position": [
+        2,
+        -0.8,
+        0
+      ],
+      "fixed": true
+    },
+    {
+      "id": "body-top-right",
+      "object_id": "croc",
+      "position": [
+        6,
+        -0.7,
+        0
+      ],
+      "fixed": true
+    },
+    {
+      "id": "body-bottom-right",
+      "object_id": "croc",
+      "position": [
+        6,
+        0.7,
+        0
+      ],
+      "fixed": true
+    },
+    {
+      "id": "body-bottom-left",
+      "object_id": "croc",
+      "position": [
+        2,
+        0.8,
+        0
+      ],
+      "fixed": true
+    },
+    {
+      "id": "tail-left",
+      "object_id": "croc",
+      "position": [
+        0,
+        -0.35,
+        0
+      ],
+      "fixed": true,
+      "relative_to": "tail-root",
+      "axis_to": "tail-tip"
+    },
+    {
+      "id": "tail-right",
+      "object_id": "croc",
+      "position": [
+        0,
+        0.35,
+        0
+      ],
+      "fixed": true,
+      "relative_to": "tail-root",
+      "axis_to": "tail-tip"
+    }
+  ],
+  "parts": [
+    {
+      "id": "croc-head",
+      "object_id": "croc",
+      "role": "Editable crocodile head",
+      "outline": [
+        "nose",
+        "head-top",
+        "head-bottom"
+      ],
+      "curve": "smooth"
+    },
+    {
+      "id": "croc-body",
+      "object_id": "croc",
+      "role": "Editable crocodile torso",
+      "outline": [
+        "body-top-left",
+        "body-top-right",
+        "body-bottom-right",
+        "body-bottom-left"
+      ],
+      "curve": "smooth"
+    },
+    {
+      "id": "croc-tail",
+      "object_id": "croc",
+      "role": "Editable crocodile tail",
+      "outline": [
+        "tail-left",
+        "tail-tip",
+        "tail-right"
+      ],
+      "curve": "smooth"
+    }
+  ],
+  "constraints": [
+    {
+      "id": "tail-length-ratio",
+      "kind": "ratio",
+      "points": [
+        "tail-root",
+        "tail-tip",
+        "nose",
+        "neck"
+      ],
+      "value": 2
+    },
+    {
+      "id": "tail-direction",
+      "kind": "parallel",
+      "points": [
+        "tail-root",
+        "tail-tip",
+        "nose",
+        "neck"
+      ]
+    }
+  ],
+  "camera": {
+    "kind": "orthographic",
+    "origin": [
+      550,
+      500
+    ],
+    "scale": 60
+  }
+}

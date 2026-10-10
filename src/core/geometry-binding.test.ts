@@ -3,8 +3,10 @@ import {
   changedSceneGeometryDependencyIds,
   geometryBindingStaleness,
   normalizeGeometryBinding,
+  transformGeometryBinding,
 } from './geometry-binding.js';
 import { normalizeSceneGeometryModel } from './scene-geometry-model.js';
+import { previewToCanvasAffine } from './spatial-support.js';
 
 function scene(revision: number, mutate?: (value: any) => void) {
   const value: any = {
@@ -87,5 +89,56 @@ describe('geometry binding dependency invalidation', () => {
     });
     expect(geometryBindingStaleness(binding('window', 'facade', 'wall_plane', ['roof_edge']), after, before))
       .toMatchObject({ stale: true, changed_dependency_ids: ['__projection__'] });
+  });
+
+  it('reprojects connected owner anchors and control sections through a parent move/scale without rewriting dependencies', () => {
+    const source = binding('handle', 'rails', 'track_plane', ['left_rail', 'right_rail']);
+    source.anchors.far_extent = { x: 300, y: 500 };
+    source.anchors.centerline = { line: [{ x: 200, y: 600 }, { x: 300, y: 500 }] };
+    source.control_sections.find(section => section.id === 'near')!.expected_bounds = { left: 190, top: 590, right: 210, bottom: 610 };
+    const projected = transformGeometryBinding(source, {
+      scale_x: 2,
+      scale_y: 0.5,
+      origin: { x: 200, y: 600 },
+      translate_x: 80,
+      translate_y: 30,
+    });
+
+    expect(projected.anchors).toEqual({
+      near_contact: { x: 280, y: 630 },
+      far_extent: { x: 480, y: 580 },
+      centerline: { line: [{ x: 280, y: 630 }, { x: 480, y: 580 }] },
+    });
+    expect(projected.control_sections.find(section => section.id === 'near')).toMatchObject({
+      at: { x: 280, y: 630 },
+      expected_bounds: { left: 260, top: 625, right: 300, bottom: 635 },
+    });
+    expect(projected.dependencies).toEqual(source.dependencies);
+    expect(projected.constraints).toEqual(source.constraints);
+    expect(projected.exact_evidence).toEqual(source.exact_evidence);
+    expect(source.anchors.near_contact).toEqual({ x: 200, y: 600 });
+  });
+
+  it('fails closed for invalid parent affine transforms', () => {
+    const source = binding('handle', 'rails', 'track_plane', ['left_rail']);
+    expect(() => transformGeometryBinding(source, { scale_x: 0 }))
+      .toThrow(/finite positive scales/);
+    expect(() => transformGeometryBinding(source, { translate_x: Number.NaN }))
+      .toThrow(/finite positive scales/);
+  });
+
+  it('maps crop-preview connected construction back into canvas coordinates before persistence', () => {
+    const source = binding('handle', 'rails', 'track_plane', ['left_rail']);
+    source.anchors.near_contact = { x: 100, y: 75 };
+    source.control_sections = [{ id: 'near', at: { x: 100, y: 75 }, expected_bounds: { left: 90, top: 65, right: 110, bottom: 85 } }];
+    const projected = transformGeometryBinding(source, previewToCanvasAffine({
+      documentId: 42, canvasWidth: 1200, canvasHeight: 800,
+      outputWidth: 400, outputHeight: 300,
+      crop: { left: 200, top: 100, right: 1000, bottom: 700 },
+    }));
+    expect(projected.anchors.near_contact).toEqual({ x: 400, y: 250 });
+    expect(projected.control_sections[0]).toMatchObject({
+      at: { x: 400, y: 250 }, expected_bounds: { left: 380, top: 230, right: 420, bottom: 270 },
+    });
   });
 });

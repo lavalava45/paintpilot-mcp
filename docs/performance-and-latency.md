@@ -1,5 +1,15 @@
 # Performance and latency
 
+## Evaluator overhead in the current source
+
+[Independent artistic review](artistic-evaluator.md) starts outside the mutation lease and reuses one
+inference at the ordinary pass review boundary. Local controls measured 13.4s (early block-in) and 25.4s
+(realistic form rejection); cold loading and GPU residency are additional costs. Include these in whole
+request-to-pixel/quality-time comparisons. There is no added Guard cycle, but do not call this a measured
+speed improvement until it actually reduces avoidable planning/rejection work. Provider failure has a
+30s cooldown and cannot authorize replay or certify artistic success.
+
+
 Current repository guide to painting-cycle performance evidence, optimization decisions and benchmark
 boundaries. It combines the former policy optimization audit with the generated painting-cycle
 latency benchmark.
@@ -169,8 +179,8 @@ fell to single-digit/low-double-digit milliseconds (4-12 ms in those samples). T
 result of the final live run; Photoshop dispatch itself remained roughly 3.6-4.0s and was not weakened or bypassed.
 
 The run also confirmed **zero recovery-only turns**. Its sole predispatch rejection was
-`structured_mass_iconic_primitive_compound`, a real form/strategy decision rather than deterministic schema
-boilerplate; the corrected asymmetric contour pass then dispatched normally. Full repository acceptance after the
+`structured_mass_iconic_primitive_compound`, the historical vertex-count heuristic retired on 2026-10-04 because
+extra contour points do not prove form quality; the revised contour pass then dispatched normally. Full repository acceptance after the
 implementation changes completed at **93/93 test files and 939/939 tests**.
 
 ## 7. Generated representative painting-cycle benchmark
@@ -248,3 +258,28 @@ These are **server-observed diagnostic boundaries**. Marker intervals include an
 This benchmark is historical/repository evidence. The final clean-host acceptance must append fresh compact-v2 cycles from the rebuilt child rather than treating these older journals as proof of the new live route.
 
 <!-- END GENERATED PAINTING CYCLE BENCHMARK -->
+
+## Public state byte budget (2026-10-05)
+
+Status/resume text is capped at 24 KiB UTF-8. Oversize full projections are saved under the existing runtime directory, with an exact full_projection_path and explicit omissions in response_budget. Small results need no extra I/O. Required identities/bindings are never abbreviated; required context that cannot fit produces an incomplete-state error. This bounds model context, not artistic quality or measured wall-time gain.
+
+Review response-ready is sampled after receipt persistence and response construction. The endpoint joins its exact receipt on the next ordinary journal write, with no second telemetry write. A process interruption before that flush leaves review_image_response_boundary_complete=false: full service/gap intervals are unknown, and only review_image_service_prefix_ms is observed. Local ready responses expose the actual boundary immediately.
+
+Throughput accounting_integrity compares receipt-owned dispatch counts with the run mirror in the current document incarnation. Proven disagreement suppresses the actions-per-call ratio; partial/legacy/unowned evidence remains unverified. The check reuses current projections and does not repair or reconstruct model-visible call totals.
+
+
+### Recorder/checkpoint and repair scopes (2026-10-05 source)
+
+photoshop_dispatch_wall_ms ends when dispatch resolves/rejects, before recorder finalization. recorder_prepare_ms
+and recorder_finalize_ms measure lifecycle overhead; recorder_settle_ms, recorder_stop_ms and
+recorder_postprocess_ms subdivide finalization and are not additive to it. Failed/unused phases remain unknown.
+A due automatic checkpoint owns automatic_checkpoint_wall_ms and its dispatch/reported execution in its journal.
+Its wall boundary is before the timing write; full cycle wall includes that write. The next pass carries only
+an automatic_checkpoint_operation_id, including the prepared async path. Do not add checkpoint dispatch twice.
+No additional Photoshop reads or model turns; one timing write only when a checkpoint is due.
+
+violation_accounting rows carry scope (cycle/finalization/compiled mutation) and origin (initial/introduced).
+Only typed deterministic compiled-mutation defects enter the benchmark repair percentage. Legacy, unowned or
+inconsistent rows leave the percentage unknown. Scoped durable counters supplement the old compatibility map;
+this is diagnostic evidence, not an artistic score or proof of complete run ownership. Live trace/checkpoint
+latency and quality/time comparisons remain required.

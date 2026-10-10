@@ -102,6 +102,10 @@ export function comparePreviewFiles(beforeFile, afterFile, maxSamples = 240_000)
     after_width: after.width,
     after_height: after.height,
     sampled_pixels: sampled,
+    // Exact equality must use all decoded pixels: zero sampled delta can miss
+    // a small real change between sample positions.
+    decoded_pixels_equal: Buffer.from(before.data.buffer, before.data.byteOffset, before.data.byteLength)
+      .equals(Buffer.from(after.data.buffer, after.data.byteOffset, after.data.byteLength)),
     mean_abs_rgb_delta: sampled ? sum / sampled : 0,
     p95_abs_rgb_delta: p95,
     changed_ratio_delta_ge_2: sampled ? changed2 / sampled : 0,

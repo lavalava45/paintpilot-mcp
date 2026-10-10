@@ -49,16 +49,16 @@ function requestForStrokes(
   strokes: Array<{ points: Point[]; color?: Record<string, number>; size?: number }>,
   motifBounds: Bounds[],
   patternIntent: 'organic_instances' | 'intentional_regular' = 'organic_instances',
-  category = 'bird'
+  category = 'organic-instance'
 ) {
   return {
     id: 'mechanical-pattern-pass',
     tool: 'photoshop_execute_visual_microplan',
     args: {
       document_id: 42,
-      summary: 'Add several visible bird instances with independent construction.',
-      intent: 'Add readable bird silhouettes without copy-pasted geometry.',
-      region: 'sky',
+      summary: 'Add several visible motif instances with independent construction.',
+      intent: 'Add readable motif instances without copy-pasted geometry.',
+      region: 'region-a',
       pattern_intent: patternIntent,
       motif_instances: motifBounds.map((region_bounds, index) => ({
         id: `${category}-${index + 1}`,
@@ -71,7 +71,7 @@ function requestForStrokes(
         args: { strokes },
       }],
     },
-    summary: 'Add several visible bird instances with independent construction.',
+    summary: 'Add several visible motif instances with independent construction.',
     purpose: 'Exercise repeated-instance review.',
   };
 }
@@ -82,16 +82,16 @@ function requestForStamps(
   patternIntent: 'organic_instances' | 'intentional_regular' = 'organic_instances',
   options: { category?: string; profileId?: string; overpaint?: Array<{ points: Point[] }> } = {}
 ) {
-  const category = options.category ?? 'bird';
-  const profileId = options.profileId ?? 'bird-stamp-profile';
+  const category = options.category ?? 'organic-instance';
+  const profileId = options.profileId ?? 'motif-stamp-profile';
   return {
     id: 'mechanical-stamp-pass',
     tool: 'photoshop_execute_visual_microplan',
     args: {
       document_id: 42,
-      summary: 'Place several visible bird stamp instances and integrate them artistically.',
+      summary: 'Place several visible motif stamp instances and integrate them artistically.',
       intent: 'Use stamp motifs without obvious copy-paste repetition.',
-      region: 'sky',
+      region: 'region-a',
       pattern_intent: patternIntent,
       steps: [
         {
@@ -99,7 +99,7 @@ function requestForStamps(
           tool: 'photoshop_paint_stamp_instances',
           args: {
             stamp_profile_id: profileId,
-            preset_name: 'Bird Stamp',
+            preset_name: 'Motif Stamp',
             instances,
           },
         },
@@ -116,7 +116,7 @@ function requestForStamps(
       stamp_profile_id: profileId,
       region_bounds,
     })),
-    summary: 'Place several visible bird stamp instances and integrate them artistically.',
+    summary: 'Place several visible motif stamp instances and integrate them artistically.',
     purpose: 'Exercise repeated stamp-instance review.',
   };
 }
@@ -181,19 +181,19 @@ function cropPreview(dir: string, wholeSha: string, capture: Record<string, any>
 }
 
 describe('mechanical-patterning review gate', () => {
-  const bird = [
+  const motif = [
     { x: 0, y: 4 },
     { x: 8, y: 0 },
     { x: 16, y: 5 },
     { x: 10, y: 3 },
   ];
 
-  it('flags four exact translated bird glyphs as repeated organic geometry', () => {
+  it('flags four exact translated motif glyphs as repeated organic geometry', () => {
     const shapes = [
-      transform(bird, { tx: 40, ty: 70 }),
-      transform(bird, { tx: 120, ty: 90 }),
-      transform(bird, { tx: 220, ty: 65 }),
-      transform(bird, { tx: 330, ty: 105 }),
+      transform(motif, { tx: 40, ty: 70 }),
+      transform(motif, { tx: 120, ty: 90 }),
+      transform(motif, { tx: 220, ty: 65 }),
+      transform(motif, { tx: 330, ty: 105 }),
     ];
     const result = analyzeMechanicalPatterning(requestForStrokes(
       shapes.map(points => ({ points })),
@@ -212,10 +212,10 @@ describe('mechanical-patterning review gate', () => {
 
   it('still flags transform/color/scale and small coordinate-jitter variants', () => {
     const shapes = [
-      transform(bird, { tx: 50, ty: 70, scale: 1 }),
-      transform(bird, { tx: 150, ty: 80, scale: 1.6, degrees: 24 }),
-      transform(bird, { tx: 280, ty: 100, scale: 0.8, degrees: -18, jitter: 0.15 }),
-      transform(bird, { tx: 390, ty: 75, scale: 1.25, degrees: 47, jitter: 0.1 }),
+      transform(motif, { tx: 50, ty: 70, scale: 1 }),
+      transform(motif, { tx: 150, ty: 80, scale: 1.6, degrees: 24 }),
+      transform(motif, { tx: 280, ty: 100, scale: 0.8, degrees: -18, jitter: 0.15 }),
+      transform(motif, { tx: 390, ty: 75, scale: 1.25, degrees: 47, jitter: 0.1 }),
     ];
     const colors = [
       { red: 20, green: 20, blue: 20 },
@@ -281,7 +281,7 @@ describe('mechanical-patterning review gate', () => {
 
   it('turns execution-derived repeated stamp evidence into durable instance-scale review debt', () => {
     const instances = [0, 1, 2, 3].map(index => ({
-      instance_id: `bird-${index}`,
+      instance_id: `motif-${index}`,
       x: 90 + index * 110,
       y: 150 + (index % 2) * 20,
       size: 52 + index * 9,
@@ -336,7 +336,7 @@ describe('mechanical-patterning review gate', () => {
     expect(result.repeated_cluster_size).toBeLessThan(3);
   });
 
-  it('does not fail structurally different birds merely because they share one semantic class', () => {
+  it('does not fail structurally different motifs merely because they share one semantic class', () => {
     const shapes = [
       transform([{ x: 0, y: 3 }, { x: 8, y: 0 }, { x: 16, y: 4 }], { tx: 50, ty: 70 }),
       transform([{ x: 0, y: 5 }, { x: 5, y: 0 }, { x: 12, y: 2 }, { x: 18, y: 8 }], { tx: 150, ty: 85 }),
@@ -352,12 +352,12 @@ describe('mechanical-patterning review gate', () => {
     expect(result.repeated_cluster_size).toBeLessThan(3);
   });
 
-  it('flags mechanically uniform foliage distribution even when motif geometry is structurally different', () => {
+  it('flags mechanically uniform organic-instance distribution even when motif geometry is structurally different', () => {
     const shapes = [3, 4, 5, 6].map((count, index) => Array.from({ length: count }, (_, point) => ({
       x: 60 + index * 100 + point * 5,
       y: 90 + (point % 2) * (4 + index),
     })));
-    const request: any = requestForStrokes(shapes.map(points => ({ points })), shapes.map(points => bounds(points)), 'organic_instances', 'foliage');
+    const request: any = requestForStrokes(shapes.map(points => ({ points })), shapes.map(points => bounds(points)), 'organic_instances', 'organic-instance');
     request.args.distribution_intent = 'organic-clustered';
     const result = analyzeMechanicalPatterning(request);
     expect(result).toMatchObject({ triggered: true, distribution_intent: 'organic-clustered', distribution_failure: 'uniform-organic-spacing' });
@@ -366,7 +366,7 @@ describe('mechanical-patterning review gate', () => {
 
   it('flags depth-invariant ripple/module scale against a declared perspective progression', () => {
     const shapes = [0, 1, 2, 3].map(index => [{ x: 80 + index * 90, y: 100 + index * 45 }, { x: 110 + index * 90, y: 100 + index * 45 }]);
-    const request: any = requestForStrokes(shapes.map(points => ({ points })), shapes.map(points => bounds(points)), 'intentional_regular', 'ripple');
+    const request: any = requestForStrokes(shapes.map(points => ({ points })), shapes.map(points => bounds(points)), 'intentional_regular', 'regular-module');
     request.args.distribution_intent = 'perspective-regular';
     request.args.logical_layer = { surface_frame: {
       axes: [{ id: 'depth', angle_degrees: 25 }], distribution: 'perspective-regular',
@@ -377,23 +377,23 @@ describe('mechanical-patterning review gate', () => {
 
   it('keeps explicit intentional-uniform distribution exempt from organic spacing heuristics', () => {
     const shapes = [0, 1, 2, 3].map(index => [{ x: 50 + index * 80, y: 200 }, { x: 58 + index * 80, y: 204 + index }, { x: 65 + index * 80, y: 199 }]);
-    const request: any = requestForStrokes(shapes.map(points => ({ points })), shapes.map(points => bounds(points)), 'intentional_regular', 'tile');
+    const request: any = requestForStrokes(shapes.map(points => ({ points })), shapes.map(points => bounds(points)), 'intentional_regular', 'regular-module');
     request.args.distribution_intent = 'intentional-uniform';
     expect(analyzeMechanicalPatterning(request)).toMatchObject({ triggered: false, distribution_intent: 'intentional-uniform' });
   });
 
   it('allows an explicitly classified regular architectural rhythm', () => {
     const modules = [
-      transform(bird, { tx: 50, ty: 70 }),
-      transform(bird, { tx: 100, ty: 70 }),
-      transform(bird, { tx: 150, ty: 70 }),
-      transform(bird, { tx: 200, ty: 70 }),
+      transform(motif, { tx: 50, ty: 70 }),
+      transform(motif, { tx: 100, ty: 70 }),
+      transform(motif, { tx: 150, ty: 70 }),
+      transform(motif, { tx: 200, ty: 70 }),
     ];
     const result = analyzeMechanicalPatterning(requestForStrokes(
       modules.map(points => ({ points })),
       modules.map(points => bounds(points)),
       'intentional_regular',
-      'railing-post'
+      'regular-module'
     ));
 
     expect(result).toMatchObject({
@@ -407,14 +407,14 @@ describe('mechanical-patterning review gate', () => {
     const strokes: Array<{ points: Point[] }> = [];
     const motifBounds: Bounds[] = [];
     for (const tx of offsets) {
-      const head = transform([{ x: 4, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 6 }, { x: 4, y: 6 }], { tx, ty: 180 });
-      const body = transform([{ x: 7, y: 6 }, { x: 7, y: 25 }], { tx, ty: 180 });
-      const arms = transform([{ x: 0, y: 12 }, { x: 7, y: 9 }, { x: 14, y: 12 }], { tx, ty: 180 });
-      const all = [...head, ...body, ...arms];
-      strokes.push({ points: head }, { points: body }, { points: arms });
+      const segmentA = transform([{ x: 4, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 6 }, { x: 4, y: 6 }], { tx, ty: 180 });
+      const segmentB = transform([{ x: 7, y: 6 }, { x: 7, y: 25 }], { tx, ty: 180 });
+      const segmentC = transform([{ x: 0, y: 12 }, { x: 7, y: 9 }, { x: 14, y: 12 }], { tx, ty: 180 });
+      const all = [...segmentA, ...segmentB, ...segmentC];
+      strokes.push({ points: segmentA }, { points: segmentB }, { points: segmentC });
       motifBounds.push(bounds(all, 5));
     }
-    const request = requestForStrokes(strokes, motifBounds, 'organic_instances', 'ninja-character');
+    const request = requestForStrokes(strokes, motifBounds, 'organic_instances', 'organic-instance');
     const { dir, controller, store } = fixtureWithRecord(request);
     const record = store.read('mechanical-pattern-pass')!;
     const wholeSha = record.preview.sha256;

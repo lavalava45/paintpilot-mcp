@@ -10,6 +10,11 @@
         padding: 8px;
         color: #ccc;
         background: #323232;
+        overflow-y: auto;
+        overflow-x: hidden;
+        width: 100%;
+        max-width: 100%;
+        box-sizing: border-box;
       }
       .status-row {
         display: flex;
@@ -34,11 +39,41 @@
         color: #999;
         font-size: 11px;
         line-height: 1.35;
+        overflow-wrap: anywhere;
+        word-break: break-word;
       }
       .readiness {
         margin-top: 8px;
         padding-top: 7px;
         border-top: 1px solid #4a4a4a;
+      }
+      .section-title {
+        margin: 10px 0 5px;
+        color: #ddd;
+        font-weight: 600;
+      }
+      .config-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        margin: 3px 0;
+        color: #aaa;
+        font-size: 11px;
+        min-width: 0;
+      }
+      .config-row span {
+        min-width: 0;
+      }
+      .config-row select {
+        width: 104px;
+        min-width: 104px;
+        height: 22px;
+        font-size: 11px;
+      }
+      .config-status {
+        margin-top: 4px;
+        min-height: 14px;
       }
       .ready { color: #7fbe83; }
       .error { color: #d98686; }
@@ -51,12 +86,39 @@
     </div>
     <label class="control">
       <input id="videoTraceEnabled" type="checkbox" disabled />
-      <span>Включить видеозапись</span>
+      <span id="videoTraceLabel">Enable video recording</span>
     </label>
-    <div id="videoTraceStatus" class="detail">Состояние записи загружается…</div>
+    <div id="videoTraceStatus" class="detail">Loading recording state…</div>
+    <div id="userConfigTitle" class="section-title">Configuration</div>
+    <label class="config-row">
+      <span id="userConfigLanguageLabel">Report language</span>
+      <select id="userConfigLanguage" disabled>
+        <option id="userConfigLanguageAuto" value="auto">auto</option>
+        <option id="userConfigLanguageRu" value="ru">Russian</option>
+        <option id="userConfigLanguageEn" value="en">English</option>
+      </select>
+    </label>
+    <label class="config-row">
+      <span id="userConfigCommentaryModeLabel">Commentary</span>
+      <select id="userConfigCommentaryMode" disabled>
+        <option id="userConfigCommentaryTechnical" value="technical">technical</option>
+        <option id="userConfigCommentaryArtistic" value="artistic">artistic</option>
+        <option id="userConfigCommentaryMixed" value="mixed">mixed</option>
+      </select>
+    </label>
+    <label class="config-row">
+      <span id="userConfigCommentaryDetailLabel">Detail</span>
+      <select id="userConfigCommentaryDetail" disabled>
+        <option id="userConfigDetailShort" value="short">short</option>
+        <option id="userConfigDetailNormal" value="normal">normal</option>
+        <option id="userConfigDetailDetailed" value="detailed">detailed</option>
+      </select>
+    </label>
+    <div id="userConfigStatus" class="detail config-status">Loading configuration…</div>
     <div class="readiness detail">
-      <div id="ffmpegStatus">FFmpeg: проверка…</div>
-      <div id="photoshopWindowStatus">Окно Photoshop: проверка…</div>
+      <div id="ffmpegStatus">FFmpeg: checking…</div>
+      <div id="ffmpegPath">FFmpeg path: detecting…</div>
+      <div id="photoshopWindowStatus">Photoshop window: checking…</div>
     </div>
     <script src="main.js"></script>
   </body>

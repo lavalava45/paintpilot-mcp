@@ -1,0 +1,15 @@
+{
+  "next_pass": {
+    "request_key": "dragon-woman-brush-select-01",
+    "document_id": 4280,
+    "goal": "Подготовить кисть Soft Round для последующего живописного моделирования теней и тумана.",
+    "actions": [
+      {
+        "tool": "photoshop_select_brush_preset",
+        "args": {
+          "name": "Soft Round"
+        }
+      }
+    ]
+  }
+}

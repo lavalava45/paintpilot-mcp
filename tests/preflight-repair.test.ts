@@ -8,8 +8,8 @@ import {
   type RepairableViolation,
 } from '../src/core/guard/preflight-repair.js';
 
-function violation(code: string, message = code): RepairableViolation {
-  return { scope: 'next_operation', code, message };
+function violation(code: string, message = code, details?: Record<string, unknown>): RepairableViolation {
+  return { scope: 'next_operation', code, message, ...(details ? { details } : {}) };
 }
 
 describe('preflight repair', () => {
@@ -122,7 +122,8 @@ describe('preflight repair', () => {
     };
     const budgetViolation = violation(
       'compact_pass_adaptive_mutation_budget_exceeded',
-      'next_pass requests 3 visual mutations but adaptive budget allows 2 (risk=low)'
+      'wording is intentionally irrelevant to machine control',
+      { requested_mutations: 3, allowed_mutations: 2, splittable: true }
     );
 
     const split = splitPassForBudget(pass, [budgetViolation]);
@@ -163,10 +164,33 @@ describe('preflight repair', () => {
     };
     const budgetViolation = violation(
       'compact_pass_visual_mutation_limit',
-      'next_pass may contain at most 1 visual mutations'
+      'different human-readable wording',
+      { requested_mutations: 2, allowed_mutations: 1, splittable: true }
     );
 
     expect(splitPassForBudget(pass, [budgetViolation])).toBeUndefined();
+  });
+
+  it('never derives split control from human-readable violation prose', () => {
+    const pass = {
+      request_key: 'typed-budget-only',
+      action_class: 'ADD',
+      logical_layer: { decision: 'continue-logical-layer', hypothesis_id: 'hero-owner', layer_id: 7 },
+      actions: [1, 2].map(index => ({
+        id: `dab-${index}`,
+        tool: 'photoshop_paint_dabs',
+        args: { layer_id: 7, dabs: [{ x: index * 10, y: index * 20 }] },
+      })),
+    };
+    const proseOnly = violation(
+      'compact_pass_adaptive_mutation_budget_exceeded',
+      'adaptive budget allows 1; this sentence must not be executable control data'
+    );
+    expect(splitPassForBudget(pass, [proseOnly])).toBeUndefined();
+    expect(classifyViolation(violation(
+      'invalid_visual_microplan',
+      'mutation budget exceeded: requested=2 allowed=1'
+    ))).toBe('MODEL_SEMANTIC_DECISION');
   });
 
   it('reports whether the remaining repair recipe still needs model choice or indicates a systemic failure', () => {
@@ -182,4 +206,20 @@ describe('preflight repair', () => {
       ],
     });
   });
+});
+
+it('fills omitted region targets before a budget split, including the deferred suffix, and keeps foreign targets rejected', () => {
+  const pass = { request_key: 'plants', logical_layer: { decision: 'continue-logical-layer', hypothesis_id: 'plants', layer_id: 3 },
+    actions: [1, 2, 3].map(index => ({ id: `region-${index}`, tool: 'photoshop_paint_regions', args: { regions: [{ id: `${index}` }] } })) };
+  const context = { logical_layer_owners: [{ hypothesis_id: 'plants', layer_id: 3 }] };
+  const budget = violation('compact_pass_adaptive_mutation_budget_exceeded', 'Split first', { allowed_mutations: 2 });
+  const repaired = applyDeterministicPassRepairs(pass, [budget], context);
+  const split = splitPassForBudget(repaired.repaired_pass, [budget])!;
+  for (const candidate of [split.first_pass, split.deferred_pass]) {
+    for (const action of candidate.actions as any[]) expect(action.args.regions[0].layer_id).toBe(3);
+  }
+  expect(pass.actions[0].args.regions[0]).not.toHaveProperty('layer_id');
+  const foreign = structuredClone(pass) as any;
+  foreign.actions[1].args.regions[0].layer_id = 99;
+  expect(applyDeterministicPassRepairs(foreign, [budget], context).repairs).toEqual([]);
 });

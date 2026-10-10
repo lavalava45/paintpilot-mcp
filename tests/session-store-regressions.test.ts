@@ -3,9 +3,13 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { paintingDevelopmentProvenance, paintingMethodUsage, SessionStore } from '../src/core/guard/session-store.js';
+import { commentaryLanguageNotice, paintingDevelopmentProvenance, paintingMethodUsage, SessionStore } from '../src/core/guard/session-store.js';
+import { compileGuardCycle } from '../src/core/guard/cycle-compiler.js';
+import { ToolRegistry } from '../src/core/tool-registry.js';
 import { createJob, writeJobCompleted } from '../src/core/guard/async-job.js';
 import { RUNTIME_STATE_VERSION } from '../src/core/guard/protocol-version.js';
+import { transformGeometryBinding } from '../src/core/geometry-binding.js';
+import { previewToCanvasAffine } from '../src/core/spatial-support.js';
 
 const dirs: string[] = [];
 
@@ -22,6 +26,177 @@ function store() {
     workspaceRoot: dir,
   });
 }
+
+describe('E.17 artistic frame commentary', () => {
+  it.each(['ru', 'en'].flatMap(language => ['short', 'normal', 'detailed'].map(detail => ({ language, detail }))))(
+    'uses the saved primary language=$language throughout $detail commentary independently of verbosity', ({ language, detail }) => {
+      const s = store() as any;
+      s.setUserConfig({ language, commentary_mode: 'artistic', commentary_detail: detail }, 42);
+      expect(s.presentationContext(42)).toMatchObject({ language, commentary_mode: 'artistic', commentary_detail: detail });
+      const intent = language === 'ru' ? 'Смягчить края проёма, сохранив глубину.' : 'Soften the recess edges while preserving depth.';
+      const observed = language === 'ru' ? 'Края мягче, но глубина ещё недостаточна.' : 'Edges are softer, but depth is still insufficient.';
+      const commentPath = path.join(dirs[dirs.length - 1], 'primary-language.txt');
+      s.writeCommentarySidecar({ id: 'primary', phase: 'completed', visual: true,
+        tool: 'photoshop_apply_gaussian_blur', artistic_commentary: intent, args: { document_id: 42, radius: 8 },
+        preview: { commentary_path: commentPath }, verdict: { observed_change: observed },
+        report: { source: 'guard_compact_closure', did: 'Recorded.', why: intent, result: observed } });
+      const text = readFileSync(commentPath, 'utf8');
+      expect(text.split('\n')[0]).toBe(intent);
+      expect(text).toContain(observed);
+      expect(text).toContain(language === 'ru' ? 'В Photoshop я использую' : 'In Photoshop I use');
+      if (detail !== 'short') expect(text).toContain(language === 'ru' ? 'радиус 8 px' : 'radius 8 px');
+      const nextLanguage = language === 'ru' ? 'en' : 'ru';
+      s.setUserConfig({ language: nextLanguage }, 42);
+      expect(s.presentationContext(42)).toMatchObject({ language: nextLanguage, commentary_mode: 'artistic', commentary_detail: detail });
+      const notice = commentaryLanguageNotice({ artistic_commentary: intent }, s.presentationContext(42));
+      expect(notice?.expected_language).toBe(nextLanguage);
+      expect(notice?.repair).toContain(nextLanguage === 'ru' ? 'на русском языке' : 'in English');
+    }
+  );
+  it.each(['ru', 'en'])('repairs localized pre-pass narration during ordinary closure without changing its goal in %s', async language => {
+    const s = store() as any;
+    s.presentationContext = () => ({ language, commentary_mode: 'artistic', commentary_detail: 'detailed' });
+    const original = language === 'ru' ? 'Construct a worn stairwell.' : 'Построить обветшалую лестничную клетку.';
+    const localized = language === 'ru' ? 'Построить обветшалую лестничную клетку.' : 'Construct a worn stairwell.';
+    const observed = language === 'ru' ? 'Проём читается, но стены всё ещё слишком плоские.' : 'The recess reads, but the walls remain too flat.';
+    const commentPath = path.join(dirs[dirs.length - 1], 'localized.txt');
+    const record = { id: 'localize', tool: 'photoshop_paint_regions', phase: 'completed', visual: true,
+      goal: original, summary: original, artistic_commentary: original, args: { document_id: 42 }, preview: { commentary_path: commentPath } };
+    s.read = () => record;
+    expect(commentaryLanguageNotice(record, s.presentationContext())?.expected_language).toBe(language);
+    const compiled = await compileGuardCycle({ previous_operation_id: record.id,
+      previous_observation: { observed, target: 'unresolved', artistic_commentary: localized } }, {
+      collectClosePreviousErrors: () => [], collectPreflightErrors: () => [],
+      compactClosureDefaults: (id, verdict) => s.compactClosureDefaults(id, verdict),
+    }, new ToolRegistry());
+    expect(compiled.rejection).toBeUndefined();
+    expect(compiled.input.previous_visual_verdict).toMatchObject({ artistic_commentary: localized, observed_change: observed, target_resolved: 'no' });
+    const corrected = { ...record, verdict: compiled.input.previous_visual_verdict,
+      report: { ...(compiled.input.previous_report as object), source: 'guard_compact_closure' } };
+    s.writeCommentarySidecar(corrected);
+    const text = readFileSync(commentPath, 'utf8');
+    expect(text.split('\n')[0]).toBe(localized);
+    expect(text).toContain(observed);
+    expect(text).not.toContain(original);
+    expect(corrected.goal).toBe(original);
+    expect(corrected.artistic_commentary).toBe(original);
+    expect(commentaryLanguageNotice(corrected, s.presentationContext())).toBeUndefined();
+  });
+
+  it.each(['short', 'normal', 'detailed'])('honors %s detail while retaining intent and full observed limitations', detail => {
+    const s = store() as any;
+    s.presentationContext = () => ({ language: 'ru', commentary_mode: 'artistic', commentary_detail: detail });
+    const commentPath = path.join(dirs[dirs.length - 1], 'detail.txt');
+    const intent = 'Хочу мягко связать износ стен с тёмным проёмом.';
+    const observed = 'Пятна стали разнообразнее, но всё ещё выглядят геометричными; объём стен не исправлен.';
+    const record = { id: 'details', tool: 'photoshop_execute_visual_microplan', phase: 'completed', visual: true,
+      artistic_commentary: intent, args: { document_id: 42, logical_layer: { layer_name: 'Стены' }, steps: [
+        { tool: 'photoshop_paint_regions', args: { regions: [{ color: { red: 19, green: 20, blue: 17 }, opacity: 80 }] } },
+        { tool: 'photoshop_select_brush_preset', args: { name: 'Soft Round' } },
+        { tool: 'photoshop_paint_strokes', args: { strokes: [{ tool: 'BRUSH', size: 47, opacity: 28, flow: 14 }] } },
+      ] }, preview: { commentary_path: commentPath }, verdict: { observed_change: observed },
+      report: { source: 'guard_compact_closure', did: 'Выполнено.', why: intent, result: observed } };
+    s.writeCommentarySidecar(record);
+    const text = readFileSync(commentPath, 'utf8');
+    expect(text.split('\n')[0]).toBe(intent);
+    expect(text).toContain(observed);
+    expect(text).toContain('заливку контуров, кисть');
+    if (detail === 'short') expect(text).not.toMatch(/Soft Round|Рабочий слой|размер 47/);
+    else for (const value of ['Стены', 'Soft Round', 'размер 47 px', 'непрозрачность 28%', 'поток 14%']) expect(text).toContain(value);
+    if (detail === 'detailed') expect(text).toContain('RGB(19, 20, 17), непрозрачность 80%');
+    else expect(text).not.toContain('RGB(');
+    if (detail === 'normal') expect(text).toContain('Контурных заливок: 1');
+  });
+  it.each(['artistic', 'mixed'])('preserves artistic intent, Photoshop craft and full observed limitations in %s frame comments', mode => {
+    const s = store() as any;
+    s.presentationContext = () => ({ language: 'ru', commentary_mode: mode, commentary_detail: 'detailed' });
+    const dir = dirs[dirs.length - 1];
+    const commentPath = path.join(dir, 'frame.txt');
+    const intent = 'Отделить три слоя гор, сохранив силуэт и пространство для храмового комплекса.';
+    const observed = 'Дальний план уже читается: три слоя гор дают глубину, но сейчас они ещё слишком геометричные. Я оставляю их как конструктивную основу и позже смягчу туманом и воздушной перспективой. Следующий проход — крупный силуэт храмового комплекса с воротами и дальней пагодой.';
+    const record = {
+      id: 'mountain-pass', tool: 'photoshop_execute_visual_microplan', visual: true, phase: 'completed',
+      summary: intent, artistic_commentary: intent,
+      args: { document_id: 42, steps: [
+        { tool: 'photoshop_select_layer_by_name', args: { name: 'Дальние горы' } },
+        { tool: 'photoshop_paint_regions', args: { regions: [{ color: { red: 126, green: 134, blue: 153 }, opacity: 100 }] } },
+        { tool: 'photoshop_select_brush_preset', args: { name: 'Soft Round' } },
+        { tool: 'photoshop_set_brush', args: { size: 150, hardness: 18, opacity: 48, flow: 24 } },
+        { tool: 'photoshop_paint_strokes', args: { strokes: [{ tool: 'BRUSH', points: [] }] } },
+        { tool: 'photoshop_set_brush', args: { size: 40, spacing: 15, smoothing: 10 } },
+        { tool: 'photoshop_apply_gaussian_blur', args: { radius: 8 } },
+        { tool: 'photoshop_apply_gradient_mask', args: { direction: 'right_to_left', start_pct: 0, end_pct: 35 } },
+        { tool: 'photoshop_set_layer_blend_mode', args: { blendMode: 'SCREEN' } },
+        { tool: 'photoshop_paint_color_gradient', args: {
+          from: { x: 0, y: 0 }, to: { x: 0, y: 100 },
+          stops: [{ position: 0, red: 10, green: 20, blue: 30 }, { position: 1, red: 40, green: 50, blue: 60 }],
+        } },
+      ] },
+      preview: { commentary_path: commentPath, project_path: path.join(dir, 'frame.jpg') },
+    };
+    s.read = () => record;
+    const report = s.compactClosureDefaults(record.id, { observed_change: observed }).previous_report;
+    expect(report.why).toBe(intent);
+    expect(report.result).toBe(observed);
+    expect(report.did).not.toContain(intent);
+    s.writeCommentarySidecar({ ...record, report: { ...report, source: 'guard_compact_closure' } });
+    const text = readFileSync(commentPath, 'utf8');
+    for (const detail of [intent, observed, 'Дальние горы', 'заливку контуров',
+      'Soft Round', 'размер 150 px', 'размер 40 px', 'жёсткость 18%', 'непрозрачность 48%', 'поток 24%',
+      'интервал 15%', 'сглаживание 10%', 'радиус 8 px', 'SCREEN', '(0, 0) → (0, 100) px', 'RGB(10, 20, 30)',
+      'RGB(126, 134, 153)', 'непрозрачность 100%', 'справа налево', '0% → 35%']) {
+      expect(text).toContain(detail);
+    }
+    expect(text).not.toMatch(/Продвинуть текущую художественную задачу|результат прохода проверен и зафиксирован/);
+    if (mode === 'mixed') expect(text.indexOf('Техническая запись:')).toBeGreaterThan(text.indexOf(observed));
+    else expect(text).not.toMatch(/Операция:|photoshop_execute_visual_microplan/);
+    s.read = () => ({ ...record, phase: 'uncertain' });
+    const unobserved = s.compactClosureDefaults(record.id).previous_report;
+    expect(unobserved.result).toContain('визуальный результат ещё не оценён');
+    expect(unobserved.did).toContain('не подтверждено');
+    s.writeCommentarySidecar({ ...record, report: { ...unobserved, source: 'guard_compact_closure' } });
+    expect(readFileSync(commentPath, 'utf8')).not.toContain('Я сделал следующий шаг');
+    const otherLanguage = 'The three mountain planes read clearly, but their contours are still too geometric.';
+    expect(s.compactClosureDefaults(record.id, { observed_change: otherLanguage }).previous_report.result).toBe(otherLanguage);
+    expect(s.compactClosureDefaults(record.id, { observations: [{ visible: observed }, { visible: otherLanguage }] }).previous_report.result)
+      .toBe(`${observed}\n\n${otherLanguage}`);
+  });
+
+  it.each(['artistic', 'mixed'])('refreshes the frame and compact report from final review in %s mode', mode => {
+    const s = store() as any;
+    s.presentationContext = () => ({ language: 'ru', commentary_mode: mode, commentary_detail: 'detailed' });
+    const dir = dirs[dirs.length - 1];
+    const file = path.join(dir, 'frame.jpg');
+    const commentPath = path.join(dir, 'frame.txt');
+    const bytes = Buffer.from('materialized preview fixture');
+    writeFileSync(file, bytes);
+    writeFileSync(commentPath, 'Теперь я хочу художественный проход в области «right half of temple complex».');
+    const sha = createHash('sha256').update(bytes).digest('hex');
+    const intent = 'Хочу отделить дальний зал от главных ворот градиентом на маске, сохранив ворота и пагоду.';
+    const observed = 'Маска скрыла почти весь храмовый комплекс, включая ворота и пагоду. Видны только небо и горы; нужен откат.';
+    s.write({ id: 'temple-mask', tool: 'photoshop_apply_gradient_mask', visual: true, phase: 'completed',
+      created_at: '2026-10-04T11:31:38.424Z', completed_at: '2026-10-04T11:32:30.000Z',
+      summary: intent, artistic_commentary: intent,
+      args: { document_id: 42, direction: 'right_to_left', start_pct: 0, end_pct: 35 },
+      preview: { commentary_path: commentPath, materialized_path: file, sha256: sha, document_id: 42 },
+      report: { source: 'guard_compact_closure', did: 'Выполнен запланированный художественный проход.',
+        why: 'Продвинуть текущую художественную задачу запланированным проходом в Photoshop.',
+        result: 'Визуальный результат прохода проверен и зафиксирован.' },
+    });
+    s.verdict({ id: 'temple-mask', preview_id: 'temple-mask', sha256: sha, verdict: 'neutral', disposition: 'rollback',
+      observed_change: observed, observations: [{ region: 'whole frame', visible: observed }],
+      primary_mismatch: 'Восстановить храмовый комплекс.', target_resolved: 'no', regressions: [],
+      uncertainty: 'none observed', global_readability: 'unknown', primitive_footprint: 'unknown', trend_signals: [] });
+    expect(s.read('temple-mask').report.result).toBe(observed);
+    const text = readFileSync(commentPath, 'utf8');
+    expect(text.split('\n')[0]).toBe(intent);
+    for (const detail of [observed, 'градиент на маске', 'справа налево', '0% → 35%', 'выбран откат']) {
+      expect(text).toContain(detail);
+    }
+    expect(text).not.toMatch(/художественный проход в области|Выполнен запланированный|Продвинуть текущую|проверен и зафиксирован/);
+  });
+
+});
 
 describe('E.8b continuation checkpoint', () => {
   it('exports host-joinable Guard timing while leaving the inter-call gap unattributed', () => {
@@ -179,8 +354,8 @@ describe('E.8b continuation checkpoint', () => {
         current_frame: { operation_id: 'op-frame', sha256: 'a'.repeat(64), path: 'frames/op-frame.png' },
         accepted_frame: { operation_id: 'op-accepted', sha256: 'b'.repeat(64), path: 'frames/op-accepted.png' },
         primary_artistic_anchor: { operation_id: 'op-anchor', sha256: 'c'.repeat(64), path: 'frames/op-anchor.png' },
-        active_problem: 'train-perspective', current_stage: 'STRUCTURE', active_scale: 'object',
-        largest_open_must_fix: { severity: 'high' }, process_dir: 'processes/railway-process/study-01',
+        active_problem: 'primaryAssembly-perspective', current_stage: 'STRUCTURE', active_scale: 'object',
+        largest_open_must_fix: { severity: 'high' }, process_dir: 'processes/rigidScene-process/study-01',
         art_director: { directive_id: 'directive-7', current_task_id: 'task-3' },
       },
       pending_visual_verdict: {
@@ -201,9 +376,9 @@ describe('E.8b continuation checkpoint', () => {
       current_operation_id: 'op-frame',
       visual_verdict_pending: true,
       delivered_preview: { operation_id: 'op-frame', sha256: 'a'.repeat(64), materialized_path: 'frames/op-frame.png' },
-      active_problem: { id: 'train-perspective', stage: 'STRUCTURE', scale: 'object', severity: 'high' },
+      active_problem: { id: 'primaryAssembly-perspective', stage: 'STRUCTURE', scale: 'object', severity: 'high' },
       accepted_anchor: { operation_id: 'op-anchor', sha256: 'c'.repeat(64) },
-      art_run: 'processes/railway-process/study-01',
+      art_run: 'processes/rigidScene-process/study-01',
       planner: { directive_id: 'directive-7', task_id: 'task-3' },
       next_required_action: 'inspect pending delivered frame op-frame',
     });
@@ -218,7 +393,7 @@ describe('E.8b continuation checkpoint', () => {
       document: {
         current_frame: { operation_id: 'op-frame', sha256: 'a'.repeat(64), path: 'frames/op-frame.png' },
         accepted_frame: { operation_id: 'op-old', sha256: 'b'.repeat(64), path: 'frames/op-old.png' },
-        process_dir: 'processes/railway-process/study-01',
+        process_dir: 'processes/rigidScene-process/study-01',
       },
       pending_visual_verdict: {
         operation_id: 'op-frame', sha256: 'a'.repeat(64), materialized_path: 'frames/op-frame.png',
@@ -250,7 +425,7 @@ describe('E.8b continuation checkpoint', () => {
       document_id: 42,
       document: {
         current_frame: { operation_id: operation, sha256: 'a'.repeat(64), path: `frames/${operation}.png` },
-        process_dir: 'processes/railway-process/study-01',
+        process_dir: 'processes/rigidScene-process/study-01',
       },
       pending_visual_verdict: {
         operation_id: operation, sha256: 'a'.repeat(64), materialized_path: `frames/${operation}.png`,
@@ -420,11 +595,11 @@ function brushPreflight() {
     inventory_observed: true,
     inventory_total: 123,
     roles: [{
-      role_id: 'water-flow',
-      purpose: 'Broad directional water and reflected-light strokes.',
-      material_roles: ['water'],
+      role_id: 'receiverSurface-flow',
+      purpose: 'Broad directional receiverSurface and reflected-light strokes.',
+      material_roles: ['receiverSurface'],
       visual_intents: ['surface-flow', 'directional-mass'],
-      preferred_preset: 'Water Brush',
+      preferred_preset: 'ReceiverSurface Brush',
       alternative_presets: ['Dry Brush'],
       effective_settings: {
         size: 120, hardness: 35, roundness: 100, opacity: 75, flow: 45, spacing: 12,
@@ -441,11 +616,55 @@ function brushPreflight() {
 function exclusivePackBrushPreflight() {
   const preflight = brushPreflight() as any;
   preflight.brush_pack_id = 'brush-pack-sha256:test-pack';
-  preflight.roles[0].profile_id = 'media-profile-sha256:water-flow';
+  preflight.roles[0].profile_id = 'media-profile-sha256:receiverSurface-flow';
   return preflight;
 }
 
 describe('Guard session-store regressions', () => {
+  it.each([
+    { steps: 2, failed: false, retired: true },
+    { steps: 1, failed: false, retired: false },
+    { steps: 2, failed: true, retired: false },
+  ])('retires owner authority only after the complete bounded undo: $steps/$failed', ({ steps, failed, retired }) => {
+    const s = store();
+    const ownerRecord = (id: string, sequence: number, layerId: number) => ({
+      ...request(id, 'photoshop_execute_visual_microplan', { document_id: 42, problem_id: 'subject-form-problem' }),
+      phase: 'completed', visual: true, failed: false, sequence,
+      created_at: new Date(sequence * 1000).toISOString(),
+      verdict: { verdict: sequence === 1 ? 'improvement' : 'neutral', disposition: sequence === 1 ? 'accept' : 'rollback',
+        target_resolved: sequence === 1 ? 'yes' : 'no', significance: { execution_effect: 'material' } },
+      result: { content: [{ type: 'text', text: JSON.stringify({ ok: true, change_domains: ['local-shape'],
+        continuation_layers: [{ layer_id: layerId, hypothesis_id: 'subject-owner', hypothesis: id,
+          rollback_value: 'moderate', construction_tier: 'primary', decision: sequence === 1 ? 'create-new' : 'adjust' }],
+      }) }] },
+    });
+    s.write(ownerRecord('retained-owner-pass', 1, 11));
+    s.write(ownerRecord('rejected-owner-pass', 2, 12));
+    s.updatePaintingState(42, current => ({ ...current, pending_rollback: {
+      operation_id: 'rejected-owner-pass', required_undo_steps: 2, remaining_undo_steps: 2,
+    } }));
+    const undo = { ...request('bounded-owner-undo', 'photoshop_undo', { document_id: 42, steps }),
+      phase: 'dispatched', visual: true, sequence: 3, created_at: new Date(3000).toISOString(),
+    };
+    s.write(undo);
+    s.complete(undo, { ...(failed ? { isError: true } : {}), content: [{ type: 'text', text: JSON.stringify({ ok: !failed }) }] });
+    const source = s.read('rejected-owner-pass');
+    if (retired) {
+      expect(source).toMatchObject({ rolled_back: true, current_frame_authority: false, rollback: { completed: true } });
+      expect(s.semanticLayerOwners(42)).toEqual([expect.objectContaining({
+        layer_id: 11, hypothesis: 'retained-owner-pass', construction_revision: 'retained-owner-pass',
+      })]);
+      expect(s.paintingState().documents['42'].pending_rollback).toBeUndefined();
+    } else {
+      expect(source.rollback).toBeUndefined();
+      expect(source.rolled_back).not.toBe(true);
+      expect(s.semanticLayerOwners(42)[0].layer_id).toBe(12);
+      expect(s.paintingState().documents['42'].pending_rollback.operation_id).toBe('rejected-owner-pass');
+    }
+    expect(s.artisticRecoveryForProblem(42, 'subject-form-problem', undefined)).toMatchObject({ attempt_count: 1 });
+    expect(s.read('rejected-owner-pass').verdict.target_resolved).toBe('no');
+  });
+
   it('recovers semantic layer ownership from journal evidence after restart and preserves temporary debt across ordinary continuation', () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'semantic-layer-owner-restart-'));
     dirs.push(dir);
@@ -470,9 +689,9 @@ describe('Guard session-store regressions', () => {
             continuation_layers: [{
               step_id: 'temp-layer',
               layer_id: 12,
-              layer_name: 'Cat Temp',
-              hypothesis_id: 'cat-temp',
-              hypothesis: 'Temporary cat structure',
+              layer_name: 'PrimaryOwner Temp',
+              hypothesis_id: 'primaryOwner-temp',
+              hypothesis: 'Temporary primaryOwner structure',
               rollback_value: 'moderate',
               temporary: true,
               decision: 'temporary-hypothesis',
@@ -498,9 +717,9 @@ describe('Guard session-store regressions', () => {
             continuation_layers: [{
               step_id: 'logical-layer-continuation',
               layer_id: 12,
-              layer_name: 'Cat Temp',
-              hypothesis_id: 'cat-temp',
-              hypothesis: 'Temporary cat structure',
+              layer_name: 'PrimaryOwner Temp',
+              hypothesis_id: 'primaryOwner-temp',
+              hypothesis: 'Temporary primaryOwner structure',
               rollback_value: 'moderate',
               decision: 'continue-logical-layer',
             }],
@@ -512,53 +731,57 @@ describe('Guard session-store regressions', () => {
     const restarted = new SessionStore(controller, options);
     expect(restarted.semanticLayerOwners(42)).toEqual([
       expect.objectContaining({
-        hypothesis_id: 'cat-temp',
+        hypothesis_id: 'primaryOwner-temp',
         layer_id: 12,
         temporary: true,
         source_operation_id: 'temp-owner-continue',
       }),
     ]);
     expect(restarted.statusCompact().documents['42'].logical_layer_owners).toEqual([
-      expect.objectContaining({ hypothesis_id: 'cat-temp', layer_id: 12, temporary: true }),
+      expect.objectContaining({ hypothesis_id: 'primaryOwner-temp', layer_id: 12, temporary: true }),
     ]);
     expect(restarted.resume(42).document.logical_layer_owners).toEqual([
-      expect.objectContaining({ hypothesis_id: 'cat-temp', layer_id: 12, temporary: true }),
+      expect.objectContaining({ hypothesis_id: 'primaryOwner-temp', layer_id: 12, temporary: true }),
     ]);
 
     const kept = restarted.keepSemanticLayerOwner({
-      request_key: 'keep-cat-temp',
+      request_key: 'keep-primaryOwner-temp',
       document_id: 42,
-      hypothesis_id: 'cat-temp',
+      hypothesis_id: 'primaryOwner-temp',
       layer_id: 12,
       scene_ownership_plan: {
         plan_id: 'restart-scene-owners',
         units: [{
-          semantic_id: 'cat',
-          owner_id: 'cat-temp',
-          role: 'Accepted character structure',
+          semantic_id: 'primaryOwner',
+          owner_id: 'primaryOwner-temp',
+          role: 'Accepted independently editable character component',
           editability: 'independent',
-          rationale: 'Promote the accepted temporary character into durable independently correctable scene ownership.',
+          rationale: 'Promote the accepted temporary component into durable independently correctable scene ownership.',
         }],
+        // A kept owner is one editable component, not a whole character
+        // silently exempted from the current scene decomposition contract.
+        objects: [{ object_id: 'primaryOwner-component', subject_kind: 'single-component',
+          kind: 'single-part', component_semantic_ids: ['primaryOwner'] }],
       },
     });
     expect(kept.semantic_layer_lifecycle).toMatchObject({
       action: 'keep',
-      hypothesis_id: 'cat-temp',
+      hypothesis_id: 'primaryOwner-temp',
       layer_id: 12,
     });
     expect(kept.semantic_layer_lifecycle).not.toHaveProperty('rationale');
     expect(restarted.semanticLayerOwners(42)).toEqual([
-      expect.objectContaining({ hypothesis_id: 'cat-temp', layer_id: 12, temporary: false, decision: 'keep' }),
+      expect.objectContaining({ hypothesis_id: 'primaryOwner-temp', layer_id: 12, temporary: false, decision: 'keep' }),
     ]);
-    expect(restarted.statusCompact().pending_reports).not.toContain('keep-cat-temp');
+    expect(restarted.statusCompact().pending_reports).not.toContain('keep-primaryOwner-temp');
     expect(restarted.statusCompact().documents['42'].scene_ownership_plan).toMatchObject({
       protocol: 'photoshop.guard.scene_ownership_plan.v1',
       plan_id: 'restart-scene-owners',
-      source_operation_id: 'keep-cat-temp',
+      source_operation_id: 'keep-primaryOwner-temp',
     });
     expect(restarted.resume(42).document.scene_ownership_plan).toMatchObject({
       plan_id: 'restart-scene-owners',
-      source_operation_id: 'keep-cat-temp',
+      source_operation_id: 'keep-primaryOwner-temp',
     });
 
     restarted.write({
@@ -594,30 +817,30 @@ describe('Guard session-store regressions', () => {
         ok: true,
         continuation_layers: [{
           layer_id: layerId,
-          layer_name: `Tree ${layerId}`,
-          hypothesis_id: 'tree-owner',
-          hypothesis: 'Tree semantic owner',
+          layer_name: `PrimaryForm ${layerId}`,
+          hypothesis_id: 'primaryForm-owner',
+          hypothesis: 'PrimaryForm semantic owner',
           decision: sequence === 1 ? 'create-new' : 'continue-logical-layer',
         }],
       }) }] },
     });
-    store.write(ownerRecord('tree-base', 1, 12));
-    store.write(ownerRecord('tree-overlay-migration', 2, 13));
+    store.write(ownerRecord('primaryForm-base', 1, 12));
+    store.write(ownerRecord('primaryForm-overlay-migration', 2, 13));
 
     expect(store.semanticLayerOwners(42)).toEqual([
       expect.objectContaining({
-        hypothesis_id: 'tree-owner',
+        hypothesis_id: 'primaryForm-owner',
         layer_id: 13,
         physical_layer_ids: [12, 13],
       }),
     ]);
     expect(store.compactPassContext(42).logical_layer_owners[0]).toEqual(expect.objectContaining({
-      hypothesis_id: 'tree-owner',
+      hypothesis_id: 'primaryForm-owner',
       physical_layer_ids: [12, 13],
     }));
 
     store.write({
-      id: 'delete-tree-overlay',
+      id: 'delete-primaryForm-overlay',
       tool: 'photoshop_delete_layer',
       args: { document_id: 42, layer_id: 13 },
       sequence: 3,
@@ -628,7 +851,7 @@ describe('Guard session-store regressions', () => {
     });
     expect(store.semanticLayerOwners(42)).toEqual([
       expect.objectContaining({
-        hypothesis_id: 'tree-owner',
+        hypothesis_id: 'primaryForm-owner',
         layer_id: 12,
         physical_layer_ids: [12],
       }),
@@ -646,15 +869,15 @@ describe('Guard session-store regressions', () => {
       created_at: new Date(sequence * 1000).toISOString(), completed_at: new Date(sequence * 1000 + 1).toISOString(),
       phase: 'completed', failed: false,
       result: { content: [{ type: 'text', text: JSON.stringify({
-        ok: true, continuation_layers: [{ layer_id: layerId, hypothesis_id: 'tree-owner', decision: 'continue-logical-layer' }],
+        ok: true, continuation_layers: [{ layer_id: layerId, hypothesis_id: 'primaryForm-owner', decision: 'continue-logical-layer' }],
       }) }] },
     });
-    store.write(ownerRecord('tree-old', 1, 12));
-    store.write(ownerRecord('tree-current', 2, 13));
+    store.write(ownerRecord('primaryForm-old', 1, 12));
+    store.write(ownerRecord('primaryForm-current', 2, 13));
     store.write({
       id: 'layers-after-external-delete', tool: 'photoshop_get_layers', args: { document_id: 42 }, sequence: 3,
       created_at: new Date(3000).toISOString(), completed_at: new Date(3001).toISOString(), phase: 'completed', failed: false,
-      result: { content: [{ type: 'text', text: JSON.stringify({ ok: true, layers: [{ id: 12, name: 'Tree base' }] }) }] },
+      result: { content: [{ type: 'text', text: JSON.stringify({ ok: true, layers: [{ id: 12, name: 'PrimaryForm base' }] }) }] },
     });
     expect(store.semanticLayerOwners(42)[0]).toEqual(expect.objectContaining({ layer_id: 12, physical_layer_ids: [12] }));
 
@@ -679,29 +902,29 @@ describe('Guard session-store regressions', () => {
       phase: 'completed', failed: false,
       result: { content: [{ type: 'text', text: JSON.stringify({
         ok: true,
-        continuation_layers: [{ layer_id: layerId, hypothesis_id: 'tree-owner', decision: 'continue-logical-layer' }],
+        continuation_layers: [{ layer_id: layerId, hypothesis_id: 'primaryForm-owner', decision: 'continue-logical-layer' }],
       }) }] },
     });
-    store.write(ownerRecord('tree-old', 1, 12));
-    store.write(ownerRecord('tree-current', 2, 13));
+    store.write(ownerRecord('primaryForm-old', 1, 12));
+    store.write(ownerRecord('primaryForm-current', 2, 13));
     store.write({
-      id: 'tree-migrate-back', tool: 'photoshop_execute_visual_microplan',
+      id: 'primaryForm-migrate-back', tool: 'photoshop_execute_visual_microplan',
       args: { document_id: 42 }, sequence: 3,
       created_at: new Date(3000).toISOString(), completed_at: new Date(3001).toISOString(),
       phase: 'completed', failed: false,
-      correction_scope: { semantic_owner_ids: ['tree-owner'] },
+      correction_scope: { semantic_owner_ids: ['primaryForm-owner'] },
       cross_layer_correction: {
         mode: 'migration', current_layer_id: 13, target_layer_ids: [12],
-        post_authoritative_layer_id: 12, reason: 'Restore the surviving structural tree binding.',
+        post_authoritative_layer_id: 12, reason: 'Restore the surviving structural primaryForm binding.',
       },
       result: { content: [{ type: 'text', text: '{"ok":true}' }] },
     });
     expect(store.semanticLayerOwners(42)).toEqual([
       expect.objectContaining({
-        hypothesis_id: 'tree-owner',
+        hypothesis_id: 'primaryForm-owner',
         layer_id: 12,
         physical_layer_ids: [12, 13],
-        source_operation_id: 'tree-migrate-back',
+        source_operation_id: 'primaryForm-migrate-back',
       }),
     ]);
   });
@@ -717,26 +940,26 @@ describe('Guard session-store regressions', () => {
       created_at: new Date(sequence * 1000).toISOString(), completed_at: new Date(sequence * 1000 + 1).toISOString(),
       phase: 'completed', failed: false,
       result: { content: [{ type: 'text', text: JSON.stringify({
-        ok: true, continuation_layers: [{ layer_id: layerId, hypothesis_id: 'tree-owner', decision: 'continue-logical-layer' }],
+        ok: true, continuation_layers: [{ layer_id: layerId, hypothesis_id: 'primaryForm-owner', decision: 'continue-logical-layer' }],
       }) }] },
     });
-    store.write(ownerRecord('tree-old', 1, 12));
-    store.write(ownerRecord('tree-current', 2, 13));
+    store.write(ownerRecord('primaryForm-old', 1, 12));
+    store.write(ownerRecord('primaryForm-current', 2, 13));
     store.write({
-      id: 'tree-historical-correction', tool: 'photoshop_execute_visual_microplan', args: { document_id: 42 },
+      id: 'primaryForm-historical-correction', tool: 'photoshop_execute_visual_microplan', args: { document_id: 42 },
       sequence: 3, created_at: new Date(3000).toISOString(), completed_at: new Date(3001).toISOString(),
-      phase: 'completed', failed: false, correction_scope: { semantic_owner_ids: ['tree-owner'] },
-      cross_layer_correction: { mode: 'correction', current_layer_id: 13, target_layer_ids: [12], post_authoritative_layer_id: 13, reason: 'Correct only the historical tree underpaint.' },
+      phase: 'completed', failed: false, correction_scope: { semantic_owner_ids: ['primaryForm-owner'] },
+      cross_layer_correction: { mode: 'correction', current_layer_id: 13, target_layer_ids: [12], post_authoritative_layer_id: 13, reason: 'Correct only the historical primaryForm underpaint.' },
       result: { content: [{ type: 'text', text: '{"ok":true}' }] },
     });
     expect(store.semanticLayerOwners(42)[0]).toEqual(expect.objectContaining({ layer_id: 13, physical_layer_ids: [12, 13] }));
 
     store.write({
-      id: 'tree-rolled-back-migration', tool: 'photoshop_execute_visual_microplan', args: { document_id: 42 },
+      id: 'primaryForm-rolled-back-migration', tool: 'photoshop_execute_visual_microplan', args: { document_id: 42 },
       sequence: 4, created_at: new Date(4000).toISOString(), completed_at: new Date(4001).toISOString(),
-      phase: 'completed', failed: false, rolled_back: true, correction_scope: { semantic_owner_ids: ['tree-owner'] },
+      phase: 'completed', failed: false, rolled_back: true, correction_scope: { semantic_owner_ids: ['primaryForm-owner'] },
       cross_layer_correction: { mode: 'migration', current_layer_id: 13, target_layer_ids: [12], post_authoritative_layer_id: 12, reason: 'Tentative migration that was subsequently rolled back.' },
-      result: { content: [{ type: 'text', text: JSON.stringify({ ok: true, continuation_layers: [{ layer_id: 12, hypothesis_id: 'tree-owner' }] }) }] },
+      result: { content: [{ type: 'text', text: JSON.stringify({ ok: true, continuation_layers: [{ layer_id: 12, hypothesis_id: 'primaryForm-owner' }] }) }] },
     });
     expect(store.semanticLayerOwners(42)[0]).toEqual(expect.objectContaining({ layer_id: 13, physical_layer_ids: [12, 13] }));
   });
@@ -806,12 +1029,12 @@ describe('Guard session-store regressions', () => {
   it('summarizes effective tool, method and brush usage from durable visual operations', () => {
     const records = [
       { id: 'regions', phase: 'completed', visual: true, tool: 'photoshop_execute_visual_microplan', args: {
-        document_id: 42, stage: 'GLOBAL_BLOCK_IN', method_class: 'region', problem_id: 'tree-shape',
+        document_id: 42, stage: 'GLOBAL_BLOCK_IN', method_class: 'region', problem_id: 'primaryForm-shape',
         steps: [{ tool: 'photoshop_paint_regions', method_id: 'region-block-in' }],
       }, verdict: { disposition: 'accept' } },
       { id: 'brush', phase: 'completed', visual: true, tool: 'photoshop_execute_visual_microplan', args: {
-        document_id: 42, stage: 'MATERIAL', method_class: 'preset-brush', problem_id: 'tree-shape',
-        paint_strategy: { brush_role: 'foliage-breakup', preset_name: 'Bristle Scatter' },
+        document_id: 42, stage: 'MATERIAL', method_class: 'preset-brush', problem_id: 'primaryForm-shape',
+        paint_strategy: { brush_role: 'organicInstances-breakup', preset_name: 'Bristle Scatter' },
         steps: [{ tool: 'photoshop_select_brush_preset' }, { tool: 'photoshop_paint_strokes', method_id: 'installed-brush-preset' }],
       }, verdict: { disposition: 'accept' } },
       { id: 'other-doc', phase: 'completed', visual: true, tool: 'photoshop_execute_visual_microplan', args: {
@@ -828,13 +1051,13 @@ describe('Guard session-store regressions', () => {
       distinct_brush_presets_used: 1,
       tool_usage: { photoshop_paint_regions: 1, photoshop_select_brush_preset: 1, photoshop_paint_strokes: 1 },
       method_class_usage: { region: 1, 'preset-brush': 1 },
-      brush_role_usage: { 'foliage-breakup': 1 },
+      brush_role_usage: { 'organicInstances-breakup': 1 },
       brush_preset_usage: { 'Bristle Scatter': 1 },
-      problem_usage: { 'tree-shape': 2 },
+      problem_usage: { 'primaryForm-shape': 2 },
       outcome_usage: { accepted: 2 },
     });
   });
-  it('uses mutation-risk checkpoint debt instead of wall-clock age or a fixed visual-pass count', () => {
+  it('uses mutation-risk checkpoint debt instead of planarForm-clock age or a fixed visual-pass count', () => {
     const s = store();
     for (let sequence = 1; sequence <= 7; sequence++) {
       const id = `checkpoint-low-${sequence}`;
@@ -935,7 +1158,7 @@ describe('Guard session-store regressions', () => {
       writeProjectionRecord(s, { id, documentId: 42, sequence, visual: true, report: true, ack: true, verdict: true });
       const record = s.read(id)! as any;
       record.verdict.trend_signals = ['edge-noise'];
-      record.args = { document_id: 42, region: 'tree', scale: 'medium' };
+      record.args = { document_id: 42, region: 'primaryForm', scale: 'medium' };
       if (!authority) record.current_frame_authority = false;
       s.write(record);
     };
@@ -1078,7 +1301,7 @@ describe('Guard session-store regressions', () => {
     const root = s.read('owner-root')! as any;
     root.result = { content: [{ type: 'text', text: JSON.stringify({
       ok: true,
-      continuation_layers: [{ layer_id: 12, hypothesis_id: 'tree-owner', decision: 'continue-logical-layer' }],
+      continuation_layers: [{ layer_id: 12, hypothesis_id: 'primaryForm-owner', decision: 'continue-logical-layer' }],
     }) }] };
     s.write(root);
     writeProjectionRecord(s, { id: 'owner-branch', documentId: 42, sequence: 2, visual: true, report: true, ack: true, verdict: true });
@@ -1097,7 +1320,7 @@ describe('Guard session-store regressions', () => {
 
     expect(s.recordHasCurrentFrameAuthority(s.read('owner-branch'), s.paintingState().documents['42'], s.records())).toBe(false);
     expect(s.semanticLayerOwners(42)).toEqual([
-      expect.objectContaining({ hypothesis_id: 'tree-owner', layer_id: 12, physical_layer_ids: [12] }),
+      expect.objectContaining({ hypothesis_id: 'primaryForm-owner', layer_id: 12, physical_layer_ids: [12] }),
     ]);
   });
 
@@ -1328,6 +1551,7 @@ describe('Guard session-store regressions', () => {
     const commentaryBytes = Buffer.from('before closure\r\nsecond line\n');
     const projectBytes = Buffer.from([0x7b, 0x22, 0x70, 0x72, 0x6f, 0x6a, 0x65, 0x63, 0x74, 0x22, 0x3a, 0x31, 0x7d, 0x0a]);
     mkdirSync(path.dirname(s.visualBarrierFile(42)), { recursive: true });
+    mkdirSync(path.dirname(commentaryPath), { recursive: true });
     writeFileSync(s.paintingStateFile(), controllerBytes);
     writeFileSync(s.visualBarrierFile(42), barrierBytes);
     writeFileSync(commentaryPath, commentaryBytes);
@@ -1380,6 +1604,7 @@ describe('Guard session-store regressions', () => {
 
     s.write({ ...record, report: { did: 'partial', why: 'partial', result: 'partial' }, operation_ack: { token: 'partial' } });
     mkdirSync(path.dirname(s.visualBarrierFile(42)), { recursive: true });
+    mkdirSync(path.dirname(commentaryPath), { recursive: true });
     writeFileSync(s.paintingStateFile(), '{"partial":true}');
     writeFileSync(projectState, '{"partial":true}');
     writeFileSync(s.visualBarrierFile(42), '{"planId":"partial","requiresExternalPreview":true}');
@@ -1425,13 +1650,13 @@ describe('Guard session-store regressions', () => {
       ...request('before-preflight', 'photoshop_execute_visual_microplan', {
         document_id: 42,
         plan_id: 'before-preflight-plan',
-        stage: 'FORM',
+        stage: 'SHAPE',
         scale: 'medium',
         method_class: 'paint',
         steps: [{ tool: 'photoshop_paint_strokes', args: { strokes: [{ tool: 'BRUSH', points: [{ x: 1, y: 1 }, { x: 2, y: 2 }] }] } }],
       }),
       problem_id: 'brush-form',
-      stage: 'FORM',
+      stage: 'SHAPE',
       scale: 'medium',
     })).toThrow(/brush_preflight_required/);
 
@@ -1446,19 +1671,19 @@ describe('Guard session-store regressions', () => {
       ...request('unknown-brush-role', 'photoshop_execute_visual_microplan', {
         document_id: 42,
         plan_id: 'unknown-brush-role-plan',
-        stage: 'FORM',
+        stage: 'SHAPE',
         scale: 'medium',
         method_class: 'preset-brush',
         paint_strategy: {
-          material_role: 'water',
+          material_role: 'receiverSurface',
           visual_intent: 'surface-flow',
           brush_role: 'invented-role',
-          preset_name: 'Water Brush',
+          preset_name: 'ReceiverSurface Brush',
           pressure_policy: 'simulated-size-opacity',
         },
       }),
-      problem_id: 'water-flow',
-      stage: 'FORM',
+      problem_id: 'receiverSurface-flow',
+      stage: 'SHAPE',
       scale: 'medium',
     })).toThrow(/brush_role_not_preflighted/);
 
@@ -1466,19 +1691,19 @@ describe('Guard session-store regressions', () => {
       ...request('wrong-brush-preset', 'photoshop_execute_visual_microplan', {
         document_id: 42,
         plan_id: 'wrong-brush-preset-plan',
-        stage: 'FORM',
+        stage: 'SHAPE',
         scale: 'medium',
         method_class: 'preset-brush',
         paint_strategy: {
-          material_role: 'water',
+          material_role: 'receiverSurface',
           visual_intent: 'surface-flow',
-          brush_role: 'water-flow',
+          brush_role: 'receiverSurface-flow',
           preset_name: 'Uninventoried Brush',
           pressure_policy: 'simulated-size-opacity',
         },
       }),
-      problem_id: 'water-flow',
-      stage: 'FORM',
+      problem_id: 'receiverSurface-flow',
+      stage: 'SHAPE',
       scale: 'medium',
     })).toThrow(/brush_preset_not_preflighted/);
 
@@ -1487,8 +1712,8 @@ describe('Guard session-store regressions', () => {
         document_id: 42,
         strokes: [{ points: [{ x: 1, y: 1 }, { x: 2, y: 2 }] }],
       }),
-      problem_id: 'water-flow',
-      stage: 'FORM',
+      problem_id: 'receiverSurface-flow',
+      stage: 'SHAPE',
       scale: 'medium',
     })).toThrow(/visual_microplan_required/);
 
@@ -1496,32 +1721,48 @@ describe('Guard session-store regressions', () => {
       ...request('missing-paint-strategy', 'photoshop_execute_visual_microplan', {
         document_id: 42,
         plan_id: 'missing-paint-strategy-plan',
-        stage: 'FORM',
+        stage: 'SHAPE',
         scale: 'medium',
         method_class: 'paint',
       }),
-      problem_id: 'water-flow',
-      stage: 'FORM',
+      problem_id: 'receiverSurface-flow',
+      stage: 'SHAPE',
       scale: 'medium',
     })).toThrow(/paint_strategy_required/);
+
+    // This suite isolates brush admission at SHAPE. Advancing the same valid
+    // brush to FORM must still require an actual whole-frame physical-stack
+    // review; a completed brush preflight is not a substitute for that gate.
+    expect(() => s.begin({
+      ...request('preflighted-form-without-stack-review', 'photoshop_execute_visual_microplan', {
+        document_id: 42, plan_id: 'form-stack-gate', stage: 'FORM', scale: 'medium',
+        method_class: 'preset-brush',
+        paint_strategy: {
+          material_role: 'receiverSurface', visual_intent: 'surface-flow',
+          brush_role: 'receiverSurface-flow', preset_name: 'ReceiverSurface Brush',
+          pressure_policy: 'simulated-size-opacity',
+        },
+      }),
+      problem_id: 'receiverSurface-flow', stage: 'FORM', scale: 'medium',
+    })).toThrow(/physical_stack_check_required/);
 
     const admitted = s.begin({
       ...request('preflighted-brush-plan', 'photoshop_execute_visual_microplan', {
         document_id: 42,
         plan_id: 'preflighted-brush-plan',
-        stage: 'FORM',
+        stage: 'SHAPE',
         scale: 'medium',
         method_class: 'preset-brush',
         paint_strategy: {
-          material_role: 'water',
+          material_role: 'receiverSurface',
           visual_intent: 'surface-flow',
-          brush_role: 'water-flow',
-          preset_name: 'Water Brush',
+          brush_role: 'receiverSurface-flow',
+          preset_name: 'ReceiverSurface Brush',
           pressure_policy: 'simulated-size-opacity',
         },
       }),
-      problem_id: 'water-flow',
-      stage: 'FORM',
+      problem_id: 'receiverSurface-flow',
+      stage: 'SHAPE',
       scale: 'medium',
     }).record;
     expect(admitted.phase).toBe('started');
@@ -1543,12 +1784,12 @@ describe('Guard session-store regressions', () => {
         document_id: 42,
         method_class: 'paint',
         paint_strategy: {
-          material_role: 'water', visual_intent: 'surface-flow', brush_role: 'water-flow',
+          material_role: 'receiverSurface', visual_intent: 'surface-flow', brush_role: 'receiverSurface-flow',
           pressure_policy: 'simulated-size-opacity',
         },
         steps: [{ id: 'paint', tool: 'photoshop_paint_strokes', args: { strokes: [{ tool: 'BRUSH', points: [{ x: 1, y: 1 }, { x: 4, y: 4 }] }] } }],
       }),
-      problem_id: 'exclusive-pack-water', stage: 'FORM', scale: 'medium',
+      problem_id: 'exclusive-pack-receiverSurface', stage: 'SHAPE', scale: 'medium',
     })).toThrow(/exclusive_brush_pack_preset_required/);
 
     const admitted = s.begin({
@@ -1556,15 +1797,15 @@ describe('Guard session-store regressions', () => {
         document_id: 42,
         method_class: 'preset-brush',
         paint_strategy: {
-          material_role: 'water', visual_intent: 'surface-flow', brush_role: 'water-flow',
-          preset_name: 'Water Brush', pressure_policy: 'simulated-size-opacity',
+          material_role: 'receiverSurface', visual_intent: 'surface-flow', brush_role: 'receiverSurface-flow',
+          preset_name: 'ReceiverSurface Brush', pressure_policy: 'simulated-size-opacity',
         },
         steps: [
-          { id: 'preset', tool: 'photoshop_select_brush_preset', args: { name: 'Water Brush' } },
+          { id: 'preset', tool: 'photoshop_select_brush_preset', args: { name: 'ReceiverSurface Brush' } },
           { id: 'paint', tool: 'photoshop_paint_strokes', args: { strokes: [{ tool: 'BRUSH', points: [{ x: 1, y: 1 }, { x: 4, y: 4 }] }] } },
         ],
       }),
-      problem_id: 'exclusive-pack-water', stage: 'FORM', scale: 'medium',
+      problem_id: 'exclusive-pack-receiverSurface', stage: 'SHAPE', scale: 'medium',
     }).record;
     expect(admitted.phase).toBe('started');
 
@@ -1573,7 +1814,7 @@ describe('Guard session-store regressions', () => {
         document_id: 42,
         method_class: 'preset-brush',
         paint_strategy: {
-          material_role: 'foliage', visual_intent: 'texture', preset_name: 'Leaf Stamp',
+          material_role: 'organicInstances', visual_intent: 'texture', preset_name: 'Leaf Stamp',
           brush_pack_id: 'brush-pack-sha256:other-pack', stamp_profile_id: 'stamp-profile-sha256:leaf',
           pressure_policy: 'native-preset',
         },
@@ -1584,7 +1825,7 @@ describe('Guard session-store regressions', () => {
           },
         }],
       }),
-      problem_id: 'exclusive-pack-foliage', stage: 'FORM', scale: 'medium',
+      problem_id: 'exclusive-pack-organicInstances', stage: 'SHAPE', scale: 'medium',
     })).toThrow(/exclusive_brush_pack_violation/);
 
     expect(s.artRunState(42)?.brush_pack_policy).toEqual({
@@ -1624,10 +1865,231 @@ describe('Guard session-store regressions', () => {
       inventory_observed: true,
       inventory_total: 123,
       roles: [expect.objectContaining({
-        role_id: 'water-flow',
-        preferred_preset: 'Water Brush',
+        role_id: 'receiverSurface-flow',
+        preferred_preset: 'ReceiverSurface Brush',
         pressure_policy: 'simulated-size-opacity',
       })],
+    });
+  });
+
+  it('reprojects connected descendant geometry when a parent construction revision moves/scales', () => {
+    const s = store();
+    const binding = {
+      protocol: 'photoshop.guard.geometry_binding.v1', owner_id: 'child',
+      scene_geometry_model_id: 'scene', scene_geometry_revision: 1,
+      vanishing_family_ids: [], dependencies: ['parent'],
+      anchors: { near_contact: { x: 20, y: 30 }, far_extent: { x: 40, y: 50 } },
+      control_sections: [{ id: 'joint', at: { x: 20, y: 30 }, expected_bounds: { left: 18, top: 28, right: 22, bottom: 32 } }],
+      constraints: [{ type: 'contact', target_ref: 'parent', evidence: ['connected parent construction'] }],
+      exact_geometry_completion_relevant: false, exact_evidence: [], local_exceptions: [],
+    };
+    writeProjectionRecord(s, { id: 'parent-r1', documentId: 42, sequence: 1, visual: true, report: true, ack: true, verdict: true });
+    const initial = s.read('parent-r1')! as any;
+    initial.result = { content: [{ type: 'text', text: JSON.stringify({ ok: true, continuation_layers: [
+      { layer_id: 10, hypothesis_id: 'parent', construction_tier: 'primary', construction_change: true },
+      { layer_id: 11, hypothesis_id: 'child', construction_tier: 'secondary', parent_hypothesis_id: 'parent', parent_construction_revision: 'parent-r1', geometry_binding: binding },
+    ] }) }] };
+    s.write(initial);
+
+    writeProjectionRecord(s, { id: 'parent-r2', documentId: 42, sequence: 2, visual: true, report: true, ack: true, verdict: true });
+    const moved = s.read('parent-r2')! as any;
+    moved.geometry_preflight = { executable_geometry: {
+      mode: 'validated-landmark-transform', owner_id: 'parent',
+      source_bounds: { left: 10, top: 20, right: 110, bottom: 120 },
+      target_bounds: { left: 90, top: 50, right: 290, bottom: 100 },
+    } };
+    moved.result = { content: [{ type: 'text', text: JSON.stringify({ ok: true, continuation_layers: [
+      { layer_id: 10, hypothesis_id: 'parent', construction_tier: 'primary', construction_change: true },
+    ] }) }] };
+    s.write(moved);
+
+    const owners = s.semanticLayerOwners(42);
+    const child = owners.find((owner: any) => owner.hypothesis_id === 'child') as any;
+    expect(child.parent_construction_revision).toBe('parent-r2');
+    expect(child.geometry_binding.anchors.near_contact).toEqual({ x: 110, y: 55 });
+    expect(child.geometry_binding.anchors.far_extent).toEqual({ x: 150, y: 65 });
+    expect(child.geometry_binding.control_sections[0]).toMatchObject({
+      at: { x: 110, y: 55 }, expected_bounds: { left: 106, top: 54, right: 114, bottom: 56 },
+    });
+  });
+
+  it('does not propagate malformed persisted parent-transform bounds into descendant geometry', () => {
+    const validSource = { left: 10, top: 20, right: 110, bottom: 120 };
+    const validTarget = { left: 90, top: 50, right: 290, bottom: 100 };
+    const malformed = [
+      { source: { ...validSource, left: null }, target: validTarget },
+      { source: { ...validSource, left: false }, target: validTarget },
+      { source: validSource, target: { ...validTarget, left: '90' } },
+      { source: validSource, target: { ...validTarget, left: null } },
+    ];
+    for (const [index, sample] of malformed.entries()) {
+      const s = store();
+      const binding = {
+        protocol: 'photoshop.guard.geometry_binding.v1', owner_id: 'child',
+        scene_geometry_model_id: 'scene', scene_geometry_revision: 1,
+        vanishing_family_ids: [], dependencies: ['parent'],
+        anchors: { near_contact: { x: 20, y: 30 } },
+        control_sections: [], constraints: [],
+        exact_geometry_completion_relevant: false, exact_evidence: [], local_exceptions: [],
+      };
+      writeProjectionRecord(s, { id: `malformed-parent-r1-${index}`, documentId: 42, sequence: 1, visual: true, report: true, ack: true, verdict: true });
+      const initial = s.read(`malformed-parent-r1-${index}`)! as any;
+      initial.result = { content: [{ type: 'text', text: JSON.stringify({ ok: true, continuation_layers: [
+        { layer_id: 10, hypothesis_id: 'parent', construction_tier: 'primary', construction_change: true },
+        { layer_id: 11, hypothesis_id: 'child', construction_tier: 'secondary', parent_hypothesis_id: 'parent',
+          parent_construction_revision: `malformed-parent-r1-${index}`, geometry_binding: binding },
+      ] }) }] };
+      s.write(initial);
+      writeProjectionRecord(s, { id: `malformed-parent-r2-${index}`, documentId: 42, sequence: 2, visual: true, report: true, ack: true, verdict: true });
+      const moved = s.read(`malformed-parent-r2-${index}`)! as any;
+      moved.geometry_preflight = { executable_geometry: {
+        mode: 'validated-landmark-transform', owner_id: 'parent',
+        source_bounds: sample.source, target_bounds: sample.target,
+      } };
+      moved.result = { content: [{ type: 'text', text: JSON.stringify({ ok: true, continuation_layers: [
+        { layer_id: 10, hypothesis_id: 'parent', construction_tier: 'primary', construction_change: true },
+      ] }) }] };
+      s.write(moved);
+      const child = s.semanticLayerOwners(42).find((owner: any) => owner.hypothesis_id === 'child') as any;
+      expect(child.geometry_binding.anchors.near_contact).toEqual({ x: 20, y: 30 });
+      expect(child.parent_construction_revision).toBe(`malformed-parent-r1-${index}`);
+    }
+  });
+
+  it('keeps focus-crop construction in document coordinates through later parent revision propagation', () => {
+    const s = store();
+    const previewLocal = {
+      protocol: 'photoshop.guard.geometry_binding.v1', owner_id: 'child',
+      scene_geometry_model_id: 'scene', scene_geometry_revision: 1,
+      vanishing_family_ids: [], dependencies: ['parent'],
+      anchors: { near_contact: { x: 20, y: 30 }, far_extent: { x: 40, y: 50 } },
+      control_sections: [{ id: 'joint', at: { x: 20, y: 30 }, expected_bounds: { left: 18, top: 28, right: 22, bottom: 32 } }],
+      constraints: [{ type: 'contact', target_ref: 'parent', evidence: ['focus crop construction'] }],
+      exact_geometry_completion_relevant: false, exact_evidence: [], local_exceptions: [],
+    } as any;
+    const documentBinding = transformGeometryBinding(previewLocal, previewToCanvasAffine({
+      documentId: 42, canvasWidth: 1200, canvasHeight: 800,
+      outputWidth: 400, outputHeight: 300,
+      crop: { left: 200, top: 100, right: 1000, bottom: 700 },
+    }));
+    expect(documentBinding.anchors.near_contact).toEqual({ x: 240, y: 160 });
+
+    writeProjectionRecord(s, { id: 'parent-r1', documentId: 42, sequence: 1, visual: true, report: true, ack: true, verdict: true });
+    const initial = s.read('parent-r1')! as any;
+    initial.result = { content: [{ type: 'text', text: JSON.stringify({ ok: true, continuation_layers: [
+      { layer_id: 10, hypothesis_id: 'parent', construction_tier: 'primary', construction_change: true },
+      { layer_id: 11, hypothesis_id: 'child', construction_tier: 'secondary', parent_hypothesis_id: 'parent', parent_construction_revision: 'parent-r1', geometry_binding: documentBinding },
+    ] }) }] };
+    s.write(initial);
+
+    writeProjectionRecord(s, { id: 'parent-r2', documentId: 42, sequence: 2, visual: true, report: true, ack: true, verdict: true });
+    const moved = s.read('parent-r2')! as any;
+    moved.geometry_preflight = { executable_geometry: {
+      mode: 'validated-landmark-transform', owner_id: 'parent',
+      source_bounds: { left: 200, top: 100, right: 1000, bottom: 700 },
+      target_bounds: { left: 280, top: 130, right: 1880, bottom: 430 },
+    } };
+    moved.result = { content: [{ type: 'text', text: JSON.stringify({ ok: true, continuation_layers: [
+      { layer_id: 10, hypothesis_id: 'parent', construction_tier: 'primary', construction_change: true },
+    ] }) }] };
+    s.write(moved);
+
+    const child = s.semanticLayerOwners(42).find((owner: any) => owner.hypothesis_id === 'child') as any;
+    expect(child.parent_construction_revision).toBe('parent-r2');
+    expect(child.geometry_binding.anchors.near_contact).toEqual({ x: 360, y: 160 });
+    expect(child.geometry_binding.anchors.far_extent).toEqual({ x: 440, y: 180 });
+    expect(child.geometry_binding.control_sections[0]).toMatchObject({
+      at: { x: 360, y: 160 }, expected_bounds: { left: 352, top: 158, right: 368, bottom: 162 },
+    });
+  });
+
+  it('reuses run-level brush preflight and permits replacement only after relevant invalidation', () => {
+    const s = store();
+    const base = brushPreflight();
+    const first = s.setArtRunState({
+      document_id: 42,
+      process_dir: 'processes/brush-reuse-process/run-01',
+      painting_profile: 'nontrivial_painting',
+      brush_preflight: base,
+    });
+    const recordedAt = first.brush_preflight.recorded_at;
+
+    const healthyRepeat = s.setArtRunState({
+      document_id: 42,
+      process_dir: 'processes/brush-reuse-process/run-01',
+      painting_profile: 'nontrivial_painting',
+      brush_preflight: structuredClone(base),
+    });
+    expect(healthyRepeat.brush_preflight.recorded_at).toBe(recordedAt);
+    expect(healthyRepeat.brush_preflight.invalidation_reason).toBeUndefined();
+
+    const changedSemantic = brushPreflight();
+    changedSemantic.roles[0]!.purpose = 'Different artistic role';
+    expect(() => s.setArtRunState({
+      document_id: 42,
+      process_dir: 'processes/brush-reuse-process/run-01',
+      painting_profile: 'nontrivial_painting',
+      brush_preflight: changedSemantic,
+    })).toThrow(/brush_preflight_reprobe_requires_invalidation/);
+
+    const changed = brushPreflight();
+    changed.roles[0]!.effective_settings.flow = 47;
+    const replaced = s.setArtRunState({
+      document_id: 42,
+      process_dir: 'processes/brush-reuse-process/run-01',
+      painting_profile: 'nontrivial_painting',
+      brush_preflight: changed,
+      brush_preflight_invalidation: 'settings_changed',
+    });
+    expect(replaced.brush_preflight).toMatchObject({
+      invalidation_reason: 'settings_changed',
+      invalidation_source: 'explicit',
+      roles: [expect.objectContaining({
+        effective_settings: expect.objectContaining({ flow: 47 }),
+      })],
+    });
+
+    const observedDrift = brushPreflight();
+    observedDrift.roles[0]!.effective_settings.flow = 51;
+    const inferred = s.setArtRunState({
+      document_id: 42,
+      process_dir: 'processes/brush-reuse-process/run-01',
+      painting_profile: 'nontrivial_painting',
+      brush_preflight: observedDrift,
+    });
+    expect(inferred.brush_preflight).toMatchObject({
+      invalidation_reason: 'settings_changed',
+      invalidation_source: 'observed_preflight_diff',
+      roles: [expect.objectContaining({ effective_settings: expect.objectContaining({ flow: 51 }) })],
+    });
+
+    const observedCatalogDrift = brushPreflight();
+    observedCatalogDrift.inventory_total = 124;
+    const inferredCatalog = s.setArtRunState({
+      document_id: 42,
+      process_dir: 'processes/brush-reuse-process/run-01',
+      painting_profile: 'nontrivial_painting',
+      brush_preflight: observedCatalogDrift,
+    });
+    expect(inferredCatalog.brush_preflight).toMatchObject({
+      invalidation_reason: 'catalog_changed',
+      invalidation_source: 'observed_preflight_diff',
+      inventory_total: 124,
+    });
+  });
+
+  it('infers runtime brush invalidation from a changed authoritative runtime witness', () => {
+    const s = store();
+    const first = brushPreflight();
+    first.runtime_instance_witness = 'instance-one';
+    s.setArtRunState({ document_id: 42, process_dir: 'processes/runtime-brush-process/run-01', brush_preflight: first });
+    const second = brushPreflight();
+    second.runtime_instance_witness = 'instance-two';
+    const result = s.setArtRunState({ document_id: 42, process_dir: 'processes/runtime-brush-process/run-01', brush_preflight: second });
+    expect(result.brush_preflight).toMatchObject({
+      runtime_instance_witness: 'instance-two',
+      invalidation_reason: 'runtime_changed',
+      invalidation_source: 'bridge_runtime_witness',
     });
   });
 
@@ -1896,14 +2358,14 @@ describe('Guard session-store regressions', () => {
             details: {
               motif_instances: [
                 {
-                  id: 'bird-a',
-                  category: 'bird',
+                  id: 'motifForm-a',
+                  category: 'motifForm',
                   stamp_profile_id: 'stamp-profile-a',
                   region_bounds: { left: 75, top: 80, right: 125, bottom: 120 },
                 },
                 {
-                  id: 'bird-b',
-                  category: 'bird',
+                  id: 'motifForm-b',
+                  category: 'motifForm',
                   stamp_profile_id: 'stamp-profile-a',
                   region_bounds: { left: 250, top: 190, right: 350, bottom: 290 },
                 },
@@ -1916,14 +2378,14 @@ describe('Guard session-store regressions', () => {
 
     expect(s.read('stamp-plan')?.observed_motif_instances).toEqual([
       {
-        id: 'bird-a',
-        category: 'bird',
+        id: 'motifForm-a',
+        category: 'motifForm',
         stamp_profile_id: 'stamp-profile-a',
         region_bounds: { left: 75, top: 80, right: 125, bottom: 120 },
       },
       {
-        id: 'bird-b',
-        category: 'bird',
+        id: 'motifForm-b',
+        category: 'motifForm',
         stamp_profile_id: 'stamp-profile-a',
         region_bounds: { left: 250, top: 190, right: 350, bottom: 290 },
       },
@@ -2373,6 +2835,26 @@ describe('Guard session-store regressions', () => {
     ]);
   });
 
+  it('reuses one presentation state for multiple active jobs and preserves the selected output language', () => {
+    const s = store();
+    writeProjectionPaintingState(s, [11, 22]);
+    createProjectionJob(s, 'localized-projection-a', 11);
+    createProjectionJob(s, 'localized-projection-b', 22);
+    s.setUserConfig({ language: 'en' });
+    const paintingSpy = vi.spyOn(s, 'paintingState');
+    const projection = s.captureProjectionContext();
+    expect(paintingSpy).toHaveBeenCalledTimes(1);
+    expect(projection.activeJobs).toHaveLength(2);
+    expect(projection.activeJobs.every(job => job.narrative.text.startsWith('Now:') && job.narrative.language === 'en')).toBe(true);
+    paintingSpy.mockClear();
+    const fromSnapshot = s.activeJobs(undefined, undefined, projection.capturedAt, projection.paintingState);
+    expect(paintingSpy).not.toHaveBeenCalled();
+    expect(fromSnapshot).toEqual(projection.activeJobs);
+    paintingSpy.mockClear();
+    expect(s.activeJobs(undefined)).toHaveLength(2);
+    expect(paintingSpy).toHaveBeenCalledTimes(1);
+  });
+
   it('captures one fresh projection for full status and one fresh projection for resume', () => {
     const s = store();
     writeProjectionPaintingState(s, [34]);
@@ -2584,6 +3066,14 @@ describe('Guard session-store regressions', () => {
     });
     s.recordArtisticThroughputEvent(42, {
       kind: 'semantic-dispatch', model_visible: true, semantic_actions: 6, operation_id: 'pass-a',
+      deterministic_violations_encountered_count: 3,
+      deterministic_violations_repaired_count: 2,
+      deterministic_violations_unresolved_count: 1,
+      violation_accounting: [
+        { code: 'semantic_layer_pollution', repair_class: 'AUTO_PATCH', encountered: 1, repaired: 1, unresolved: 0 },
+        { code: 'compact_pass_visual_mutation_limit', repair_class: 'SPLIT_DEFER', encountered: 1, repaired: 1, unresolved: 0 },
+        { code: 'compact_action_class_invalid', repair_class: 'AUTO_NORMALIZE', encountered: 1, repaired: 0, unresolved: 1 },
+      ],
     });
     s.recordArtisticThroughputEvent(42, {
       kind: 'bookkeeping', model_visible: true, semantic_actions: 0, operation_id: 'pass-a',
@@ -2611,6 +3101,20 @@ describe('Guard session-store regressions', () => {
       bookkeeping_only_round_trips: 1,
       semantic_artistic_actions_dispatched: 6,
       artistic_actions_per_model_visible_guard_round_trip: 3,
+      deterministic_violations_encountered_count: 3,
+      deterministic_violations_repaired_count: 2,
+      deterministic_violations_unresolved_count: 1,
+      violation_accounting_by_class_code: {
+        'AUTO_PATCH:semantic_layer_pollution': {
+          repair_class: 'AUTO_PATCH', code: 'semantic_layer_pollution', encountered: 1, repaired: 1, unresolved: 0,
+        },
+        'SPLIT_DEFER:compact_pass_visual_mutation_limit': {
+          repair_class: 'SPLIT_DEFER', code: 'compact_pass_visual_mutation_limit', encountered: 1, repaired: 1, unresolved: 0,
+        },
+        'AUTO_NORMALIZE:compact_action_class_invalid': {
+          repair_class: 'AUTO_NORMALIZE', code: 'compact_action_class_invalid', encountered: 1, repaired: 0, unresolved: 1,
+        },
+      },
       outcomes: {
         regression_passes: 1,
         recovery_or_uncertain_records: 0,
@@ -2917,8 +3421,8 @@ describe('Guard session-store regressions', () => {
         status: 'review_due',
         review_due: true,
         review_reason: 'cadence:5_microplans',
-        current_task_id: 'foliage-light',
-        tasks: [{ task_id: 'foliage-light', status: 'active' }],
+        current_task_id: 'organicInstances-light',
+        tasks: [{ task_id: 'organicInstances-light', status: 'active' }],
       },
     }));
 
@@ -2951,9 +3455,9 @@ describe('Guard session-store regressions', () => {
         directive_id: 'nonvisual-stall-regression',
         status: 'active',
         review_due: false,
-        current_task_id: 'foliage-light',
+        current_task_id: 'organicInstances-light',
         tasks: [
-          { task_id: 'foliage-light', status: 'active' },
+          { task_id: 'organicInstances-light', status: 'active' },
           { task_id: 'focal-details', status: 'pending' },
         ],
       },
@@ -2965,7 +3469,7 @@ describe('Guard session-store regressions', () => {
     expect(watch.nonvisual_progress_stall).toBe(true);
     expect(watch.nonvisual_progress_stall_reason).toBe('unfinished_painting_without_visual_pass');
     expect(watch.next_required_action).toBe(
-      'Painter: execute bounded task foliage-light under directive nonvisual-stall-regression'
+      'Painter: execute bounded task organicInstances-light under directive nonvisual-stall-regression'
     );
   });
 
@@ -3048,7 +3552,8 @@ describe('Guard session-store regressions', () => {
           type: 'text',
           text: JSON.stringify({
             continuation_layers: [
-              { hypothesis_id: 'hero-owner', layer_id: 11, physical_role: 'primary subject mass' },
+              { hypothesis_id: 'hero-owner', layer_id: 11, physical_role: 'primary subject mass',
+                geometry_binding: { model_revision: 3, owner_id: 'hero-owner', plane_id: 'ground', primitive_id: 'hero-box' } },
               { hypothesis_id: 'support-owner', layer_id: 12, physical_role: 'supporting environment' },
             ],
           }),
@@ -3066,6 +3571,9 @@ describe('Guard session-store regressions', () => {
         severity: 'must-fix',
         status: 'open',
         stage: 'FORM',
+        region: 'hero foreground',
+        hypothesis: 'Perspective drift is flattening the hero.',
+        depends_on_problem_ids: ['ground-contact'],
       },
       visual_problems: {
         ...(current.visual_problems ?? {}),
@@ -3074,6 +3582,9 @@ describe('Guard session-store regressions', () => {
           scale: 'medium',
           severity: 'must-fix',
           status: 'open',
+          region: 'hero foreground',
+          hypothesis: 'Perspective drift is flattening the hero.',
+          depends_on_problem_ids: ['ground-contact'],
         },
       },
       art_director: {
@@ -3140,9 +3651,14 @@ describe('Guard session-store regressions', () => {
         problem_id: 'hero-perspective',
         scale: 'medium',
         severity: 'must-fix',
+        region: 'hero foreground',
+        hypothesis: 'Perspective drift is flattening the hero.',
+        depends_on_problem_ids: ['ground-contact'],
+        structural_or_global: false,
       },
       owners: [
-        { owner_id: 'hero-owner', role: 'primary subject mass', layer_id: 11 },
+        { owner_id: 'hero-owner', role: 'primary subject mass', layer_id: 11,
+          geometry_binding: { model_revision: 3, owner_id: 'hero-owner', plane_id: 'ground', primitive_id: 'hero-box' } },
         { owner_id: 'support-owner', role: 'supporting environment', layer_id: 12 },
       ],
       current_task: {
@@ -3170,6 +3686,13 @@ describe('Guard session-store regressions', () => {
       ],
       protected_qualities: ['Preserve silhouette clarity.', 'Preserve quiet background hierarchy.'],
     });
+
+    const projection = s.captureProjectionContext({ activeJobs: [], capturedAt: Date.now() });
+    const recordsSpy = vi.spyOn(s, 'records').mockImplementation(() => {
+      throw new Error('artistic continuation must reuse the supplied request-local projection');
+    });
+    expect(s.artisticContinuationContext(42, projection)).toEqual(continuation);
+    expect(recordsSpy).not.toHaveBeenCalled();
     expect(continuation).not.toHaveProperty('brush_roles');
     expect(continuation).not.toHaveProperty('scene_geometry_model');
     expect(continuation).not.toHaveProperty('scene_lighting_color_model');
@@ -3177,7 +3700,7 @@ describe('Guard session-store regressions', () => {
     expect(continuation).not.toHaveProperty('artistic_evaluation_contract');
   });
 
-  it('projects the latest scene geometry revision only for the exact current document incarnation', () => {
+  it('projects the latest scene geometry revision only for the exact current document incarnation in bounded status/resume summaries', () => {
     const s = store();
     writeProjectionPaintingState(s, [42]);
     s.updatePaintingState(42, current => ({
@@ -3205,16 +3728,37 @@ describe('Guard session-store regressions', () => {
     } as any);
 
     writeGeometry('geometry-r1', 1, geometry(1));
-    writeGeometry('geometry-r2', 2, geometry(2));
+    const detailedGeometry = {
+      ...geometry(2),
+      line_families: Array.from({ length: 16 }, (_, family) => ({
+        id: `family-${family}`,
+        members: Array.from({ length: 32 }, (_, member) => ({
+          id: `line-${family}-${member}`,
+          points: [{ x: family * 50, y: member * 20 }, { x: 800, y: 300 }],
+        })).sort((a, b) => a.id.localeCompare(b.id)),
+      })).sort((a, b) => a.id.localeCompare(b.id)),
+    };
+    writeGeometry('geometry-r2', 2, detailedGeometry);
     writeGeometry('geometry-stale-incarnation', 3, geometry(3, 'doc-42-incarnation-old'));
 
     expect(s.sceneGeometryModel(42)).toMatchObject({
       model_id: 'station-perspective-01', revision: 2,
       source_operation_id: 'geometry-r2', source_sequence: 2,
     });
-    expect(s.compactPassContext(42).scene_geometry_model).toMatchObject({ revision: 2 });
-    expect(s.statusCompact().documents['42'].scene_geometry_model)
-      .toMatchObject({ revision: 2, source_operation_id: 'geometry-r2' });
+    const full = s.compactPassContext(42).scene_geometry_model;
+    expect(full).toMatchObject({ revision: 2, line_families: detailedGeometry.line_families });
+    const summary = s.statusCompact().documents['42'].scene_geometry_model;
+    expect(summary).toEqual({
+      model_id: detailedGeometry.model_id, revision: 2, applicability: 'coherent_3d',
+      source_frame: detailedGeometry.source_frame, projection: { kind: 'one_point' },
+      source_operation_id: 'geometry-r2', source_sequence: 2,
+      source_operation_path: s.file('geometry-r2'),
+    });
+    expect(Buffer.byteLength(JSON.stringify(summary))).toBeLessThan(1000);
+    expect(Buffer.byteLength(JSON.stringify(full))).toBeGreaterThan(30000);
+    expect(JSON.parse(readFileSync(summary.source_operation_path, 'utf8')).scene_geometry_model)
+      .toEqual(detailedGeometry);
+    expect(s.resume(42).document.scene_geometry_model).toEqual(summary);
 
     s.observeDocumentInstance(42, {
       protocol: 'photoshop.uxp.document_instance_witness.v1',
@@ -3222,6 +3766,7 @@ describe('Guard session-store regressions', () => {
     });
     expect(s.sceneGeometryModel(42)).toBeNull();
     expect(s.compactPassContext(42).scene_geometry_model).toBeNull();
+    expect(s.statusCompact().documents['42'].scene_geometry_model).toBeNull();
   });
 
   it('projects selective geometry-stale owner debt from durable scene revision history', () => {
@@ -3250,7 +3795,7 @@ describe('Guard session-store regressions', () => {
       ],
       support_planes: [
         { id: 'track_plane', role: 'track', vanishing_family_ids: ['rails'], boundary_relations: ['left_rail'] },
-        { id: 'wall_plane', role: 'wall', vanishing_family_ids: ['facade'], boundary_relations: ['roof_edge'] },
+        { id: 'wall_plane', role: 'planarForm', vanishing_family_ids: ['facade'], boundary_relations: ['roof_edge'] },
       ],
       scale_anchors: [],
     });
@@ -3273,18 +3818,117 @@ describe('Guard session-store regressions', () => {
       created_at: new Date().toISOString(), completed_at: new Date().toISOString(),
       phase: 'completed', execution: 'completed', failed: false, visual: true,
       result: { content: [{ type: 'text', text: JSON.stringify({ ok: true, continuation_layers: [
-        { layer_id: 12, hypothesis_id: 'train', geometry_binding: binding('train', 'rails', 'track_plane', 'left_rail') },
-        { layer_id: 13, hypothesis_id: 'window', geometry_binding: binding('window', 'facade', 'wall_plane', 'roof_edge') },
+        { layer_id: 12, hypothesis_id: 'primaryAssembly', geometry_binding: binding('primaryAssembly', 'rails', 'track_plane', 'left_rail') },
+        { layer_id: 13, hypothesis_id: 'openingForm', geometry_binding: binding('openingForm', 'facade', 'wall_plane', 'roof_edge') },
       ] }) }] },
     } as any);
     writeGeometry('geometry-r2-selective', 3, geometry(2, 540));
 
     expect(s.geometryBindingStates(42)).toEqual([
-      expect.objectContaining({ owner_id: 'train', stale: true, reason: 'dependency_changed', changed_dependency_ids: expect.arrayContaining(['left_rail', 'rails', 'track_plane']) }),
-      expect.objectContaining({ owner_id: 'window', stale: false, reason: 'current', changed_dependency_ids: [] }),
+      expect.objectContaining({ owner_id: 'openingForm', stale: false, reason: 'current', changed_dependency_ids: [] }),
+      expect.objectContaining({ owner_id: 'primaryAssembly', stale: true, reason: 'dependency_changed', changed_dependency_ids: expect.arrayContaining(['left_rail', 'rails', 'track_plane']) }),
     ]);
     expect(s.compactPassContext(42).geometry_binding_states).toEqual(s.geometryBindingStates(42));
     expect(s.statusCompact().documents['42'].geometry_binding_states).toEqual(s.geometryBindingStates(42));
+  });
+
+  it('schedules rebuild debt only for generated geometry whose recorded source boundary changed', () => {
+    const s = store();
+    writeProjectionPaintingState(s, [42]);
+    s.updatePaintingState(42, current => ({ ...current, document_instance: {
+      protocol: 'photoshop.guard.document_instance.v1',
+      host_witness: { protocol: 'photoshop.uxp.document_instance_witness.v1', session_id: 'uxp-generated-debt', token: 'doc-42-generated-debt' },
+    }}));
+    const geometry = (revision: number, leftTopX: number, unrelatedX: number) => ({
+      model_id: 'generated-scene', revision, applicability: 'coherent_3d',
+      source_frame: { document_id: 42, document_incarnation: 'doc-42-generated-debt', width: 1000, height: 700 },
+      projection: { kind: 'one_point', vanishing_points: [{ id: 'vp', x: 500, y: 180, evidence: 'derived', derived_from: ['left', 'right'] }] },
+      line_families: [{ id: 'facade', vanishing_point_id: 'vp', members: [
+        { id: 'left', points: [{ x: 180, y: 650 }, { x: leftTopX, y: 180 }] },
+        { id: 'right', points: [{ x: 820, y: 650 }, { x: 500, y: 180 }] },
+        { id: 'unrelated', points: [{ x: 50, y: 600 }, { x: unrelatedX, y: 300 }] },
+      ] }], support_planes: [], scale_anchors: [],
+    });
+    const writeScene = (id: string, sequence: number, model: any) => s.write({
+      id, tool: 'photoshop_execute_visual_microplan', args: { document_id: 42 }, summary: id, purpose: 'generated rebuild debt',
+      hash: `hash-${id}`, sequence, created_at: new Date().toISOString(), completed_at: new Date().toISOString(),
+      phase: 'completed', execution: 'completed', failed: false, visual: true, report: {}, verdict: {}, scene_geometry_model: model,
+    } as any);
+    const r1 = geometry(1, 500, 200);
+    writeScene('generated-scene-r1', 1, r1);
+    s.write({
+      id: 'generated-facade-r1', tool: 'photoshop_execute_visual_microplan', args: { document_id: 42 },
+      summary: 'derived facade band', purpose: 'generated rebuild debt', hash: 'hash-generated-r1', sequence: 2,
+      created_at: new Date().toISOString(), completed_at: new Date().toISOString(), phase: 'completed', execution: 'completed', failed: false, visual: true, report: {}, verdict: {},
+      geometry_preflight: {
+        executable_geometry: {
+          mode: 'derived-boundary-sections', owner_id: 'facade-owner', scene_geometry_model_id: 'generated-scene', scene_geometry_revision: 1,
+          dependency_ids: ['left', 'right'], dependency_snapshots: {
+            left: JSON.stringify(r1.line_families[0].members[0]), right: JSON.stringify(r1.line_families[0].members[1]),
+          }, tools: ['photoshop_paint_regions'], dispatched_point_count: 4, tolerance_px: 3,
+        },
+      },
+    } as any);
+    // A later scene record can reuse the original revision number while
+    // changing the camera. The generated contour must retain its pre-paint
+    // source model rather than trusting that revision number or the latest
+    // same-revision model as its original authority.
+    writeScene('generated-scene-r1-camera-reused', 2.5, {
+      ...r1, projection: { ...r1.projection, horizon: {
+        line: [{ x: 0, y: 180 }, { x: 1000, y: 180 }],
+      } },
+    });
+    writeScene('generated-scene-r2-unrelated', 3, geometry(2, 500, 240));
+    // The later same-revision camera record must not be mistaken for the
+    // pre-paint source when comparing a genuine unrelated revision 2.
+    expect(s.generatedGeometryRebuildDebt(42)).toEqual([]);
+
+    writeScene('generated-scene-r3-boundary', 4, geometry(3, 540, 240));
+    expect(s.generatedGeometryRebuildDebt(42)).toEqual([
+      expect.objectContaining({ code: 'generated_geometry_rebuild_required', owner_id: 'facade-owner', reason: 'dependency_changed', changed_dependency_ids: ['left'] }),
+    ]);
+    expect(s.compactPassContext(42).generated_geometry_rebuild_debt).toEqual(s.generatedGeometryRebuildDebt(42));
+    expect(s.statusCompact().documents['42'].generated_geometry_rebuild_debt).toEqual(s.generatedGeometryRebuildDebt(42));
+    expect(s.documentNextRequiredAction(42)).toContain('rebuild generated geometry for owner facade-owner');
+    const resumed = s.resume(42);
+    expect(resumed.document.generated_geometry_rebuild_debt).toEqual(s.generatedGeometryRebuildDebt(42));
+    expect(resumed.next_required_action).toContain('rebuild generated geometry for owner facade-owner');
+    expect(resumed.resume_summary.next).toContain('rebuild generated geometry for owner facade-owner');
+
+    const r3 = geometry(3, 540, 240);
+    s.write({
+      id: 'generated-facade-r3-rebuilt', tool: 'photoshop_execute_visual_microplan', args: { document_id: 42 },
+      summary: 'rebuilt derived facade band', purpose: 'generated rebuild debt closure', hash: 'hash-generated-r3', sequence: 5,
+      created_at: new Date().toISOString(), completed_at: new Date().toISOString(), phase: 'completed', execution: 'completed', failed: false, visual: true, report: {}, verdict: {},
+      geometry_preflight: {
+        executable_geometry: {
+          mode: 'derived-boundary-sections', owner_id: 'facade-owner', scene_geometry_model_id: 'generated-scene', scene_geometry_revision: 3,
+          dependency_ids: ['left', 'right'], dependency_snapshots: {
+            left: JSON.stringify(r3.line_families[0].members[0]), right: JSON.stringify(r3.line_families[0].members[1]),
+          }, tools: ['photoshop_paint_regions'], dispatched_point_count: 4, tolerance_px: 3,
+        },
+      },
+    } as any);
+    expect(s.generatedGeometryRebuildDebt(42)).toEqual([]);
+    expect(s.compactPassContext(42).generated_geometry_rebuild_debt).toEqual([]);
+    expect(s.statusCompact().documents['42'].generated_geometry_rebuild_debt).toEqual([]);
+    expect(s.documentNextRequiredAction(42)).not.toContain('rebuild generated geometry for owner facade-owner');
+
+    // The pre-fix line-only snapshot remains selectively reusable through the
+    // persisted source revision, but a global camera change cannot reuse it.
+    const projectionChanged = geometry(4, 540, 240);
+    writeScene('generated-scene-r4-horizon', 6, {
+      ...projectionChanged,
+      projection: { ...projectionChanged.projection, horizon: {
+        line: [{ x: 0, y: 180 }, { x: 1000, y: 180 }],
+      } },
+    });
+    expect(s.generatedGeometryRebuildDebt(42)).toEqual([
+      expect.objectContaining({
+        code: 'generated_geometry_rebuild_required', owner_id: 'facade-owner',
+        reason: 'dependency_changed', changed_dependency_ids: ['__projection__'],
+      }),
+    ]);
   });
 
   it('projects E.17c completion debt only from insufficient scene geometry or completion-relevant stale E.18 bindings', () => {
@@ -3322,8 +3966,8 @@ describe('Guard session-store regressions', () => {
       summary: 'completion relevant owner', purpose: 'E17c completion geometry', hash: 'hash-e17c-owner', sequence: 2,
       created_at: new Date().toISOString(), completed_at: new Date().toISOString(), phase: 'completed', execution: 'completed', failed: false, visual: true,
       result: { content: [{ type: 'text', text: JSON.stringify({ continuation_layers: [{
-        layer_id: 31, hypothesis_id: 'train', geometry_binding: {
-          owner_id: 'train', scene_geometry_model_id: 'e17c-scene', scene_geometry_revision: 1,
+        layer_id: 31, hypothesis_id: 'primaryAssembly', geometry_binding: {
+          owner_id: 'primaryAssembly', scene_geometry_model_id: 'e17c-scene', scene_geometry_revision: 1,
           support_plane_id: 'track', vanishing_family_ids: ['rails'], dependencies: ['left', 'right', 'near-scale'],
           anchors: { near_contact: { x: 600, y: 700 }, far_extent: { x: 600, y: 360 }, centerline: { line: [{ x: 600, y: 700 }, { x: 600, y: 360 }] } },
           control_sections: [
@@ -3331,13 +3975,13 @@ describe('Guard session-store regressions', () => {
             { id: 'mid', at: { x: 600, y: 470 }, expected_bounds: { left: 545, top: 420, right: 655, bottom: 520 } },
           ],
           constraints: [
-            { type: 'converges_to', subject_ref: 'train', target_ref: 'rails', evidence: ['centerline'] },
-            { type: 'supported_by', subject_ref: 'train', target_ref: 'track', evidence: ['contact'] },
-            { type: 'scales_with_depth', subject_ref: 'train', target_ref: 'near-scale', evidence: ['near/mid sections'] },
+            { type: 'converges_to', subject_ref: 'primaryAssembly', target_ref: 'rails', evidence: ['centerline'] },
+            { type: 'supported_by', subject_ref: 'primaryAssembly', target_ref: 'track', evidence: ['contact'] },
+            { type: 'scales_with_depth', subject_ref: 'primaryAssembly', target_ref: 'near-scale', evidence: ['near/mid sections'] },
           ],
           exact_geometry_completion_relevant: true,
           exact_evidence: [{
-            id: 'train-measurement', method: 'photoshop_measure_points',
+            id: 'primaryAssembly-measurement', method: 'photoshop_measure_points',
             source_frame: { document_id: 42, document_incarnation: 'doc-42-e17c', width: 1200, height: 800 },
           }],
           local_exceptions: [],
@@ -3348,7 +3992,7 @@ describe('Guard session-store regressions', () => {
 
     writeGeometry('e17c-geometry-r2', 3, geometry(2, 640));
     expect(s.geometryCompletionDebt(42)).toEqual([
-      expect.objectContaining({ code: 'geometry_completion_binding_stale', owner_id: 'train' }),
+      expect.objectContaining({ code: 'geometry_completion_binding_stale', owner_id: 'primaryAssembly' }),
     ]);
     expect(s.compactPassContext(42).geometry_completion_debt).toEqual(s.geometryCompletionDebt(42));
     expect(s.statusCompact().documents['42'].geometry_completion_debt).toEqual(s.geometryCompletionDebt(42));
@@ -3480,8 +4124,8 @@ describe('Guard session-store regressions', () => {
     } as any);
     writeModel('lighting-selective-r1', 1, model(1, 'warm_amber'));
     for (const [sequence, owner, response] of [
-      [2, 'train', material(['twilight', 'headlight'], ['headlight'])],
-      [3, 'mountain', material(['twilight'], [])],
+      [2, 'primaryAssembly', material(['twilight', 'headlight'], ['headlight'])],
+      [3, 'supportMass', material(['twilight'], [])],
     ] as const) {
       s.write({
         id: `material-${owner}`, tool: 'photoshop_execute_visual_microplan',
@@ -3494,8 +4138,8 @@ describe('Guard session-store regressions', () => {
     writeModel('lighting-selective-r2', 4, model(2, 'pale_lemon'));
 
     expect(s.lightingColorBindingStates(42)).toEqual([
-      expect.objectContaining({ owner_id: 'mountain', stale: false, reason: 'current', changed_dependency_ids: [] }),
-      expect.objectContaining({ owner_id: 'train', stale: true, reason: 'dependency_changed', changed_dependency_ids: ['headlight'] }),
+      expect.objectContaining({ owner_id: 'primaryAssembly', stale: true, reason: 'dependency_changed', changed_dependency_ids: ['headlight'] }),
+      expect.objectContaining({ owner_id: 'supportMass', stale: false, reason: 'current', changed_dependency_ids: [] }),
     ]);
     expect(s.compactPassContext(42).lighting_color_binding_states).toEqual(s.lightingColorBindingStates(42));
     expect(s.statusCompact().documents['42'].lighting_color_binding_states).toEqual(s.lightingColorBindingStates(42));
@@ -3545,7 +4189,7 @@ describe('Guard session-store regressions', () => {
     } as any);
     writeScene('spatial-light-r1', 1, { scene_lighting_color_model: light });
     writeScene('spatial-geometry-r1', 2, { scene_geometry_model: geometry(1, 600) });
-    for (const [sequence, owner, response] of [[3, 'train', material(true)], [4, 'mountain', material(false)]] as const) {
+    for (const [sequence, owner, response] of [[3, 'primaryAssembly', material(true)], [4, 'supportMass', material(false)]] as const) {
       s.write({
         id: `spatial-material-${owner}`, tool: 'photoshop_execute_visual_microplan',
         args: { document_id: 42, logical_layer: { hypothesis_id: owner }, material_response: response },
@@ -3557,9 +4201,9 @@ describe('Guard session-store regressions', () => {
     writeScene('spatial-geometry-r2', 5, { scene_geometry_model: geometry(2, 640) });
 
     expect(s.lightingColorBindingStates(42)).toEqual([
-      expect.objectContaining({ owner_id: 'mountain', stale: false }),
-      expect.objectContaining({ owner_id: 'train', stale: true, reason: 'dependency_changed', changed_dependency_ids: ['rail_depth'],
+      expect.objectContaining({ owner_id: 'primaryAssembly', stale: true, reason: 'dependency_changed', changed_dependency_ids: ['rail_depth'],
         spatial_relation: expect.objectContaining({ stale: true, changed_dependency_ids: ['rail_depth'] }) }),
+      expect.objectContaining({ owner_id: 'supportMass', stale: false }),
     ]);
   });
 
@@ -3575,8 +4219,8 @@ describe('Guard session-store regressions', () => {
       source_frame: { document_id: 42, document_incarnation: incarnation },
       geometry_model_id: 'station-geometry-01', geometry_model_revision: 3,
       lighting_color_model_id: 'station-light-color-01', lighting_color_model_revision: 2,
-      camera: { framing: 'railway three-quarter view', view_character: 'wide', lens_character: 'moderately wide' },
-      focus: { focal_depth_or_plane: 'train-front-plane', depth_of_field_behavior: 'progressive-softening', foreground_softness: 'slight', background_softness: 'moderate' },
+      camera: { framing: 'rigidScene three-quarter view', view_character: 'wide', lens_character: 'moderately wide' },
+      focus: { focal_depth_or_plane: 'primaryAssembly-front-plane', depth_of_field_behavior: 'progressive-softening', foreground_softness: 'slight', background_softness: 'moderate' },
       motion: { camera_motion: 'locked', subject_motion: 'slow-arrival', shutter_character: 'mostly-frozen' },
       optical_response: { base_softness: 'low', bloom: 'local', halation: 'subtle' },
       capture_finish: { grain: 'fine', vignette: 'subtle', film_or_sensor_character: 'restrained-digital' },
@@ -3617,7 +4261,7 @@ describe('Guard session-store regressions', () => {
       model_id: 'selective-camera', revision,
       source_frame: { document_id: 42, document_incarnation: 'doc-42-camera-selective' },
       geometry_model_id: 'camera-geometry', geometry_model_revision: 1,
-      camera: { framing: 'railway', view_character: 'normal', lens_character: 'qualitative normal lens' },
+      camera: { framing: 'rigidScene', view_character: 'normal', lens_character: 'qualitative normal lens' },
       focus: { focal_depth_or_plane: focal, depth_of_field_behavior: 'far softens', foreground_softness: 'slight', background_softness: 'soft' },
       motion: { camera_motion: 'locked', subject_motion: 'none', shutter_character: 'static' },
       optical_response: { base_softness: 'low', bloom: 'none', halation: 'none' },
@@ -3625,7 +4269,7 @@ describe('Guard session-store regressions', () => {
       intentional_exceptions: [],
     });
     const geometryBinding = {
-      owner_id: 'train', scene_geometry_model_id: 'camera-geometry', scene_geometry_revision: 1,
+      owner_id: 'primaryAssembly', scene_geometry_model_id: 'camera-geometry', scene_geometry_revision: 1,
       support_plane_id: 'track-plane', vanishing_family_ids: ['depth-family'], dependencies: ['left-edge'],
       anchors: { near_contact: { x: 200, y: 650 } }, control_sections: [], constraints: [], local_exceptions: [],
     };
@@ -3635,15 +4279,15 @@ describe('Guard session-store regressions', () => {
       phase: 'completed', execution: 'completed', failed: false, visual: true, ...fields,
     } as any);
     writeScene('camera-geometry-r1', 1, { scene_geometry_model: geometry });
-    writeScene('camera-selective-r1', 2, { scene_camera_imaging_model: camera(1, 'train-plane') });
+    writeScene('camera-selective-r1', 2, { scene_camera_imaging_model: camera(1, 'primaryAssembly-plane') });
     s.write({
       id: 'camera-owner-bindings', tool: 'photoshop_execute_visual_microplan', args: { document_id: 42 },
       summary: 'camera owners', purpose: 'camera stale projection', hash: 'hash-camera-owners', sequence: 3,
       created_at: new Date().toISOString(), completed_at: new Date().toISOString(),
       phase: 'completed', execution: 'completed', failed: false, visual: true,
       result: { content: [{ type: 'text', text: JSON.stringify({ continuation_layers: [
-        { layer_id: 12, hypothesis_id: 'train', geometry_binding: geometryBinding, camera_binding: {
-          scene_camera_model_id: 'selective-camera', scene_camera_revision: 1, geometry_binding_owner_id: 'train',
+        { layer_id: 12, hypothesis_id: 'primaryAssembly', geometry_binding: geometryBinding, camera_binding: {
+          scene_camera_model_id: 'selective-camera', scene_camera_revision: 1, geometry_binding_owner_id: 'primaryAssembly',
           depth_role: 'focal', expected_focus_role: 'sharp', dependency_domains: ['focus'],
         } },
         { layer_id: 13, hypothesis_id: 'post', camera_binding: {
@@ -3657,7 +4301,7 @@ describe('Guard session-store regressions', () => {
 
     expect(s.cameraBindingStates(42)).toEqual([
       expect.objectContaining({ owner_id: 'post', stale: false, reason: 'current', changed_dependency_ids: [] }),
-      expect.objectContaining({ owner_id: 'train', stale: true, reason: 'dependency_changed', changed_dependency_ids: ['focus'] }),
+      expect.objectContaining({ owner_id: 'primaryAssembly', stale: true, reason: 'dependency_changed', changed_dependency_ids: ['focus'] }),
     ]);
     expect(s.compactPassContext(42).camera_binding_states).toEqual(s.cameraBindingStates(42));
     expect(s.statusCompact().documents['42'].camera_binding_states).toEqual(s.cameraBindingStates(42));
@@ -3671,7 +4315,7 @@ describe('Guard session-store regressions', () => {
     });
     expect(s.cameraBindingStates(42)).toEqual([
       expect.objectContaining({ owner_id: 'post', stale: false, changed_dependency_ids: [] }),
-      expect.objectContaining({ owner_id: 'train', stale: true, changed_dependency_ids: expect.arrayContaining(['focus', 'geometry']) }),
+      expect.objectContaining({ owner_id: 'primaryAssembly', stale: true, changed_dependency_ids: expect.arrayContaining(['focus', 'geometry']) }),
     ]);
   });
 
@@ -3681,8 +4325,8 @@ describe('Guard session-store regressions', () => {
     const h1 = {
       protocol: 'photoshop.guard.perceptual_hierarchy.v1', revision: 1, mode: 'ranked',
       zones: [
-        { id: 'hero', owner_ids: ['train'], priority: 'primary', contrast_budget: 'high', detail_budget: 'high', edge_certainty: 'high', chroma_accent: 'allowed' },
-        { id: 'background', owner_ids: ['mountain'], priority: 'support', contrast_budget: 'low', detail_budget: 'low', edge_certainty: 'low', chroma_accent: 'restricted' },
+        { id: 'hero', owner_ids: ['primaryAssembly'], priority: 'primary', contrast_budget: 'high', detail_budget: 'high', edge_certainty: 'high', chroma_accent: 'allowed' },
+        { id: 'background', owner_ids: ['supportMass'], priority: 'support', contrast_budget: 'low', detail_budget: 'low', edge_certainty: 'low', chroma_accent: 'restricted' },
       ],
       ordering: ['hero', 'background'],
     };
@@ -3695,13 +4339,13 @@ describe('Guard session-store regressions', () => {
       id: 'hierarchy-owners', tool: 'photoshop_execute_visual_microplan', args: { document_id: 42 }, summary: 'hierarchy owners', purpose: 'attention binding',
       hash: 'hash-hierarchy-owners', sequence: 1, created_at: new Date().toISOString(), completed_at: new Date().toISOString(), phase: 'completed', execution: 'completed', failed: false, visual: true,
       result: { content: [{ type: 'text', text: JSON.stringify({ continuation_layers: [
-        { layer_id: 21, hypothesis_id: 'train', attention_binding: { hierarchy_revision: 1, zone_id: 'hero', dimensions: ['contrast', 'detail', 'edge'] } },
-        { layer_id: 22, hypothesis_id: 'mountain', attention_binding: { hierarchy_revision: 1, zone_id: 'background', dimensions: ['detail'] } },
+        { layer_id: 21, hypothesis_id: 'primaryAssembly', attention_binding: { hierarchy_revision: 1, zone_id: 'hero', dimensions: ['contrast', 'detail', 'edge'] } },
+        { layer_id: 22, hypothesis_id: 'supportMass', attention_binding: { hierarchy_revision: 1, zone_id: 'background', dimensions: ['detail'] } },
       ] }) }] },
     } as any);
     expect(s.attentionBindingStates(42)).toEqual([
-      expect.objectContaining({ owner_id: 'mountain', stale: false }),
-      expect.objectContaining({ owner_id: 'train', stale: false }),
+      expect.objectContaining({ owner_id: 'primaryAssembly', stale: false }),
+      expect.objectContaining({ owner_id: 'supportMass', stale: false }),
     ]);
 
     const h2 = { ...h1, revision: 2, zones: [h1.zones[0], { ...h1.zones[1], detail_budget: 'medium' }] };
@@ -3709,8 +4353,8 @@ describe('Guard session-store regressions', () => {
       ...current.art_director, perceptual_hierarchy: h2, perceptual_hierarchy_history: [h1],
     }}));
     expect(s.attentionBindingStates(42)).toEqual([
-      expect.objectContaining({ owner_id: 'mountain', stale: true, changed_dependency_ids: ['zone:background'] }),
-      expect.objectContaining({ owner_id: 'train', stale: false, changed_dependency_ids: [] }),
+      expect.objectContaining({ owner_id: 'primaryAssembly', stale: false, changed_dependency_ids: [] }),
+      expect.objectContaining({ owner_id: 'supportMass', stale: true, changed_dependency_ids: ['zone:background'] }),
     ]);
 
     const h3 = { ...h2, revision: 3, ordering: ['background', 'hero'] };
@@ -3718,8 +4362,8 @@ describe('Guard session-store regressions', () => {
       ...current.art_director, perceptual_hierarchy: h3, perceptual_hierarchy_history: [h1, h2],
     }}));
     expect(s.attentionBindingStates(42)).toEqual([
-      expect.objectContaining({ owner_id: 'mountain', stale: true, changed_dependency_ids: expect.arrayContaining(['ordering']) }),
-      expect.objectContaining({ owner_id: 'train', stale: true, changed_dependency_ids: ['ordering'] }),
+      expect.objectContaining({ owner_id: 'primaryAssembly', stale: true, changed_dependency_ids: ['ordering'] }),
+      expect.objectContaining({ owner_id: 'supportMass', stale: true, changed_dependency_ids: expect.arrayContaining(['ordering']) }),
     ]);
     expect(s.compactPassContext(42).attention_binding_states).toEqual(s.attentionBindingStates(42));
     expect(s.statusCompact().documents['42'].attention_binding_states).toEqual(s.attentionBindingStates(42));

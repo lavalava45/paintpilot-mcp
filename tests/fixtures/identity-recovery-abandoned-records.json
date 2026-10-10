@@ -1,0 +1,59 @@
+[
+  {
+    "id": "cat-rabbit-soft-dominance-repair-20261003-01",
+    "tool": "photoshop_execute_visual_microplan",
+    "phase": "uncertain",
+    "failed": true,
+    "resolved": {
+      "outcome": "abandoned",
+      "evidence_mode": "bridge_registration_document_count_zero",
+      "target_document_id": 2440,
+      "source": "guard_cycle_fallback",
+      "at": "2026-10-04T08:15:32.609Z"
+    },
+    "created_at": "2026-10-03T19:40:08.072Z",
+    "sequence": 148,
+    "args": {
+      "document_id": 2440
+    }
+  },
+  {
+    "id": "still-life-clean-masses-03",
+    "tool": "photoshop_execute_visual_microplan",
+    "phase": "uncertain",
+    "failed": true,
+    "resolved": {
+      "outcome": "abandoned",
+      "evidence_mode": "uxp_document_close_notification",
+      "target_document_id": 1357,
+      "source": "photoshop_uxp_notification",
+      "at": "2026-10-05T10:52:07.774Z"
+    },
+    "created_at": "2026-10-05T09:27:26.332Z",
+    "sequence": 253,
+    "args": {
+      "document_id": 1357
+    }
+  },
+  {
+    "id": "wuxia-run03-road-edge-eraser-probe",
+    "tool": "photoshop_execute_visual_microplan",
+    "phase": "uncertain",
+    "failed": true,
+    "resolved": {
+      "id": "wuxia-run03-road-edge-eraser-probe",
+      "documents_id": "wuxia-recovery-closed-documents-20261008-1510",
+      "document_closed_confirmed": true,
+      "outcome": "abandoned",
+      "reason": "Пользователь распорядился закрыть старое изображение и начать новую работу. Photoshop подтвердил отсутствие открытых документов; старая неопределённая операция не повторяется.",
+      "evidence_mode": "document_absent",
+      "target_document_id": 59,
+      "at": "2026-10-08T15:08:50.331Z"
+    },
+    "created_at": "2026-10-08T12:08:52.370Z",
+    "sequence": 374,
+    "args": {
+      "document_id": 59
+    }
+  }
+]

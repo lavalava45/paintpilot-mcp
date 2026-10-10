@@ -17,6 +17,7 @@ const PURE_NODE = new Set([
   'photoshop_select_painting_method',
   'photoshop_transform_landmarks',
   'photoshop_compare_landmarks',
+  'photoshop_geometry_calculate',
 ]);
 
 const AUTO_BENEFIT = new Set([
@@ -185,8 +186,8 @@ const COMMON_P1 = /(?:create_layer|delete_layer|rename_layer|duplicate_layer|set
 function categoryFor(source, name) {
   if (name.startsWith('photoshop_recipe_')) return 'recipe';
   if (name.startsWith('photoshop_guard_')) return 'guard';
-  const base = source.replaceAll('\\', '/').split('/').pop()?.replace(/-tools\.ts$/, '') ?? 'core';
-  return base;
+  const base = source.replaceAll('\\', '/').split('/').pop()?.replace(/-(?:tools|catalog)\.ts$/, '') ?? 'core';
+  return base === 'effect' ? 'style' : base;
 }
 
 function primitiveGroup(source, name) {
@@ -342,11 +343,15 @@ function noteFor(source, name) {
 
 async function sourceFiles() {
   const files = [
-    join(ROOT, 'src', 'core', 'server.ts'),
+    join(ROOT, 'src', 'core', 'photoshop-mcp-server.ts'),
     join(ROOT, 'src', 'core', 'server-tool-catalog.ts'),
   ];
   for (const entry of await readdir(TOOLS, { withFileTypes: true })) {
-    if (entry.isFile() && entry.name.endsWith('-tools.ts')) files.push(join(TOOLS, entry.name));
+    // Tool declarations migrated into *-catalog.ts; scanning wrappers alone silently
+    // omits real registered commands and produces a misleading migration total.
+    if (entry.isFile() && (entry.name.endsWith('-tools.ts') || entry.name.endsWith('-catalog.ts'))) {
+      files.push(join(TOOLS, entry.name));
+    }
   }
   const recipesDir = join(TOOLS, 'recipes');
   try {
@@ -398,6 +403,14 @@ async function collectTools() {
       if (ts.isObjectLiteralExpression(node)) {
         const name = literalString(propertyValue(node, 'name'));
         if (name.startsWith('photoshop_') && propertyValue(node, 'description') && !found.has(name)) found.set(name, rel);
+      }
+      // Catalogs may declare tool: helper('photoshop_name', ...) rather than
+      // inlining a name/description object. Match the authoritative count gate.
+      if (ts.isPropertyAssignment(node) &&
+          (ts.isIdentifier(node.name) || ts.isStringLiteral(node.name)) &&
+          node.name.text === 'tool' && ts.isCallExpression(node.initializer)) {
+        const name = literalString(node.initializer.arguments[0]);
+        if (name.startsWith('photoshop_') && !found.has(name)) found.set(name, rel);
       }
       if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && factories.has(node.expression.text)) {
         const name = literalString(node.arguments[0]);

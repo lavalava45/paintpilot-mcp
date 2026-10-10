@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 const source = readFileSync(new URL('../uxp-plugin/main.js', import.meta.url), 'utf8')
   .replace(/\npollLoop\(\);\s*$/, '\n');
 
-function bootstrapHarness() {
+function bootstrapHarness(options: { dropModalReturn?: boolean; dropDocumentReturn?: boolean } = {}) {
   const calls: Array<{ kind: string; value?: unknown }> = [];
   let modalDepth = 0;
   const inertDispatcher = async () => ({ handled: false });
@@ -35,7 +35,9 @@ function bootstrapHarness() {
           resolution: options.resolution,
         };
         app.activeDocument = document;
-        return document;
+        app.documents[0] = document;
+        app.documents.length = 1;
+        return options.dropDocumentReturn ? undefined : document;
       },
     },
     async open(entry: unknown) {
@@ -63,7 +65,8 @@ function bootstrapHarness() {
       calls.push({ kind: 'modal', value: options });
       modalDepth += 1;
       try {
-        return await fn();
+        const result = await fn();
+        return options.dropModalReturn ? undefined : result;
       } finally {
         modalDepth -= 1;
       }
@@ -109,6 +112,12 @@ function bootstrapHarness() {
 }
 
 describe('UXP bootstrap mutations', () => {
+  it('captures the uniquely created identity even when modal/add return values are absent', async () => {
+    const harness = bootstrapHarness({ dropModalReturn: true, dropDocumentReturn: true });
+    const result = await harness.createDocumentMutation({ width: 640, height: 360 });
+    expect(result).toMatchObject({ operation: 'create_document', document: { id: 41, width: 640, height: 360 } });
+    expect(harness.calls.filter(call => call.kind === 'add')).toHaveLength(1);
+  });
   it('keeps selection post-mutation readback modal-safe inside executeAsModal', () => {
     for (const functionName of ['selectShapeMutation', 'featherSelectionMutation', 'selectSubjectMutation']) {
       const start = source.indexOf(`async function ${functionName}`);

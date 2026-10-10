@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { digitalPaintingControlTemplate } from '../src/prompts/templates/digital-painting-control.js';
 
@@ -20,20 +20,17 @@ describe('open-brief subject selection', () => {
     expect(prompt).toMatch(/no .*repeat inside the paint loop/i);
   });
 
-  it('uses past work only as compact negative recency evidence', () => {
+  it('does not use past work as positive or negative artistic memory', () => {
     const prompt = promptText();
-    expect(prompt).toMatch(/never browse prior runs for inspiration/i);
+    expect(prompt).toMatch(/never browse or consult prior runs/i);
+    expect(prompt).toMatch(/cross-run artistic memory/i);
     expect(prompt).toMatch(/atmosphere-only premises/);
 
     const agents = readFileSync(new URL('../AGENTS.md', import.meta.url), 'utf8');
-    expect(agents).toMatch(/Past process directories are recovery\/evaluation evidence, not an inspiration library/);
+    expect(agents).toMatch(/Past process directories are recovery\/evaluation evidence only/i);
+    expect(agents).toMatch(/never an inspiration library or a\s+cross-run artistic memory/i);
     expect(agents).not.toMatch(/processes\/constable-process\/english-landscape-01/);
-
-    const memory = JSON.parse(readFileSync(
-      new URL('../docs/subject-selection-memory-template.json', import.meta.url),
-      'utf8'
-    ));
-    expect(memory.max_entries).toBe(12);
-    expect(memory.purpose).toMatch(/Negative recency memory only/);
+    expect(agents).not.toMatch(/subject-selection-memory\.json/);
+    expect(existsSync(new URL('../docs/subject-selection-memory-template.json', import.meta.url))).toBe(false);
   });
 });

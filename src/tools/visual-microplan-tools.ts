@@ -1,8 +1,11 @@
 import type { CallToolResult, Tool } from '@modelcontextprotocol/sdk/types.js';
 import { createHash } from 'node:crypto';
+import { ATTENTION_BINDING_SCHEMA } from '../core/perceptual-hierarchy.js';
+import { bezierCriticalPoints } from '../core/bezier-geometry.js';
 import {
   normalizeToolResultForPlaceholders,
   parseVisualMicroPlan,
+  collectVisualMicroPlanConstructionErrors,
   resolveVisualMicroPlanArgs,
   VISUAL_MICROPLAN_ACTION_CLASSES,
   VISUAL_MICROPLAN_MAX_STEPS,
@@ -118,23 +121,29 @@ function passExecutionProjection(
     if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
     const row = value as Record<string, unknown>;
     for (const candidate of [row.history_steps, (row.details as Record<string, unknown> | undefined)?.history_steps]) {
-      if (typeof candidate === 'number' && Number.isSafeInteger(candidate) && candidate > 0) return candidate;
+      if (typeof candidate === 'number' && Number.isSafeInteger(candidate) && candidate >= 0) return candidate;
     }
     return undefined;
   };
-  const ownedActions = completedMutationIds.map(stepId => ({
-    step_id: stepId,
-    history_steps: results ? explicitHistorySteps(results[stepId]) : undefined,
+  // Preparation may write history too (new layer, selection, feathering).
+  // Settings/reads can be proven zero; never infer zero for a history writer.
+  const historyFree = new Set(['photoshop_select_layer_by_name', 'photoshop_select_brush_preset',
+    'photoshop_set_brush', 'photoshop_set_foreground_color']);
+  const historyActions = actions.filter(action => action.state === 'completed'
+    && (action.kind === 'visual-mutation' || (guardExecutionClass(action.tool) !== 'read-only' && !historyFree.has(action.tool))));
+  const ownedActions = historyActions.map(action => ({
+    step_id: action.step_id,
+    history_steps: results ? explicitHistorySteps(results[action.step_id]) : undefined,
   }));
   const historyProven = ownedActions.length > 0 && ownedActions.every(action => action.history_steps !== undefined);
-  const uncertainMutation = actions.some(action => action.kind === 'visual-mutation' && action.state === 'failed-or-uncertain');
+  const uncertainMutation = actions.some(action => action.state === 'failed-or-uncertain' && guardExecutionClass(action.tool) !== 'read-only');
   return {
     pass_id: plan.planId,
     state,
     actions,
     history_ownership: {
       protocol: 'photoshop.guard.semantic_pass_history_ownership.v1',
-      status: completedMutationIds.length === 0 && !uncertainMutation
+      status: historyActions.length === 0 && !uncertainMutation
         ? 'not-started'
         : uncertainMutation
           ? 'partial-or-uncertain'
@@ -144,12 +153,12 @@ function passExecutionProjection(
       ...(historyProven ? {
         owned_history_steps: ownedActions.reduce((sum, action) => sum + Number(action.history_steps), 0),
         actions: ownedActions,
-      } : completedMutationIds.length ? {
+      } : historyActions.length ? {
         actions: ownedActions.map(action => ({
           step_id: action.step_id,
           ...(action.history_steps === undefined ? { history_steps: null } : { history_steps: action.history_steps }),
         })),
-        reason: 'Exact rollback span is not proven until every completed visual mutation reports an explicit positive history_steps count.',
+        reason: 'Exact rollback span is not proven until every completed history-writing preparation and visual mutation reports an explicit nonnegative history_steps count.',
       } : {}),
     },
   };
@@ -603,7 +612,19 @@ function rawStrokeMethodClass(step: Record<string, unknown>): string | undefined
 }
 
 function collectSemanticEnvelopeErrors(args: Record<string, unknown>): string[] {
-  const errors: string[] = [];
+  const errors: string[] = collectVisualMicroPlanConstructionErrors(args);
+  for (const field of ['plan_id', 'summary', 'stage', 'scale', 'region', 'intent', 'expected_visual_delta']) {
+    if (typeof args[field] !== 'string' || !(args[field] as string).trim()) errors.push(`${field} must be a non-empty string`);
+  }
+  if (!!args.planner_directive_id !== !!args.planner_task_id) {
+    errors.push('planner_directive_id and planner_task_id must be supplied together');
+  }
+  if ((args.planner_directive_id || args.planner_task_id) && !args.painter_scope) {
+    errors.push('Painter-bound VisualMicroPlan requires painter_scope');
+  }
+  if (args.object_context_region_bounds && !args.region_bounds) {
+    errors.push('object_context_region_bounds requires exact region_bounds for the tighter MICRO target');
+  }
   const stage = normalizedString(args.stage);
   if (stage && !VISUAL_MICROPLAN_STAGES.includes(stage as (typeof VISUAL_MICROPLAN_STAGES)[number])) {
     errors.push(`stage must be one of ${VISUAL_MICROPLAN_STAGES.join(', ')}; got ${stage}`);
@@ -701,12 +722,14 @@ function collectMethodExecutionErrorsFromInput(
     if (capability.availability === 'unavailable') {
       errors.push(`step "${id}" method_id=${methodId} is unavailable: ${capability.availabilityReason}`);
     }
-    if (rootMethodClass && capability.methodClass !== rootMethodClass) {
+    const uniformContinuousField = capability.id === 'continuous-color-field'
+      && step.tool === 'photoshop_fill_layer' && rootMethodClass === 'fill';
+    if (rootMethodClass && capability.methodClass !== rootMethodClass && !uniformContinuousField) {
       errors.push(
         `step "${id}" method_id=${methodId} uses method_class=${capability.methodClass}, incompatible with micro-plan method_class=${rootMethodClass}`
       );
     }
-    if (!capability.primaryTool || step.tool !== capability.primaryTool) {
+    if ((!capability.primaryTool || step.tool !== capability.primaryTool) && !uniformContinuousField) {
       errors.push(
         `step "${id}" method_id=${methodId} requires primary tool ${capability.primaryTool ?? 'none'}, got ${String(step.tool)}`
       );
@@ -766,6 +789,16 @@ function collectDocumentBoundsErrors(
   bounds: VisualMicroPlanDocumentBounds
 ): string[] {
   const errors: string[] = [];
+  let clip: { left: number; top: number; right: number; bottom: number } | undefined;
+  let curveMode: 'region' | 'stroke' | undefined;
+  const checkPoint = (x: number, y: number, path: string): void => {
+    if (x < -1e-7 || x > bounds.width + 1e-7 || y < -1e-7 || y > bounds.height + 1e-7) {
+      errors.push(`${path} point (${x}, ${y}) is outside document ${bounds.documentId} bounds 0..${bounds.width} x 0..${bounds.height}`);
+    }
+    if (clip && (x < clip.left - 1e-7 || x > clip.right + 1e-7 || y < clip.top - 1e-7 || y > clip.bottom + 1e-7)) {
+      errors.push(`${path} point (${x}, ${y}) is outside clip_bounds [${clip.left}, ${clip.top}, ${clip.right}, ${clip.bottom}]`);
+    }
+  };
   const visit = (value: unknown, path: string): void => {
     if (Array.isArray(value)) {
       value.forEach((item, index) => visit(item, `${path}[${index}]`));
@@ -775,11 +808,13 @@ function collectDocumentBoundsErrors(
     const record = value as Record<string, unknown>;
     if (typeof record.x === 'number' && Number.isFinite(record.x)
       && typeof record.y === 'number' && Number.isFinite(record.y)) {
-      if (record.x < 0 || record.x > bounds.width || record.y < 0 || record.y > bounds.height) {
-        errors.push(
-          `${path} point (${record.x}, ${record.y}) is outside document ${bounds.documentId} bounds 0..${bounds.width} x 0..${bounds.height}`
-        );
-      }
+      checkPoint(record.x, record.y, path);
+    }
+    if (curveMode && Array.isArray(record.points)) {
+      try {
+        bezierCriticalPoints(record.points, curveMode === 'region' || record.closed === true)
+          .forEach(point => checkPoint(point.x, point.y, `${path}.curve`));
+      } catch (error) { errors.push(`${path}: ${error instanceof Error ? error.message : String(error)}`); }
     }
     if (['left', 'top', 'right', 'bottom'].every(key => typeof record[key] === 'number' && Number.isFinite(record[key]))) {
       const left = record.left as number;
@@ -798,7 +833,14 @@ function collectDocumentBoundsErrors(
   if (Array.isArray(args.steps)) {
     args.steps.forEach((step, index) => {
       if (!step || typeof step !== 'object' || Array.isArray(step)) return;
-      visit((step as Record<string, unknown>).args, `steps[${index}].args`);
+      const stepArgs = step.args as Record<string, unknown> | undefined;
+      curveMode = step.tool === 'photoshop_paint_regions' ? 'region'
+        : step.tool === 'photoshop_paint_strokes' ? 'stroke' : undefined;
+      const candidate = stepArgs?.clip_bounds as Record<string, unknown> | undefined;
+      clip = step.tool === 'photoshop_paint_regions' && candidate
+        && ['left', 'top', 'right', 'bottom'].every(key => typeof candidate[key] === 'number' && Number.isFinite(candidate[key]))
+        ? candidate as typeof clip : undefined;
+      visit(stepArgs, `steps[${index}].args`);
     });
   }
   return [...new Set(errors)];
@@ -912,12 +954,18 @@ function documentsFromListResult(result: ToolResult): Array<Record<string, unkno
  */
 export async function preflightVisualMicroPlanForExecution(
   input: Record<string, unknown>,
-  registry: ToolRegistry
+  registry: ToolRegistry,
+  documentBounds?: VisualMicroPlanDocumentBounds
 ): Promise<ToolResult | undefined> {
   const args = compileVisualMicroPlan(input);
   const documentId = args.document_id;
   if (typeof documentId !== 'number' || !Number.isSafeInteger(documentId) || documentId <= 0) {
     const validated = validateCompiledVisualMicroPlan(args, registry);
+    if (!validated.rejection && validated.plan) cachePreparedVisualPass(args, validated.plan);
+    return validated.rejection;
+  }
+  if (documentBounds && documentBounds.documentId === documentId) {
+    const validated = validateCompiledVisualMicroPlan(args, registry, { documentBounds });
     if (!validated.rejection && validated.plan) cachePreparedVisualPass(args, validated.plan);
     return validated.rejection;
   }
@@ -1227,10 +1275,12 @@ function methodExecutionError(plan: VisualMicroPlan, registry: ToolRegistry): st
     if (capability.availability === 'unavailable') {
       return `step "${step.id}" method_id=${step.methodId} is unavailable: ${capability.availabilityReason}`;
     }
-    if (capability.methodClass !== plan.methodClass) {
+    const uniformContinuousField = capability.id === 'continuous-color-field'
+      && step.tool === 'photoshop_fill_layer' && plan.methodClass === 'fill';
+    if (capability.methodClass !== plan.methodClass && !uniformContinuousField) {
       return `step "${step.id}" method_id=${step.methodId} uses method_class=${capability.methodClass}, incompatible with micro-plan method_class=${plan.methodClass}`;
     }
-    if (!capability.primaryTool || step.tool !== capability.primaryTool) {
+    if ((!capability.primaryTool || step.tool !== capability.primaryTool) && !uniformContinuousField) {
       return `step "${step.id}" method_id=${step.methodId} requires primary tool ${capability.primaryTool ?? 'none'}, got ${step.tool}`;
     }
     if (capability.preparationAnyOf?.length
@@ -1436,7 +1486,7 @@ function visualMicroPlanToolSchema(): Tool {
         },
         material_response: {
           type: 'object',
-          description: 'Qualitative causal material-response plan required at MATERIAL before texture/brush execution. Material is not inferred from texture density or noise.',
+          description: 'Optional qualitative material-response plan, validated when supplied. Exact-frame review determines material quality; texture density or noise cannot certify it.',
           properties: {
             response_role: { type: 'string', enum: [...MATERIAL_RESPONSE_ROLES] },
             components: {
@@ -1596,20 +1646,7 @@ function visualMicroPlanToolSchema(): Tool {
               required: ['scene_camera_model_id', 'scene_camera_revision', 'depth_role', 'expected_focus_role'],
               additionalProperties: false,
             },
-            attention_binding: {
-              type: 'object',
-              description: 'Durable binding from this semantic owner to one Art Director perceptual-hierarchy zone and the attention dimensions this pass consumes.',
-              properties: {
-                hierarchy_revision: { type: 'integer', minimum: 1 },
-                zone_id: { type: 'string' },
-                dimensions: {
-                  type: 'array', minItems: 1, maxItems: 4,
-                  items: { type: 'string', enum: ['contrast', 'detail', 'edge', 'chroma'] },
-                },
-              },
-              required: ['hierarchy_revision', 'zone_id', 'dimensions'],
-              additionalProperties: false,
-            },
+            attention_binding: ATTENTION_BINDING_SCHEMA,
             negative_space: {
               type: 'object',
               description: 'Durable structural opening/gap relation. Evidence must describe topology/attachment, not merely sampled background color.',
@@ -2321,13 +2358,30 @@ export function createVisualMicroPlanTools(registry: ToolRegistry, barrierDirect
             );
           }
           const stepOk = mutationResult.isError !== true;
-          statuses.push({ id: mutationStep.id, tool: mutationStep.tool, ok: stepOk });
           results[mutationStep.id] = normalizeToolResultForPlaceholders(mutationResult);
+          const childNotExecuted = normalizedResultRecord(results[mutationStep.id])?.execution === 'not-executed';
+          statuses.push({ id: mutationStep.id, tool: mutationStep.tool, ok: stepOk,
+            execution: stepOk ? 'completed' : childNotExecuted ? 'not-executed' : 'failed-or-uncertain' });
           if (!stepOk) {
             mutationOk = false;
             mutationFailureStep = mutationStep.id;
             break;
           }
+        }
+
+        const allVisualNotStarted = passActionOutcomes(plan, statuses, mutationFailureStep)
+          .filter(row => row.kind === 'visual-mutation').every(row => row.state === 'not-started');
+        if (!mutationOk && allVisualNotStarted && !sideEffectingPreparationCompleted) {
+          pendingByDocument.delete(plan.documentId);
+          return jsonResult({
+            ok: false, code: 'visual_mutation_not_executed', execution: 'not-executed', terminal: true,
+            visual_mutation_started: false, plan_id: plan.planId, document_id: plan.documentId,
+            failed_mutation_step: mutationFailureStep,
+            failure_category: normalizedFailureCode(results[mutationFailureStep!]),
+            mutation_results: Object.fromEntries(plan.mutationIndexes.map(index => plan.steps[index]!.id)
+              .filter(id => Object.prototype.hasOwnProperty.call(results, id)).map(id => [id, results[id]])),
+            steps: statuses, pass_execution: passExecutionProjection(plan, statuses, 'not-started', mutationFailureStep, results),
+          }, true);
         }
 
         // A mutation error may still have partially changed Photoshop (for example
@@ -2523,7 +2577,15 @@ export function createVisualMicroPlanTools(registry: ToolRegistry, barrierDirect
         ) {
           semanticContinuationLayers.push({
             step_id: 'logical-layer-continuation',
-            layer_id: plan.logicalLayer.layerId,
+            layer_id: (() => {
+              if (plan.methodClass !== 'filter') return plan.logicalLayer!.layerId;
+              const step = plan.steps[plan.mutationIndexes[0]!]!;
+              const result = results[step.id] as Record<string, any> | undefined;
+              const data = result?.details ?? result;
+              return result?.ok === true && data?.original_preserved === true && data.filter_mode === 'smart-filter'
+                && data.source_layer_id === plan.logicalLayer!.layerId && Number.isSafeInteger(data.layer_id) && data.layer_id > 0
+                ? data.layer_id : plan.logicalLayer!.layerId;
+            })(),
             ...(plan.logicalLayer.layerName ? { layer_name: plan.logicalLayer.layerName } : {}),
             hypothesis_id: plan.logicalLayer.hypothesisId,
             hypothesis: plan.logicalLayer.hypothesis,

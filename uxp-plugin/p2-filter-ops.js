@@ -38,13 +38,61 @@ function angle(value) {
 
 async function playFilter(params, commandName, descriptor, details) {
   return core.executeAsModal(
-    async () => {
+    async (executionContext) => {
       const doc = activeDocument(params);
-      await action.batchPlay(
-        [{ ...descriptor, _options: { dialogOptions: 'silent' } }],
-        { synchronousExecution: true }
-      );
-      return { ...details, context: contextFor(doc) };
+      const protectedBlur = ['gaussianBlur', 'motionBlur', 'smartBlur'].includes(descriptor._obj);
+      let sourceLayerId;
+      let historyId;
+      let committedHistoryUnit = false;
+      try {
+        if (protectedBlur) {
+          const selected = Array.from(doc.activeLayers ?? []);
+          const layer = selected[0];
+          if (!Number.isSafeInteger(params.layer_id) || params.layer_id <= 0) throw new Error('blur_target_layer_required: supply the exact layer_id');
+          if (selected.length !== 1 || layer?.id !== params.layer_id) throw new Error('blur_target_layer_mismatch: select only the exact target layer before filtering');
+          if (typeof params.radius !== 'number' || !Number.isFinite(params.radius) || params.radius < (descriptor._obj === 'motionBlur' ? 1 : 0.1)
+            || params.radius > (descriptor._obj === 'motionBlur' ? 999 : descriptor._obj === 'smartBlur' ? 100 : 250)) throw new Error('blur_radius_invalid');
+          if (descriptor._obj === 'motionBlur' && (typeof params.angle !== 'number' || !Number.isFinite(params.angle) || Math.abs(params.angle) > 360)) throw new Error('blur_angle_invalid');
+          if (descriptor._obj === 'smartBlur' && (typeof params.threshold !== 'number' || !Number.isFinite(params.threshold) || params.threshold < 0.1 || params.threshold > 100)) throw new Error('blur_threshold_invalid');
+          sourceLayerId = layer.id;
+          const smartKind = photoshop.constants.LayerKind.SMARTOBJECT;
+          if (layer.kind !== smartKind && layer.kind !== photoshop.constants.LayerKind.NORMAL) throw new Error('blur_source_kind_unsupported: expected a raster layer or embedded Smart Object');
+          // Conversion and filter are one bounded Photoshop undo unit. Failure restores the source.
+          historyId = await executionContext.hostControl.suspendHistory({ documentID: doc.id, name: commandName });
+          if (layer.kind !== smartKind) {
+            const converted = await action.batchPlay([{ _obj: 'newPlacedLayer', _options: { dialogOptions: 'silent' } }], { synchronousExecution: true });
+            if (converted.some(row => row?._obj === 'error')) throw new Error('blur_smart_object_conversion_failed');
+          }
+          const current = Array.from(doc.activeLayers ?? []);
+          if (current.length !== 1 || current[0].kind !== smartKind) throw new Error('blur_original_preservation_failed: Smart Object required; raster fallback is forbidden');
+        }
+        const results = await action.batchPlay(
+          [{ ...descriptor, _options: { dialogOptions: 'silent' } }],
+          { synchronousExecution: true }
+        );
+        if (results.some(row => row?._obj === 'error')) throw new Error('filter_execution_failed: ' + (results.find(row => row?._obj === 'error')?.message ?? 'Photoshop rejected filter'));
+        const current = Array.from(doc.activeLayers ?? []);
+        if (protectedBlur && (current.length !== 1 || current[0].kind !== photoshop.constants.LayerKind.SMARTOBJECT)) throw new Error('blur_original_preservation_failed: reconcile without replay');
+        if (protectedBlur) {
+          const mask = await action.batchPlay([{ _obj: 'get', _target: [{ _property: 'hasFilterMask' }, { _ref: 'layer', _id: current[0].id }], _options: { dialogOptions: 'silent' } }], { synchronousExecution: true });
+          if (mask[0]?.hasFilterMask !== true || mask[0]?.filterMaskEnabled === false) throw new Error('blur_filter_mask_unconfirmed: a present enabled Smart Filter mask is required');
+        }
+        if (historyId !== undefined) {
+          // A successful suspendHistory/resumeHistory transaction commits the
+          // conversion (when needed) and Smart Filter as ONE native undo unit.
+          // Guard must not infer this from the number of underlying batchPlay calls.
+          await executionContext.hostControl.resumeHistory(historyId, true);
+          historyId = undefined;
+          committedHistoryUnit = true;
+        }
+        return { ...details, ...(protectedBlur ? { original_preserved: true, smart_filter_mask: true, filter_mode: 'smart-filter', source_layer_id: sourceLayerId, layer_id: current[0].id, ...(committedHistoryUnit ? { history_steps: 1 } : {}) } : {}), context: contextFor(doc) };
+      } catch (error) {
+        if (historyId !== undefined) {
+          try { await executionContext.hostControl.resumeHistory(historyId, false); }
+          catch (rollbackError) { throw new Error('guarded_blur_rollback_failed: reconcile without replay; ' + rollbackError.message); }
+        }
+        throw error;
+      }
     },
     { commandName }
   );
@@ -146,11 +194,14 @@ async function applySmartBlur(params = {}) {
 
 async function tryHandleP2FilterOperation(cmdAction, params = {}) {
   switch (cmdAction) {
+    case 'apply_guarded_gaussian_blur':
     case 'apply_gaussian_blur': return { handled: true, data: await applyGaussianBlur(params) };
     case 'apply_high_pass': return { handled: true, data: await applyHighPass(params) };
+    case 'apply_guarded_motion_blur':
     case 'apply_motion_blur': return { handled: true, data: await applyMotionBlur(params) };
     case 'apply_noise': return { handled: true, data: await applyNoise(params) };
     case 'apply_sharpen': return { handled: true, data: await applySharpen(params) };
+    case 'apply_guarded_smart_blur':
     case 'apply_smart_blur': return { handled: true, data: await applySmartBlur(params) };
     default: return { handled: false };
   }

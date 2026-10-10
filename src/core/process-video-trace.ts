@@ -5,6 +5,9 @@ import { fileURLToPath } from 'node:url';
 
 export const PROCESS_VIDEO_TRACE_PROTOCOL = 'photoshop.guard.process_video_trace.v1';
 export const PROCESS_VIDEO_TRACE_SETTINGS_PROTOCOL = 'paintpilot.process_video_trace.settings.v1';
+export const PROCESS_VIDEO_TRACE_FPS = 120;
+export const PROCESS_VIDEO_TRACE_SLOWDOWN = 4;
+export const PROCESS_VIDEO_TRACE_OUTPUT_FPS = PROCESS_VIDEO_TRACE_FPS / PROCESS_VIDEO_TRACE_SLOWDOWN;
 
 const DEFAULT_PROCESS_VIDEO_TRACE_SETTINGS_PATH = fileURLToPath(
   new URL('../../.photoshop-runtime/process-video-trace-settings.json', import.meta.url)
@@ -22,6 +25,7 @@ export interface ProcessTraceEntry {
   clip_path: string;
   started_at: string;
   stopped_at: string;
+  playback_duration_ms?: number;
   outcome_operation_id?: string;
   outcome_note?: string;
 }
@@ -33,6 +37,7 @@ export interface ProcessTraceManifest {
 
 export interface ProcessVideoCapture {
   operation_id: string;
+  sequence?: number;
   clip_path: string;
   absolute_clip_path: string;
   started_at: string;
@@ -187,7 +192,7 @@ export function setProcessVideoTraceEnabled(
 }
 
 export function processTraceDirectory(projectDirectory: string): string {
-  return path.join(projectDirectory, 'video-trace');
+  return path.join(projectDirectory, 'export');
 }
 
 export function processTraceManifestPath(projectDirectory: string): string {
@@ -212,18 +217,23 @@ export function traceArtisticIntent(operation: Record<string, unknown>): string 
 
 export function appendProcessTraceEntry(
   projectDirectory: string,
-  input: Omit<ProcessTraceEntry, 'protocol' | 'sequence'>
+  input: Omit<ProcessTraceEntry, 'protocol' | 'sequence'> & { sequence?: number }
 ): ProcessTraceEntry {
   const manifest = readProcessTraceManifest(projectDirectory);
   const existing = manifest.entries.find(entry => entry.operation_id === input.operation_id);
   if (existing) return existing;
+  const suppliedSequence = Number.isSafeInteger(input.sequence) && Number(input.sequence) > 0
+    ? Number(input.sequence)
+    : undefined;
   const entry: ProcessTraceEntry = {
     protocol: PROCESS_VIDEO_TRACE_PROTOCOL,
-    sequence: manifest.entries.length + 1,
+    sequence: suppliedSequence !== undefined
+      ? suppliedSequence
+      : manifest.entries.length + 1,
     ...input,
   };
   const traceDir = processTraceDirectory(projectDirectory);
-  fs.mkdirSync(path.join(traceDir, 'clips'), { recursive: true });
+  fs.mkdirSync(path.join(traceDir, 'videos'), { recursive: true });
   const manifestPath = processTraceManifestPath(projectDirectory);
   const tmp = manifestPath + '.tmp';
   fs.writeFileSync(tmp, JSON.stringify({
@@ -240,6 +250,12 @@ export function deterministicTraceAssemblyInputs(projectDirectory: string): Proc
 }
 
 function traceDurationMs(entry: ProcessTraceEntry): number {
+  if (entry.playback_duration_ms !== undefined) {
+    if (!Number.isFinite(entry.playback_duration_ms) || entry.playback_duration_ms <= 0) {
+      throw new Error(`process_video_trace_duration_invalid:${entry.operation_id}`);
+    }
+    return entry.playback_duration_ms;
+  }
   const start = Date.parse(entry.started_at);
   const stop = Date.parse(entry.stopped_at);
   if (!Number.isFinite(start) || !Number.isFinite(stop) || stop <= start) {
@@ -306,11 +322,14 @@ export function buildProcessTraceAssemblyPlan(
 }
 
 export function processTraceAssemblyFfmpegArgs(plan: ProcessTraceAssemblyPlan): string[] {
+  // Escape first for filter options, then for the enclosing filter graph.
+  const subtitlesPath = plan.subtitles_path.replace(/\\/g, '/')
+    .replace(/[':]/g, '\\$&').replace(/[\\'[\],;]/g, '\\$&');
   return [
     '-hide_banner', '-loglevel', 'error', '-y',
     '-f', 'concat', '-safe', '0', '-i', plan.concat_list_path,
-    '-vf', `subtitles=${plan.subtitles_path.replace(/\\/g, '/').replace(/:/g, '\\:')}`,
-    '-r', '30', '-c:v', 'libx264', '-preset', 'veryfast', '-pix_fmt', 'yuv420p',
+    '-vf', `subtitles=filename=${subtitlesPath}`,
+    '-r', String(PROCESS_VIDEO_TRACE_OUTPUT_FPS), '-c:v', 'libx264', '-preset', 'veryfast', '-pix_fmt', 'yuv420p',
     '-an', plan.output_path,
   ];
 }
@@ -357,19 +376,19 @@ export function processVideoFfmpegArgs(captureTarget: string, absoluteClip: stri
       '-hide_banner', '-loglevel', 'error', '-y',
       '-progress', 'pipe:1', '-stats_period', '0.05', '-nostats',
       '-f', 'lavfi',
-      '-i', `gfxcapture=hwnd=${hwnd.toString()}:capture_cursor=0:capture_border=0:max_framerate=30`,
+      '-i', `gfxcapture=hwnd=${hwnd.toString()}:capture_cursor=0:capture_border=0:max_framerate=${PROCESS_VIDEO_TRACE_FPS}`,
       '-vf', 'hwdownload,format=bgra,format=yuv420p',
-      '-r', '30', '-c:v', 'libx264', '-preset', 'veryfast', '-tune', 'zerolatency',
-      '-bf', '0', '-g', '30', '-sc_threshold', '0', '-pix_fmt', 'yuv420p',
+      '-r', String(PROCESS_VIDEO_TRACE_FPS), '-c:v', 'libx264', '-preset', 'veryfast', '-tune', 'zerolatency',
+      '-bf', '0', '-g', String(PROCESS_VIDEO_TRACE_FPS), '-sc_threshold', '0', '-pix_fmt', 'yuv420p',
       '-an', absoluteClip,
     ];
   }
   return [
     '-hide_banner', '-loglevel', 'error', '-y',
     '-progress', 'pipe:1', '-stats_period', '0.05', '-nostats',
-    '-f', 'gdigrab', '-framerate', '30', '-i', captureTarget,
+    '-f', 'gdigrab', '-framerate', String(PROCESS_VIDEO_TRACE_FPS), '-i', captureTarget,
     '-c:v', 'libx264', '-preset', 'veryfast', '-tune', 'zerolatency',
-    '-bf', '0', '-g', '30', '-sc_threshold', '0', '-pix_fmt', 'yuv420p', absoluteClip,
+    '-bf', '0', '-g', String(PROCESS_VIDEO_TRACE_FPS), '-sc_threshold', '0', '-pix_fmt', 'yuv420p', absoluteClip,
   ];
 }
 
@@ -431,7 +450,17 @@ function probeFfmpegReadiness(
   executable: string,
   options: { requireGfxCapture?: boolean } = {}
 ): ProcessVideoFfmpegReadiness {
-  const result = spawnSync(executable, ['-version'], {
+  let resolvedExecutable = executable;
+  if (process.platform === 'win32' && !path.isAbsolute(executable) && !/[\\/]/.test(executable)) {
+    const where = spawnSync('where.exe', [executable], {
+      encoding: 'utf8',
+      windowsHide: true,
+      timeout: 3000,
+    });
+    const firstMatch = cleanText(where.stdout)?.split(/\r?\n/, 1)[0]?.trim();
+    if (!where.error && where.status === 0 && firstMatch) resolvedExecutable = firstMatch;
+  }
+  const result = spawnSync(resolvedExecutable, ['-version'], {
     encoding: 'utf8',
     windowsHide: true,
     timeout: 3000,
@@ -439,20 +468,20 @@ function probeFfmpegReadiness(
   if (result.error) {
     const code = (result.error as NodeJS.ErrnoException).code;
     return code === 'ENOENT'
-      ? { status: 'not-found', executable, error: result.error.message }
-      : { status: 'failed-to-start', executable, error: result.error.message };
+      ? { status: 'not-found', executable: resolvedExecutable, error: result.error.message }
+      : { status: 'failed-to-start', executable: resolvedExecutable, error: result.error.message };
   }
   if (result.status !== 0) {
     const detail = cleanText(result.stderr)?.replace(/\s+/g, ' ').slice(-500);
     return {
       status: 'failed-to-start',
-      executable,
+      executable: resolvedExecutable,
       error: detail ?? `ffmpeg_exit_${String(result.status ?? 'unknown')}`,
     };
   }
   const version = cleanText(result.stdout)?.split(/\r?\n/, 1)[0];
   if (options.requireGfxCapture) {
-    const gfx = spawnSync(executable, ['-hide_banner', '-h', 'filter=gfxcapture'], {
+    const gfx = spawnSync(resolvedExecutable, ['-hide_banner', '-h', 'filter=gfxcapture'], {
       encoding: 'utf8',
       windowsHide: true,
       timeout: 3000,
@@ -462,10 +491,10 @@ function probeFfmpegReadiness(
       const detail = gfx.error?.message
         ?? cleanText(help)?.replace(/\s+/g, ' ').slice(-500)
         ?? 'gfxcapture_unavailable';
-      return { status: 'failed-to-start', executable, error: `gfxcapture_unavailable:${detail}` };
+      return { status: 'failed-to-start', executable: resolvedExecutable, error: `gfxcapture_unavailable:${detail}` };
     }
   }
-  return { status: 'ready', executable, ...(version ? { version } : {}) };
+  return { status: 'ready', executable: resolvedExecutable, ...(version ? { version } : {}) };
 }
 
 export function probeProcessVideoTraceReadiness(options: {
@@ -519,6 +548,7 @@ export function startProcessVideoCapture(
   operationId: string,
   options: {
     enabled?: boolean;
+    sequence?: number;
     ffmpegPath?: string;
     captureTarget?: string;
     discoverCaptureTarget?: () => string;
@@ -531,8 +561,10 @@ export function startProcessVideoCapture(
     if (manifest.entries.some(entry => entry.operation_id === operationId)) {
       return { enabled: true, warning: 'process_video_trace_operation_already_recorded' };
     }
-    const sequence = manifest.entries.length + 1;
-    const relativeClip = `video-trace/clips/${String(sequence).padStart(4, '0')}-${safeOperationFilePart(operationId)}.mp4`;
+    const sequence = Number.isSafeInteger(options.sequence) && Number(options.sequence) > 0
+      ? Number(options.sequence)
+      : manifest.entries.length + 1;
+    const relativeClip = `export/videos/${String(sequence).padStart(4, '0')}_${safeOperationFilePart(operationId)}.mp4`;
     const absoluteClip = path.join(projectDirectory, ...relativeClip.split('/'));
     fs.mkdirSync(path.dirname(absoluteClip), { recursive: true });
     const executable = options.ffmpegPath ?? process.env.PAINTPILOT_FFMPEG_PATH ?? 'ffmpeg';
@@ -546,7 +578,7 @@ export function startProcessVideoCapture(
     });
     const recorderStartedAt = new Date().toISOString();
     const capture: ProcessVideoCapture = {
-      operation_id: operationId, clip_path: relativeClip, absolute_clip_path: absoluteClip,
+      operation_id: operationId, sequence, clip_path: relativeClip, absolute_clip_path: absoluteClip,
       started_at: recorderStartedAt, recorder_started_at: recorderStartedAt,
       capture_target: target, process: child, ffmpeg_path: executable,
       progress_frame_count: 0, diagnostic_stderr: '',
@@ -708,6 +740,7 @@ export async function prepareProcessVideoCapture(
   operationId: string,
   options: {
     enabled?: boolean;
+    sequence?: number;
     ffmpegPath?: string;
     captureTarget?: string;
     discoverCaptureTarget?: () => string;
@@ -718,6 +751,7 @@ export async function prepareProcessVideoCapture(
   if (!enabled) return { enabled: false };
   const started = startProcessVideoCapture(projectDirectory, operationId, {
     enabled: true,
+    sequence: options.sequence,
     ffmpegPath: options.ffmpegPath,
     captureTarget: options.captureTarget,
     discoverCaptureTarget: options.discoverCaptureTarget,
@@ -752,21 +786,26 @@ function validateProcessVideoClip(capture: ProcessVideoCapture): string | undefi
   return `process_video_trace_clip_invalid:${detail}`;
 }
 
-function trimProcessVideoClipToAction(capture: ProcessVideoCapture): string | undefined {
+function trimProcessVideoClipToAction(capture: ProcessVideoCapture): { duration_ms?: number; warning?: string } {
   const startFrame = capture.action_start_frame_count;
   const endFrame = capture.action_end_frame_count;
   if (typeof startFrame !== 'number' || typeof endFrame !== 'number' || endFrame <= startFrame) {
-    return 'process_video_trace_action_frame_bounds_invalid';
+    return { warning: 'process_video_trace_action_frame_bounds_invalid' };
   }
   const executable = capture.ffmpeg_path ?? process.env.PAINTPILOT_FFMPEG_PATH ?? 'ffmpeg';
   const trimmedPath = `${capture.absolute_clip_path}.trimmed.mp4`;
-  const filter = `trim=start_frame=${Math.max(0, Math.floor(startFrame))}:end_frame=${Math.max(1, Math.floor(endFrame))},setpts=PTS-STARTPTS`;
+  const firstFrame = Math.max(0, Math.floor(startFrame));
+  const lastFrame = Math.max(1, Math.floor(endFrame));
+  // Capture is CFR at 120 fps; present each retained frame once at 30 fps.
+  // Use frame count, not recorder/encoding wall time, for playback and captions.
+  const filter = `trim=start_frame=${firstFrame}:end_frame=${lastFrame},setpts=N/(${PROCESS_VIDEO_TRACE_OUTPUT_FPS}*TB)`;
   const result = spawnSync(executable, [
     '-hide_banner', '-loglevel', 'error', '-y',
     '-i', capture.absolute_clip_path,
     '-vf', filter,
+    '-r', String(PROCESS_VIDEO_TRACE_OUTPUT_FPS),
     '-c:v', 'libx264', '-preset', 'veryfast', '-tune', 'zerolatency',
-    '-bf', '0', '-g', '30', '-sc_threshold', '0', '-pix_fmt', 'yuv420p', '-an',
+    '-bf', '0', '-g', String(PROCESS_VIDEO_TRACE_OUTPUT_FPS), '-sc_threshold', '0', '-pix_fmt', 'yuv420p', '-an',
     trimmedPath,
   ], {
     encoding: 'utf8', windowsHide: true, timeout: 10_000,
@@ -776,11 +815,11 @@ function trimProcessVideoClipToAction(capture: ProcessVideoCapture): string | un
     const detail = result.error?.message
       ?? cleanText(`${result.stdout ?? ''}\n${result.stderr ?? ''}`)?.replace(/\s+/g, ' ').slice(-1000)
       ?? `ffmpeg_exit_${String(result.status ?? 'unknown')}`;
-    return `process_video_trace_trim_failed:${detail}`;
+    return { warning: `process_video_trace_trim_failed:${detail}` };
   }
   fs.rmSync(capture.absolute_clip_path, { force: true });
   fs.renameSync(trimmedPath, capture.absolute_clip_path);
-  return undefined;
+  return { duration_ms: (lastFrame - firstFrame) * 1000 / PROCESS_VIDEO_TRACE_OUTPUT_FPS };
 }
 
 export async function stopProcessVideoCapture(
@@ -788,52 +827,65 @@ export async function stopProcessVideoCapture(
   capture: ProcessVideoCapture,
   operation: Record<string, unknown>,
   options: { kind?: ProcessTraceKind; settleMs?: number; outcomeNote?: string } = {}
-): Promise<{ entry?: ProcessTraceEntry; warning?: string }> {
+): Promise<{ entry?: ProcessTraceEntry; warning?: string; timing: Record<string, number | null> }> {
+  const timing: Record<string, number | null> = {
+    recorder_settle_ms: null, recorder_stop_ms: null, recorder_postprocess_ms: null,
+  };
+  const measured = async <T>(field: string, run: () => T | Promise<T>): Promise<T> => {
+    const started = Date.now();
+    try { return await run(); } finally { timing[field] = Date.now() - started; }
+  };
   try {
     capture.action_stopped_at = new Date().toISOString();
     const settleMs = Math.max(0, Math.min(5000, Number(options.settleMs ?? process.env.PAINTPILOT_VIDEO_SETTLE_MS ?? 1500)));
     const actionBaseline = capture.action_start_frame_count;
-    if (settleMs) {
-      if (typeof actionBaseline === 'number') {
-        await waitForCaptureFrameAdvance(capture, actionBaseline, settleMs);
-      } else {
-        await new Promise(resolve => setTimeout(resolve, settleMs));
+    await measured('recorder_settle_ms', async () => {
+      if (settleMs) {
+        if (typeof actionBaseline === 'number') {
+          await waitForCaptureFrameAdvance(capture, actionBaseline, settleMs);
+        } else {
+          await new Promise(resolve => setTimeout(resolve, settleMs));
+        }
       }
-    }
+    });
     capture.action_end_frame_count = capture.progress_frame_count ?? 0;
     if (typeof actionBaseline === 'number' && capture.action_end_frame_count <= actionBaseline) {
-      await discardProcessVideoCapture(capture);
-      return { warning: `process_video_trace_no_action_frame${processVideoDiagnosticSuffix(capture)}` };
+      await measured('recorder_stop_ms', () => discardProcessVideoCapture(capture));
+      return { timing, warning: `process_video_trace_no_action_frame${processVideoDiagnosticSuffix(capture)}` };
     }
     // FFmpeg's interactive `q` command must remain readable from the pipe long
     // enough for gfxcapture/lavfi to process it. Ending stdin in the same call
     // can race the command and leave the capture process running with only an
     // unfinalized MP4 header. Keep the pipe open; process exit closes it.
-    const exited = await stopCaptureProcess(capture);
+    const exited = await measured('recorder_stop_ms', () => stopCaptureProcess(capture));
     if (!exited) {
       const wakeDetail = capture.wake_warning ? `:${capture.wake_warning}` : '';
-      return { warning: `process_video_trace_ffmpeg_stop_timeout${wakeDetail}${processVideoDiagnosticSuffix(capture)}` };
+      return { timing, warning: `process_video_trace_ffmpeg_stop_timeout${wakeDetail}${processVideoDiagnosticSuffix(capture)}` };
     }
-    if (!fs.existsSync(capture.absolute_clip_path) || fs.statSync(capture.absolute_clip_path).size === 0) {
-      return { warning: 'process_video_trace_clip_missing_or_empty' };
-    }
-    const invalidWarning = capture.ffmpeg_path ? validateProcessVideoClip(capture) : undefined;
-    if (invalidWarning) return { warning: `${invalidWarning}${processVideoDiagnosticSuffix(capture)}` };
-    const trimWarning = capture.ffmpeg_path ? trimProcessVideoClipToAction(capture) : undefined;
-    if (trimWarning) return { warning: `${trimWarning}${processVideoDiagnosticSuffix(capture)}` };
-    const trimmedInvalidWarning = capture.ffmpeg_path ? validateProcessVideoClip(capture) : undefined;
-    if (trimmedInvalidWarning) return { warning: `${trimmedInvalidWarning}${processVideoDiagnosticSuffix(capture)}` };
-    const entry = appendProcessTraceEntry(projectDirectory, {
-      operation_id: capture.operation_id,
-      kind: options.kind ?? 'attempt',
-      artistic_intent: traceArtisticIntent(operation),
-      clip_path: capture.clip_path,
-      started_at: capture.started_at,
-      stopped_at: new Date().toISOString(),
-      ...(options.outcomeNote ? { outcome_note: options.outcomeNote } : {}),
+    return await measured('recorder_postprocess_ms', () => {
+      if (!fs.existsSync(capture.absolute_clip_path) || fs.statSync(capture.absolute_clip_path).size === 0) {
+        return { timing, warning: 'process_video_trace_clip_missing_or_empty' };
+      }
+      const invalidWarning = capture.ffmpeg_path ? validateProcessVideoClip(capture) : undefined;
+      if (invalidWarning) return { timing, warning: `${invalidWarning}${processVideoDiagnosticSuffix(capture)}` };
+      const trimmed = capture.ffmpeg_path ? trimProcessVideoClipToAction(capture) : undefined;
+      if (trimmed?.warning) return { timing, warning: `${trimmed.warning}${processVideoDiagnosticSuffix(capture)}` };
+      const trimmedInvalidWarning = capture.ffmpeg_path ? validateProcessVideoClip(capture) : undefined;
+      if (trimmedInvalidWarning) return { timing, warning: `${trimmedInvalidWarning}${processVideoDiagnosticSuffix(capture)}` };
+      const entry = appendProcessTraceEntry(projectDirectory, {
+        sequence: capture.sequence ?? readProcessTraceManifest(projectDirectory).entries.length + 1,
+        operation_id: capture.operation_id,
+        kind: options.kind ?? 'attempt',
+        artistic_intent: traceArtisticIntent(operation),
+        clip_path: capture.clip_path,
+        started_at: capture.started_at,
+        stopped_at: new Date().toISOString(),
+        ...(trimmed?.duration_ms !== undefined ? { playback_duration_ms: trimmed.duration_ms } : {}),
+        ...(options.outcomeNote ? { outcome_note: options.outcomeNote } : {}),
+      });
+      return { entry, timing };
     });
-    return { entry };
   } catch (error) {
-    return { warning: `process_video_trace_stop_failed:${String((error as Error)?.message ?? error)}` };
+    return { timing, warning: `process_video_trace_stop_failed:${String((error as Error)?.message ?? error)}` };
   }
 }

@@ -1,12 +1,14 @@
 // @ts-nocheck
+import { deriveExecutionOutcome } from './artistic-contract.js';
 const LONG_RUNNING_TOOLS = [
   /^photoshop_execute_visual_microplan$/,
   /^photoshop_paint_(?:strokes|dabs|regions)$/,
   /^photoshop_neural_/,
 ];
 
-function isVisualTool(tool = '') {
-  return /(?:paint|fill_layer|undo|visual_microplan|set_layer_opacity|transform|neural)/.test(tool);
+function isVisualOperation(operation = {}) {
+  return typeof operation.visual === 'boolean' ? operation.visual
+    : /(?:paint|fill_layer|undo|visual_microplan|set_layer_opacity|transform|neural|blur|mask)/.test(operation.tool ?? '');
 }
 
 function hasLocalFocus(operation = {}) {
@@ -16,60 +18,82 @@ function hasLocalFocus(operation = {}) {
     && operation.args.steps.some(step => step?.tool === 'photoshop_get_preview' && step?.args?.focus_region);
 }
 
-function nextStep(operation = {}, state = 'running') {
-  if (state === 'failed' || state === 'uncertain') return 'проверить состояние Photoshop и восстановить контекст без повторного запуска mutation';
-  if (state === 'before_preview') return 'после фиксации исходной области выполнить запланированную mutation';
+function nextStep(operation = {}, state = 'running', language = 'ru') {
+  const copy = (ru, en) => language === 'ru' ? ru : en;
+  if (state === 'not-executed') return copy('исправить отклонённый запрос; операция в Photoshop не выполнялась', 'correct the rejected request; Photoshop did not execute the operation');
+  if (state === 'failed' || state === 'uncertain') return copy('восстановить подтверждённое состояние без повторного запуска действия', 'reconcile confirmed state without replaying the mutation');
+  if (state === 'before_preview') return copy('после фиксации исходной области выполнить запланированное действие', 'execute the planned mutation after recording the starting frame');
   if (state === 'after_preview') return hasLocalFocus(operation)
-    ? 'сравнить локальный before/after и вынести визуальный verdict'
-    : 'проверить итоговый preview и вынести визуальный verdict';
+    ? copy('сравнить исходный и итоговый кадры области и оценить результат', 'compare the local before/after frames and assess the result')
+    : copy('проверить итоговый кадр и оценить результат', 'inspect the final frame and assess the result');
   if (state === 'completed') {
-    return isVisualTool(operation.tool)
-      ? 'визуально классифицировать результат и решить: принять, скорректировать или откатить'
-      : 'использовать результат для следующего решения по задаче';
+    if (operation.verdict?.disposition === 'rollback' && operation.rolled_back !== true) return copy('завершить ограниченный откат отвергнутого прохода', 'complete bounded rollback of the rejected pass');
+    if (operation.verdict) return copy('продолжить по записанному наблюдению и оставшимся недостаткам', 'continue from the recorded observation and remaining defects');
+    return isVisualOperation(operation)
+      ? copy('оценить изображение и решить: принять, скорректировать или откатить', 'assess the image and decide whether to accept, correct or roll back')
+      : copy('использовать результат для следующего решения по задаче', 'use the result for the next task decision');
   }
-  if (hasLocalFocus(operation)) return 'локальный before/after preview и визуальная проверка именно этой области';
-  if (isVisualTool(operation.tool)) return 'preview результата и визуальный verdict перед следующей mutation';
-  if (operation.tool === 'photoshop_get_preview') return 'визуально проверить полученный кадр';
-  if (operation.tool === 'photoshop_save_document') return 'подтвердить checkpoint и продолжить с сохранённого состояния';
-  return 'оценить результат и выбрать следующий осмысленный шаг';
+  if (hasLocalFocus(operation)) return copy('сравнить исходный и итоговый кадры именно этой области', 'compare the local before/after frames');
+  if (isVisualOperation(operation)) return copy('получить итоговый кадр и оценить его перед следующим действием', 'obtain and assess the final frame before the next mutation');
+  if (operation.tool === 'photoshop_get_preview') return copy('визуально проверить полученный кадр', 'inspect the delivered frame');
+  if (operation.tool === 'photoshop_save_document') return copy('подтвердить сохранение и продолжить с сохранённого состояния', 'confirm the checkpoint and continue from saved state');
+  return copy('оценить результат и выбрать следующий осмысленный шаг', 'assess the result and select the next useful step');
 }
 
-function photoshopState(operation = {}, state = 'running') {
-  const visual = isVisualTool(operation.tool);
-  if (state === 'queued') return visual ? 'mutation поставлена в очередь' : 'операция поставлена в очередь';
-  if (state === 'starting') return visual ? 'mutation запускается' : 'операция запускается';
-  if (state === 'before_preview') return 'снимается исходный before preview';
-  if (state === 'mutation') return visual ? 'mutation выполняется' : 'операция выполняется';
-  if (state === 'after_preview') return 'снимается обязательный after preview';
-  if (state === 'running') return visual ? 'mutation выполняется' : 'операция выполняется';
-  if (state === 'awaiting_preview') return 'mutation завершена; захватывается проверочный preview';
-  if (state === 'completed') return visual ? 'mutation и обязательная фиксация результата завершены' : 'операция завершена';
-  if (state === 'failed') return 'операция завершилась ошибкой';
-  if (state === 'uncertain') return 'результат выполнения не подтверждён';
-  return String(state || 'операция выполняется');
+function photoshopState(operation = {}, state = 'running', language = 'ru') {
+  const copy = (ru, en) => language === 'ru' ? ru : en;
+  if (state === 'not-executed') return copy('операция не выполнялась', 'operation was not executed');
+  if (state === 'queued') return copy('операция поставлена в очередь', 'operation is queued');
+  if (state === 'starting') return copy('операция запускается', 'operation is starting');
+  if (state === 'before_preview') return copy('снимается исходный кадр', 'capturing the starting frame');
+  if (state === 'after_preview') return copy('снимается итоговый кадр', 'capturing the final frame');
+  if (state === 'awaiting_preview') return copy('выполнение завершено; итоговый кадр ещё нужен', 'execution completed; the final frame is still required');
+  if (state === 'completed') return isVisualOperation(operation)
+    ? operation.preview
+      ? copy('выполнение завершено; итоговый кадр записан', 'execution completed; final frame recorded')
+      : copy('выполнение завершено; итоговый кадр не подтверждён', 'execution completed; final frame is unconfirmed')
+    : copy('операция завершена', 'operation completed');
+  if (state === 'failed') return copy('операция завершилась ошибкой', 'operation failed');
+  if (state === 'uncertain') return copy('результат выполнения не подтверждён', 'execution outcome is unconfirmed');
+  return copy('операция выполняется', 'operation is running');
 }
 
-export function operationNarrative(operation, state = 'running') {
-  const summary = String(operation?.summary ?? '').trim() || 'выполняю следующий шаг в Photoshop';
-  const purpose = String(operation?.purpose ?? '').trim() || 'продвинуть текущую визуальную задачу';
-  const progressId = `photoshop-operation:${String(operation?.id ?? 'unknown')}`;
+export function formatOperationNarrative(narrative, language = narrative.language ?? 'ru') {
+  const ru = language === 'ru';
+  return [
+    `${ru ? 'Сейчас' : 'Now'}: ${narrative.now}`,
+    ...(narrative.why && narrative.why !== narrative.now ? [`${ru ? 'Зачем' : 'Why'}: ${narrative.why}`] : []),
+    `Photoshop: ${narrative.photoshop}`,
+    ...(narrative.observed ? [`${ru ? 'Наблюдение' : 'Observed'}: ${narrative.observed}`] : []),
+    ...(narrative.unresolved_basis ? [`${ru ? 'Нерешённое визуальное основание' : 'Unresolved visual basis'}: ${narrative.unresolved_basis}`] : []),
+    `${ru ? 'Следом' : 'Next'}: ${narrative.next}`,
+  ].join('\n');
+}
+
+export function operationNarrative(operation, state = 'running', presentation = {}) {
+  const summary = String(operation?.verdict?.artistic_commentary ?? operation?.artistic_commentary ?? operation?.summary ?? '').trim();
+  const language = ['ru', 'en'].includes(presentation.language) ? presentation.language
+    : presentation.language === 'auto' ? /[А-Яа-яЁё]/.test(summary) ? 'ru' : 'en' : 'ru';
+  const purpose = String(operation?.purpose ?? '').trim();
+  const genericPurpose = /^Execute (?:one bounded compact Photoshop operation|the requested bounded Photoshop pass)\.$/.test(purpose);
+  const execution = deriveExecutionOutcome(operation ?? {});
+  if (state === 'completed' && execution !== 'completed') state = execution;
+  const operationId = operation?.id ?? operation?.request_key ?? null;
+  const progressId = `photoshop-operation:${String(operationId ?? 'unknown')}`;
   const narrative = {
     progress_id: progressId,
-    operation_id: operation?.id ?? null,
+    operation_id: operationId,
+    language,
     state,
-    now: summary,
-    why: purpose,
-    photoshop: photoshopState(operation, state),
-    next: nextStep(operation, state),
+    now: summary || (language === 'ru' ? 'выполняю следующий шаг в Photoshop' : 'performing the next Photoshop step'),
+    why: genericPurpose ? summary : purpose,
+    photoshop: photoshopState(operation, state, language),
+    next: nextStep(operation, state, language),
+    ...(typeof operation?.verdict?.observed_change === 'string' ? { observed: operation.verdict.observed_change } : {}),
   };
   return {
     ...narrative,
-    text: [
-      `Сейчас: ${narrative.now}`,
-      `Почему: ${narrative.why}`,
-      `Photoshop: ${narrative.photoshop}`,
-      `Следом: ${narrative.next}`,
-    ].join('\n'),
+    text: formatOperationNarrative(narrative),
   };
 }
 
@@ -116,8 +140,8 @@ export function shouldUseAsyncJob(operation, history = []) {
   return true;
 }
 
-export function progressPayload(operation, state = 'running') {
-  const narrative = operationNarrative(operation, state);
+export function progressPayload(operation, state = 'running', presentation = {}) {
+  const narrative = operationNarrative(operation, state, presentation);
   return {
     protocol: 'operation.progress.v1',
     progress_id: narrative.progress_id,
@@ -129,7 +153,7 @@ export function progressPayload(operation, state = 'running') {
 
 // Compatibility surface for COS builds that know how to promote this structured
 // result into a native host progress row. Safety does not depend on this alias.
-export function hostProgressPayload(operation, state = 'running') {
-  const progress = progressPayload(operation, state);
+export function hostProgressPayload(operation, state = 'running', presentation = {}) {
+  const progress = progressPayload(operation, state, presentation);
   return { ...progress, protocol: 'cos.host_progress.v1' };
 }

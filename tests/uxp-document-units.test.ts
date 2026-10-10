@@ -25,8 +25,8 @@ describe('UXP document dimensions use canvas pixels', () => {
     expect(info.height).toBeCloseTo(1750);
     expect(bridge.documentPixelDimension({ _unit: 'pixelsUnit', _value: 1400 }, dpi)).toBe(1400);
     expect(bridge.documentPixelDimension(1400, dpi)).toBe(1400);
-    expect(() => bridge.assertCanvasPoint({ x: 730, y: 600 }, 'car', info.width, info.height)).not.toThrow();
-    expect(() => bridge.assertCanvasPoint({ x: 1500, y: 600 }, 'car', info.width, info.height)).toThrow(/outside/);
+    expect(() => bridge.assertCanvasPoint({ x: 730, y: 600 }, 'point-a', info.width, info.height)).not.toThrow();
+    expect(() => bridge.assertCanvasPoint({ x: 1500, y: 600 }, 'point-a', info.width, info.height)).toThrow(/outside/);
   });
 
   it('converts Photoshop distanceUnit descriptors from points to pixels', () => {

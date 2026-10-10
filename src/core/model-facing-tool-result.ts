@@ -2,11 +2,11 @@ import { createHash } from 'node:crypto';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import type { ToolResult } from './tool-registry.js';
+import { GUARD_STATE_RESPONSE_MAX_BYTES } from './guard/response-budget.js';
 
 export const MODEL_CONTEXT_WARNING_BYTES = 64 * 1024;
 
 const GUARDED_REFERENCE_ONLY_TOOLS = new Set([
-  'photoshop_guard_cycle',
   'photoshop_guard_cycle_auto',
   'photoshop_guard_job_poll',
 ]);
@@ -91,7 +91,7 @@ function redactBinaryValue(value: unknown, key?: string, parent?: Record<string,
 function sanitizeText(text: string): string {
   try {
     const parsed = JSON.parse(text);
-    return JSON.stringify(redactBinaryValue(parsed), null, 2);
+    return JSON.stringify(redactBinaryValue(parsed));
   } catch {
     return text.replace(
       /data:(image\/[^;,\s]+);base64,([A-Za-z0-9+/=]{256,})/gi,
@@ -107,7 +107,7 @@ export function estimateModelFacingContextBytes(result: ToolResult): number {
   return Buffer.byteLength(JSON.stringify(result), 'utf8');
 }
 
-function annotateGuardContextBudget(result: ToolResult): ToolResult {
+function annotateGuardContextBudget(result: ToolResult, maxTextBytes?: number): ToolResult {
   const cloned = structuredClone(result) as ToolResult;
   const textIndex = cloned.content.findIndex(item => item.type === 'text');
   if (textIndex < 0) return cloned;
@@ -124,7 +124,7 @@ function annotateGuardContextBudget(result: ToolResult): ToolResult {
   }
 
   body.estimated_context_bytes = 0;
-  textItem.text = JSON.stringify(body, null, 2);
+  textItem.text = JSON.stringify(body);
   let estimated = estimateModelFacingContextBytes(cloned);
   body.estimated_context_bytes = estimated;
   if (estimated > MODEL_CONTEXT_WARNING_BYTES) {
@@ -136,10 +136,14 @@ function annotateGuardContextBudget(result: ToolResult): ToolResult {
   } else {
     delete body.context_warning;
   }
-  textItem.text = JSON.stringify(body, null, 2);
+  textItem.text = JSON.stringify(body);
   estimated = estimateModelFacingContextBytes(cloned);
   body.estimated_context_bytes = estimated;
-  textItem.text = JSON.stringify(body, null, 2);
+  textItem.text = JSON.stringify(body);
+  // Optional telemetry must not push an otherwise complete status/resume over its transport budget.
+  const originalText = result.content[textIndex];
+  if (maxTextBytes !== undefined && Buffer.byteLength(textItem.text, 'utf8') > maxTextBytes
+    && originalText.type === 'text' && Buffer.byteLength(originalText.text, 'utf8') <= maxTextBytes) return result;
   return cloned;
 }
 
@@ -159,6 +163,8 @@ export function sanitizeModelFacingToolResult(toolName: string, result: ToolResu
   }
 
   return toolName.startsWith('photoshop_guard_')
-    ? annotateGuardContextBudget(sanitized)
+    ? annotateGuardContextBudget(sanitized,
+      toolName === 'photoshop_guard_status' || toolName === 'photoshop_guard_resume'
+        ? GUARD_STATE_RESPONSE_MAX_BYTES : undefined)
     : sanitized;
 }

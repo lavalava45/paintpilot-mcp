@@ -1,0 +1,352 @@
+{
+  "next_pass": {
+    "request_key": "violin_01_torso_main_mass",
+    "document_id": 64,
+    "goal": "Construct the first editable subject component",
+    "stage": "GLOBAL_BLOCK_IN",
+    "impact_class": "construct",
+    "construction_role": "structured-mass",
+    "scene_ownership_plan": {
+      "plan_id": "violinist_editable_semantic_v1",
+      "objects": [
+        {
+          "object_id": "violinist",
+          "kind": "compound-object",
+          "subject_kind": "person",
+          "component_semantic_ids": [
+            "torso",
+            "face",
+            "hair",
+            "skirt",
+            "left_upper_arm",
+            "left_forearm",
+            "left_hand",
+            "right_upper_arm",
+            "right_forearm",
+            "right_hand"
+          ]
+        },
+        {
+          "object_id": "violin",
+          "kind": "compound-object",
+          "subject_kind": "custom-compound",
+          "component_semantic_ids": [
+            "violin_body",
+            "violin_neck"
+          ]
+        },
+        {
+          "object_id": "bow",
+          "kind": "single-part",
+          "subject_kind": "single-component",
+          "component_semantic_ids": [
+            "bow"
+          ]
+        },
+        {
+          "object_id": "curtain",
+          "kind": "single-part",
+          "subject_kind": "single-component",
+          "component_semantic_ids": [
+            "curtain"
+          ]
+        },
+        {
+          "object_id": "window",
+          "kind": "single-part",
+          "subject_kind": "window",
+          "component_semantic_ids": [
+            "window"
+          ]
+        },
+        {
+          "object_id": "wall",
+          "kind": "single-part",
+          "subject_kind": "single-component",
+          "component_semantic_ids": [
+            "wall"
+          ]
+        },
+        {
+          "object_id": "chair",
+          "kind": "single-part",
+          "subject_kind": "single-component",
+          "component_semantic_ids": [
+            "chair"
+          ]
+        }
+      ],
+      "units": [
+        {
+          "semantic_id": "torso",
+          "owner_id": "torso",
+          "role": "torso dress",
+          "editability": "independent"
+        },
+        {
+          "semantic_id": "face",
+          "owner_id": "face",
+          "role": "face and head",
+          "editability": "independent"
+        },
+        {
+          "semantic_id": "hair",
+          "owner_id": "hair",
+          "role": "hair mass",
+          "editability": "independent"
+        },
+        {
+          "semantic_id": "skirt",
+          "owner_id": "skirt",
+          "role": "seated skirt",
+          "editability": "independent"
+        },
+        {
+          "semantic_id": "left_upper_arm",
+          "owner_id": "left_upper_arm",
+          "role": "left upper arm",
+          "editability": "independent"
+        },
+        {
+          "semantic_id": "left_forearm",
+          "owner_id": "left_forearm",
+          "role": "left forearm",
+          "editability": "independent"
+        },
+        {
+          "semantic_id": "left_hand",
+          "owner_id": "left_hand",
+          "role": "left gripping hand",
+          "editability": "independent"
+        },
+        {
+          "semantic_id": "right_upper_arm",
+          "owner_id": "right_upper_arm",
+          "role": "right upper arm",
+          "editability": "independent"
+        },
+        {
+          "semantic_id": "right_forearm",
+          "owner_id": "right_forearm",
+          "role": "right forearm",
+          "editability": "independent"
+        },
+        {
+          "semantic_id": "right_hand",
+          "owner_id": "right_hand",
+          "role": "right bow hand",
+          "editability": "independent"
+        },
+        {
+          "semantic_id": "violin_body",
+          "owner_id": "violin_body",
+          "role": "violin acoustic body",
+          "editability": "independent"
+        },
+        {
+          "semantic_id": "violin_neck",
+          "owner_id": "violin_neck",
+          "role": "violin neck and fingerboard",
+          "editability": "independent"
+        },
+        {
+          "semantic_id": "bow",
+          "owner_id": "bow",
+          "role": "violin bow",
+          "editability": "independent"
+        },
+        {
+          "semantic_id": "curtain",
+          "owner_id": "curtain",
+          "role": "window curtain with protected holes",
+          "editability": "independent"
+        },
+        {
+          "semantic_id": "window",
+          "owner_id": "window",
+          "role": "back-lit window opening",
+          "editability": "independent"
+        },
+        {
+          "semantic_id": "wall",
+          "owner_id": "wall",
+          "role": "interior wall",
+          "editability": "independent"
+        },
+        {
+          "semantic_id": "chair",
+          "owner_id": "chair",
+          "role": "seat",
+          "editability": "independent"
+        }
+      ]
+    },
+    "logical_layer": {
+      "decision": "create-new",
+      "hypothesis_id": "torso",
+      "hypothesis": "Самостоятельная масса корпуса платья",
+      "rollback_value": "high",
+      "expected_independent_rollback": true,
+      "layer_name": "01 · Корпус и платье",
+      "physical_role": "opaque-mass",
+      "opacity_role": "opaque",
+      "construction_tier": "primary"
+    },
+    "layer_separation_check": {
+      "change_kind": "new-object",
+      "substantial": true,
+      "rollback_value": "high",
+      "independent_adjustment_expected": true,
+      "reasons": [
+        "Корпус должен изменяться без смещения рук и инструмента"
+      ]
+    },
+    "construction": {
+      "model": {
+        "model_id": "violinist_pose_01",
+        "revision": 1,
+        "basis": "авторское композиционное построение на холсте 1200x900: торс девушки сидя, левое плечо ближе к окну",
+        "objects": [
+          {
+            "id": "violinist",
+            "subject_kind": "person"
+          }
+        ],
+        "points": [
+          {
+            "id": "t0",
+            "object_id": "violinist",
+            "position": [
+              673,
+              382
+            ]
+          },
+          {
+            "id": "t1",
+            "object_id": "violinist",
+            "position": [
+              710,
+              349
+            ]
+          },
+          {
+            "id": "t2",
+            "object_id": "violinist",
+            "position": [
+              731,
+              355
+            ]
+          },
+          {
+            "id": "t3",
+            "object_id": "violinist",
+            "position": [
+              753,
+              358
+            ]
+          },
+          {
+            "id": "t4",
+            "object_id": "violinist",
+            "position": [
+              786,
+              345
+            ]
+          },
+          {
+            "id": "t5",
+            "object_id": "violinist",
+            "position": [
+              835,
+              392
+            ]
+          },
+          {
+            "id": "t6",
+            "object_id": "violinist",
+            "position": [
+              861,
+              490
+            ]
+          },
+          {
+            "id": "t7",
+            "object_id": "violinist",
+            "position": [
+              842,
+              611
+            ]
+          },
+          {
+            "id": "t8",
+            "object_id": "violinist",
+            "position": [
+              806,
+              633
+            ]
+          },
+          {
+            "id": "t9",
+            "object_id": "violinist",
+            "position": [
+              685,
+              630
+            ]
+          },
+          {
+            "id": "t10",
+            "object_id": "violinist",
+            "position": [
+              645,
+              580
+            ]
+          },
+          {
+            "id": "t11",
+            "object_id": "violinist",
+            "position": [
+              646,
+              468
+            ]
+          }
+        ],
+        "parts": [
+          {
+            "id": "torso",
+            "object_id": "violinist",
+            "role": "dress bodice and seated torso",
+            "outline": [
+              "t0",
+              "t1",
+              "t2",
+              "t3",
+              "t4",
+              "t5",
+              "t6",
+              "t7",
+              "t8",
+              "t9",
+              "t10",
+              "t11"
+            ],
+            "curve": "smooth"
+          }
+        ],
+        "camera": {
+          "kind": "orthographic",
+          "origin": [
+            0,
+            0
+          ],
+          "scale": 1
+        }
+      },
+      "part_id": "torso",
+      "color": {
+        "red": 78,
+        "green": 62,
+        "blue": 83
+      }
+    }
+  }
+}

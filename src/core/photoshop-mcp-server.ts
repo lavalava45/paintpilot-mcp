@@ -86,6 +86,8 @@ export class PhotoshopMCPServer {
       previewBarrierDirectory,
       executionLeaseFile: runtimePath('execution.lock'),
     });
+    // Reapply the standard public handler wrappers to the Guard-bound analyzer.
+    this.install([this.tools.get('photoshop_analyze_value_structure')!]);
     guard.ensureRuntimeDirectories();
     this.uxpEventUnsubscribe = subscribeUxpBridgeEvents(async (event) => {
       await guard.handleUxpBridgeEvent(event);

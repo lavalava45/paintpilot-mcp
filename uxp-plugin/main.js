@@ -2,7 +2,7 @@
  * Photoshop MCP UXP Bridge — keeps a localhost long-poll open for commands and
  * runs them inside Photoshop. Load via Adobe UXP Developer Tools.
  */
-const { entrypoints } = require('uxp');
+const { entrypoints, host } = require('uxp');
 const photoshop = require('photoshop');
 const { action, core, app, constants } = photoshop;
 const { localFileSystem, types } = require('uxp').storage;
@@ -18,16 +18,177 @@ const { tryHandleP3LayerAdvancedOperation } = require('./p3-layer-advanced-ops')
 
 const BRIDGE_PORT = 38452;
 const BRIDGE_BASE = `http://127.0.0.1:${BRIDGE_PORT}`;
-const BRIDGE_REVISION = 'compact-v2-20261002-video-trace-readiness';
+const BRIDGE_REVISION = 'compact-v2-20261009-component-rebuild';
 const REGISTRATION_PROTOCOL = 'photoshop.uxp.registration.v1';
 const COMMAND_PROTOCOL = 'photoshop.uxp.command.v1';
 const RESULT_PROTOCOL = 'photoshop.uxp.command_result.v1';
 const EVENT_PROTOCOL = 'photoshop.uxp.event.v1';
+const RUNTIME_INSTANCE_WITNESS = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+
+function panelLanguageFromLocale(locale) {
+  return /^ru(?:[_-]|$)/i.test(String(locale ?? '').trim()) ? 'ru' : 'en';
+}
+
+const PANEL_LANGUAGE = panelLanguageFromLocale(host?.uiLocale);
+const UI_COPY = {
+  en: {
+    videoLabel: 'Enable video recording',
+    videoLoading: 'Loading recording state…',
+    configTitle: 'Configuration',
+    languageLabel: 'Report language',
+    languageAuto: 'auto',
+    languageRu: 'Russian',
+    languageEn: 'English',
+    commentaryLabel: 'Commentary',
+    commentaryTechnical: 'technical',
+    commentaryArtistic: 'artistic',
+    commentaryMixed: 'mixed',
+    detailLabel: 'Detail',
+    detailShort: 'short',
+    detailNormal: 'normal',
+    detailDetailed: 'detailed',
+    configLoading: 'Loading configuration…',
+    connected: 'PaintPilot: connected',
+    disconnected: 'PaintPilot: disconnected',
+    ffmpegChecking: 'FFmpeg: checking…',
+    ffmpegReady: 'FFmpeg: ready',
+    ffmpegNotFound: 'FFmpeg: not found',
+    ffmpegLaunchError: 'FFmpeg: launch error',
+    ffmpegCheckUnavailable: 'FFmpeg: check unavailable',
+    ffmpegPathDetecting: 'FFmpeg path: detecting…',
+    ffmpegPath: 'FFmpeg path: {value}',
+    ffmpegPathUnavailable: 'FFmpeg path: check unavailable',
+    photoshopWindowChecking: 'Photoshop window: checking…',
+    photoshopWindowReady: 'Photoshop window: found',
+    photoshopWindowNotFound: 'Photoshop window: not found',
+    photoshopWindowCheckError: 'Photoshop window: check failed',
+    photoshopWindowCheckUnavailable: 'Photoshop window: check unavailable',
+    unknown: 'unknown',
+    notFound: 'not found',
+    sourceRuntime: 'saved in PaintPilot',
+    sourceEnvironment: 'from environment',
+    sourceDefault: 'default',
+    recordingOn: 'Recording enabled',
+    recordingOff: 'Recording disabled',
+    photoshopWindowAutomatic: 'Photoshop window is detected automatically',
+    recordingUnavailable: 'Recording setting unavailable: {error}',
+    recordingEnabling: 'Enabling recording…',
+    recordingDisabling: 'Disabling recording…',
+    recordingChangeFailed: 'Could not change setting: {error}',
+    configWarning: 'Warning: {warning}',
+    configSaved: 'Saved',
+    configLoaded: 'Configuration loaded',
+    activeRunApplied: ' · applied to active run',
+    configUnavailable: 'Configuration unavailable: {error}',
+    configSaving: 'Saving…',
+    configSaveFailed: 'Could not save: {error} · previous value restored',
+  },
+  ru: {
+    videoLabel: 'Включить видеозапись',
+    videoLoading: 'Состояние записи загружается…',
+    configTitle: 'Конфигурация',
+    languageLabel: 'Язык отчётов',
+    languageAuto: 'авто',
+    languageRu: 'русский',
+    languageEn: 'английский',
+    commentaryLabel: 'Комментарий',
+    commentaryTechnical: 'технический',
+    commentaryArtistic: 'художественный',
+    commentaryMixed: 'смешанный',
+    detailLabel: 'Детализация',
+    detailShort: 'коротко',
+    detailNormal: 'обычно',
+    detailDetailed: 'подробно',
+    configLoading: 'Конфигурация загружается…',
+    connected: 'PaintPilot: подключен',
+    disconnected: 'PaintPilot: отключен',
+    ffmpegChecking: 'FFmpeg: проверка…',
+    ffmpegReady: 'FFmpeg: готов',
+    ffmpegNotFound: 'FFmpeg: не найден',
+    ffmpegLaunchError: 'FFmpeg: ошибка запуска',
+    ffmpegCheckUnavailable: 'FFmpeg: проверка недоступна',
+    ffmpegPathDetecting: 'Путь FFmpeg: определение…',
+    ffmpegPath: 'Путь FFmpeg: {value}',
+    ffmpegPathUnavailable: 'Путь FFmpeg: проверка недоступна',
+    photoshopWindowChecking: 'Окно Photoshop: проверка…',
+    photoshopWindowReady: 'Окно Photoshop: найдено',
+    photoshopWindowNotFound: 'Окно Photoshop: не найдено',
+    photoshopWindowCheckError: 'Окно Photoshop: ошибка проверки',
+    photoshopWindowCheckUnavailable: 'Окно Photoshop: проверка недоступна',
+    unknown: 'неизвестен',
+    notFound: 'не найден',
+    sourceRuntime: 'сохранено в PaintPilot',
+    sourceEnvironment: 'из environment',
+    sourceDefault: 'по умолчанию',
+    recordingOn: 'Запись включена',
+    recordingOff: 'Запись выключена',
+    photoshopWindowAutomatic: 'окно Photoshop определяется автоматически',
+    recordingUnavailable: 'Настройка записи недоступна: {error}',
+    recordingEnabling: 'Включаю запись…',
+    recordingDisabling: 'Выключаю запись…',
+    recordingChangeFailed: 'Не удалось изменить настройку: {error}',
+    configWarning: 'Предупреждение: {warning}',
+    configSaved: 'Сохранено',
+    configLoaded: 'Конфигурация загружена',
+    activeRunApplied: ' · применено к активному run',
+    configUnavailable: 'Настройки конфигурации недоступны: {error}',
+    configSaving: 'Сохраняю…',
+    configSaveFailed: 'Не удалось сохранить: {error} · прежнее значение восстановлено',
+  },
+};
+
+function uiText(key, values = {}) {
+  const table = UI_COPY[PANEL_LANGUAGE] ?? UI_COPY.en;
+  let text = table[key] ?? UI_COPY.en[key] ?? key;
+  for (const [name, value] of Object.entries(values)) {
+    text = text.split('{' + name + '}').join(String(value));
+  }
+  return text;
+}
+
+function applyPanelLocale() {
+  const dom = typeof document !== 'undefined' ? document : null;
+  if (!dom) return;
+  if (dom.documentElement) dom.documentElement.lang = PANEL_LANGUAGE;
+  const labels = {
+    videoTraceLabel: 'videoLabel',
+    videoTraceStatus: 'videoLoading',
+    userConfigTitle: 'configTitle',
+    userConfigLanguageLabel: 'languageLabel',
+    userConfigLanguageAuto: 'languageAuto',
+    userConfigLanguageRu: 'languageRu',
+    userConfigLanguageEn: 'languageEn',
+    userConfigCommentaryModeLabel: 'commentaryLabel',
+    userConfigCommentaryTechnical: 'commentaryTechnical',
+    userConfigCommentaryArtistic: 'commentaryArtistic',
+    userConfigCommentaryMixed: 'commentaryMixed',
+    userConfigCommentaryDetailLabel: 'detailLabel',
+    userConfigDetailShort: 'detailShort',
+    userConfigDetailNormal: 'detailNormal',
+    userConfigDetailDetailed: 'detailDetailed',
+    userConfigStatus: 'configLoading',
+    ffmpegStatus: 'ffmpegChecking',
+    ffmpegPath: 'ffmpegPathDetecting',
+    photoshopWindowStatus: 'photoshopWindowChecking',
+  };
+  for (const [id, key] of Object.entries(labels)) {
+    const element = dom.getElementById(id);
+    if (element) element.textContent = uiText(key);
+  }
+}
 
 let polling = false;
 let bridgeUiConnected = false;
 let videoTraceUiBound = false;
 let videoTraceUpdateInFlight = false;
+let userConfigUiBound = false;
+let userConfigUpdateInFlight = false;
+let lastUserConfigDocumentId = null;
+let lastUserConfigEffective = {
+  language: 'auto',
+  commentary_mode: 'mixed',
+  commentary_detail: 'normal',
+};
 let closeNotificationBound = false;
 const pendingResultDeliveries = new Map();
 const recentDocumentWitnesses = new Map();
@@ -48,7 +209,12 @@ function bridgeUiElements() {
     checkbox: dom?.getElementById('videoTraceEnabled') ?? null,
     status: dom?.getElementById('videoTraceStatus') ?? null,
     ffmpegStatus: dom?.getElementById('ffmpegStatus') ?? null,
+    ffmpegPath: dom?.getElementById('ffmpegPath') ?? null,
     photoshopWindowStatus: dom?.getElementById('photoshopWindowStatus') ?? null,
+    userConfigLanguage: dom?.getElementById('userConfigLanguage') ?? null,
+    userConfigCommentaryMode: dom?.getElementById('userConfigCommentaryMode') ?? null,
+    userConfigCommentaryDetail: dom?.getElementById('userConfigCommentaryDetail') ?? null,
+    userConfigStatus: dom?.getElementById('userConfigStatus') ?? null,
   };
 }
 
@@ -59,11 +225,15 @@ function setReadinessText(element, text, ok) {
 }
 
 async function refreshVideoTraceReadiness() {
-  const { ffmpegStatus, photoshopWindowStatus } = bridgeUiElements();
+  const { ffmpegStatus, ffmpegPath, photoshopWindowStatus } = bridgeUiElements();
   if (!ffmpegStatus || !photoshopWindowStatus) return;
-  ffmpegStatus.textContent = 'FFmpeg: проверка…';
+  ffmpegStatus.textContent = uiText('ffmpegChecking');
   ffmpegStatus.className = '';
-  photoshopWindowStatus.textContent = 'Окно Photoshop: проверка…';
+  if (ffmpegPath) {
+    ffmpegPath.textContent = uiText('ffmpegPathDetecting');
+    ffmpegPath.className = '';
+  }
+  photoshopWindowStatus.textContent = uiText('photoshopWindowChecking');
   photoshopWindowStatus.className = '';
   try {
     const response = await fetch(`${BRIDGE_BASE}/settings/process-video-trace/readiness`);
@@ -71,38 +241,57 @@ async function refreshVideoTraceReadiness() {
     const state = await response.json();
     const ffmpegState = state?.ffmpeg?.status;
     if (ffmpegState === 'ready') {
-      setReadinessText(ffmpegStatus, 'FFmpeg: готов', true);
+      setReadinessText(ffmpegStatus, uiText('ffmpegReady'), true);
+      if (ffmpegPath) {
+        ffmpegPath.textContent = uiText('ffmpegPath', { value: state?.ffmpeg?.executable ?? uiText('unknown') });
+        ffmpegPath.className = 'ready';
+      }
     } else if (ffmpegState === 'not-found') {
-      setReadinessText(ffmpegStatus, 'FFmpeg: не найден', false);
+      setReadinessText(ffmpegStatus, uiText('ffmpegNotFound'), false);
+      if (ffmpegPath) setReadinessText(ffmpegPath, uiText('ffmpegPath', { value: state?.ffmpeg?.executable ?? uiText('notFound') }), false);
     } else {
-      setReadinessText(ffmpegStatus, 'FFmpeg: ошибка запуска', false);
+      setReadinessText(ffmpegStatus, uiText('ffmpegLaunchError'), false);
+      if (ffmpegPath) setReadinessText(ffmpegPath, uiText('ffmpegPath', { value: state?.ffmpeg?.executable ?? uiText('unknown') }), false);
     }
     const windowState = state?.photoshop_window?.status;
     if (windowState === 'ready') {
-      setReadinessText(photoshopWindowStatus, 'Окно Photoshop: найдено', true);
+      setReadinessText(photoshopWindowStatus, uiText('photoshopWindowReady'), true);
     } else if (windowState === 'not-found') {
-      setReadinessText(photoshopWindowStatus, 'Окно Photoshop: не найдено', false);
+      setReadinessText(photoshopWindowStatus, uiText('photoshopWindowNotFound'), false);
     } else {
-      setReadinessText(photoshopWindowStatus, 'Окно Photoshop: ошибка проверки', false);
+      setReadinessText(photoshopWindowStatus, uiText('photoshopWindowCheckError'), false);
     }
   } catch (error) {
-    setReadinessText(ffmpegStatus, `FFmpeg: проверка недоступна`, false);
-    setReadinessText(photoshopWindowStatus, `Окно Photoshop: проверка недоступна`, false);
+    setReadinessText(ffmpegStatus, uiText('ffmpegCheckUnavailable'), false);
+    if (ffmpegPath) setReadinessText(ffmpegPath, uiText('ffmpegPathUnavailable'), false);
+    setReadinessText(photoshopWindowStatus, uiText('photoshopWindowCheckUnavailable'), false);
   }
 }
 
 function setBridgeUiConnected(connected) {
   bridgeUiConnected = connected;
-  const { dot, text, checkbox } = bridgeUiElements();
+  const {
+    dot,
+    text,
+    checkbox,
+    userConfigLanguage,
+    userConfigCommentaryMode,
+    userConfigCommentaryDetail,
+  } = bridgeUiElements();
   if (dot) dot.className = connected ? 'dot connected' : 'dot';
-  if (text) text.textContent = connected ? 'PaintPilot: connected' : 'PaintPilot: disconnected';
+  if (text) text.textContent = connected ? uiText('connected') : uiText('disconnected');
   if (checkbox && !videoTraceUpdateInFlight) checkbox.disabled = !connected;
+  if (!userConfigUpdateInFlight) {
+    for (const select of [userConfigLanguage, userConfigCommentaryMode, userConfigCommentaryDetail]) {
+      if (select) select.disabled = !connected;
+    }
+  }
 }
 
 function videoTraceSourceLabel(source) {
-  if (source === 'runtime') return 'сохранено в PaintPilot';
-  if (source === 'environment') return 'из environment';
-  return 'по умолчанию';
+  if (source === 'runtime') return uiText('sourceRuntime');
+  if (source === 'environment') return uiText('sourceEnvironment');
+  return uiText('sourceDefault');
 }
 
 async function refreshVideoTraceSetting() {
@@ -114,11 +303,11 @@ async function refreshVideoTraceSetting() {
     const state = await response.json();
     checkbox.checked = state?.enabled === true;
     checkbox.disabled = false;
-    const mode = checkbox.checked ? 'Запись включена' : 'Запись выключена';
-    status.textContent = `${mode} · ${videoTraceSourceLabel(state?.source)} · окно Photoshop определяется автоматически`;
+    const mode = checkbox.checked ? uiText('recordingOn') : uiText('recordingOff');
+    status.textContent = `${mode} · ${videoTraceSourceLabel(state?.source)} · ${uiText('photoshopWindowAutomatic')}`;
   } catch (error) {
     checkbox.disabled = true;
-    status.textContent = `Настройка записи недоступна: ${error?.message ?? String(error)}`;
+    status.textContent = uiText('recordingUnavailable', { error: error?.message ?? String(error) });
   }
 }
 
@@ -127,7 +316,7 @@ async function updateVideoTraceSetting(enabled) {
   if (!checkbox || !status || videoTraceUpdateInFlight) return;
   videoTraceUpdateInFlight = true;
   checkbox.disabled = true;
-  status.textContent = enabled ? 'Включаю запись…' : 'Выключаю запись…';
+  status.textContent = enabled ? uiText('recordingEnabling') : uiText('recordingDisabling');
   try {
     const response = await fetch(`${BRIDGE_BASE}/settings/process-video-trace`, {
       method: 'POST',
@@ -137,10 +326,10 @@ async function updateVideoTraceSetting(enabled) {
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const state = await response.json();
     checkbox.checked = state?.enabled === true;
-    status.textContent = `${checkbox.checked ? 'Запись включена' : 'Запись выключена'} · сохранено в PaintPilot · окно Photoshop определяется автоматически`;
+    status.textContent = `${checkbox.checked ? uiText('recordingOn') : uiText('recordingOff')} · ${uiText('sourceRuntime')} · ${uiText('photoshopWindowAutomatic')}`;
     await refreshVideoTraceReadiness();
   } catch (error) {
-    status.textContent = `Не удалось изменить настройку: ${error?.message ?? String(error)}`;
+    status.textContent = uiText('recordingChangeFailed', { error: error?.message ?? String(error) });
     await refreshVideoTraceSetting();
   } finally {
     videoTraceUpdateInFlight = false;
@@ -148,16 +337,143 @@ async function updateVideoTraceSetting(enabled) {
   }
 }
 
+function setUserConfigControlsDisabled(disabled) {
+  const {
+    userConfigLanguage,
+    userConfigCommentaryMode,
+    userConfigCommentaryDetail,
+  } = bridgeUiElements();
+  for (const select of [userConfigLanguage, userConfigCommentaryMode, userConfigCommentaryDetail]) {
+    if (select) select.disabled = disabled;
+  }
+}
+
+function applyUserConfigState(state, saved = false) {
+  const {
+    userConfigLanguage,
+    userConfigCommentaryMode,
+    userConfigCommentaryDetail,
+    userConfigStatus,
+  } = bridgeUiElements();
+  const effective = state?.effective ?? {};
+  if (userConfigLanguage && ['auto', 'ru', 'en'].includes(effective.language)) {
+    userConfigLanguage.value = effective.language;
+  }
+  if (userConfigCommentaryMode && ['technical', 'artistic', 'mixed'].includes(effective.commentary_mode)) {
+    userConfigCommentaryMode.value = effective.commentary_mode;
+  }
+  if (userConfigCommentaryDetail && ['short', 'normal', 'detailed'].includes(effective.commentary_detail)) {
+    userConfigCommentaryDetail.value = effective.commentary_detail;
+  }
+  lastUserConfigEffective = {
+    language: userConfigLanguage?.value ?? lastUserConfigEffective.language,
+    commentary_mode: userConfigCommentaryMode?.value ?? lastUserConfigEffective.commentary_mode,
+    commentary_detail: userConfigCommentaryDetail?.value ?? lastUserConfigEffective.commentary_detail,
+  };
+  if (!userConfigStatus) return;
+  const warnings = Array.isArray(state?.warnings) ? state.warnings.filter(Boolean) : [];
+  if (warnings.length) {
+    userConfigStatus.textContent = uiText('configWarning', { warning: warnings.join('; ') });
+    userConfigStatus.className = 'detail config-status error';
+    return;
+  }
+  const sources = state?.sources ?? {};
+  const sticky = sources.commentary_mode === 'art_run' || sources.commentary_detail === 'art_run';
+  userConfigStatus.textContent = (saved ? uiText('configSaved') : uiText('configLoaded')) + (sticky ? uiText('activeRunApplied') : '');
+  userConfigStatus.className = 'detail config-status';
+}
+
+async function readUserConfigResponse(response) {
+  let payload;
+  try {
+    payload = await response.json();
+  } catch {
+    payload = null;
+  }
+  if (!response.ok) {
+    throw new Error(payload?.error ?? ('HTTP ' + response.status));
+  }
+  return payload;
+}
+
+async function refreshUserConfig() {
+  const { userConfigStatus } = bridgeUiElements();
+  try {
+    const response = await fetch(BRIDGE_BASE + '/settings/user-config');
+    const state = await readUserConfigResponse(response);
+    applyUserConfigState(state);
+    setUserConfigControlsDisabled(!bridgeUiConnected);
+  } catch (error) {
+    setUserConfigControlsDisabled(true);
+    if (userConfigStatus) {
+      userConfigStatus.textContent = uiText('configUnavailable', { error: error?.message ?? String(error) });
+      userConfigStatus.className = 'detail config-status error';
+    }
+  }
+}
+
+async function updateUserConfigSetting(field, value) {
+  if (userConfigUpdateInFlight) return;
+  const elements = bridgeUiElements();
+  const selectByField = {
+    language: elements.userConfigLanguage,
+    commentary_mode: elements.userConfigCommentaryMode,
+    commentary_detail: elements.userConfigCommentaryDetail,
+  };
+  const select = selectByField[field];
+  if (!select) return;
+  const previous = lastUserConfigEffective[field];
+  userConfigUpdateInFlight = true;
+  setUserConfigControlsDisabled(true);
+  if (elements.userConfigStatus) {
+    elements.userConfigStatus.textContent = uiText('configSaving');
+    elements.userConfigStatus.className = 'detail config-status';
+  }
+  try {
+    const response = await fetch(BRIDGE_BASE + '/settings/user-config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ [field]: value }),
+    });
+    const state = await readUserConfigResponse(response);
+    applyUserConfigState(state, true);
+  } catch (error) {
+    select.value = previous;
+    if (elements.userConfigStatus) {
+      elements.userConfigStatus.textContent = uiText('configSaveFailed', { error: error?.message ?? String(error) });
+      elements.userConfigStatus.className = 'detail config-status error';
+    }
+  } finally {
+    userConfigUpdateInFlight = false;
+    setUserConfigControlsDisabled(!bridgeUiConnected);
+  }
+}
+
 function setupBridgePanelUi() {
-  const { checkbox } = bridgeUiElements();
-  if (!checkbox) return;
-  if (!videoTraceUiBound) {
+  applyPanelLocale();
+  const {
+    checkbox,
+    userConfigLanguage,
+    userConfigCommentaryMode,
+    userConfigCommentaryDetail,
+  } = bridgeUiElements();
+  if (!checkbox && !userConfigLanguage && !userConfigCommentaryMode && !userConfigCommentaryDetail) return;
+  if (checkbox && !videoTraceUiBound) {
     checkbox.addEventListener('change', () => updateVideoTraceSetting(checkbox.checked));
     videoTraceUiBound = true;
   }
+  if (!userConfigUiBound && userConfigLanguage && userConfigCommentaryMode && userConfigCommentaryDetail) {
+    userConfigLanguage.addEventListener('change', () => updateUserConfigSetting('language', userConfigLanguage.value));
+    userConfigCommentaryMode.addEventListener('change', () => updateUserConfigSetting('commentary_mode', userConfigCommentaryMode.value));
+    userConfigCommentaryDetail.addEventListener('change', () => updateUserConfigSetting('commentary_detail', userConfigCommentaryDetail.value));
+    userConfigUiBound = true;
+  }
   setBridgeUiConnected(bridgeUiConnected);
-  refreshVideoTraceSetting();
-  refreshVideoTraceReadiness();
+  if (checkbox) {
+    refreshVideoTraceSetting();
+    refreshVideoTraceReadiness();
+  }
+  refreshUserConfig();
 }
 
 // A Document DOM object represents one live open-document instance. Keep an
@@ -252,6 +568,17 @@ async function onPhotoshopNotification(eventName, descriptor) {
   const normalizedEvent = typeof eventName === 'string'
     ? eventName
     : String(eventName?.event ?? eventName?.name ?? '');
+  if (normalizedEvent === 'imageSize') {
+    const documentId = closeEventDocumentId(descriptor);
+    if (!documentId) return;
+    await postBridgeEvent({
+      protocol: EVENT_PROTOCOL,
+      event: 'document_geometry_changed',
+      document_id: documentId,
+      observed_at: new Date().toISOString(),
+    });
+    return;
+  }
   if (normalizedEvent !== 'close') return;
   const documentId = closeEventDocumentId(descriptor);
   if (!documentId) return;
@@ -272,7 +599,7 @@ async function onPhotoshopNotification(eventName, descriptor) {
 function setupPhotoshopNotifications() {
   if (closeNotificationBound) return;
   try {
-    const pending = action.addNotificationListener(['close'], onPhotoshopNotification);
+    const pending = action.addNotificationListener(['close', 'imageSize'], onPhotoshopNotification);
     closeNotificationBound = true;
     if (pending && typeof pending.catch === 'function') {
       pending.catch(() => { closeNotificationBound = false; });
@@ -1298,6 +1625,9 @@ function gradientMaskEndpoints(direction, startPct, endPct) {
 }
 
 async function applyGradientMaskMutation(params = {}) {
+  if (params.layer_id !== undefined && (!Number.isInteger(params.layer_id) || params.layer_id <= 0)) {
+    throw new Error('mask_layer_id_invalid');
+  }
   const direction = ['top_to_bottom', 'bottom_to_top', 'left_to_right', 'right_to_left'].includes(params.direction)
     ? params.direction
     : 'bottom_to_top';
@@ -1307,58 +1637,61 @@ async function applyGradientMaskMutation(params = {}) {
     ? Number(params.angle_deg)
     : direction === 'left_to_right' || direction === 'right_to_left' ? 0 : 90;
   return core.executeAsModal(
-    async () => {
-      const prepared = await prepareLayerMutation(params, 'apply_gradient_mask');
-      let maskAutoCreated = false;
-      if (!(await activeLayerHasUserMask({ synchronousExecution: true }))) {
-        const created = await createLayerMaskInCurrentModal();
-        maskAutoCreated = created?.maskCreated === true;
-      }
-      const doc = prepared.doc;
-      const width = Number(doc.width);
-      const height = Number(doc.height);
-      const endpoints = gradientMaskEndpoints(direction, startPct, endPct);
-      const fromX = width * endpoints.fromH / 100;
-      const fromY = height * endpoints.fromV / 100;
-      const toX = width * endpoints.toH / 100;
-      const toY = height * endpoints.toV / 100;
-      await action.batchPlay(
-        [{
-          _obj: 'select',
-          _target: [{ _ref: 'channel', _enum: 'ordinal', _value: 'targetEnum' }],
-          makeVisible: true,
-          _options: { dialogOptions: 'silent' },
-        }],
-        { synchronousExecution: true }
-      );
-      await action.batchPlay(
-        [{
-          _obj: 'gradientClassEvent',
-          from: { _obj: 'paint', horizontal: { _unit: 'pixelsUnit', _value: fromX }, vertical: { _unit: 'pixelsUnit', _value: fromY } },
-          to: { _obj: 'paint', horizontal: { _unit: 'pixelsUnit', _value: toX }, vertical: { _unit: 'pixelsUnit', _value: toY } },
-          type: { _enum: 'gradientType', _value: 'linear' },
-          dither: true,
-          useMask: true,
-          reverse: false,
-          gradient: {
+    async (executionContext) => {
+      const prepared = await preparePaintTarget({ ...params, paint_target: 'layer-mask' }, 'apply_gradient_mask');
+      const { doc, targetLayerId } = prepared;
+      const originalChannels = Array.from(doc.activeChannels ?? []);
+      if (!originalChannels.length) throw new Error('mask_channel_restore_unavailable');
+      const suspensionId = await executionContext.hostControl.suspendHistory({ documentID: doc.id, name: 'MCP Apply Gradient Mask' });
+      let committed = false;
+      try {
+        const maskDetails = await selectStrokeMaskModal(doc, targetLayerId);
+        const width = Number(doc.width);
+        const height = Number(doc.height);
+        const endpoints = gradientMaskEndpoints(direction, startPct, endPct);
+        const fromX = width * endpoints.fromH / 100;
+        const fromY = height * endpoints.fromV / 100;
+        const toX = width * endpoints.toH / 100;
+        const toY = height * endpoints.toV / 100;
+        const result = await action.batchPlay(
+          [{
             _obj: 'gradientClassEvent',
-            name: 'Black, White',
-            gradientForm: { _enum: 'gradientForm', _value: 'customStops' },
-            interfaceIconFrameDimmed: 4096,
-            colors: [
-              { _obj: 'colorStop', color: { _obj: 'grayscale', gray: { _unit: 'percentUnit', _value: 100 } }, type: { _enum: 'colorStopType', _value: 'userStop' }, location: 0, midpoint: 50 },
-              { _obj: 'colorStop', color: { _obj: 'grayscale', gray: { _unit: 'percentUnit', _value: 0 } }, type: { _enum: 'colorStopType', _value: 'userStop' }, location: 4096, midpoint: 50 },
-            ],
-            transparency: [
-              { _obj: 'transferSpec', opacity: { _unit: 'percentUnit', _value: 100 }, location: 0, midpoint: 50 },
-              { _obj: 'transferSpec', opacity: { _unit: 'percentUnit', _value: 100 }, location: 4096, midpoint: 50 },
-            ],
-          },
-          _options: { dialogOptions: 'silent' },
-        }],
-        { synchronousExecution: true }
-      );
-      return { applied: true, direction, angle, mask_auto_created: maskAutoCreated };
+            from: { _obj: 'paint', horizontal: { _unit: 'pixelsUnit', _value: fromX }, vertical: { _unit: 'pixelsUnit', _value: fromY } },
+            to: { _obj: 'paint', horizontal: { _unit: 'pixelsUnit', _value: toX }, vertical: { _unit: 'pixelsUnit', _value: toY } },
+            type: { _enum: 'gradientType', _value: 'linear' },
+            dither: true,
+            useMask: true,
+            reverse: false,
+            gradient: {
+              _obj: 'gradientClassEvent',
+              name: 'Black, White',
+              gradientForm: { _enum: 'gradientForm', _value: 'customStops' },
+              interfaceIconFrameDimmed: 4096,
+              colors: [
+                { _obj: 'colorStop', color: { _obj: 'grayscale', gray: { _unit: 'percentUnit', _value: 100 } }, type: { _enum: 'colorStopType', _value: 'userStop' }, location: 0, midpoint: 50 },
+                { _obj: 'colorStop', color: { _obj: 'grayscale', gray: { _unit: 'percentUnit', _value: 0 } }, type: { _enum: 'colorStopType', _value: 'userStop' }, location: 4096, midpoint: 50 },
+              ],
+              transparency: [
+                { _obj: 'transferSpec', opacity: { _unit: 'percentUnit', _value: 100 }, location: 0, midpoint: 50 },
+                { _obj: 'transferSpec', opacity: { _unit: 'percentUnit', _value: 100 }, location: 4096, midpoint: 50 },
+              ],
+            },
+            _options: { dialogOptions: 'silent' },
+          }],
+          { synchronousExecution: true }
+        );
+        if (!result[0] || result[0]._obj === 'error') throw new Error('mask_gradient_application_failed');
+        doc.activeChannels = originalChannels;
+        await executionContext.hostControl.resumeHistory(suspensionId, true);
+        committed = true;
+        return { applied: true, direction, angle, ...maskDetails, layer_id: targetLayerId,
+          original_preserved: true, paint_channel: 'layer-mask', mask_polarity: 'black-hide-to-white-reveal' };
+      } finally {
+        if (!committed) {
+          try { doc.activeChannels = originalChannels; } catch {}
+          await executionContext.hostControl.resumeHistory(suspensionId, false);
+        }
+      }
     },
     { commandName: 'MCP Apply Gradient Mask' }
   );
@@ -2023,6 +2356,95 @@ async function fillLayer(params = {}) {
   );
 }
 
+// Cubic extent math mirrors src/core/bezier-geometry.ts; covered by the shared regression.
+function scalarValue(values, t) {
+    const u = 1 - t;
+    return u * u * u * values[0] + 3 * u * u * t * values[1] + 3 * u * t * t * values[2] + t * t * t * values[3];
+}
+function scalarParameters(values, crossings) {
+    const [p0, p1, p2, p3] = values;
+    const a = -p0 + 3 * p1 - 3 * p2 + p3;
+    const b = 2 * (p0 - 2 * p1 + p2);
+    const c = p1 - p0;
+    if (![a, b, c].every(Number.isFinite))
+        throw new Error('Non-finite Bezier polynomial');
+    const ts = [0, 1];
+    const add = (t) => { if (Number.isFinite(t) && t > 0 && t < 1)
+        ts.push(t); };
+    if (Math.abs(a) < 1e-12) {
+        if (Math.abs(b) > 1e-12)
+            add(-c / b);
+    }
+    else {
+        const discriminant = b * b - 4 * a * c;
+        if (!Number.isFinite(discriminant))
+            throw new Error('Non-finite Bezier discriminant');
+        if (discriminant >= 0) {
+            const q = -0.5 * (b + (b < 0 ? -1 : 1) * Math.sqrt(discriminant));
+            add(q / a);
+            if (q !== 0)
+                add(c / q);
+        }
+    }
+    if (crossings) {
+        const knots = [...ts].sort((a, b) => a - b);
+        for (let i = 1; i < knots.length; i++) {
+            let lo = knots[i - 1], hi = knots[i];
+            const start = scalarValue(values, lo), end = scalarValue(values, hi);
+            if (Math.abs(start) < 1e-10)
+                add(lo);
+            if (Math.abs(end) < 1e-10)
+                add(hi);
+            if (Math.sign(start) === Math.sign(end))
+                continue;
+            for (let j = 0; j < 48; j++) {
+                const mid = (lo + hi) / 2;
+                if (Math.sign(scalarValue(values, mid)) === Math.sign(start))
+                    lo = mid;
+                else
+                    hi = mid;
+            }
+            add((lo + hi) / 2);
+        }
+    }
+    return ts;
+}
+/** Actual cubic extrema; handles are finite control positions, not visible endpoints. */
+function bezierCriticalPoints(rawPoints, closed = false, projections = []) {
+    const points = rawPoints.map((value, index) => {
+        const p = value;
+        if (!p || ![p.x, p.y].every(v => typeof v === 'number' && Number.isFinite(v))) {
+            throw new Error(`points[${index}] has a non-finite anchor`);
+        }
+        for (const key of ['left', 'right']) {
+            const handle = p[key];
+            if (handle !== undefined && (!Array.isArray(handle) || handle.length !== 2
+                || !handle.every(v => typeof v === 'number' && Number.isFinite(v)))) {
+                throw new Error(`points[${index}].${key} has a non-finite Bezier handle`);
+            }
+        }
+        return p;
+    });
+    const result = points.map(p => ({ x: p.x, y: p.y }));
+    const axes = [{ x: 1, y: 0 }, { x: 0, y: 1 }, ...projections];
+    for (let i = 0; i < (closed ? points.length : points.length - 1); i++) {
+        const a = points[i], b = points[(i + 1) % points.length];
+        const controls = [[a.x, a.y], a.right ?? [a.x, a.y], b.left ?? [b.x, b.y], [b.x, b.y]];
+        for (const axis of axes) {
+            const values = controls.map(p => axis.x * p[0] + axis.y * p[1] + (axis.offset ?? 0));
+            for (const t of scalarParameters(values, Boolean(axis.crossings))) {
+                if (t === 0 || t === 1)
+                    continue;
+                const point = { x: scalarValue(controls.map(p => p[0]), t), y: scalarValue(controls.map(p => p[1]), t) };
+                if (![point.x, point.y].every(Number.isFinite))
+                    throw new Error('Non-finite Bezier extent');
+                result.push(point);
+            }
+        }
+    }
+    return result;
+}
+
 function assertCanvasPoint(point, label, width, height, clipBounds) {
   const checks = [
     ['anchor', Number(point.x), Number(point.y)],
@@ -2030,12 +2452,16 @@ function assertCanvasPoint(point, label, width, height, clipBounds) {
     ...(Array.isArray(point.right) ? [['right', Number(point.right[0]), Number(point.right[1])]] : []),
   ];
   for (const [suffix, x, y] of checks) {
-    if (![x, y].every(Number.isFinite) || x < 0 || x > width || y < 0 || y > height) {
+    if (![x, y].every(Number.isFinite)) {
+      throw new Error(`${label}.${suffix} has non-finite coordinates`);
+    }
+    if (suffix !== 'anchor') continue;
+    if (x < -1e-7 || x > width + 1e-7 || y < -1e-7 || y > height + 1e-7) {
       throw new Error(`${label}.${suffix} lies outside document canvas`);
     }
     if (
       clipBounds &&
-      (x < clipBounds.left || x > clipBounds.right || y < clipBounds.top || y > clipBounds.bottom)
+      (x < clipBounds.left - 1e-7 || x > clipBounds.right + 1e-7 || y < clipBounds.top - 1e-7 || y > clipBounds.bottom + 1e-7)
     ) {
       throw new Error(`${label}.${suffix} lies outside clip_bounds`);
     }
@@ -2048,11 +2474,14 @@ function makeUxpPathPoint(point) {
     ? constants.PointKind.SMOOTHPOINT
     : constants.PointKind.CORNERPOINT;
   pathPoint.anchor = [Number(point.x), Number(point.y)];
-  pathPoint.leftDirection = Array.isArray(point.left)
-    ? [Number(point.left[0]), Number(point.left[1])]
-    : [Number(point.x), Number(point.y)];
-  pathPoint.rightDirection = Array.isArray(point.right)
+  // Photoshop's PathPointInfo add() consumes these DOM directions in reverse
+  // segment order (live asymmetric-curve probe, 2026-10-05). Public left is
+  // incoming and right is outgoing, matching the CPU dynamic-stroke sampler.
+  pathPoint.leftDirection = Array.isArray(point.right)
     ? [Number(point.right[0]), Number(point.right[1])]
+    : [Number(point.x), Number(point.y)];
+  pathPoint.rightDirection = Array.isArray(point.left)
+    ? [Number(point.left[0]), Number(point.left[1])]
     : [Number(point.x), Number(point.y)];
   return pathPoint;
 }
@@ -2068,14 +2497,15 @@ function makeUxpRegionSubPath(contour) {
   return subPath;
 }
 
-function validatePaintTargetDescriptor(descriptor, toolName) {
+function validatePaintTargetDescriptor(descriptor, toolName, maskPainting = false) {
   if (!descriptor || descriptor._obj === 'error') {
     throw new Error(`${toolName} target layer not found`);
   }
   if (layerSectionValue(descriptor) === 'layerSectionStart') {
     throw new Error(`${toolName} target must be an ArtLayer, not a LayerSet`);
   }
-  if (legacyLayerKind(descriptor) !== 'LayerKind.NORMAL') {
+  const kind = legacyLayerKind(descriptor);
+  if (kind !== 'LayerKind.NORMAL' && !(maskPainting && kind === 'LayerKind.SMARTOBJECT')) {
     throw new Error(
       `${toolName} target must be a normal raster ArtLayer: ${String(descriptor.name ?? '')}`
     );
@@ -2107,7 +2537,9 @@ async function preparePaintTarget(params, toolName) {
     );
   }
   const doc = app.activeDocument;
-  const originalLayer = Array.from(doc.activeLayers ?? [])[0] ?? null;
+  const originalLayers = Array.from(doc.activeLayers ?? []);
+  if (params.paint_target === 'layer-mask' && originalLayers.length !== 1) throw new Error('mask_single_active_layer_required');
+  const originalLayer = originalLayers[0] ?? null;
   const originalLayerId = originalLayer?.id ?? null;
   const targetLayerId = requestedLayerId ?? originalLayerId;
   if (!Number.isInteger(targetLayerId) || targetLayerId <= 0) {
@@ -2120,13 +2552,15 @@ async function preparePaintTarget(params, toolName) {
   if (!targetDescriptor || targetDescriptor._obj === 'error') {
     throw new Error(`${toolName} target layer not found: ${targetLayerId}`);
   }
-  validatePaintTargetDescriptor(targetDescriptor, toolName);
+  validatePaintTargetDescriptor(targetDescriptor, toolName, params.paint_target === 'layer-mask');
   return {
     doc,
     targetLayerId,
     targetDescriptor,
     originalLayerId,
     resolution: numericValue(descriptors.documentDescriptor?.resolution) ?? 72,
+    width: documentPixelDimension(descriptors.documentDescriptor?.width, descriptors.documentDescriptor?.resolution),
+    height: documentPixelDimension(descriptors.documentDescriptor?.height, descriptors.documentDescriptor?.resolution),
   };
 }
 
@@ -2203,11 +2637,86 @@ async function strokeNamedPathModal(doc, pathName, tool, simulatePressure) {
   await pathItem.strokePath(tool, Boolean(simulatePressure));
 }
 
+function paintTargetCompositing(doc, layerId) {
+  const layer = findLayerByIdDom(doc, layerId);
+  const properties = (item) => ({
+    layer_id: item.id,
+    ...(Number.isFinite(item.opacity) ? { opacity: item.opacity } : {}),
+    ...(Number.isFinite(item.fillOpacity) ? { fill_opacity: item.fillOpacity } : {}),
+    ...(item.blendMode != null ? { blend_mode: String(item.blendMode) } : {}),
+  });
+  if (!layer) return { layer_id: layerId };
+  const parentGroups = [];
+  let parent = layer.parent;
+  while (parent && parent !== doc && parent.kind === constants.LayerKind.GROUP) {
+    parentGroups.push(properties(parent));
+    parent = parent.parent;
+  }
+  return { ...properties(layer), ...(parentGroups.length ? { parent_groups: parentGroups } : {}) };
+}
+
+function batchBrushStyle(baseline, override) {
+  return Object.fromEntries(['size', 'opacity', 'flow'].map(
+    key => [key, Number(override[key] === undefined ? baseline[key] : override[key])]
+  ));
+}
+
+function sameCoreBrushStyle(a, b) {
+  return ['size', 'opacity', 'flow'].every(key => Number(a[key]) === Number(b[key]));
+}
+
+async function restoreBatchBrushStyle(baseline, current, dirty = false) {
+  if (!baseline || (!dirty && sameCoreBrushStyle(baseline, current))) return;
+  await action.batchPlay([selectPaintbrushToolDescriptor()], { synchronousExecution: true });
+  await applyBrushSettingsModal(batchBrushStyle(baseline, {}));
+}
+
+// Mask edits use the established BRUSH renderer, never ERASER or an RGB fallback.
+async function selectStrokeMaskModal(doc, targetLayerId) {
+  if (doc.activeLayers?.length !== 1 || doc.activeLayers[0].id !== targetLayerId) throw new Error('mask_layer_target_mismatch');
+  const [layer] = await action.batchPlay([layerByIdDescriptor(targetLayerId)], { synchronousExecution: true });
+  if (!layer || layer._obj === 'error') throw new Error('mask_target_unavailable');
+  if (layer.hasUserMask === true && layer.userMaskEnabled !== true) throw new Error('mask_target_disabled_or_unconfirmed');
+  const created = layer.hasUserMask !== true;
+  if (created) {
+    const result = await action.batchPlay([{ _obj: 'make', new: { _class: 'channel' },
+      at: { _ref: 'channel', _enum: 'channel', _value: 'mask' },
+      using: { _enum: 'userMaskEnabled', _value: 'revealAll' },
+      _options: { dialogOptions: 'silent' } }], { synchronousExecution: true });
+    if (!result[0] || result[0]._obj === 'error') throw new Error('mask_creation_failed');
+  }
+  const [confirmed] = await action.batchPlay([layerByIdDescriptor(targetLayerId)], { synchronousExecution: true });
+  if (confirmed?.hasUserMask !== true || confirmed.userMaskEnabled !== true) throw new Error('mask_creation_unconfirmed');
+  await selectStrokeMaskChannelModal(doc, targetLayerId);
+  return { mask_auto_created: created };
+}
+
+async function selectStrokeMaskChannelModal(doc, targetLayerId) {
+  if (doc.activeLayers?.length !== 1 || doc.activeLayers[0].id !== targetLayerId) throw new Error('mask_layer_target_mismatch');
+  const result = await action.batchPlay([{ _obj: 'select',
+    _target: [{ _ref: 'channel', _enum: 'channel', _value: 'mask' }], makeVisible: false,
+    _options: { dialogOptions: 'silent' } }], { synchronousExecution: true });
+  if (!result[0] || result[0]._obj === 'error') throw new Error('mask_channel_selection_failed');
+}
+
 async function paintStrokesBatch(params = {}) {
   const strokes = Array.isArray(params.strokes) ? params.strokes : [];
   if (strokes.length < 1) throw new Error('strokes must be a non-empty array');
+  const maskPainting = params.paint_target === 'layer-mask';
+  if (maskPainting && (!Number.isInteger(params.document_id) || params.document_id <= 0
+    || !Number.isInteger(params.layer_id) || params.layer_id <= 0
+    || strokes.some(stroke => String(stroke.tool ?? 'BRUSH').toUpperCase() !== 'BRUSH'
+      || !stroke.color || stroke.color.red !== stroke.color.green || stroke.color.red !== stroke.color.blue))) {
+    throw new Error('mask_paint_contract_invalid');
+  }
   const target = await preparePaintTarget(params, 'paint_strokes');
   const { doc, targetLayerId, targetDescriptor, originalLayerId, resolution } = target;
+  if (target.width == null || target.height == null) throw new Error('paint_strokes document geometry unavailable');
+  for (const [index, stroke] of strokes.entries()) {
+    for (const point of bezierCriticalPoints(stroke.points ?? [], Boolean(stroke.closed))) {
+      assertCanvasPoint(point, `strokes[${index}].curve`, target.width, target.height);
+    }
+  }
   return core.executeAsModal(
     async (executionContext) => {
       // Validate every requested Photoshop stroke mechanism before history is
@@ -2215,22 +2724,29 @@ async function paintStrokesBatch(params = {}) {
       // batch from discovering that a later mechanism is not ready only after
       // earlier strokes have already rendered.
       const strokeToolReadiness = await preflightStrokeToolsModal(strokes);
+      const originalColor = maskPainting ? currentForegroundRgb() : null;
+      const originalChannels = maskPainting ? Array.from(doc.activeChannels ?? []) : null;
       const suspensionId = await executionContext.hostControl.suspendHistory({
         documentID: doc.id,
         name: 'MCP Digital Painting',
       });
       let committed = false;
+      let brushBaseline = null;
+      let brushState = null;
+      let brushStateDirty = false;
+      let maskDetails;
       try {
+        if (maskPainting && !originalChannels.length) throw new Error('mask_channel_restore_unavailable');
         if (targetLayerId !== originalLayerId) {
           await action.batchPlay(
             [selectLayerByIdDescriptor(targetLayerId)],
             { synchronousExecution: true }
           );
         }
+        if (maskPainting) maskDetails = await selectStrokeMaskModal(doc, targetLayerId);
         const hasBrushStroke = strokes.some(
           (stroke) => String(stroke?.tool ?? 'BRUSH').toUpperCase() === 'BRUSH'
         );
-        let brushState = null;
         if (hasBrushStroke) {
           // currentToolOptions describes the active Photoshop tool. Region/fill
           // work or user interaction may leave another tool active between
@@ -2241,37 +2757,30 @@ async function paintStrokesBatch(params = {}) {
             { synchronousExecution: true }
           );
           const initialBrush = await snapshotBrushSettings({ synchronousExecution: true });
-          brushState = { ...initialBrush.settings };
+          brushBaseline = { ...initialBrush.settings };
+          brushState = { ...brushBaseline };
         }
         let cachedColor = currentForegroundRgb();
-        let brushStateDirty = false;
 
         for (let index = 0; index < strokes.length; index++) {
           const stroke = strokes[index];
           const strokeToolName = String(stroke.tool ?? 'BRUSH').toUpperCase();
           const usesBrushSettings = strokeToolName === 'BRUSH';
           let brushChanged = false;
-          if (usesBrushSettings && stroke.size !== undefined && Number(stroke.size) !== Number(brushState.size)) {
-            brushState.size = Number(stroke.size);
-            brushChanged = true;
-          }
-          if (usesBrushSettings && stroke.opacity !== undefined && Number(stroke.opacity) !== Number(brushState.opacity)) {
-            brushState.opacity = Number(stroke.opacity);
-            brushChanged = true;
-          }
-          if (usesBrushSettings && stroke.flow !== undefined && Number(stroke.flow) !== Number(brushState.flow)) {
-            brushState.flow = Number(stroke.flow);
-            brushChanged = true;
+          if (usesBrushSettings) {
+            const desiredStyle = batchBrushStyle(brushBaseline, stroke);
+            brushChanged = !sameCoreBrushStyle(desiredStyle, brushState);
+            brushState = { ...brushState, ...desiredStyle };
           }
           const colorChanged = Boolean(stroke.color && !samePaintColor(cachedColor, stroke.color));
           if (colorChanged) {
+            if (hasBrushStroke) brushStateDirty = true;
             setForegroundColorModal(stroke.color);
             cachedColor = {
               red: Number(stroke.color.red),
               green: Number(stroke.color.green),
               blue: Number(stroke.color.blue),
             };
-            if (hasBrushStroke) brushStateDirty = true;
           }
           // In this UXP host, assigning app.foregroundColor inside the same
           // painting modal can restore the pre-assignment brush opacity/flow.
@@ -2292,17 +2801,27 @@ async function paintStrokesBatch(params = {}) {
           try {
             const tool = constants.ToolType[strokeToolName];
             if (!tool) throw new Error(`unsupported UXP stroke tool: ${String(stroke.tool)}`);
+            // Tool/color writes may affect channel targeting. Pin the mask immediately before every draw.
+            if (maskPainting) await selectStrokeMaskChannelModal(doc, targetLayerId);
             await strokeNamedPathModal(doc, pathName, tool, stroke.simulatePressure);
           } finally {
             await deleteNamedPathModal(pathName);
           }
         }
+        if (maskPainting) { setForegroundColorModal(originalColor); brushStateDirty = true; }
+        // Local overrides must not become the baseline of a later AUTO chunk
+        // or painting call. Persistent configuration belongs to set_brush.
+        await restoreBatchBrushStyle(brushBaseline, brushState, brushStateDirty);
+        brushState = brushBaseline;
+        brushStateDirty = false;
         if (originalLayerId != null && originalLayerId !== targetLayerId) {
           await action.batchPlay(
             [selectLayerByIdDescriptor(originalLayerId)],
             { synchronousExecution: true }
           );
         }
+        if (maskPainting) doc.activeChannels = originalChannels;
+        const paintTarget = paintTargetCompositing(doc, targetLayerId);
         await executionContext.hostControl.resumeHistory(suspensionId, true);
         committed = true;
         return {
@@ -2310,10 +2829,12 @@ async function paintStrokesBatch(params = {}) {
           stroke_count: strokes.length,
           layer_id: targetLayerId,
           layer_name: String(targetDescriptor.name ?? ''),
+          paint_target: paintTarget,
           coordinate_space: 'canvas_pixels',
           document_resolution_dpi: resolution,
           path_coordinate_scale: 1,
           stroke_tool_readiness: strokeToolReadiness,
+          ...(maskPainting ? { ...maskDetails, original_preserved: true, paint_channel: 'layer-mask' } : {}),
         };
       } catch (error) {
         if (!committed) {
@@ -2321,6 +2842,10 @@ async function paintStrokesBatch(params = {}) {
         }
         throw error;
       } finally {
+        if (!committed) {
+          if (maskPainting) { try { setForegroundColorModal(originalColor); brushStateDirty = true; } catch {} }
+          try { await restoreBatchBrushStyle(brushBaseline, brushState, brushStateDirty); } catch {}
+        }
         if (originalLayerId != null && originalLayerId !== targetLayerId) {
           try {
             await action.batchPlay(
@@ -2328,6 +2853,9 @@ async function paintStrokesBatch(params = {}) {
               { synchronousExecution: true }
             );
           } catch {}
+        }
+        if (!committed && maskPainting && originalChannels.length) {
+          try { doc.activeChannels = originalChannels; } catch {}
         }
       }
     },
@@ -2347,6 +2875,9 @@ async function paintDabsBatch(params = {}) {
         name: 'MCP Paint Dabs',
       });
       let committed = false;
+      let brushBaseline = null;
+      let brushState = null;
+      let brushStateDirty = false;
       try {
         if (targetLayerId !== originalLayerId) {
           await action.batchPlay(
@@ -2354,29 +2885,24 @@ async function paintDabsBatch(params = {}) {
             { synchronousExecution: true }
           );
         }
+        await action.batchPlay([selectPaintbrushToolDescriptor()], { synchronousExecution: true });
         const initialBrush = await snapshotBrushSettings({ synchronousExecution: true });
-        let brushState = { ...initialBrush.settings };
+        brushBaseline = { ...initialBrush.settings };
+        brushState = { ...brushBaseline };
 
         for (let groupIndex = 0; groupIndex < groups.length; groupIndex++) {
           const group = groups[groupIndex];
-          let brushChanged = false;
-          if (group.size !== undefined && Number(group.size) !== Number(brushState.size)) {
-            brushState.size = Number(group.size);
-            brushChanged = true;
-          }
-          if (group.opacity !== undefined && Number(group.opacity) !== Number(brushState.opacity)) {
-            brushState.opacity = Number(group.opacity);
-            brushChanged = true;
-          }
-          if (group.flow !== undefined && Number(group.flow) !== Number(brushState.flow)) {
-            brushState.flow = Number(group.flow);
-            brushChanged = true;
-          }
+          const desiredStyle = batchBrushStyle(brushBaseline, group);
+          const brushChanged = !sameCoreBrushStyle(desiredStyle, brushState);
+          brushState = { ...brushState, ...desiredStyle };
           const colorWritten = Boolean(group.color);
-          if (colorWritten) setForegroundColorModal(group.color);
+          if (colorWritten) {
+            brushStateDirty = true;
+            setForegroundColorModal(group.color);
+          }
           // Foreground-color assignment can restore stale brush opacity/flow
           // inside the same modal. Restore the desired style after every color
-          // write, including color-only groups that inherit the prior style.
+          // write, including color-only groups that use the batch baseline.
           if (brushChanged || colorWritten) {
             const updated = await applyBrushSettingsModal({
               size: Number(brushState.size),
@@ -2384,6 +2910,7 @@ async function paintDabsBatch(params = {}) {
               flow: Number(brushState.flow),
             });
             brushState = { ...updated.settings };
+            brushStateDirty = false;
           }
           const points = Array.isArray(group.points) ? group.points : [];
           const pathName = `__MCP_DABS_${Date.now()}_${groupIndex}`;
@@ -2394,12 +2921,16 @@ async function paintDabsBatch(params = {}) {
             await deleteNamedPathModal(pathName);
           }
         }
+        await restoreBatchBrushStyle(brushBaseline, brushState, brushStateDirty);
+        brushState = brushBaseline;
+        brushStateDirty = false;
         if (originalLayerId != null && originalLayerId !== targetLayerId) {
           await action.batchPlay(
             [selectLayerByIdDescriptor(originalLayerId)],
             { synchronousExecution: true }
           );
         }
+        const paintTarget = paintTargetCompositing(doc, targetLayerId);
         await executionContext.hostControl.resumeHistory(suspensionId, true);
         committed = true;
         return {
@@ -2407,6 +2938,7 @@ async function paintDabsBatch(params = {}) {
           group_count: groups.length,
           layer_id: targetLayerId,
           layer_name: String(targetDescriptor.name ?? ''),
+          paint_target: paintTarget,
           coordinate_space: 'canvas_pixels',
           document_resolution_dpi: resolution,
           path_coordinate_scale: 1,
@@ -2417,6 +2949,9 @@ async function paintDabsBatch(params = {}) {
         }
         throw error;
       } finally {
+        if (!committed) {
+          try { await restoreBatchBrushStyle(brushBaseline, brushState, brushStateDirty); } catch {}
+        }
         if (originalLayerId != null && originalLayerId !== targetLayerId) {
           try {
             await action.batchPlay(
@@ -2488,10 +3023,11 @@ async function paintRegions(params = {}) {
       const points = Array.isArray(contours[contourIndex]?.points)
         ? contours[contourIndex].points
         : [];
-      for (let pointIndex = 0; pointIndex < points.length; pointIndex++) {
+      const criticalPoints = bezierCriticalPoints(points, true);
+      for (let pointIndex = 0; pointIndex < criticalPoints.length; pointIndex++) {
         assertCanvasPoint(
-          points[pointIndex],
-          `regions[${regionIndex}].contours[${contourIndex}].points[${pointIndex}]`,
+          criticalPoints[pointIndex],
+          `regions[${regionIndex}].contours[${contourIndex}].curve[${pointIndex}]`,
           width,
           height,
           clipBounds
@@ -2501,6 +3037,11 @@ async function paintRegions(params = {}) {
     targets.push({ id: targetId, descriptor: targetDescriptor });
   }
 
+  if (params.replace_contents === true && (!requestedDocumentId || targets.some((target, i) =>
+    !Number.isInteger(regions[i]?.layerId) || regions[i].layerId <= 0 || target.id !== targets[0].id)
+    || targets[0].descriptor.background === true)) {
+    throw new Error('region_rebuild_requires_one_pinned_nonbackground_raster_layer');
+  }
   return core.executeAsModal(
     async (executionContext) => {
       const suspensionId = await executionContext.hostControl.suspendHistory({
@@ -2510,6 +3051,17 @@ async function paintRegions(params = {}) {
       const painted = [];
       let committed = false;
       try {
+        if (params.replace_contents === true) {
+          const selected = await action.batchPlay([selectLayerByIdDescriptor(targets[0].id), {
+            _obj: 'select', _target: [{ _ref: 'channel', _enum: 'channel', _value: 'RGB' }],
+            _options: { dialogOptions: 'silent' },
+          }], { synchronousExecution: true });
+          if (selected.some(result => result?._obj === 'error')) throw new Error('component_rebuild_pixel_target_failed');
+          await doc.selection.selectAll();
+          const cleared = await action.batchPlay([{ _obj: 'delete', _options: { dialogOptions: 'silent' } }], { synchronousExecution: true });
+          if (cleared.some(result => result?._obj === 'error')) throw new Error('component_rebuild_clear_failed');
+          await doc.selection.deselect();
+        }
         for (let regionIndex = 0; regionIndex < regions.length; regionIndex++) {
           const region = regions[regionIndex];
           const target = targets[regionIndex];
@@ -2568,6 +3120,7 @@ async function paintRegions(params = {}) {
             id: region.id || String(regionIndex),
             layer_id: target.id,
             layer_name: String(target.descriptor.name ?? ''),
+            paint_target: paintTargetCompositing(doc, target.id),
             contour_count: region.contours.length,
             opacity: Number(region.opacity),
           });
@@ -3132,20 +3685,28 @@ async function createDocumentMutation(params = {}) {
     throw new Error(`unsupported create_document color mode: ${colorMode}`);
   }
 
-  const document = await core.executeAsModal(
-    () => app.documents.add({
+  const beforeIds = new Set(Array.from(app.documents).map(document => Number(document.id)));
+  let createdResult;
+  return core.executeAsModal(async () => {
+    const document = await app.documents.add({
       width,
       height,
       resolution,
       mode: colorModes[colorMode],
       fill: constants.DocumentFill?.WHITE ?? 'white',
-    }),
-    { commandName: 'MCP Create Document' }
-  );
-  return structuredDocumentResult(document, {
-    operation: 'create_document',
-    requested: { width, height, resolution, colorMode },
-  });
+    });
+    // Capture identity while the modal scope still owns creation. Some UXP
+    // executeAsModal implementations don't propagate the callback return value.
+    // A fallback is admissible only for the uniquely new document, never simply
+    // whatever document happens to be active after the modal scope has ended.
+    const newDocuments = Array.from(app.documents).filter(candidate => !beforeIds.has(Number(candidate.id)));
+    const created = Number.isInteger(Number(document?.id)) && Number(document.id) > 0 && !beforeIds.has(Number(document.id))
+      ? document : newDocuments.length === 1 ? newDocuments[0] : null;
+    const result = structuredDocumentResult(created, {
+      operation: 'create_document', requested: { width, height, resolution, colorMode },
+    });
+    createdResult = result;
+  }, { commandName: 'MCP Create Document' }).then(() => createdResult);
 }
 
 async function openImageMutation(params = {}) {
@@ -4005,6 +4566,11 @@ async function handleCommand(cmd) {
       return;
     }
 
+    if (cmdAction === 'paint_mask_strokes') {
+      await postResult({ id, ok: true, data: await paintStrokesBatch({ ...params, paint_target: 'layer-mask' }) });
+      return;
+    }
+
     if (cmdAction === 'paint_strokes') {
       await postResult({ id, ok: true, data: await paintStrokesBatch(params) });
       return;
@@ -4073,16 +4639,18 @@ async function pollOnce() {
   try {
     await flushPendingResults();
     const activeDocument = app.activeDocument;
-    if (activeDocument && Number.isSafeInteger(Number(activeDocument.id))) {
-      documentInstanceWitness(Number(activeDocument.id));
-    }
+    const activeDocumentWitness = activeDocument && Number.isSafeInteger(Number(activeDocument.id))
+      ? documentInstanceWitness(Number(activeDocument.id))
+      : null;
     const query = [
       `protocol=${encodeURIComponent(REGISTRATION_PROTOCOL)}`,
       `revision=${encodeURIComponent(BRIDGE_REVISION)}`,
+      `runtimeInstanceWitness=${encodeURIComponent(RUNTIME_INSTANCE_WITNESS)}`,
       `photoshopVersion=${encodeURIComponent(String(app.version || ''))}`,
       `documentCount=${encodeURIComponent(String(app.documents?.length ?? 0))}`,
       `activeDocumentId=${encodeURIComponent(activeDocument ? String(activeDocument.id) : '')}`,
       `activeDocumentName=${encodeURIComponent(activeDocument ? String(activeDocument.name) : '')}`,
+      `activeDocumentInstanceWitness=${encodeURIComponent(activeDocumentWitness?.token || '')}`,
     ].join('&');
     const res = await fetch(`${BRIDGE_BASE}/poll?${query}`);
     if (res.status === 204) return true;
@@ -4106,10 +4674,14 @@ async function pollLoop() {
   while (polling) {
     const connected = await pollOnce();
     const wasConnected = bridgeUiConnected;
+    const activeDocumentId = numericValue(app.activeDocument?.id) ?? null;
+    const activeDocumentChanged = activeDocumentId !== lastUserConfigDocumentId;
     setBridgeUiConnected(connected);
-    if (connected && !wasConnected) {
+    if (connected && (!wasConnected || activeDocumentChanged)) {
+      lastUserConfigDocumentId = activeDocumentId;
       refreshVideoTraceSetting();
       refreshVideoTraceReadiness();
+      refreshUserConfig();
     }
     // A healthy long-poll immediately opens the next request. Back off only when
     // the localhost server is unavailable so a stopped MCP process cannot cause

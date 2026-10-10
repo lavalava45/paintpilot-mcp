@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parsePaintingIntent } from '../src/core/guard/painting-intent.js';
+import { parsePaintingIntent, normalizeGuardActionIds } from '../src/core/guard/painting-intent.js';
 import {
   NextPassCompilerError,
   compilePaintingIntentToNextPass,
@@ -89,6 +89,12 @@ function existingOwnerIntent() {
 }
 
 describe('NextPassCompiler', () => {
+  it('preserves localized artistic commentary independently of the technical goal', () => {
+    const intent = parsePaintingIntent({ ...existingOwnerIntent(), artistic_commentary: '  Хочу связать шерсть с объёмом тела направленными мазками.  ' });
+    const compiled = compilePaintingIntentToNextPass(intent, { compactPassContext: () => existingOwnerContext() });
+    expect(compiled.next_pass.goal).toBe(intent.goal);
+    expect(compiled.next_pass.artistic_commentary).toBe('Хочу связать шерсть с объёмом тела направленными мазками.');
+  });
   it('inherits an existing owner, injects its physical layer, preserves planner context, and batches compatible actions', () => {
     const context = existingOwnerContext();
     const compiled = compilePaintingIntentToNextPass(existingOwnerIntent(), {
@@ -205,6 +211,20 @@ describe('NextPassCompiler', () => {
     });
     expect((accepted.next_pass.actions as any[])[1].args.regions[0].layer_id)
       .toBe('$steps.tower-layer.details.layerId');
+    const implicit = compilePaintingIntentToNextPass(
+      parsePaintingIntent({ ...raw, construction_role: 'structured-mass',
+        actions: raw.actions.map(({ id, ...action }) => action) }),
+      { compactPassContext: () => context }
+    );
+    const steps = implicit.next_pass.actions as any[];
+    expect(steps[0].id).toBe('guard_action_1');
+    const collision = [{ tool: 'paint', args: { layer_id: '$steps.guard_action_1.details.layerId' } },
+      { id: 'guard_action_1', tool: 'create' }];
+    expect(normalizeGuardActionIds(collision)).toEqual([
+      { ...collision[0], id: 'guard_action_1_' }, collision[1],
+    ]);
+    expect(collision[0]).not.toHaveProperty('id');
+    expect(steps[1].args.regions[0].layer_id).toBe('$steps.guard_action_1.details.layerId');
   });
 
   it('is deterministic for identical PaintingIntent and durable context', () => {

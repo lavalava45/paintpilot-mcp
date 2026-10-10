@@ -1,0 +1,40 @@
+Bezier.js 6.1.4
+Author identified by upstream: Pomax.
+Upstream: https://github.com/Pomax/bezierjs
+Source revision: a41f3e08e9724c9973eca0eb5c1304120e72fc70
+
+The published package and this source revision have no standalone license file.
+package.json declares MIT; the upstream README License section states:
+This code is MIT licensed.
+
+Retained source header:
+/**
+  A javascript Bezier curve library by Pomax.
+
+  Based on http://pomax.github.io/bezierinfo
+
+  This code is MIT licensed.
+**/
+
+Standard MIT license text supplied as a companion to the upstream declaration.
+This is not represented as a verbatim upstream license file; no copyright year is invented.
+
+MIT License
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

@@ -20,7 +20,7 @@ vi.mock('../platform/uxp-bridge-client.js', () => ({
   invokeUxpPaintDabs: bridge.paintDabs,
 }));
 
-import { createPaintingTools } from './painting-tools.js';
+import { createPaintingTools, strokeExecutionBudget } from './painting-tools.js';
 import {
   withToolExecutionContext,
   withToolExecutionStepContext,
@@ -181,6 +181,26 @@ describe('canonical painting tools UXP routing', () => {
     });
     expect(allowed.isError).not.toBe(true);
     expect(bridge.paintStrokes).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['strokes', 'dabs', 'regions'] as const)('preserves actual layer compositing facts in %s receipts', async kind => {
+    const { connection, router } = fixture();
+    const target = { layer_id: 9, opacity: 35, fill_opacity: 70, blend_mode: 'normal' };
+    const data = kind === 'regions'
+      ? { painted_regions: [{ id: 'r1', layer_id: 9, paint_target: target }] }
+      : { paint_target: target };
+    const invoke = kind === 'strokes' ? bridge.paintStrokes : kind === 'dabs' ? bridge.paintDabs : bridge.paintRegions;
+    invoke.mockResolvedValueOnce({ ok: true, data });
+    const paint = createPaintingTools(connection, router)
+      .find(tool => tool.tool.name === `photoshop_paint_${kind}`)!;
+    const args = kind === 'strokes' ? { strokes: [{ points: [{ x: 1, y: 1 }, { x: 2, y: 2 }] }] }
+      : kind === 'dabs' ? { dabs: [{ x: 1, y: 1 }] }
+        : { regions: [{ id: 'r1', layer_id: 9, color: { red: 1, green: 2, blue: 3 },
+          contours: [{ points: [{ x: 1, y: 1 }, { x: 2, y: 1 }, { x: 2, y: 2 }] }] }] };
+    const result = await paint.handler(args);
+    expect(result.isError).not.toBe(true);
+    const details = JSON.parse(textOf(result)).details;
+    expect(kind === 'regions' ? details.painted_regions[0].paint_target : details.paint_target).toEqual(target);
   });
 
   it('rejects meaningless SMUDGE/ERASER color overrides before UXP dispatch', async () => {
@@ -361,4 +381,27 @@ describe('canonical painting tools UXP routing', () => {
     expect(bridge.paintRegions).not.toHaveBeenCalled();
     expect(bridge.paintDabs).not.toHaveBeenCalled();
   });
+});
+
+it('rejects expanded dynamics and SINGLE_HISTORY bypass before any UXP dispatch, retaining the original strokes', async () => {
+  vi.clearAllMocks();
+  const { connection, router, backendFor } = fixture();
+  const paint = createPaintingTools(connection, router).find(tool => tool.tool.name === 'photoshop_paint_strokes')!;
+  const args = { document_id: 42, strokes: Array.from({ length: 76 }, (_, i) => ({
+    points: [{ x: i, y: 0 }, { x: i + 20, y: 30 }, { x: i + 40, y: 50 }],
+    color: { red: 10, green: 20, blue: 30 }, dynamics: { steps: 12, size: [8, 2], opacity: [70, 20] },
+  })) };
+  const original = structuredClone(args);
+  const budget = strokeExecutionBudget(args);
+  expect(budget).toMatchObject({ allowed: false, render_strokes: 912, auto_batches: 228 });
+  for (const batch_mode of ['AUTO', 'SINGLE_HISTORY']) {
+    const result = await paint.handler({ ...args, batch_mode });
+    expect(result.isError).toBe(true);
+    expect(JSON.parse(textOf(result))).toMatchObject({ execution: 'not-executed' });
+  }
+  expect(bridge.paintStrokes).not.toHaveBeenCalled();
+  expect(backendFor).not.toHaveBeenCalled();
+  expect(args).toEqual(original);
+  expect(strokeExecutionBudget({ ...args, strokes: args.strokes.slice(0, 2) }).allowed).toBe(true);
+  expect(strokeExecutionBudget({ ...args, strokes: args.strokes.slice(0, 2) }, 13000).allowed).toBe(false);
 });

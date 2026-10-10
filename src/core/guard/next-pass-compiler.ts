@@ -1,4 +1,5 @@
 import {
+  normalizeGuardActionIds,
   type PaintingIntent,
   type PaintingIntentAction,
   type PaintingIntentScale,
@@ -417,16 +418,17 @@ export function compileIntentActions(
       'The artistic intent is clear, but concrete Photoshop action geometry is not uniquely derivable. Supply bounded actions; Guard will compile the protocol fields locally.'
     );
   }
+  const actions = normalizeGuardActionIds(intent.actions);
   const layerId = resolvePhysicalLayer(owner);
   if (layerId) {
-    return consolidateCompatibleActions(intent.actions.map(action => bindActionToLayer(action, layerId)));
+    return consolidateCompatibleActions(actions.map(action => bindActionToLayer(action, layerId)));
   }
 
-  const createLayer = intent.actions.find(action => text(action.tool) === 'photoshop_create_layer');
+  const createLayer = actions.find(action => text(action.tool) === 'photoshop_create_layer');
   const createLayerId = text(createLayer?.id);
-  if (!createLayerId) return consolidateCompatibleActions(intent.actions.map(action => structuredClone(action)));
+  if (!createLayerId) return consolidateCompatibleActions(actions.map(action => structuredClone(action)));
   const stepRef = `$steps.${createLayerId}.details.layerId`;
-  return consolidateCompatibleActions(intent.actions.map(action => {
+  return consolidateCompatibleActions(actions.map(action => {
     if (action === createLayer) return structuredClone(action);
     const next = structuredClone(action);
     const tool = text(next.tool);
@@ -650,6 +652,7 @@ export function compilePaintingIntentToNextPass(
     problem_id: intent.problem_id,
     document_id: intent.document_id,
     goal: intent.goal,
+    ...(intent.artistic_commentary ? { artistic_commentary: intent.artistic_commentary } : {}),
     ...(stage ? { stage } : {}),
     ...(effectiveIntent.stage_reset ? { stage_reset: structuredClone(effectiveIntent.stage_reset) } : {}),
     ...(scale ? { scale } : {}),

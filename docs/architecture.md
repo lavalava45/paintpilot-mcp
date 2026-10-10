@@ -1,5 +1,16 @@
 # Architecture
 
+## Same-chat pixel review — 2026-10-05 source update
+
+The existing inline/exact-image review asks the Painter in the same chat to inspect actual BEFORE/AFTER
+against the original brief/style, identify the largest visible defect and choose a construction change.
+Existing previous_observation fields store the critique; the next pass acts on it. Pass gain, task/stage
+readiness and whole-image finish remain distinct. This self-review is not independent artistic acceptance.
+Production no longer creates, loads, calls or waits for a local vision evaluator. Stored historical local
+assessments do not override current observations. Exact image delivery and no-replay rules remain intact.
+See [workflow and experimental history](artistic-evaluator.md); activation/live quality acceptance is pending.
+
+
 Engineering source of truth for **Photoshop MCP — Digital Painting Edition**: host integration,
 embedded Guard, semantic tool dispatch, UXP transport, preview/evidence flow, prompt layer and the
 MCP host boundary.
@@ -47,6 +58,15 @@ For ordinary MCP clients, `src/index.ts` exposes the same server and semantic ca
 `src/cos-plugin.ts` entry sets `PHOTOSHOP_GUARD_MODE=required`, making the guarded mutation lane
 mandatory while leaving known read-only tools directly callable.
 
+Async Guard workers run inside that MCP process. Job journals survive interruption; the worker
+does not survive the host closing the stdio transport. CoS PluginManager owns the persistent
+connection through start, poll and final review. One-request shell pipelines are unsuitable for
+async painting; restore the installed plugin when its route is unavailable, without another server.
+After lost execution, inspect/reconcile existing receipts and fresh state; never replay the package.
+The existing pre-dispatch document-bounds validation covers anchors and absolute Bezier handle
+pairs, including region clip_bounds. Negative handle offsets fail the public schema; all independent
+coordinate defects join the existing not-executed rejection, before layer preparation or mutation.
+
 ## 2. System overview
 
 ```mermaid
@@ -83,7 +103,7 @@ flowchart TB
 | --- | --- | --- |
 | MCP core | protocol, tool/prompt registry, session lifecycle | `src/core/` |
 | Embedded Guard | durable journal, barriers, jobs, recovery, artistic workflow state | `src/core/guard/`, `src/tools/guard-tools.ts` |
-| Semantic tools | 133 public non-recipe `photoshop_*` tools | `src/tools/`, core connection/Guard tools |
+| Semantic tools | 132 public non-recipe `photoshop_*` tools | `src/tools/`, core connection/Guard tools |
 | Backend router | production UXP-only semantic dispatch | `src/platform/photoshop-backend.ts` |
 | UXP bridge | Photoshop-side execution and exact outcomes | `src/platform/uxp-bridge-client.ts`, `uxp-plugin/` |
 | Prompt layer | server instructions and 5 MCP guide prompts | `src/prompts/` |
@@ -94,7 +114,7 @@ flowchart TB
 `PhotoshopMCPServer` is implemented in `src/core/photoshop-mcp-server.ts`; `src/core/server.ts` is the
 stable compatibility facade. The server wires the official MCP SDK to:
 
-- **133 semantic tools**, including 16 public Guard tools;
+- **132 semantic tools**, including 15 public Guard tools;
 - **5 MCP guide prompts**;
 - server-level instructions published during MCP initialization;
 - structured error wrapping with machine-readable error codes and suggested next actions;
@@ -321,18 +341,21 @@ runtime materialization path; `include_image=true` is an explicit opt-in for dir
 delivery. Materialization is an evidence-delivery option, not another Photoshop export/save
 workflow.
 
-The compact Guard hot loop is stricter: `photoshop_guard_cycle[_auto]` and
-`photoshop_guard_job_poll` return only SHA/path/dimensions/crop references and never embed
-review image bytes. A pending visual barrier is inspected explicitly with
-`photoshop_guard_review_image`, which verifies the durable file SHA and delivers only those
-exact bytes through MCP image content. Visual closure remains fail-closed until the required
-review roles have an explicit delivery receipt.
+The compact Guard hot loop is evidence-bound: `photoshop_guard_cycle_auto` delivers the
+complete set of required exact review images **inline** when they fit its bounded MCP image
+block/byte budget, recording the durable delivery receipt. For oversized or incomplete
+bundles it returns SHA/path/dimensions/crop references and explicitly lists the missing
+roles. `photoshop_guard_job_poll` is reference-only. Request only missing roles via
+`photoshop_guard_review_image`, which verifies registered file identity before delivering
+their exact bytes; do not repeat an already successful inline review delivery. Visual
+closure remains fail-closed until all required review roles have delivery receipts and
+the Painter supplies an actual observation.
 
 At the final model-facing MCP boundary, textual/structured binary fields are semantically
 redacted (`base64`, image `data`, data-URLs and byte arrays). Guard results also expose
 `estimated_context_bytes`; responses above the context warning threshold include a
 `large_model_facing_response` warning. This boundary does not remove explicit MCP image
-content from `photoshop_guard_review_image`.
+content from `photoshop_guard_review_image` or inline `photoshop_guard_cycle_auto` delivery.
 
 ### Multiscale Guard review
 

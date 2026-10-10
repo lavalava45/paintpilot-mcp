@@ -43,16 +43,26 @@ function validatedRange(
   return value;
 }
 
+async function protectedBlur(router: PhotoshopBackendRouter, primitive: PhotoshopPrimitive, action: string, args: AdjustmentArgs, payload: Record<string, unknown>, summary: string): Promise<ToolResult> {
+  if (typeof args.layer_id !== 'number' || !Number.isSafeInteger(args.layer_id) || args.layer_id <= 0) return atomicFailureFromError(new Error('blur_target_layer_required: explicit numeric layer_id is required'));
+  try {
+    await router.backendFor(primitive);
+    // Dedicated guarded actions fail safely on old UXP builds; never fall back to their destructive commands.
+    const outcome = await invokeUxpOperation(action, { ...payload, layer_id: args.layer_id, ...(args.document_id !== undefined ? { document_id: args.document_id } : {}) }, 'uxp_guarded_blur_failed');
+    if (!outcome.ok || !outcome.data) {
+      if (/unknown.*(?:action|command)|(?:action|command).*unknown/i.test(outcome.error ?? '')) throw new Error('uxp_guarded_blur_unavailable: reload the installed UXP plugin after the current operation; destructive fallback is forbidden');
+      throw new Error(outcome.error ?? 'uxp_guarded_blur_failed');
+    }
+    if (outcome.data.original_preserved !== true || outcome.data.smart_filter_mask !== true || outcome.data.filter_mode !== 'smart-filter'
+      || outcome.data.source_layer_id !== args.layer_id || !Number.isSafeInteger(outcome.data.layer_id) || Number(outcome.data.layer_id) <= 0) throw new Error('guarded_blur_preservation_unconfirmed: do not replay; reconcile the operation');
+    return atomicSuccess(summary, outcome.data);
+  } catch (error) { return atomicFailureFromError(error); }
+}
+
 export function runGaussianBlur(router: PhotoshopBackendRouter, args: AdjustmentArgs): Promise<ToolResult> {
-  const radius = args.radius as number;
-  return plainFilter(
-    router,
-    'filter.gaussian_blur',
-    'apply_gaussian_blur',
-    { radius },
-    `Gaussian Blur applied with radius ${radius}px`,
-    'Error applying Gaussian Blur'
-  );
+  const radius = validatedRange(args.radius, 0.1, 250, 'radius');
+  if (typeof radius !== 'number') return Promise.resolve(radius);
+  return protectedBlur(router, 'filter.gaussian_blur', 'apply_guarded_gaussian_blur', args, { radius }, `Gaussian Smart Filter applied with radius ${radius}px`);
 }
 
 export function runSharpen(router: PhotoshopBackendRouter, args: AdjustmentArgs): Promise<ToolResult> {
@@ -84,16 +94,11 @@ export function runNoise(router: PhotoshopBackendRouter, args: AdjustmentArgs): 
 }
 
 export function runMotionBlur(router: PhotoshopBackendRouter, args: AdjustmentArgs): Promise<ToolResult> {
-  const angle = args.angle as number;
-  const radius = args.radius as number;
-  return plainFilter(
-    router,
-    'filter.motion_blur',
-    'apply_motion_blur',
-    { angle, radius },
-    `Motion Blur applied: angle ${angle}°, radius ${radius}px`,
-    'Error applying motion blur'
-  );
+  const angle = validatedRange(args.angle, -360, 360, 'angle');
+  if (typeof angle !== 'number') return Promise.resolve(angle);
+  const radius = validatedRange(args.radius, 1, 999, 'radius');
+  if (typeof radius !== 'number') return Promise.resolve(radius);
+  return protectedBlur(router, 'filter.motion_blur', 'apply_guarded_motion_blur', args, { angle, radius }, `Motion Blur Smart Filter applied: angle ${angle}°, radius ${radius}px`);
 }
 
 export async function runHighPass(router: PhotoshopBackendRouter, args: AdjustmentArgs): Promise<ToolResult> {
@@ -132,21 +137,6 @@ export async function runSmartBlur(router: PhotoshopBackendRouter, args: Adjustm
   if (typeof threshold !== 'number') return threshold;
   const mode = smartMode(args.mode);
   const quality = smartQuality(args.quality);
-  try {
-    await router.backendFor('filter.smart_blur');
-    const outcome = await invokeUxpOperation(
-      'apply_smart_blur',
-      { radius, threshold, mode, quality },
-      'uxp_apply_smart_blur_failed'
-    );
-    if (!outcome.ok || !outcome.data) throw new Error(outcome.error ?? 'uxp_apply_smart_blur_failed');
-    const details: Record<string, unknown> = {};
-    for (const key of ['filter', 'radius', 'threshold', 'mode', 'quality']) {
-      if (outcome.data[key] !== undefined) details[key] = outcome.data[key];
-    }
-    if (outcome.data.context !== undefined) details.context = outcome.data.context;
-    return atomicSuccess(`Smart Blur applied (radius ${radius}px, threshold ${threshold})`, details);
-  } catch (error) {
-    return atomicFailureFromError(error);
-  }
+  return protectedBlur(router, 'filter.smart_blur', 'apply_guarded_smart_blur', args,
+    { radius, threshold, mode, quality }, `Smart Blur applied (radius ${radius}px, threshold ${threshold})`);
 }

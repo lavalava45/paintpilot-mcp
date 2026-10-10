@@ -51,6 +51,14 @@ function registryWithRuntimePalette(): ToolRegistry {
 }
 
 describe('painting method capability map', () => {
+  it('keeps a uniform continuous field as an explicit fill instead of forcing a gradient', () => {
+    const selected = selectPaintingConstructionMethod(registryWithRuntimePalette(), 'continuous-field', 'construct', [], {
+      executionTools: ['photoshop_fill_layer'],
+    });
+    expect(selected.selected.id).toBe('continuous-color-field');
+    expect(selected.selected.executionTools).toContain('photoshop_fill_layer');
+  });
+
   it('reports unsupported methods explicitly instead of inventing runtime support', () => {
     const registry = registryWithRuntimePalette();
     const capabilities = paintingMethodCapabilities(registry);
@@ -101,7 +109,7 @@ describe('painting method capability map', () => {
     const registry = registryWithRuntimePalette();
     expect(selectPaintingMethod(registry, 'line', 'construct').selected.id).toBe('pencil-line');
     expect(selectPaintingMethod(registry, 'mass', 'construct').selected.id).toBe('installed-brush-preset');
-    expect(selectPaintingMethod(registry, 'mass', 'construct', [], { stage: 'RECOGNITION_BLOCK_IN' }).selected.id).toBe('region-block-in');
+    expect(selectPaintingMethod(registry, 'mass', 'construct', [], { stage: 'RECOGNITION_BLOCK_IN' }).selected.id).toBe('installed-brush-preset');
     expect(selectPaintingMethod(registry, 'painted-mass', 'construct').selected.id).toBe('installed-brush-preset');
     expect(selectPaintingMethod(registry, 'broken-mass', 'construct').selected.id).toBe('installed-brush-preset');
     expect(selectPaintingMethod(registry, 'smooth', 'transition').selected.id).toBe('smudge-shape');
@@ -115,21 +123,59 @@ describe('painting method capability map', () => {
 
   it('selects subject-agnostic construction roles before concrete Photoshop mechanisms', () => {
     const registry = registryWithRuntimePalette();
-    // Unrelated fixtures: a wall light field, an organic smoke body, and aerial haze.
+    // Unrelated subject-neutral fixtures: a planar field, a soft volume, and an optical veil.
     const structuredMass = selectPaintingConstructionMethod(registry, 'structured-mass', 'construct', [], { stage: 'GLOBAL_BLOCK_IN' });
-    const wallField = selectPaintingConstructionMethod(registry, 'continuous-field', 'construct');
-    const smokeBody = selectPaintingConstructionMethod(registry, 'volumetric-soft-mass', 'construct');
-    const aerialHaze = selectPaintingConstructionMethod(registry, 'optical-veil', 'construct');
+    const planarField = selectPaintingConstructionMethod(registry, 'continuous-field', 'construct');
+    const softVolume = selectPaintingConstructionMethod(registry, 'volumetric-soft-mass', 'construct');
+    const opticalVeil = selectPaintingConstructionMethod(registry, 'optical-veil', 'construct');
 
     expect(structuredMass).toMatchObject({ constructionRole: 'structured-mass', visualIntent: 'mass' });
-    expect(structuredMass.selected.id).toBe('region-block-in');
-    expect(wallField).toMatchObject({ constructionRole: 'continuous-field', visualIntent: 'continuous-field' });
-    expect(wallField.selected.id).toBe('continuous-color-field');
-    expect(smokeBody).toMatchObject({ constructionRole: 'volumetric-soft-mass', visualIntent: 'painted-mass' });
-    expect(smokeBody.selected.methodClass).not.toMatch(/blur|smudge/);
-    expect(aerialHaze).toMatchObject({ constructionRole: 'optical-veil', visualIntent: 'atmospheric-mass' });
-    expect(aerialHaze.selected.visualIntents).toContain('atmospheric-mass');
-    expect(aerialHaze.selected.id).not.toBe('soft-brush-build');
+    expect(structuredMass.selected.id).toBe('installed-brush-preset');
+    expect(planarField).toMatchObject({ constructionRole: 'continuous-field', visualIntent: 'continuous-field' });
+    expect(planarField.selected.id).toBe('continuous-color-field');
+    expect(softVolume).toMatchObject({ constructionRole: 'volumetric-soft-mass', visualIntent: 'painted-mass' });
+    expect(softVolume.selected.methodClass).not.toMatch(/blur|smudge/);
+    expect(opticalVeil).toMatchObject({ constructionRole: 'optical-veil', visualIntent: 'atmospheric-mass' });
+    expect(opticalVeil.selected.visualIntents).toContain('atmospheric-mass');
+    expect(opticalVeil.selected.id).not.toBe('soft-brush-build');
+  });
+
+  it('opens shape modelling and continuous fields to brush construction without rewriting valid region actions', () => {
+    const registry = registryWithRuntimePalette();
+    expect(selectPaintingConstructionMethod(registry, 'structured-mass', 'construct', [], {
+      stage: 'GLOBAL_BLOCK_IN',
+    }).selected.id).toBe('installed-brush-preset');
+    expect(selectPaintingConstructionMethod(registry, 'structured-mass', 'construct', [], {
+      stage: 'SHAPE', executionTools: ['photoshop_paint_regions'],
+    }).selected.id).toBe('region-block-in');
+    expect(selectPaintingConstructionMethod(registry, 'continuous-field', 'construct', [], {
+      executionTools: ['photoshop_paint_strokes'],
+    }).selected.id).toBe('installed-brush-preset');
+    expect(selectPaintingConstructionMethod(registry, 'volumetric-soft-mass', 'construct', [], {
+      executionTools: ['photoshop_paint_dabs'],
+    }).selected.id).toBe('soft-brush-build');
+    const painted = projectStyleMethodTraitEvidence({ mark_visibility: 'retain visible directional brush marks' }, {
+      stage: 'SHAPE', methodClass: 'paint',
+    });
+    expect(selectPaintingConstructionMethod(registry, 'continuous-field', 'construct', [], {
+      styleTraitEvidence: painted,
+    }).selected.id).toBe('installed-brush-preset');
+  });
+
+  it('honors compatible continuous-field preferences in the planning tool and rejects avoided or incompatible choices', async () => {
+    const registry = registryWithRuntimePalette();
+    const select = createMethodPaletteTools(registry).find(tool => tool.tool.name === 'photoshop_select_painting_method')!;
+    const result = await select.handler({
+      construction_role: 'continuous-field', impact_class: 'construct', preferred_method_id: 'installed-brush-preset',
+    });
+    const payload = JSON.parse(result.content[0]!.type === 'text' ? result.content[0]!.text : '{}');
+    expect(payload.selection.selected.id).toBe('installed-brush-preset');
+    expect(() => selectPaintingConstructionMethod(registry, 'continuous-field', 'construct', ['installed-brush-preset'], {
+      preferredMethodId: 'installed-brush-preset',
+    })).toThrow(/avoided/);
+    expect(() => selectPaintingConstructionMethod(registry, 'continuous-field', 'construct', [], {
+      preferredMethodId: 'region-block-in',
+    })).toThrow(/incompatible/);
   });
 
   it('exposes construction-role selection through the planning tool without requiring a visual intent', async () => {
@@ -252,7 +298,7 @@ describe('painting method capability map', () => {
     expect(noEvidence).toEqual([]);
     expect(selectPaintingMethod(registry, 'mass', 'construct', [], {
       stage: 'GLOBAL_BLOCK_IN', styleTraitEvidence: noEvidence,
-    }).selected.id).toBe('region-block-in');
+    }).selected.id).toBe('installed-brush-preset');
   });
 
   it('exposes capability and selection as read-only MCP tools', async () => {

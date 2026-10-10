@@ -42,7 +42,7 @@ function basePlan(overrides: Record<string, unknown> = {}) {
     summary: 'Control one explicit boundary.',
     stage: 'FORM_AND_LIGHT',
     scale: 'medium',
-    region: 'face',
+    region: 'focalForm',
     intent: 'control edge character',
     method_class: 'line',
     risk: 'low',
@@ -50,7 +50,7 @@ function basePlan(overrides: Record<string, unknown> = {}) {
     verification_envelope: { mode: 'after_only' },
     paint_strategy: {
       construction_role: 'volumetric-soft-mass',
-      material_role: 'form-bearing cheek mass',
+      material_role: 'form-bearing localRegion mass',
       visual_intent: 'painted-mass',
       pressure_policy: 'none',
     },
@@ -66,14 +66,14 @@ function basePlan(overrides: Record<string, unknown> = {}) {
     expected_visual_result: 'Boundary character matches the declared edge intent.',
     document_id: 42,
     edges: [
-      { boundary_id: 'cheek-bg', region_a: 'cheek', region_b: 'background', class: 'hard' },
+      { boundary_id: 'localRegion-bg', region_a: 'localRegion', region_b: 'background', class: 'hard' },
     ],
     steps: [
       {
         id: 'edge',
         tool: 'photoshop_paint_strokes',
         method_id: 'pencil-line',
-        edge_boundary_ids: ['cheek-bg'],
+        edge_boundary_ids: ['localRegion-bg'],
         args: { strokes: [{ tool: 'PENCIL', points: [{ x: 1, y: 1 }, { x: 20, y: 20 }] }] },
       },
       { id: 'preview', tool: 'photoshop_get_preview', args: {} },
@@ -109,25 +109,25 @@ describe('edge intent schema and method routing', () => {
 
   it('stores different edges for one object and different neighboring region pairs', () => {
     const edges = parseEdgeIntents([
-      { boundary_id: 'cheek-bg', region_a: 'left-cheek', region_b: 'background', class: 'lost' },
-      { boundary_id: 'cheek-nose', region_a: 'left-cheek', region_b: 'nose', class: 'soft' },
+      { boundary_id: 'localRegion-bg', region_a: 'left-localRegion', region_b: 'background', class: 'lost' },
+      { boundary_id: 'localRegion-adjacentForm', region_a: 'left-localRegion', region_b: 'adjacentForm', class: 'soft' },
       { boundary_id: 'jaw-collar', region_a: 'jaw', region_b: 'collar', class: 'firm' },
-      { boundary_id: 'beard-air', region_a: 'beard', region_b: 'background', class: 'broken' },
+      { boundary_id: 'textureRegion-air', region_a: 'textureRegion', region_b: 'background', class: 'broken' },
     ]);
     expect(edges.map(edge => edge.edgeClass)).toEqual(['lost', 'soft', 'firm', 'broken']);
     expect(edges.map(edge => `${edge.regionA}/${edge.regionB}`)).toEqual([
-      'left-cheek/background',
-      'left-cheek/nose',
+      'left-localRegion/background',
+      'left-localRegion/adjacentForm',
       'jaw/collar',
-      'beard/background',
+      'textureRegion/background',
     ]);
   });
 
   it('requires every edge intent to bind to a mutation method', () => {
     const parsed = parseVisualMicroPlan(basePlan());
-    expect(parsed.edges[0].boundaryId).toBe('cheek-bg');
+    expect(parsed.edges[0].boundaryId).toBe('localRegion-bg');
     expect(parsed.steps[0].methodId).toBe('pencil-line');
-    expect(parsed.steps[0].edgeBoundaryIds).toEqual(['cheek-bg']);
+    expect(parsed.steps[0].edgeBoundaryIds).toEqual(['localRegion-bg']);
 
     expect(() => parseVisualMicroPlan(basePlan({
       steps: [
@@ -139,16 +139,16 @@ describe('edge intent schema and method routing', () => {
 
   it('requires qualitative AFTER observations for every declared boundary', () => {
     const intents = parseEdgeIntents([
-      { boundary_id: 'cheek-bg', region_a: 'cheek', region_b: 'background', class: 'lost' },
+      { boundary_id: 'localRegion-bg', region_a: 'localRegion', region_b: 'background', class: 'lost' },
       { boundary_id: 'jaw-collar', region_a: 'jaw', region_b: 'collar', class: 'hard' },
     ]);
     const observations = validateEdgeObservations(intents, [
-      { boundary_id: 'cheek-bg', observed_behavior: 'The cheek boundary dissolves into the background across the lower half.', target_met: 'yes' },
+      { boundary_id: 'localRegion-bg', observed_behavior: 'The localRegion boundary dissolves into the background across the lower half.', target_met: 'yes' },
       { boundary_id: 'jaw-collar', observed_behavior: 'The jaw/collar separation remains crisp and clearly readable.', target_met: 'yes' },
     ]);
     expect(observations).toHaveLength(2);
     expect(() => validateEdgeObservations(intents, [
-      { boundary_id: 'cheek-bg', observed_behavior: 'Observed.', target_met: 'yes' },
+      { boundary_id: 'localRegion-bg', observed_behavior: 'Observed.', target_met: 'yes' },
     ])).toThrow(/missing boundary_id/);
   });
 
@@ -182,7 +182,7 @@ describe('edge intent schema and method routing', () => {
           id: 'edge',
           tool: 'photoshop_paint_strokes',
           method_id: 'smudge-shape',
-          edge_boundary_ids: ['cheek-bg'],
+          edge_boundary_ids: ['localRegion-bg'],
           args: { strokes: [{ tool: 'PENCIL', points: [{ x: 1, y: 1 }, { x: 20, y: 20 }] }] },
         },
         { id: 'preview', tool: 'photoshop_get_preview', args: {} },
@@ -199,7 +199,7 @@ describe('edge intent schema and method routing', () => {
     const text = correct.content.find(item => item.type === 'text');
     const body = JSON.parse(text && 'text' in text ? text.text : '{}');
     expect(body.edge_control[0]).toEqual(expect.objectContaining({
-      boundary_id: 'cheek-bg',
+      boundary_id: 'localRegion-bg',
       class: 'hard',
     }));
     expect(body.edge_control[0].executions[0].method_id).toBe('pencil-line');
@@ -230,14 +230,14 @@ describe('edge intent schema and method routing', () => {
 
     const result = await createVisualMicroPlanTools(r)[0]!.handler(basePlan({
       plan_id: 'edge-preflight-before-preparation',
-      edges: [{ boundary_id: 'cheek-bg', region_a: 'cheek', region_b: 'background', class: 'soft' }],
+      edges: [{ boundary_id: 'localRegion-bg', region_a: 'localRegion', region_b: 'background', class: 'soft' }],
       steps: [
         { id: 'foreground', tool: 'photoshop_set_foreground_color', args: {} },
         {
           id: 'edge',
           tool: 'photoshop_paint_strokes',
           method_id: 'pencil-line',
-          edge_boundary_ids: ['cheek-bg'],
+          edge_boundary_ids: ['localRegion-bg'],
           args: { strokes: [{ tool: 'PENCIL', points: [{ x: 1, y: 1 }, { x: 20, y: 20 }] }] },
         },
         { id: 'preview', tool: 'photoshop_get_preview', args: {} },
@@ -283,14 +283,14 @@ describe('edge intent schema and method routing', () => {
 
     const result = await tool.handler(basePlan({
       method_class: 'paint',
-      edges: [{ boundary_id: 'cheek-bg', region_a: 'cheek', region_b: 'background', class: 'firm' }],
+      edges: [{ boundary_id: 'localRegion-bg', region_a: 'localRegion', region_b: 'background', class: 'firm' }],
       steps: [
         { id: 'brush', tool: 'photoshop_set_brush', args: { hardness: 100 } },
         {
           id: 'edge',
           tool: 'photoshop_paint_dabs',
           method_id: 'hard-brush-line',
-          edge_boundary_ids: ['cheek-bg'],
+          edge_boundary_ids: ['localRegion-bg'],
           args: { dabs: [{ x: 10, y: 10 }] },
         },
         { id: 'preview', tool: 'photoshop_get_preview', args: {} },
@@ -332,8 +332,8 @@ describe('edge intent schema and method routing', () => {
       plan_id: brushArgs ? 'soft-correct' : 'soft-missing',
       method_class: 'paint',
       edges: [{
-        boundary_id: 'cheek-bg',
-        region_a: 'cheek',
+        boundary_id: 'localRegion-bg',
+        region_a: 'localRegion',
         region_b: 'background',
         class: 'soft',
         preferred_method_id: 'soft-brush-build',
@@ -344,7 +344,7 @@ describe('edge intent schema and method routing', () => {
           id: 'edge',
           tool: 'photoshop_paint_dabs',
           method_id: 'soft-brush-build',
-          edge_boundary_ids: ['cheek-bg'],
+          edge_boundary_ids: ['localRegion-bg'],
           args: { dabs: [{ x: 10, y: 10 }] },
         },
         { id: 'preview', tool: 'photoshop_get_preview', args: {} },

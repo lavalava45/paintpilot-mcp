@@ -1,8 +1,12 @@
+import { CHAT_CRITIC_SCHEMA, criticRoleInstruction, criticSpawnHandoff } from '../core/guard/chat-critic.js';
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import type { ToolDefinition, ToolResult } from '../core/tool-registry.js';
 import { EmbeddedGuardRuntime, guardRuntimeErrorCode } from '../core/guard/runtime.js';
+import { projectGuardDiagnostics, serializeGuardState } from '../core/guard/response-budget.js';
+import { currentToolExecutionContext } from '../core/execution-context.js';
+import { ReviewContextCache, type ReviewContextImage } from '../core/guard/review-context-cache.js';
 import {
   COMPACT_GUARD_PROTOCOL_VERSION,
   UXP_BRIDGE_REVISION,
@@ -11,6 +15,9 @@ import {
 import { visualReviewPackage } from '../core/guard/cycle.js';
 import { PAINTING_CONSTRUCTION_ROLES, PAINTING_VISUAL_INTENTS } from '../core/painting-method-palette.js';
 import { PAINTING_STAGE_RESET_REASONS } from '../core/painting-stage-policy.js';
+import { ATTENTION_BINDING_SCHEMA } from '../core/perceptual-hierarchy.js';
+import { collectSchemaErrors, type JsonSchemaNode } from '../core/guard/cycle-compiler.js';
+import { SCENE_GEOMETRY_SCHEMA, GEOMETRY_BINDING_SCHEMA } from '../core/geometry-contract.js';
 import {
   DEFAULT_BRUSH_SCENE_ROLES,
   MEDIA_MARK_CHARACTERS,
@@ -30,7 +37,9 @@ import {
   VISUAL_MICROPLAN_MAX_LAYER_CREATIONS,
   VISUAL_MICROPLAN_MAX_MUTATIONS,
   VISUAL_MICROPLAN_ROLLBACK_VALUES,
+  VISUAL_MICROPLAN_CHANGE_DOMAINS,
 } from '../core/visual-microplan.js';
+import { DISTRIBUTION_INTENTS } from '../core/guard/mechanical-patterning.js';
 import { VISUAL_REVIEW_FINDING_KINDS } from '../core/guard/visual-review-profile.js';
 import {
   SOFT_DOMINANCE_CRITERIA,
@@ -53,12 +62,18 @@ import {
   MATERIAL_RESPONSE_ROLES,
   MATERIAL_RESPONSE_STYLE_BASIS_FIELDS,
 } from '../core/material-response.js';
+import { EDGE_CLASSES } from '../core/edge-control.js';
 import {
   PHYSICAL_STACK_CHECK_STATUSES,
   PHYSICAL_STACK_CRITERIA,
   PHYSICAL_STACK_CRITERION_STATUSES,
 } from '../core/physical-stack-check.js';
-import { SCENE_OWNERSHIP_EDITABILITY } from '../core/scene-ownership-plan.js';
+import { sceneOwnershipPlanSchema } from '../core/scene-ownership-plan.js';
+import { CONSTRUCTION_MODEL_SCHEMA, CONSTRUCTION_PASS_SCHEMA, ConstructionError, constructionReviewTarget, solveConstruction } from '../core/object-construction.js';
+import { PAINTERLY_PASS_SCHEMA } from '../core/painterly-strokes.js';
+import { PAINTING_COMPLETION_SCHEMA } from '../core/guard/document-artistic-debt.js';
+import { SCENE_CAMERA_IMAGING_MODEL_SCHEMA } from '../core/scene-camera-imaging-model.js';
+import { IMAGING_PREFLIGHT_SCHEMA } from '../core/imaging-preflight.js';
 import {
   PAINTING_INTENT_ACTIONS,
   PAINTING_INTENT_SCALES,
@@ -66,6 +81,25 @@ import {
 } from '../core/guard/painting-intent.js';
 
 const REVIEW_IMAGE_MAX_BLOCKS = 4;
+
+// Stored Director records include runtime metadata/null optional defaults. Expose
+// an editable public template without deleting artistic constraints or evidence.
+export function publicDirectorTemplate(value: unknown, schema?: JsonSchemaNode): unknown {
+  if (Array.isArray(value)) return value.map(item => publicDirectorTemplate(item, schema?.items));
+  if (!value || typeof value !== 'object' || !schema?.properties) return value;
+  const properties = schema.properties;
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>)
+    .filter(([key, item]) => {
+      const child = properties[key];
+      if (!child) return false;
+      if (schema.required?.includes(key)) return true;
+      if (item === null) return false;
+      if (Array.isArray(item) && !item.length && child.minItems) return false;
+      if (item && typeof item === 'object' && !Array.isArray(item) && !Object.keys(item).length && child.required?.length) return false;
+      return true;
+    })
+    .map(([key, item]) => [key, publicDirectorTemplate(item, properties[key])]));
+}
 const REVIEW_RESPONSE_MAX_BYTES = 6 * 1024 * 1024;
 const REVIEW_METADATA_RESERVE_BYTES = 256 * 1024;
 const REVIEW_IMAGE_MAX_ENCODED_BYTES = REVIEW_RESPONSE_MAX_BYTES - REVIEW_METADATA_RESERVE_BYTES;
@@ -192,16 +226,28 @@ function json(value: unknown, isError = false, runtime?: EmbeddedGuardRuntime): 
     review.delivery = referenceOnlyReviewDelivery(review, runtime);
   }
   return {
-    content: [{ type: 'text', text: JSON.stringify(output, null, 2) }],
+    content: [{ type: 'text', text: JSON.stringify(runtime ? projectGuardDiagnostics(output, runtime.runtimeDirectory) : output) }],
     ...(isError ? { isError: true } : {}),
   };
 }
 
-function explicitReviewImageResult(
+function stateJson(value: Record<string, unknown>, runtime: EmbeddedGuardRuntime, surface: 'status' | 'resume'): ToolResult {
+  const text = serializeGuardState(value, runtime.runtimeDirectory, surface);
+  return {
+    content: [{ type: 'text', text }],
+    ...(text.startsWith('{"ok":false,"code":"guard_state_projection_requires_public_resume",') ? { isError: true } : {}),
+  };
+}
+
+const reviewContextCaches = new WeakMap<EmbeddedGuardRuntime, ReviewContextCache>();
+
+async function explicitReviewImageResult(
   runtime: EmbeddedGuardRuntime,
   operationId: string,
-  requestedRoles?: string[]
-): ToolResult {
+  requestedRoles?: string[],
+  forceRedelivery = false,
+  redeliveryReason?: string
+): Promise<ToolResult> {
   const record = runtime.store.read(operationId);
   if (!record?.visual || !record.preview) {
     return json({
@@ -210,6 +256,9 @@ function explicitReviewImageResult(
       message: `Visual operation ${operationId} does not have a durable review preview.`,
     }, true);
   }
+  if (forceRedelivery && !['images-unavailable', 'delivery-failed'].includes(redeliveryReason ?? ''))
+    return json({ ok: false, code: 'guard_review_redelivery_reason_required', execution: 'not-executed',
+      next_required_action: 'Inspect the already delivered inline images. Only if unavailable use force_redelivery=true and redelivery_reason=images-unavailable|delivery-failed; do not repeat delivery to confirm a successful result.' }, true);
   const review = visualReviewPackage(record, runtime.store.visualSignificance(operationId));
   if (!review) {
     return json({
@@ -218,7 +267,40 @@ function explicitReviewImageResult(
       message: `Visual operation ${operationId} does not have review metadata.`,
     }, true);
   }
-  const expectedRoles = reviewRequestedRoles(review);
+  const documentId = Number(record.args?.document_id);
+  const projectionContext = Number.isSafeInteger(documentId) && documentId > 0
+    ? runtime.store.captureProjectionContext({ capturedAt: Date.now() })
+    : undefined;
+  const incarnation = runtime.store.currentDocumentIncarnationId(documentId, projectionContext);
+  const identityPending = runtime.store.artRunState(documentId, projectionContext)?.document_instance?.identity_pending;
+  const contextId = incarnation && !identityPending ? currentToolExecutionContext()?.reviewContextId : undefined;
+  const identity = JSON.stringify([documentId, incarnation]);
+  let cache = reviewContextCaches.get(runtime);
+  if (!cache) { cache = new ReviewContextCache(); reviewContextCaches.set(runtime, cache); }
+  const confirmed = (entry: ReviewContextImage): boolean => {
+    const source = runtime.store.read(entry.operation_id);
+    return source?.verdict?.sha256 === entry.whole_sha256
+      && source.visual_delivery?.review_context_id === entry.context_id
+      && source.visual_delivery?.bound_whole_sha256 === entry.whole_sha256
+      && source.visual_delivery?.delivery_complete === true
+      && source.continuation_timing?.review_image_response_boundary_complete === true
+      && source.visual_delivery.delivered.some((item: Record<string, unknown>) => item.role === entry.role
+        && item.sha256 === entry.sha256 && item.image_delivered_for_review === true);
+  };
+  const deliveredHere = (entry: ReviewContextImage): boolean => {
+    const source = runtime.store.read(entry.operation_id);
+    return entry.operation_id === operationId && source.visual_delivery?.review_context_id === entry.context_id
+      && source.visual_delivery?.bound_whole_sha256 === entry.whole_sha256
+      && source.visual_delivery?.delivery_complete === true
+      && source.continuation_timing?.review_image_response_boundary_complete === true
+      && source.visual_delivery.delivered.some((item: Record<string, unknown>) => item.role === entry.role
+        && item.sha256 === entry.sha256 && item.image_delivered_for_review === true);
+  };
+  const reusable = (entry: ReviewContextImage) => confirmed(entry) || deliveredHere(entry);
+  // A new known chat cannot inherit the assumption that a historical BEFORE was seen.
+  const expectedRoles = [...new Set([...reviewRequestedRoles(review),
+    ...(contextId && review.before?.sha256 ? ['before'] : []),
+  ])];
   const roles = requestedRoles?.length ? requestedRoles : expectedRoles;
   const invalidRoles = roles.filter(role => !expectedRoles.includes(role));
   if (invalidRoles.length) {
@@ -229,6 +311,10 @@ function explicitReviewImageResult(
       available_roles: expectedRoles,
     }, true);
   }
+  const forceKey = cache.forcedKey(contextId, identity, operationId, record.preview.sha256, roles);
+  if (forceRedelivery && cache.wasForced(forceKey) && record.visual_delivery?.delivery_complete === true)
+    return json({ ok: false, code: 'guard_review_repeated_forced_delivery', execution: 'not-executed',
+      next_required_action: 'The same exact roles were already redelivered in this host-proven chat. Inspect those images; if still unavailable report the client image-availability blocker. Do not request the same bytes again or invent an observation.' }, true);
   const reviewRequestReceivedAt = new Date().toISOString();
 
   const images: Array<{ type: 'image'; data: string; mimeType: string }> = [];
@@ -236,11 +322,8 @@ function explicitReviewImageResult(
   const omitted: Array<Record<string, unknown>> = [];
   let totalBytes = 0;
   let totalEncodedBytes = 0;
+  const responseImages = new Map<string, number>();
   for (const role of roles) {
-    if (images.length >= REVIEW_IMAGE_MAX_BLOCKS) {
-      omitted.push({ role, reason: 'image_block_limit' });
-      continue;
-    }
     const frame = reviewRoleFrame(review, role);
     const file = frame?.materialized_path;
     const expectedSha = frame?.sha256;
@@ -248,21 +331,22 @@ function explicitReviewImageResult(
       omitted.push({ role, reason: 'materialized_image_unavailable' });
       continue;
     }
-    let size: number;
     try {
       const stat = statSync(file);
       if (!stat.isFile()) {
         omitted.push({ role, reason: 'materialized_image_not_file' });
         continue;
       }
-      size = stat.size;
+      // No cached/inline frame can exceed the per-response limit. Reject oversized
+      // files before reading; reused frames do not consume the remaining budget.
+      const encodedSize = base64EncodedBytes(stat.size);
+      if (encodedSize > REVIEW_IMAGE_MAX_ENCODED_BYTES) {
+        omitted.push({ role, reason: 'response_byte_budget', bytes: stat.size,
+          encoded_bytes: encodedSize, max_total_bytes: REVIEW_RESPONSE_MAX_BYTES });
+        continue;
+      }
     } catch {
       omitted.push({ role, reason: 'materialized_image_stat_failed' });
-      continue;
-    }
-    const estimatedEncodedBytes = base64EncodedBytes(size);
-    if (totalEncodedBytes + estimatedEncodedBytes > REVIEW_IMAGE_MAX_ENCODED_BYTES) {
-      omitted.push({ role, reason: 'response_byte_budget', bytes: size, encoded_bytes: estimatedEncodedBytes, max_total_bytes: REVIEW_RESPONSE_MAX_BYTES });
       continue;
     }
     let bytes: Buffer;
@@ -277,6 +361,20 @@ function explicitReviewImageResult(
       omitted.push({ role, reason: 'sha256_mismatch' });
       continue;
     }
+    const previous = forceRedelivery ? undefined : cache.image(contextId, identity, actualSha, reusable);
+    const sameResponseIndex = responseImages.get(actualSha);
+    if (previous || sameResponseIndex !== undefined) {
+      delivered.push({ role, sha256: actualSha, image_delivered_for_review: true,
+        ...(previous ? { reused_from: { operation_id: previous.operation_id, role: previous.role,
+          context_id: previous.context_id, sha256: previous.sha256, confirmed_observation: confirmed(previous), confirmed_delivery: true } }
+          : { content_index: sameResponseIndex, reused_from: { same_response_content_index: sameResponseIndex } }),
+      });
+      continue;
+    }
+    if (images.length >= REVIEW_IMAGE_MAX_BLOCKS) {
+      omitted.push({ role, reason: 'image_block_limit' });
+      continue;
+    }
     const encodedBytes = base64EncodedBytes(bytes.byteLength);
     if (totalEncodedBytes + encodedBytes > REVIEW_IMAGE_MAX_ENCODED_BYTES) {
       omitted.push({ role, reason: 'response_byte_budget', bytes: bytes.byteLength, encoded_bytes: encodedBytes, max_total_bytes: REVIEW_RESPONSE_MAX_BYTES });
@@ -284,6 +382,7 @@ function explicitReviewImageResult(
     }
     const mimeType = typeof frame.mime_type === 'string' ? frame.mime_type : 'image/jpeg';
     images.push({ type: 'image', data: bytes.toString('base64'), mimeType });
+    responseImages.set(actualSha, images.length);
     delivered.push({
       role,
       sha256: actualSha,
@@ -298,7 +397,8 @@ function explicitReviewImageResult(
 
   const reviewResultReadyAt = new Date().toISOString();
   const delivery = {
-    transport: images.length ? 'mcp_image_content_explicit_review' : 'metadata_only',
+    transport: images.length ? 'mcp_image_content_explicit_review'
+      : delivered.length ? 'confirmed_same_chat_image_references' : 'metadata_only',
     delivered,
     omitted,
     raw_image_bytes: totalBytes,
@@ -313,34 +413,110 @@ function explicitReviewImageResult(
       protocol: 'photoshop.guard.continuation_timing.v1',
       request_received_at: reviewRequestReceivedAt,
       result_ready_at: reviewResultReadyAt,
+      response_boundary_complete: false,
       semantics: 'server_observed_review_image_tool_boundaries',
     },
   };
-  const receipt = runtime.store.recordVisualDeliveryReceipt(operationId, delivery);
-  const documentId = Number(record.args?.document_id);
+  const presentationContext = runtime.store.presentationContext(
+    Number.isSafeInteger(documentId) && documentId > 0 ? documentId : undefined,
+    projectionContext?.paintingState
+  );
   const artisticContinuation = Number.isSafeInteger(documentId) && documentId > 0
-    ? runtime.store.artisticContinuationContext(documentId)
+    ? runtime.store.artisticContinuationContext(documentId, projectionContext)
     : null;
-  return {
-    content: [{
-      type: 'text',
-      text: JSON.stringify({
+  const state = projectionContext?.paintingState.documents?.[String(documentId)];
+  const director = state?.art_director as { tasks?: Array<Record<string, unknown>> } | undefined;
+  const taskId = record.args?.planner_task_id ?? record.planner_task_id;
+  const task = director?.tasks?.find(row => row.task_id === taskId);
+  // This is a request to the host looking at the delivered pixels, never a server verdict.
+  const criticRole = runtime.store.chatCriticRequest(operationId, projectionContext);
+  const artisticReview = {
+    mode: 'same_chat',
+    ...(criticRole ? { critic_role: { ...criticRole, ...(criticRole.required ? {
+      instruction: criticRoleInstruction(presentationContext.language),
+      optional_spawn: criticSpawnHandoff(criticRole, state ?? {}, record) } : {}) } } : {}),
+    status: delivery.undelivered_roles.length === 0 ? 'awaiting_host_observation' : 'awaiting_image_delivery',
+    language: presentationContext.language,
+    original_brief: state?.original_brief ?? null,
+    pass_goal: record.summary ?? record.args?.summary ?? null,
+    construction_target: constructionReviewTarget(record),
+    painterly_target: record.painterly_provenance ? {
+      algorithm: record.painterly_provenance.algorithm,
+      source_kind: record.painterly_provenance.source_kind ?? 'aligned-jpeg-reference',
+      ...(record.painterly_provenance.authored_form_field ? { authored_form_field: record.painterly_provenance.authored_form_field } : {}),
+      owner_id: record.painterly_provenance.owner_id,
+      reference_path: record.painterly_provenance.reference_path,
+      reference_sha256: record.painterly_provenance.reference_sha256,
+      reference_bounds: record.painterly_provenance.reference_bounds,
+      stroke_count: record.painterly_provenance.stroke_count,
+      deferred_candidates: record.painterly_provenance.levels?.reduce((sum: number, level: Record<string, unknown>) => sum + Number(level.deferred_candidates ?? 0), 0),
+      native_pixels_verified: false, artistic_quality_verified: false,
+      instruction: 'Judge actual visible form/light/material against the brief and observed reference, including marks outside the intended component. Surrogate errors and generated strokes are not proof. Replan from the current frame; do not replay.',
+    } : undefined,
+    stage: record.stage ?? record.args?.stage ?? state?.current_stage ?? 'GLOBAL_BLOCK_IN',
+    planner_task: task ? { task_id: task.task_id, summary: task.summary } : null,
+    after_sha256: record.preview.sha256,
+    instruction: presentationContext.language === 'ru'
+      ? 'Посмотри на доставленные AFTER и BEFORE: что реально видно в форме, пропорциях, перспективе и освещении относительно исходного задания и выбранного стиля? Не используй отчёт о выполненных командах как доказательство. Запиши видимый результат в previous_observation.observed, самый важный оставшийся недостаток в primary_mismatch и честный target. Если цель не достигнута, следующий painting_intent или next_pass должен исправлять этот недостаток конкретным способом построения; при повторном провале меняй построение, а не добавляй фактуру или блики. Различай улучшение прохода, готовность стадии и всей работы. Если кадра или задания недостаточно, укажи неопределённость. Оцени primitive_footprint относительно формы объекта и задания: при доминировании плоской заготовки/пиктограммы укажи suspect и сохрани дефект объекта; unknown оставляет долг оценки. Успех локального прохода не закрывает этот долг. Полезную начальную заготовку можно сохранить. Дальность сама по себе не требует размытия: оцени воздушную перспективу, фокус, материал и выборочные края отдельно. Смягчение не исправляет геометрию; фильтр не закрывает долг формы только потому, что исчезли углы. Заполненные поля не доказывают качество; дополнительный вызов оценки не нужен.'
+      : 'Inspect the delivered AFTER and BEFORE: what is actually visible in form, proportions, perspective and lighting against the original brief and intended style? Do not use executed commands as evidence. Put the visible result in previous_observation.observed, the largest remaining defect in primary_mismatch and an honest target. If the goal is unmet, the next painting_intent or next_pass must address that defect with a concrete construction change; after repeated failure change construction instead of adding texture or highlights. Distinguish pass improvement, stage readiness and whole-image completion. State uncertainty when the frame or brief is insufficient. Assess primitive_footprint against object form and the brief: use suspect for scaffold/pictogram-dominant representation and retain the object defect; unknown leaves assessment debt. Local pass success does not close this debt. Useful initial block-in pixels may be retained. Distance alone does not require blur: assess atmospheric perspective, focus, material and selective edges separately. Softening does not repair geometry; a filter does not clear form debt merely because corners disappear. Filled fields do not prove quality; no separate assessment call is needed.',
+  };
+  // Continuation projection is review-service work; no external inference is awaited.
+  delivery.timing.result_ready_at = new Date().toISOString();
+  const receipt = runtime.store.recordVisualDeliveryReceipt(operationId, delivery);
+  const body = {
         ok: receipt.delivery_complete === true,
         operation_id: operationId,
+        presentation_context: presentationContext,
+        artistic_review: artisticReview,
         delivery: {
           ...delivery,
+          timing: { ...delivery.timing, result_ready_at: '__guard_review_response_boundary__', response_boundary_complete: true },
           delivered: receipt.delivered,
           delivery_complete: receipt.delivery_complete,
           undelivered_roles: receipt.undelivered_roles,
         },
         ...(artisticContinuation ? { artistic_continuation: artisticContinuation } : {}),
         next_required_action: receipt.delivery_complete
-          ? 'Inspect the delivered image blocks, select/adapt the compact artistic continuation candidate when useful, then continue with previous_operation_id + previous_observation plus painting_intent or next_pass.'
+          ? (criticRole?.required ? 'Switch to Critic and review the whole exact scene against original_brief; submit previous_observation.critic_review with the next pass in the SAME cycle_auto. ' : '') + 'Perform artistic_review on the delivered pixels, then continue once with previous_operation_id + previous_observation and a painting_intent or next_pass addressing the largest visible defect. Omit the next pass only to finalize or when the user asked to stop.'
           : 'Some required review roles were not delivered. Request the remaining roles before visual verdict closure.',
-      }, null, 2),
-    }, ...images],
+  };
+  const serialized = JSON.stringify(body, null, 2);
+  const readyAt = new Date().toISOString();
+  runtime.store.recordReviewResponseBoundary(operationId, receipt, readyAt);
+  const briefSha = createHash('sha256').update(JSON.stringify(artisticReview.original_brief)).digest('hex');
+  const observedBrief = forceRedelivery ? undefined : cache.brief(contextId, identity, briefSha, confirmed);
+  const completeBody = JSON.parse(serialized.replace('"result_ready_at": "__guard_review_response_boundary__"', `"result_ready_at": ${JSON.stringify(readyAt)}`));
+  const text = JSON.stringify(projectGuardDiagnostics(completeBody, runtime.runtimeDirectory,
+    observedBrief ? { sha256: briefSha, operation_id: observedBrief.operation_id } : undefined));
+  if (contextId && receipt.delivery_complete) for (const item of delivered) {
+    if (item.reused_from) continue;
+    cache.remember({ context_id: contextId, document_identity: identity, sha256: String(item.sha256),
+      operation_id: operationId, role: String(item.role), whole_sha256: record.preview.sha256,
+      ...(observedBrief ? {} : { brief_sha256: briefSha }),
+    }, confirmed);
+  }
+  if (forceRedelivery && receipt.delivery_complete) cache.rememberForced(forceKey);
+  return {
+    content: [{ type: 'text', text }, ...images],
     ...(receipt.delivery_complete ? {} : { isError: true }),
   };
+}
+
+async function inlineReviewImageResult(runtime: EmbeddedGuardRuntime, operationId: string): Promise<ToolResult | null> {
+  const result = await explicitReviewImageResult(runtime, operationId);
+  if (result.isError) return null;
+  const images = result.content.filter(item => item.type === 'image');
+  if (!images.length) return null;
+  let body: Record<string, unknown>;
+  try {
+    const text = result.content.find(item => item.type === 'text');
+    body = text?.type === 'text' ? JSON.parse(text.text) : {};
+  } catch {
+    return null;
+  }
+  const delivery = body.delivery as Record<string, unknown> | undefined;
+  if (delivery?.delivery_complete !== true) return null;
+  return result;
 }
 
 function compactPassSchema(): Record<string, unknown> {
@@ -349,22 +525,23 @@ function compactPassSchema(): Record<string, unknown> {
     properties: {
       request_key: {
         type: 'string',
-        description: 'Unique stable idempotency key for this execution attempt. Re-delivering the same request_key must not repeat a mutation. Do not reuse it for a new attempt.',
+        description: 'Unique attempt id; reuse only for the same attempt, never a new mutation.',
       },
       problem_id: {
         type: 'string',
-        description: 'Stable artistic problem identity shared across multiple distinct attempts at the same unresolved visual problem. Omit only when request_key intentionally also names the problem.',
+        description: 'Stable problem id across attempts; omit only if request_key also identifies the problem.',
       },
       document_id: { type: 'number', minimum: 1 },
       restore_anchor_operation_id: {
         type: 'string',
         description:
-          'One-action accepted-state recovery. Supply a registered primary/alternative artistic anchor operation id instead of actions. Guard computes bounded undo depth internally, restores through the pinned Photoshop document, and verifies exact preview SHA plus registered layer/active-layer/selection parity before closing the recovery.',
+          'Registered primary/alternative anchor operation id instead of actions; recovery verifies exact frame and layer/selection parity.',
       },
       goal: {
         type: 'string',
-        description: 'The single authoritative artistic goal for the pass.',
+        description: 'One artistic goal in presentation_context.language; otherwise supply the exact localized chat text in artistic_commentary.',
       },
+      artistic_commentary: { type: 'string', description: 'Exact pre-pass chat text in presentation_context.language, saved verbatim; include intent and tool choices, with settings derived from actions.' },
       region: { type: 'string' },
       region_bounds: {
         type: 'object',
@@ -388,27 +565,27 @@ function compactPassSchema(): Record<string, unknown> {
         },
         required: ['left', 'top', 'right', 'bottom'],
         additionalProperties: false,
-        description: 'Optional broader exact source-document object/semantic bounds for direct MICRO review. Must contain region_bounds; Guard never invents this context region.',
+        description: 'Source-document object bounds for MICRO review; must contain region_bounds.',
       },
       protected_regions: { type: 'array', items: { type: 'string' } },
       protected_layer_ids: { type: 'array', items: { type: 'number', minimum: 1 } },
       replace_protected_layer_ids: {
         type: 'array',
         items: { type: 'number', minimum: 1 },
-        description: 'Exact protected layer ids intentionally replaced/erased by this pass. Every id must also be in protected_layer_ids and action_class must explicitly be REPLACE or ERASE.',
+        description: 'Protected ids intentionally replaced/erased; also list them in protected_layer_ids and set action_class=REPLACE or ERASE.',
       },
       action_class: {
         type: 'string',
         enum: [...VISUAL_MICROPLAN_ACTION_CLASSES],
-        description: 'Optional explicit artistic mutation intent. Required for protected-layer REPLACE/ERASE exceptions and late-stage paint_regions corrections. Omit for ordinary ADD inference.',
+        description: 'Required for protected-layer REPLACE/ERASE and late-stage paint_regions corrections; otherwise ADD is inferred.',
       },
       stage: {
         type: 'string',
-        description: 'Optional override when no durable current stage exists; normally inherited from the art run.',
+        description: 'Inherit the art-run stage, or GLOBAL_BLOCK_IN initially; moving backwards requires stage_reset.',
       },
       stage_reset: {
         type: 'object',
-        description: 'Explicit durable authorization for a genuine backward structural stage transition. Required only when next_pass.stage moves earlier than the durable current stage; ordinary passes cannot regress stage merely to regain early-stage primitives.',
+        description: 'Required for an earlier structural stage; use only for genuine rework, not to unlock early-stage primitives.',
         properties: {
           reason: { type: 'string', enum: [...PAINTING_STAGE_RESET_REASONS] },
           detail: {
@@ -421,7 +598,7 @@ function compactPassSchema(): Record<string, unknown> {
       },
       layer_separation_check: {
         type: 'object',
-        description: 'Semantic editability decision for this pass. Required for committed nontrivial refinement and for independently editable new logical owners.',
+        description: 'Editability decision; unchanged known-owner continuation inherits it. Required for new ownership, structural changes or rollback reassessment.',
         properties: {
           change_kind: { type: 'string', enum: [...VISUAL_MICROPLAN_LAYER_CHANGE_KINDS] },
           substantial: { type: 'boolean' },
@@ -438,7 +615,7 @@ function compactPassSchema(): Record<string, unknown> {
       },
       cross_layer_correction: {
         type: 'object',
-        description: 'Explicit fail-closed authorization for intentionally targeting a historical physical binding of the declared semantic owner. Ordinary correction preserves the current authoritative binding; migration deliberately moves it.',
+        description: 'Authorize edits to historical owner bindings; correction preserves the current binding, migration moves it.',
         properties: {
           mode: { type: 'string', enum: ['correction', 'migration'] },
           current_layer_id: { type: 'number', minimum: 1 },
@@ -449,87 +626,17 @@ function compactPassSchema(): Record<string, unknown> {
         required: ['mode', 'current_layer_id', 'target_layer_ids', 'post_authoritative_layer_id'],
         additionalProperties: false,
       },
-      scene_ownership_plan: {
-        type: 'object',
-        description: 'Durable scene-level ownership plan declared before the first committed semantic owner is constructed. semantic_id names the visual concern; owner_id is the stable future logical_layer.hypothesis_id. Multiple semantic units may share one owner only through explicit shared-owner justification.',
-        properties: {
-          plan_id: { type: 'string' },
-          units: {
-            type: 'array',
-            minItems: 1,
-            maxItems: 32,
-            items: {
-              type: 'object',
-              properties: {
-                semantic_id: { type: 'string' },
-                owner_id: { type: 'string' },
-                role: { type: 'string', minLength: 4 },
-                editability: { type: 'string', enum: [...SCENE_OWNERSHIP_EDITABILITY] },
-                rationale: { type: 'string', description: 'Optional audit/artistic guidance for this semantic ownership assignment.' },
-              },
-              required: ['semantic_id', 'owner_id', 'role', 'editability'],
-              additionalProperties: false,
-            },
-          },
-          shared_owner_justifications: {
-            type: 'array',
-            maxItems: 16,
-            items: {
-              type: 'object',
-              properties: {
-                owner_id: { type: 'string' },
-                semantic_ids: { type: 'array', minItems: 2, items: { type: 'string' } },
-                rationale: { type: 'string', description: 'Optional audit/artistic guidance for why these semantic ids intentionally share one owner.' },
-              },
-              required: ['owner_id', 'semantic_ids'],
-              additionalProperties: false,
-            },
-          },
-        },
-        required: ['plan_id', 'units'],
-        additionalProperties: false,
-      },
-      scene_geometry_model: {
-        type: 'object',
-        description: 'Durable document-incarnation-bound scene geometry/projection model. A later structural revision must preserve model_id and increase revision.',
-        properties: {
-          model_id: { type: 'string' },
-          revision: { type: 'number', minimum: 1 },
-          applicability: { type: 'string', enum: ['coherent_3d', 'orthographic_or_diagrammatic', 'flat_or_collage', 'intentional_non_euclidean', 'insufficient_evidence'] },
-          applicability_rationale: { type: 'string' },
-          source_frame: {
-            type: 'object',
-            properties: {
-              document_id: { type: 'number', minimum: 1 },
-              document_incarnation: { type: 'string' },
-              width: { type: 'number', minimum: 1 },
-              height: { type: 'number', minimum: 1 },
-              operation_id: { type: 'string' },
-              preview_sha256: { type: 'string' },
-            },
-            required: ['document_id', 'document_incarnation', 'width', 'height'],
-            additionalProperties: false,
-          },
-          projection: {
-            type: 'object',
-            properties: {
-              kind: { type: 'string', enum: ['one_point', 'two_point', 'three_point', 'weak_perspective', 'orthographic', 'custom'] },
-              horizon: { type: 'object' },
-              vanishing_points: { type: 'array', maxItems: 8, items: { type: 'object' } },
-            },
-            required: ['kind', 'vanishing_points'],
-            additionalProperties: false,
-          },
-          line_families: { type: 'array', maxItems: 16, items: { type: 'object' } },
-          support_planes: { type: 'array', maxItems: 16, items: { type: 'object' } },
-          scale_anchors: { type: 'array', maxItems: 24, items: { type: 'object' } },
-        },
-        required: ['model_id', 'revision', 'applicability', 'source_frame', 'projection'],
-        additionalProperties: false,
-      },
+      scene_ownership_plan: sceneOwnershipPlanSchema(
+        'Declare before semantic layer construction in every rendering profile, including first block-in. semantic_id is one editable part, owner_id its logical layer. objects declare subject_kind and single-part/compound-object; whole people/animals/furniture/windows cannot be single-part. Add units to the same plan without altering old bindings; distinct components require distinct owners/layers and intermediate review.'
+      ),
+      scene_geometry_model: SCENE_GEOMETRY_SCHEMA,
+      construction: { ...CONSTRUCTION_PASS_SCHEMA, description: 'General object proportions/connections and articulated reach/contact/pose edits: model.ik_chains preserves authored bone lengths and joint limits; curve=smooth builds continuous contours. Supply model once, then durable model_id, part_id and explicit color. Generates one component on its own layer. Do not also supply actions. No source reads or extra preparation call.' },
+      painterly: PAINTERLY_PASS_SCHEMA,
+      scene_camera_imaging_model: SCENE_CAMERA_IMAGING_MODEL_SCHEMA,
+      imaging_preflight: IMAGING_PREFLIGHT_SCHEMA,
       scene_lighting_color_model: {
         type: 'object',
-        description: 'Durable document-incarnation-bound lighting/color model used by broad color, atmosphere, relighting, and material-response preflights. A later revision must preserve model_id and increase revision.',
+        description: 'Incarnation-bound light/color for broad color, atmosphere, relighting and materials; updates keep model_id and increase revision.',
         properties: {
           model_id: { type: 'string' },
           revision: { type: 'number', minimum: 1 },
@@ -658,7 +765,7 @@ function compactPassSchema(): Record<string, unknown> {
       },
       color_gradient_preflight: {
         type: 'object',
-        description: 'Required semantic color/gradient receipt for broad color-field, relighting, atmosphere, and major optical-effect passes. Must reference the exact active scene_lighting_color_model revision.',
+        description: 'Required for broad color, relighting, atmosphere and major optical effects; bind the active scene_lighting_color_model revision.',
         properties: {
           scene_model_id: { type: 'string' },
           scene_model_revision: { type: 'number', minimum: 1 },
@@ -691,7 +798,7 @@ function compactPassSchema(): Record<string, unknown> {
       },
       logical_layer: {
         type: 'object',
-        description: 'Stable semantic owner binding. hypothesis_id is owner identity across passes; request_key is never owner identity.',
+        description: 'Stable owner binding; hypothesis_id, not request_key, identifies the owner across passes.',
         properties: {
           decision: { type: 'string', enum: [...VISUAL_MICROPLAN_LOGICAL_LAYER_DECISIONS] },
           hypothesis_id: { type: 'string' },
@@ -711,10 +818,7 @@ function compactPassSchema(): Record<string, unknown> {
             type: 'boolean',
             description: 'True only when this pass structurally revises the owner; structural revisions require current scene-geometry classification.',
           },
-          geometry_binding: {
-            type: 'object',
-            description: 'Durable relational binding from this semantic owner to the exact scene_geometry_model revision. Required for committed owner-bearing structured construction in coherent_3d scenes.',
-          },
+          geometry_binding: GEOMETRY_BINDING_SCHEMA,
           depth_relations: {
             type: 'array',
             maxItems: 1,
@@ -762,31 +866,31 @@ function compactPassSchema(): Record<string, unknown> {
           },
           surface_frame: { type: 'object' },
           camera_binding: { type: 'object' },
-          attention_binding: { type: 'object' },
+          attention_binding: ATTENTION_BINDING_SCHEMA,
         },
         required: ['decision', 'hypothesis_id', 'hypothesis', 'rollback_value', 'expected_independent_rollback'],
         additionalProperties: false,
       },
       scale: {
         type: 'string',
-        description: 'Optional override when no durable active scale exists; normally inherited from the art run.',
+        description: 'Inherit art-run scale or default to global; bounded marks use small/local plus region_bounds; broad soft construction needs construction_role.',
       },
       brush_role: {
         type: 'string',
-        description: 'Optional durable brush-role hint when several preflighted roles fit. Omit to let Guard choose by working scale.',
+        description: 'Optional preflighted brush role; omit for selection by working scale.',
       },
       material_role: {
         type: 'string',
-        description: 'Explicit material/surface role. Guard uses it for construction-role planning and matches brush-based refinement against durable brush_preflight roles.',
+        description: 'Material/surface role for construction planning and matching refinement to brush_preflight.',
       },
       construction_role: {
         type: 'string',
         enum: [...PAINTING_CONSTRUCTION_ROLES],
-        description: 'Subject-agnostic construction role fixed before mechanism selection for broad nontrivial construction. structured-mass preserves legitimate early closed-mass block-in; continuous/soft/environmental roles route to their dedicated mechanisms.',
+        description: 'Choose before broad construction; structured-mass permits early closed masses, while continuous/soft/environmental roles use their matching mechanisms.',
       },
       material_response: {
         type: 'object',
-        description: 'Required for MATERIAL visual work. Qualitatively decomposes visible material response before brush/texture execution; no numeric roughness/PBR score is used.',
+        description: 'Optional material plan bound to role/style/light; omission proves neither quality nor resolved refinement.',
         properties: {
           response_role: { type: 'string', enum: [...MATERIAL_RESPONSE_ROLES] },
           components: {
@@ -825,9 +929,26 @@ function compactPassSchema(): Record<string, unknown> {
         required: ['response_role', 'components', 'microtexture'],
         additionalProperties: false,
       },
+      edges: {
+        type: 'array',
+        description: 'Boundary-specific edge intents. Each boundary must be referenced by an action edge_boundary_ids entry; expected_behavior may be omitted for the class default.',
+        items: {
+          type: 'object',
+          properties: {
+            boundary_id: { type: 'string' },
+            region_a: { type: 'string' },
+            region_b: { type: 'string' },
+            class: { type: 'string', enum: [...EDGE_CLASSES] },
+            expected_behavior: { type: 'string' },
+            preferred_method_id: { type: 'string' },
+          },
+          required: ['boundary_id', 'region_a', 'region_b', 'class'],
+          additionalProperties: false,
+        },
+      },
       style_contract_basis: {
         type: 'object',
-        description: 'Optional exact durable style-contract basis for an otherwise suspicious primitive-heavy late pass. The criterion must exactly equal the active Art Director style_contract field; this is not a free-form bypass.',
+        description: 'For primitive-heavy late passes, criterion must exactly match the active Director style_contract field.',
         properties: {
           field: {
             type: 'string',
@@ -849,16 +970,21 @@ function compactPassSchema(): Record<string, unknown> {
       affected_relations: { type: 'array', items: { type: 'string' } },
       affected_qualities: { type: 'array', items: { type: 'string' } },
       preservation_facts: { type: 'array', items: { type: 'string' } },
+      change_domains: {
+        type: 'array',
+        uniqueItems: true,
+        items: { type: 'string', enum: [...VISUAL_MICROPLAN_CHANGE_DOMAINS] },
+      },
+      distribution_intent: {
+        type: 'string',
+        enum: [...DISTRIBUTION_INTENTS],
+        description: 'Optional spatial-distribution contract for repeated marks; uses the same vocabulary as previous_observation.',
+      },
       independent_region: {
         type: 'boolean',
         description: 'True only when this pass is independent of the currently unresolved primary mismatch; preservation_facts must explain why.',
       },
       addresses_primary_mismatch: { type: 'boolean' },
-      deferred_from_operation_id: {
-        type: 'string',
-        description:
-          'Explicit post-review selection of a compiler-owned deferred sub-pass from a prior safe SPLIT_DEFER. Do not combine with actions; Guard reloads the durable deferred action geometry and revalidates it against current state.',
-      },
       addresses_problem_id: { type: 'string' },
       causal_strategy_id: { type: 'string' },
       strategy_family: { type: 'string' },
@@ -871,12 +997,12 @@ function compactPassSchema(): Record<string, unknown> {
       brush_preset_choice_reason: {
         type: 'string',
         minLength: 12,
-        description: 'Evidence-fit reason for the selected preset when a brush role has multiple viable candidates. State the relevant observed mark behavior rather than familiarity or generic preference.',
+        description: 'When multiple presets fit, explain the selected preset using observed mark behavior.',
       },
       brush_retry_reason: {
         type: 'string',
         minLength: 12,
-        description: 'Required when retrying the same preset after that preset failed or was rolled back for the same problem while viable alternatives exist. Explain why the failure was not caused by mark fit and why reuse remains causal rather than habitual.',
+        description: 'Required when reusing a failed/rolled-back preset despite alternatives; explain why mark fit was not the cause and reuse is justified.',
       },
       root_cause_reason: { type: 'string', minLength: 12 },
       causal_level_change: { type: 'boolean' },
@@ -916,14 +1042,14 @@ function compactPassSchema(): Record<string, unknown> {
         items: {
           type: 'object',
           properties: {
-            id: { type: 'string' },
+            id: { type: 'string', description: 'Optional technical step key; omitted keys are assigned deterministically. Keep an explicit id when another action references it.' },
             tool: { type: 'string' },
             args: { type: 'object', additionalProperties: true },
             description: { type: 'string' },
             method_id: { type: 'string' },
             edge_boundary_ids: { type: 'array', items: { type: 'string' } },
           },
-          required: ['id', 'tool'],
+          required: ['tool'],
           additionalProperties: false,
         },
       },
@@ -942,7 +1068,8 @@ function paintingIntentSchema(): Record<string, unknown> {
       request_key: { type: 'string' },
       problem_id: { type: 'string' },
       document_id: { type: 'number', minimum: 1 },
-      goal: { type: 'string' },
+      goal: { type: 'string', description: 'Artistic goal; use presentation_context.language or supply the localized chat narration in artistic_commentary.' },
+      artistic_commentary: { type: 'string', description: 'Optional exact pre-pass chat narration in presentation_context.language; preserved through compilation independently of the technical goal.' },
       target_owner_id: {
         type: 'string',
         description: 'Existing or predeclared semantic owner. Guard resolves the current physical layer and durable bindings.',
@@ -967,6 +1094,10 @@ function paintingIntentSchema(): Record<string, unknown> {
       preferred_brush_role: { type: 'string' },
       preserve: { type: 'array', items: { type: 'string' } },
       addresses_primary_mismatch: { type: 'boolean' },
+      deferred_from_operation_id: {
+        type: 'string',
+        description: 'Select a compiler-owned deferred sub-pass after review; Guard reloads and revalidates the saved sub-pass.',
+      },
       actions: {
         type: 'array',
         minItems: 1,
@@ -976,14 +1107,14 @@ function paintingIntentSchema(): Record<string, unknown> {
         items: {
           type: 'object',
           properties: {
-            id: { type: 'string' },
+            id: { type: 'string', description: 'Optional technical step key; omitted keys are assigned deterministically. Keep an explicit id when another action references it.' },
             tool: { type: 'string' },
             args: { type: 'object', additionalProperties: true },
             description: { type: 'string' },
             method_id: { type: 'string' },
             edge_boundary_ids: { type: 'array', items: { type: 'string' } },
           },
-          required: ['id', 'tool'],
+          required: ['tool'],
           additionalProperties: false,
         },
       },
@@ -1012,13 +1143,92 @@ function paintingIntentSchema(): Record<string, unknown> {
   };
 }
 
+function materialResponseReviewSchema(): Record<string, unknown> {
+  return {
+    type: 'object',
+    description: 'Evidence-bound qualitative decomposition supporting material_light_response. Texture/noise alone cannot resolve this review.',
+    properties: {
+      response_role: { type: 'string', enum: [...MATERIAL_RESPONSE_ROLES] },
+      components: {
+        type: 'object',
+        properties: Object.fromEntries(MATERIAL_RESPONSE_COMPONENTS.map(key => [key, {
+          type: 'object',
+          properties: {
+            status: { type: 'string', enum: [...MATERIAL_RESPONSE_REVIEW_STATUSES] },
+            note: { type: 'string', minLength: 8 },
+          },
+          required: ['status', 'note'],
+          additionalProperties: false,
+        }])),
+        required: [...MATERIAL_RESPONSE_COMPONENTS],
+        additionalProperties: false,
+      },
+      microtexture: {
+        type: 'object',
+        properties: {
+          status: { type: 'string', enum: [...MATERIAL_RESPONSE_MICROTEXTURE_REVIEW_STATUSES] },
+          note: { type: 'string', minLength: 8 },
+        },
+        required: ['status', 'note'],
+        additionalProperties: false,
+      },
+      texture_only_treatment: { type: 'boolean' },
+      style_contract_basis: {
+        type: 'object',
+        properties: {
+          field: { type: 'string', enum: [...MATERIAL_RESPONSE_STYLE_BASIS_FIELDS] },
+          criterion: { type: 'string', minLength: 8 },
+        },
+        required: ['field', 'criterion'],
+        additionalProperties: false,
+      },
+    },
+    required: ['response_role', 'components', 'microtexture', 'texture_only_treatment'],
+    additionalProperties: false,
+  };
+}
+
+function physicalStackCheckSchema(): Record<string, unknown> {
+  return {
+    type: 'object',
+    description: 'Optional physical scene-stack assessment on the ordinary current whole-frame review, needed before VALUE or later in fresh nontrivial runs. Reuse the same criteria with or without Director. Guard derives exact SHA and operation id in previous_observation; omission is not a pass.',
+    properties: {
+      status: { type: 'string', enum: [...PHYSICAL_STACK_CHECK_STATUSES] },
+      observed: { type: 'boolean' },
+      preview_sha256: { type: 'string', pattern: '^[0-9a-fA-F]{64}$' },
+      evidence_operation_id: {
+        type: 'string',
+        description: 'Guard operation id of the successful visual operation whose preview is the exact current frame being assessed.',
+      },
+      confidence: { type: 'number', minimum: 0, maximum: 1 },
+      limitations: { type: 'array', items: { type: 'string' } },
+      criteria: {
+        type: 'object',
+        properties: Object.fromEntries(PHYSICAL_STACK_CRITERIA.map(key => [key, {
+          type: 'object',
+          properties: {
+            status: { type: 'string', enum: [...PHYSICAL_STACK_CRITERION_STATUSES] },
+            note: { type: 'string' },
+          },
+          required: ['status', 'note'],
+          additionalProperties: false,
+        }])),
+        additionalProperties: false,
+      },
+      material_response: materialResponseReviewSchema(),
+    },
+    required: ['status', 'observed'],
+    additionalProperties: false,
+};
+}
+
 function compactObservationSchema(): Record<string, unknown> {
   return {
     type: 'object',
     properties: {
       observed: {
         type: 'string',
-        description: 'Preferred compact form: one short factual observation grounded in the delivered frame.',
+        description: 'Describe visible form/perspective/light against the brief and style in presentation_context.language; executed tools prove no artistic gain; include remaining defects and the next construction change in this ordinary review.',
       },
       target: {
         type: 'string',
@@ -1038,9 +1248,12 @@ function compactObservationSchema(): Record<string, unknown> {
       disposition: { type: 'string', enum: ['accept', 'correct', 'rollback'] },
       observed_change: {
         type: 'string',
-        description: 'Short factual observation grounded in the delivered previous frame.',
+        description: 'Factual observation in presentation_context.language grounded in the delivered previous frame; preserved in full in frame commentary regardless of detail mode.',
       },
+      artistic_commentary: { type: 'string', description: 'Optional localized pre-pass narration for the previous operation when its saved intent used the wrong language. Repairs presentation during this ordinary observation call; does not rewrite goal, actions or artistic verdict.' },
       target_resolved: { type: 'string', enum: ['yes', 'no', 'uncertain'] },
+      painting_completion: PAINTING_COMPLETION_SCHEMA,
+      critic_review: CHAT_CRITIC_SCHEMA,
       regressions: { type: 'array', items: { type: 'string' } },
       uncertainty: { type: 'string' },
       uncertainty_review: {
@@ -1072,16 +1285,30 @@ function compactObservationSchema(): Record<string, unknown> {
       },
       distribution_intent: {
         type: 'string',
-        enum: ['organic-clustered', 'directional-broken', 'perspective-regular', 'intentional-uniform'],
+        enum: [...DISTRIBUTION_INTENTS],
         description: 'Optional spatial-distribution contract for repeated marks. This complements pattern_intent: random jitter is not proof of organic clustering, and perspective-regular distribution is checked against the declared surface frame.',
       },
-      primary_mismatch: { type: 'string' },
+      edge_observations: {
+        type: 'array',
+        description: 'Required after a pass with edge intents; report each declared boundary exactly once.',
+        items: {
+          type: 'object',
+          properties: {
+            boundary_id: { type: 'string' },
+            observed_behavior: { type: 'string' },
+            target_met: { type: 'string', enum: ['yes', 'no', 'uncertain'] },
+          },
+          required: ['boundary_id', 'observed_behavior', 'target_met'],
+          additionalProperties: false,
+        },
+      },
+      primary_mismatch: { type: 'string', description: 'Largest defect visible in AFTER against the brief; guide the next construction change; if none is visible say so honestly; field presence proves no quality.' },
       global_readability: { type: 'string', enum: ['improved', 'stable', 'degraded', 'unknown'] },
-      primitive_footprint: { type: 'string', enum: ['none', 'acceptable', 'suspect', 'unknown'] },
+      primitive_footprint: { type: 'string', enum: ['none', 'acceptable', 'suspect', 'unknown'], description: 'Judge the object representation against the brief, not merely recognizability or the operation goal. Use suspect for scaffold/pictogram-dominant form; unknown keeps durable owner assessment debt. A temporary block-in can be retained without certifying object completion.' },
       trend_signals: { type: 'array', items: { type: 'string' } },
       softness_review: {
         type: 'object',
-        description: 'Structured contextual review for broad softness/over-smoothing. Required by Guard for broad soft-dominant work in nontrivial paintings. It is bound to the exact current preview internally; do not use a generic sharpness score.',
+        description: 'Optional detailed softness/over-smoothing review. Ordinary exact-frame whole-frame observation and review_findings suffice; omission does not certify a softness pass. Supplied criteria remain bound to the exact current preview; do not use a generic sharpness score.',
         properties: {
           status: { type: 'string', enum: [...SOFT_DOMINANCE_STATUSES] },
           observed: { type: 'boolean' },
@@ -1115,6 +1342,7 @@ function compactObservationSchema(): Record<string, unknown> {
         required: ['status', 'observed', 'criteria'],
         additionalProperties: false,
       },
+      physical_stack_check: physicalStackCheckSchema(),
       review_findings: {
         type: 'array',
         maxItems: 6,
@@ -1236,24 +1464,32 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
     delete normalized.protocol_version;
     return normalized;
   };
-  return [
+  const definitions: ToolDefinition[] = [
     {
       tool: {
         name: 'photoshop_guard_capabilities',
-        description: 'Describe the embedded durable Photoshop Guard, acknowledgement/barrier behavior and current public mutation mode.',
-        inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+        description: 'Read Guard capabilities and recovery contract; tool_name returns one exact executable argument schema without source inspection.',
+        inputSchema: { type: 'object', properties: { if_revision: { type: 'string', description: 'Echo the prior discovery_revision when deliberately checking for changes; matching revision returns a compact unchanged receipt. Keep schemas from the earlier response.' }, tool_name: { type: 'string', description: 'One exact Photoshop command.' }, tool_names: { type: 'array', minItems: 1, maxItems: 8, uniqueItems: true, items: { type: 'string' }, description: 'Batch of exact command_sets names; avoids serial contract queries. Choose this OR tool_name.' } }, additionalProperties: false },
       },
-      handler: async () => json({
-        ...runtime.capabilities(),
-        compact_guard_protocol_version: COMPACT_GUARD_PROTOCOL_VERSION,
-        expected_uxp_bridge_revision: UXP_BRIDGE_REVISION,
-      }),
+      handler: async (args) => {
+        if (args.tool_name !== undefined && args.tool_names !== undefined) throw new Error('Choose tool_name OR tool_names');
+        const value = Array.isArray(args.tool_names)
+          ? { execution: 'not-executed', contracts: args.tool_names.map(name => runtime.toolContract(String(name))) }
+          : args.tool_name !== undefined ? runtime.toolContract(String(args.tool_name)) : {
+            ...runtime.capabilities(), compact_guard_protocol_version: COMPACT_GUARD_PROTOCOL_VERSION,
+            expected_uxp_bridge_revision: UXP_BRIDGE_REVISION };
+        const revision = createHash('sha256').update(JSON.stringify(value)).digest('hex');
+        if (args.if_revision === revision) return json({ execution: 'not-executed', unchanged: true, discovery_revision: revision,
+          next: 'Reuse prior exact schemas; batch only missing names. Do not repeat capabilities/brush setup without changed bridge/inventory or a concrete missing command.' });
+        return json({ ...value, discovery_revision: revision,
+          discovery_policy: 'Read once per art run; cache schemas and batch up to 8 missing tool_names. Deliberate recheck uses if_revision.' });
+      },
     },
     {
       tool: {
         name: 'photoshop_guard_brush_pack_ingest',
         description:
-          'Canonical Guard entry for a supplied Photoshop brush pack. Recursively fingerprints .abr assets, performs idempotent UXP import with durable command receipts, compares exact before/after installed-preset inventory, and returns a durable brush_pack_id plus attributed preset occurrences. This is a global Photoshop preparation operation, not a canvas mutation.',
+          'Import supplied .abr assets and return brush_pack_id with verified presets; changes Photoshop brush inventory, not canvas pixels.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -1286,7 +1522,7 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
       tool: {
         name: 'photoshop_guard_brush_pack_profile',
         description:
-          'Canonical bounded brush-pack profiling surface. plan returns a finite probe plan; probe_media executes one disposable UXP probe sheet under a stable no-replay command and returns exact preview evidence; record_media stores evidence-bound mark behavior; record_stamp stores a separate evidence-bound motif vocabulary without guessing semantics from names; build_preflight generates the durable media-brush role map.',
+          'Plan/probe a brush pack, record observed media or stamp behavior, or build its preflight role map; probe_media draws a disposable sheet.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -1403,7 +1639,7 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
       tool: {
         name: 'photoshop_guard_set_art_run',
         description:
-          'Bind a Photoshop document to one repository-local art-project folder. Non-trivial painting is the default profile and remains fail-closed until this same art run records a live brush_preflight role map from the installed Photoshop preset inventory. Re-call with the same immutable process_dir after inventory/probes to persist brush_preflight.',
+          'Bind document and immutable process_dir; record the original brief and brush_preflight, required for the default nontrivial_painting profile.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -1411,6 +1647,10 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
             process_dir: {
               type: 'string',
               description: 'Repository-relative path exactly processes/<subject>-process/<run-name> using lowercase kebab-case.',
+            },
+            original_brief: {
+              type: 'string', minLength: 1, maxLength: 16000,
+              description: 'Original user request for independent evaluation; changing it invalidates the evaluation binding, so never substitute a success summary.',
             },
             commentary_mode: {
               type: 'string',
@@ -1421,16 +1661,17 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
               type: 'string',
               enum: ['short', 'normal', 'detailed'],
               default: 'normal',
+              description: 'short: intent/tools/observation; normal adds layer/preset/settings; detailed adds colors/opacities/gradient stops; technical keeps audit text; no translation.',
             },
             painting_profile: {
               type: 'string',
               enum: ['nontrivial_painting', 'simple_graphic'],
               default: 'nontrivial_painting',
-              description: 'nontrivial_painting requires brush preflight and VisualMicroPlan-mediated paint; simple_graphic may be upgraded in place to nontrivial_painting when the stronger obligations are supplied.',
+              description: 'nontrivial_painting requires brush_preflight and guarded microplans; simple_graphic can upgrade when these are supplied.',
             },
             profile_transition_reason: {
               type: 'string',
-              description: 'Optional audit/artistic context for an in-place simple_graphic -> nontrivial_painting upgrade. The stronger profile obligations, not prose, authorize the transition.',
+              description: 'Optional reason for upgrading simple_graphic; the stronger profile requirements still apply.',
             },
             brush_preflight: {
               type: 'object',
@@ -1522,7 +1763,10 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
                         ],
                         additionalProperties: false,
                       },
-                      working_scale: { type: 'string' },
+                      working_scale: { type: 'string', description: 'Descriptive canvas/mark size. A legacy exact global|medium|small|detail|local|micro token restricts scale; prose does not. Use allowed_scales for explicit typed restrictions.' },
+                      allowed_scales: { type: 'array', minItems: 1, maxItems: 6, uniqueItems: true,
+                        items: { type: 'string', enum: ['global', 'medium', 'small', 'detail', 'local', 'micro'] },
+                        description: 'Optional explicit applicable pass scales; overrides a legacy working_scale token. Other material/intent/preset checks still apply.' },
                       pressure_policy: {
                         type: 'string',
                         enum: ['none', 'native-preset', 'simulated-size', 'simulated-opacity', 'simulated-size-opacity'],
@@ -1542,6 +1786,11 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
               required: ['completed', 'inventory_observed', 'inventory_total', 'roles'],
               additionalProperties: false,
             },
+            brush_preflight_invalidation: {
+              type: 'string',
+              enum: ['catalog_changed', 'settings_changed', 'runtime_changed'],
+              description: 'Optional explicit invalidation for a replacement brush preflight. Catalog/settings drift is inferred from newly observed inventory/preset/settings evidence when unambiguous; runtime_changed remains explicit when host/runtime evidence requires a reprobe.',
+            },
             brush_pack_policy: {
               type: 'object',
               description: 'Optional supplied-pack execution policy. preferred allows justified fallback; exclusive means every brush/stamp mark must be explicitly bound to this evidence-backed pack while non-brush Photoshop operations remain available.',
@@ -1558,18 +1807,20 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
         },
       },
       handler: async (args) => {
-        try { return json(await runtime.artRunWithCapabilitySnapshot(args)); }
+        try { return json(await runtime.artRunWithCapabilitySnapshot(args), false, runtime); }
         catch (error) { return json({ ok: false, code: 'guard_art_run_rejected', message: error instanceof Error ? error.message : String(error) }, true); }
       },
     },
     {
       tool: {
         name: 'photoshop_guard_status',
-        description: 'Read compact durable Guard state and paint readiness for the established local Photoshop workflow. Optional next_pass runs read-only lint. diagnostic_timing_marker is benchmark-only; do not add marker calls to normal painting. Use after interruption before declaring the route is unavailable; never replay prior mutations.',
+        description: 'Read state/readiness, lint next_pass, or solve construction_model / construction_ref without painting. Keep the established local Photoshop workflow unless its route is unavailable; never replay uncertain mutations. Construction is a geometric target, not image proof; diagnostic_timing_marker is benchmark-only.',
         inputSchema: {
           type: 'object',
           properties: {
             next_pass: compactPassSchema(),
+            construction_model: CONSTRUCTION_MODEL_SCHEMA,
+            construction_ref: { type: 'object', properties: { document_id: { type: 'integer', minimum: 1 }, model_id: { type: 'string' } }, required: ['document_id', 'model_id'], additionalProperties: false },
             diagnostic_timing_marker: {
               type: 'object',
               properties: {
@@ -1584,6 +1835,23 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
         },
       },
       handler: async (args) => {
+        if (args.construction_model !== undefined || args.construction_ref !== undefined) {
+          try {
+            if (args.next_pass !== undefined || args.diagnostic_timing_marker !== undefined || args.construction_model !== undefined && args.construction_ref !== undefined) throw new Error('Choose exactly one read-only construction solve, next_pass lint, or ordinary status request');
+            const ref = args.construction_ref as { document_id: number; model_id: string } | undefined;
+            const model = ref ? runtime.store.constructionModel(ref.document_id, ref.model_id) : args.construction_model;
+            if (!model) throw new Error('No completed current-document construction has this id; supply construction_model');
+            const solved = solveConstruction(model);
+            return json({ ok: true, execution: 'not-executed', model_id: solved.model.model_id, revision: solved.model.revision,
+              model_sha256: solved.model_sha256, iterations: solved.iterations, basis: solved.basis,
+              landmarks: solved.landmarks, parts: solved.parts.map(p => ({ id: p.id, object_id: p.object_id, owner_id: p.id, bounds: p.bounds, target_sha256: p.target_sha256 })),
+              pixel_geometry_verified: false, artistic_quality_verified: false,
+              ...(ref ? { retained_geometry: runtime.store.constructionReviewState(ref.document_id, ref.model_id) } : {}),
+              next: 'Use next_pass.construction with this model inline, or the completed durable model_id, one part_id and color; actual pixels still need exact-image review.' });
+          } catch (error) {
+            return json({ ok: false, execution: 'not-executed', code: 'construction_rejected', issues: error instanceof ConstructionError ? error.issues : [{ path: 'construction_model', message: error instanceof Error ? error.message : String(error) }] }, true);
+          }
+        }
         const marker = args.diagnostic_timing_marker
           && typeof args.diagnostic_timing_marker === 'object'
           && !Array.isArray(args.diagnostic_timing_marker)
@@ -1614,19 +1882,19 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
             }, true);
           }
         }
-        return json({
+        return stateJson({
           ...(await runtime.statusWithCapabilitySnapshots()),
           ...(args.next_pass && typeof args.next_pass === 'object' && !Array.isArray(args.next_pass)
             ? { next_pass_lint: await runtime.lintNextPass(args.next_pass as Record<string, unknown>) }
             : {}),
-        });
+        }, runtime, 'status');
       },
     },
     {
       tool: {
         name: 'photoshop_guard_keep_logical_layer',
         description:
-          'Promote one exact temporary semantic layer owner to stable ownership without mutating Photoshop pixels or layer structure. The exact hypothesis_id -> layer_id binding must already exist in the current document journal. Use this only after the temporary structure has been visually accepted; discard/merge still use the real guarded Photoshop layer operations.',
+          'Commit a visually accepted temporary owner using its journal-bound hypothesis_id and layer_id; does not alter pixels or layer structure.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -1635,43 +1903,9 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
             hypothesis_id: { type: 'string' },
             layer_id: { type: 'number', minimum: 1 },
             rationale: { type: 'string', description: 'Optional audit/artistic guidance for why this already-bound temporary owner is being promoted.' },
-            scene_ownership_plan: {
-              type: 'object',
-              description: 'Required when this temporary owner is the first committed owner and no durable scene ownership plan exists yet. Must predeclare the owner being kept; later keep calls reuse the durable plan.',
-              properties: {
-                plan_id: { type: 'string' },
-                units: {
-                  type: 'array', minItems: 1, maxItems: 32,
-                  items: {
-                    type: 'object',
-                    properties: {
-                      semantic_id: { type: 'string' },
-                      owner_id: { type: 'string' },
-                      role: { type: 'string', minLength: 4 },
-                      editability: { type: 'string', enum: [...SCENE_OWNERSHIP_EDITABILITY] },
-                      rationale: { type: 'string', description: 'Optional audit/artistic guidance for this semantic ownership assignment.' },
-                    },
-                    required: ['semantic_id', 'owner_id', 'role', 'editability'],
-                    additionalProperties: false,
-                  },
-                },
-                shared_owner_justifications: {
-                  type: 'array', maxItems: 16,
-                  items: {
-                    type: 'object',
-                    properties: {
-                      owner_id: { type: 'string' },
-                      semantic_ids: { type: 'array', minItems: 2, items: { type: 'string' } },
-                      rationale: { type: 'string', description: 'Optional audit/artistic guidance for why these semantic ids intentionally share one owner.' },
-                    },
-                    required: ['owner_id', 'semantic_ids'],
-                    additionalProperties: false,
-                  },
-                },
-              },
-              required: ['plan_id', 'units'],
-              additionalProperties: false,
-            },
+            scene_ownership_plan: sceneOwnershipPlanSchema(
+              'Required when this temporary owner is the first committed owner and no durable scene ownership plan exists yet. Must predeclare the owner being kept; later keep calls reuse the durable plan.'
+            ),
           },
           required: ['request_key', 'document_id', 'hypothesis_id', 'layer_id'],
           additionalProperties: false,
@@ -1691,48 +1925,85 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
     {
       tool: {
         name: 'photoshop_guard_resume',
-        description: 'Resume one established local Photoshop workflow after interruption without replaying any prior mutation. With no document_id, consume and verify the persisted continuation checkpoint first: an exact match returns the already-delivered frame/operation and bounded next action; a stale checkpoint fails closed into one bounded status/recovery verification. Pass document_id only for an explicit workflow selection. Drawing/image continuation remains bound to the local Photoshop document unless the user explicitly changes execution mode.',
+        description: 'Recover the local Photoshop workflow without replaying uncertain mutations; keep it unless the user explicitly changes execution mode. After a UXP session change, same_document_confirmed=true requires user confirmation and internally compares fresh pixels/owners with the preserved frame; mismatch keeps work quarantined. No source inspection is needed.',
         inputSchema: {
           type: 'object',
-          properties: { document_id: { type: 'number', minimum: 1 } },
+          properties: { document_id: { type: 'number', minimum: 1 },
+            projection: { type: 'string', enum: ['recovery', 'ownership'], description: 'Bounded public recovery or ownership context; never read runtime files. Requires document_id.' },
+            owner_id: { type: 'string', description: 'Optional exact hypothesis id for projection=ownership.' },
+            same_document_confirmed: { type: 'boolean', description: 'True only after user confirms this is the same still-open document after reconnection.' },
+            director_fields: { type: 'array', minItems: 1, maxItems: 5, uniqueItems: true,
+              items: { type: 'string', enum: ['style_contract', 'prompt_conflict_preflight', 'strategy_validation_after_microplans', 'strategy_validation', 'assessment', 'perceptual_hierarchy', 'value_check', 'refinement_check', 'artistic_evaluation_contract', 'composition_freedom', 'composition_exploration', 'tasks'] },
+              description: 'Fetch only the named saved Director fields, without inventories or source inspection. Requires document_id; use a separate call for identity recovery.' },
+          },
           additionalProperties: false,
         },
       },
-      handler: async (args) => json(runtime.resume(typeof args.document_id === 'number' ? args.document_id : undefined)),
+      handler: async (args) => {
+        try {
+          const result = await runtime.resumeWithRecovery(args);
+          if (Array.isArray(args.director_fields) && result.art_director) {
+            const schema = definitions.find(item => item.tool.name === 'photoshop_guard_art_director')!.tool.inputSchema as JsonSchemaNode;
+            const saved = result.art_director as Record<string, unknown>;
+            result.art_director = { ...saved, ...Object.fromEntries(args.director_fields.map(field => [String(field),
+              publicDirectorTemplate(saved[String(field)], schema.properties!.directive!.properties![String(field)])])) };
+          }
+          return stateJson(result, runtime, 'resume');
+        }
+        catch (error) {
+          const details = error as { identity_recovery_blockers?: unknown; next_public_call?: unknown; owner_identity_comparison?: unknown } | null;
+          return json({ ok: false, code: guardRuntimeErrorCode(error, 'document_identity_recovery_rejected'), execution: 'not-executed',
+            message: error instanceof Error ? error.message : String(error),
+            ...(details?.identity_recovery_blockers ? { identity_recovery_blockers: details.identity_recovery_blockers,
+              next_public_call: details.next_public_call, mutation_replay_permitted: false } : {}),
+            ...(details?.owner_identity_comparison ? { owner_identity_comparison: details.owner_identity_comparison,
+              mutation_replay_permitted: false, mutation_allowed: false } : {}),
+          }, true);
+        }
+      },
     },
     {
       tool: {
         name: 'photoshop_guard_lint_next_pass',
-        description: 'Read-only deterministic validation for one proposed compact next_pass against current durable Guard state.',
+        description: 'Optional read-only validation of a complete continuation, including previous observation. cycle_auto already validates; do not lint each normal component or separately close a reviewed previous pass.',
         inputSchema: {
           type: 'object',
-          properties: { next_pass: compactPassSchema() },
+          properties: { next_pass: compactPassSchema(), previous_operation_id: { type: 'string' }, previous_observation: compactObservationSchema() },
           required: ['next_pass'],
           additionalProperties: false,
         },
       },
       handler: async (args) => {
-        try { return json(await runtime.lintNextPass(args.next_pass as Record<string, unknown>)); }
+        try { return json(await runtime.lintNextPass(args.next_pass as Record<string, unknown>, args)); }
         catch (error) { return json({ ok: false, code: 'guard_next_pass_lint_failed', execution: 'not-executed', message: error instanceof Error ? error.message : String(error) }, true); }
       },
     },
     {
       tool: cycleTool(
-        'photoshop_guard_cycle',
-        'Run one durable compact Photoshop cycle inside the embedded Guard. Start with next_pass; after inspecting the returned frame, continue or finalize with previous_operation_id + previous_observation and optionally another next_pass. Technical report/receipt/verdict closure is derived internally.'
-      ),
-      handler: async (args) => {
-        try { return json(await runtime.cycle(compactCycleArgs(args)), false, runtime); }
-        catch (error) { return json({ ok: false, code: guardRuntimeErrorCode(error, 'guard_cycle_rejected'), message: error instanceof Error ? error.message : String(error) }, true); }
-      },
-    },
-    {
-      tool: cycleTool(
         'photoshop_guard_cycle_auto',
-        'Preferred normal entry point for local Photoshop creation/editing/painting/continuation and accepted-anchor recovery. In an established workflow stay on this route unless the user explicitly changes execution mode. One Guard pass is NOT an entire artistic stage: a whole-canvas/recognition block-in may require several sequential passes. request_key identifies the unique execution attempt; problem_id identifies the stable artistic problem across attempts. Guard derives technical method/preview requirements from the actual actions. Start ordinary work with next_pass={request_key,problem_id?,document_id,goal,region/protection,action_class?,actions}. To restore a registered accepted anchor, send next_pass={request_key,document_id,goal,restore_anchor_operation_id} with no actions; Guard computes bounded history internally and closes recovery only after exact preview/state parity. Visual cycle results are reference-only: call photoshop_guard_review_image for the returned operation before submitting previous_observation. Guard derives technical report, exact receipt acknowledgement and internal visual closure. Short work runs synchronously; longer work returns a durable job_id for photoshop_guard_job_poll.'
+        'Run one bounded semantic pass, not an entire artistic stage, in local Photoshop; keep this route unless the user explicitly changes execution mode. After inspecting exact review images, send previous_operation_id + previous_observation (critic_review at its checkpoint) with optional next_pass; fetch missing images via photoshop_guard_review_image and poll returned job_id via photoshop_guard_job_poll.'
       ),
       handler: async (args) => {
-        try { return json(await runtime.cycleAuto(compactCycleArgs(args)), false, runtime); }
+        try {
+          const envelope = await runtime.cycleAuto(compactCycleArgs(args)) as any;
+          const base = json(envelope, false, runtime);
+          const operationId = envelope?.execution?.operation_id;
+          if (envelope?.next_state !== 'awaiting_visual_review' || typeof operationId !== 'string') return base;
+          const inline = await inlineReviewImageResult(runtime, operationId);
+          if (!inline) return base;
+          const inlineText = inline.content.find(item => item.type === 'text');
+          const inlineBody = inlineText?.type === 'text' ? JSON.parse(inlineText.text) : {};
+          const body = JSON.parse((base.content[0] as { type: 'text'; text: string }).text);
+          body.visual_review.delivery = inlineBody.delivery;
+          body.artistic_review = inlineBody.artistic_review;
+          body.next_required_action = (inlineBody.artistic_review?.critic_role?.required ? 'Switch to Critic; return previous_observation.critic_review for the whole exact scene, then resume Painter. ' : '') + `Perform artistic_review on the inline exact image(s), then call photoshop_guard_cycle_auto once with previous_operation_id=${operationId} + previous_observation and next_pass addressing the largest visible defect. Omit next_pass to close only the current operation, or when the user asked to stop. PSD/JPEG saves and pass closure never certify the whole painting: continue original-brief/form/light/contact debt and pending construction rebuilds.`;
+          return {
+            content: [
+              { type: 'text', text: JSON.stringify(body, null, 2) },
+              ...inline.content.filter(item => item.type === 'image'),
+            ],
+          };
+        }
         catch (error) { return json({ ok: false, code: guardRuntimeErrorCode(error, 'guard_cycle_rejected'), message: error instanceof Error ? error.message : String(error) }, true); }
       },
     },
@@ -1740,17 +2011,19 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
       tool: {
         name: 'photoshop_guard_review_image',
         description:
-          'Explicitly deliver the exact durable image bytes for a pending Guard visual review. Guard cycle/poll responses are reference-only; call this after receiving a visual_review operation_id, inspect the returned MCP image blocks, then submit previous_observation. The tool never replays or mutates Photoshop.',
+          'Deliver exact review images for operation_id without painting; inspect them before submitting previous_observation.',
         inputSchema: {
           type: 'object',
           properties: {
             operation_id: { type: 'string' },
+            force_redelivery: { type: 'boolean', description: 'Only for unavailable/failed images; requires redelivery_reason. Same-operation exact delivered images in a host-proven chat are reused without claiming visual observation.' },
+            redelivery_reason: { type: 'string', enum: ['images-unavailable', 'delivery-failed'] },
             roles: {
               type: 'array',
               minItems: 1,
               maxItems: REVIEW_IMAGE_MAX_BLOCKS,
               items: { type: 'string' },
-              description: 'Optional subset of exact review roles such as after or after_crop. Omit to deliver every role required by the Guard review package.',
+              description: 'Optional roles, e.g. after/after_crop; omit to deliver all required images.',
             },
           },
           required: ['operation_id'],
@@ -1760,13 +2033,15 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
       handler: async (args) => explicitReviewImageResult(
         runtime,
         String(args.operation_id ?? ''),
-        Array.isArray(args.roles) ? args.roles.filter((role): role is string => typeof role === 'string') : undefined
+        Array.isArray(args.roles) ? args.roles.filter((role): role is string => typeof role === 'string') : undefined,
+        args.force_redelivery === true,
+        typeof args.redelivery_reason === 'string' ? args.redelivery_reason : undefined
       ),
     },
     {
       tool: {
         name: 'photoshop_guard_job_poll',
-        description: 'Poll a durable embedded-Guard background job. Completed visual jobs return reference-only review metadata; use photoshop_guard_review_image for exact image delivery. Running/uncertain jobs must not be replaced by a second mutation.',
+        description: 'Poll job_id; fetch completed visual review via photoshop_guard_review_image; never replace running/uncertain work with another mutation.',
         inputSchema: {
           type: 'object',
           properties: { job_id: { type: 'string' } },
@@ -1782,14 +2057,15 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
     {
       tool: {
         name: 'photoshop_guard_reconcile',
-        description: 'Resolve an interrupted/uncertain operation from fresh evidence. Normal recovery requires same-document state + preview. If the user explicitly closed the target document first, a fresh photoshop_list_documents record proving that document absent may close the workflow as abandoned. The original operation remains non-replayable.',
+        description: 'Reconcile uncertain execution without replay. For a user-confirmed closed document, send id + outcome=abandoned + document_closed_confirmed=true + reason; Guard collects fresh document-list evidence internally. Do not read source or manufacture evidence ids.',
         inputSchema: {
           type: 'object',
           properties: {
             id: { type: 'string' },
+            capture_evidence: { type: 'boolean', description: 'Read-only: collect fresh pinned state and materialized preview internally and deliver exact image inline. Does not classify execution or clear the barrier. Inspect and then reconcile with returned ids/outcome/reason.' },
             state_id: { type: 'string' },
             preview_id: { type: 'string' },
-            documents_id: { type: 'string', description: 'Fresh Guard operation id for photoshop_list_documents; used only for closed-document abandonment recovery.' },
+            documents_id: { type: 'string', description: 'Optional existing Guard document-list evidence id. Omit for user-confirmed closed-document recovery: Guard collects fresh evidence internally.' },
             document_closed_confirmed: { type: 'boolean', description: 'Must be true only after the user explicitly confirms the interrupted target document was closed.' },
             outcome: { type: 'string', enum: ['completed', 'not-executed', 'partial', 'abandoned'] },
             reason: { type: 'string' },
@@ -1799,14 +2075,21 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
         },
       },
       handler: async (args) => {
-        try { return json(await runtime.reconcile(args)); }
+        try {
+          if (args.capture_evidence === true) {
+            if (args.outcome !== undefined || args.state_id !== undefined || args.preview_id !== undefined) throw new Error('Capture and outcome classification require separate calls; inspect fresh evidence first');
+            const evidence = await runtime.captureRecoveryEvidence(String(args.id ?? ''));
+            return { content: [...json(evidence.body).content, ...evidence.images] };
+          }
+          return json(await runtime.reconcile(args));
+        }
         catch (error) { return json({ ok: false, code: 'guard_reconcile_rejected', message: error instanceof Error ? error.message : String(error) }, true); }
       },
     },
     {
       tool: {
         name: 'photoshop_guard_set_priorities',
-        description: 'Persist whole-frame visual problem priorities so the Guard blocks finer work while a larger must-fix remains open.',
+        description: 'Record whole-frame problem priorities; open larger must-fix problems block finer work.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -1824,6 +2107,12 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
                   status: { type: 'string', enum: ['open', 'resolved'] },
                   region: { type: 'string' },
                   hypothesis: { type: 'string' },
+                  depends_on_problem_ids: {
+                    type: 'array',
+                    uniqueItems: true,
+                    items: { type: 'string' },
+                    description: 'Problem ids that must be resolved first. Guard persists these dependencies and uses them when selecting the primary blocker.',
+                  },
                 },
                 required: ['problem_id', 'scale', 'severity'],
                 additionalProperties: false,
@@ -1842,7 +2131,7 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
     {
       tool: {
         name: 'photoshop_guard_art_director',
-        description: 'Manage the high-level Art Director/Planner state separately from Painter execution. Review issues a bounded directive/task queue and adaptive review horizon; interrupt returns early from Painter to Planner; complete closes a fully satisfied directive.',
+        description: 'Manage Director plans: review issues tasks, interrupt returns to planning, complete closes a satisfied directive; does not certify painted quality.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -1889,7 +2178,7 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
                 goal: { type: 'string' },
                 style_contract: {
                   type: 'object',
-                  description: 'Compact durable artistic intent. Supply only relevant fields, with at least three concrete constraints.',
+                  description: 'Durable artistic intent; supply relevant fields without a constraint-count quota.',
                   properties: {
                     realism_level: { type: 'string' },
                     shape_language: { type: 'string' },
@@ -1911,7 +2200,7 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
                 },
                 prompt_conflict_preflight: {
                   type: 'object',
-                  description: 'Mandatory pre-paint interpretation gate. Resolve prompt tensions that would change the first 1-3 rendering passes before Painter mutation, declare one dominant rendering objective, and freeze the initial rendering strategy.',
+                  description: 'Resolve structural prompt conflicts; declare the dominant objective and rendering strategy. First-pass notes are optional.',
                   properties: {
                     dominant_objective: { type: 'string' },
                     secondary_traits: { type: 'array', maxItems: 8, items: { type: 'string' } },
@@ -1936,19 +2225,19 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
                     resolution_mode: { type: 'string', enum: ['none', 'declared-interpretation', 'user-confirmed'] },
                     chosen_rendering_strategy: { type: 'string' },
                     resolution_rationale: { type: 'string' },
-                    first_pass_strategy: { type: 'array', minItems: 1, maxItems: 3, items: { type: 'string' } },
+                    first_pass_strategy: { type: 'array', items: { type: 'string' } },
                     user_confirmation: { type: 'string' },
                   },
-                  required: ['dominant_objective', 'conflicts', 'resolution_mode', 'chosen_rendering_strategy', 'first_pass_strategy'],
+                  required: ['dominant_objective', 'conflicts', 'resolution_mode', 'chosen_rendering_strategy'],
                   additionalProperties: false,
                 },
                 strategy_validation_after_microplans: {
                   type: 'number', minimum: 1, maximum: 2,
-                  description: 'Mandatory early strategy checkpoint after the first one or two classified Painter micro-plans.',
+                  description: 'Optional advisory cadence, default 2. Counting meaningful previews does not force a Director call or block Painter execution.',
                 },
                 strategy_validation: {
                   type: 'object',
-                  description: 'Early preview-based validation of whether the chosen rendering strategy is actually advancing the dominant objective. Initial directives use pending; a due review must record pass or replan against the exact current frame.',
+                  description: 'Optional strategy review, initially pending by default. A persisted due review still requires pass/replan against the exact current frame; advisory cadence alone creates no review barrier.',
                   properties: {
                     status: { type: 'string', enum: ['pending', 'pass', 'replan'] },
                     evidence_operation_id: { type: 'string' },
@@ -1963,6 +2252,12 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
                   type: 'object',
                   description: 'Revision-bound, open-ended image-observable criteria derived from this run brief. It interprets the brief without defining a style taxonomy.',
                   properties: {
+                    brief_items: { type: 'array', maxItems: 24, items: {
+                      type: 'object', properties: {
+                        item_id: { type: 'string' }, kind: { type: 'string', enum: ['hard_perceptual', 'soft_preference', 'technical_non_visual'] },
+                        requirement: { type: 'string' }, provenance: { type: 'string' }, recognition_target: { type: 'string' },
+                      }, required: ['item_id', 'kind', 'requirement', 'provenance'], additionalProperties: false,
+                    } },
                     contract_id: { type: 'string' },
                     revision: { type: 'number', minimum: 1 },
                     positive_criteria: { type: 'array', minItems: 1, maxItems: 8, items: { type: 'string' } },
@@ -1993,7 +2288,7 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
                   properties: {
                     hypotheses: {
                       type: 'array',
-                      maxItems: 4,
+                      description: 'Cheap structural alternatives. Free composition requires at least 2 with no fixed upper bound; constrained composition with material_choice_unresolved=true is runtime-bounded to 2-4; fixed composition requires none.',
                       items: {
                         type: 'object',
                         properties: {
@@ -2115,9 +2410,9 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
                 },
                 value_check: {
                   type: 'object',
-                  description: 'Observed grayscale/value review for representational workflows. DETAIL is blocked when this status is fail or when observed evidence is missing. style-not-applicable and override require an exact durable style-contract basis; prose reasons are optional audit guidance.',
+                  description: 'Omit on a fresh unpainted document, or use {status:pending, observed:false}; construct the subject before grayscale analysis. Pending never unlocks DETAIL. Observed PASS/FAIL/override still require exact grayscale evidence; style exceptions require an exact durable style-contract basis.',
                   properties: {
-                    status: { type: 'string', enum: ['pass', 'fail', 'override', 'style-not-applicable'] },
+                    status: { type: 'string', enum: ['pending', 'pass', 'fail', 'override', 'style-not-applicable'] },
                     observed: { type: 'boolean' },
                     preview_sha256: { type: 'string', pattern: '^[0-9a-fA-F]{64}$' },
                     evidence_operation_id: {
@@ -2201,6 +2496,7 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
                       required: ['status', 'observed', 'source_preview_sha256', 'evidence_operation_id', 'note'],
                       additionalProperties: false,
                     },
+                    material_response: materialResponseReviewSchema(),
                     confidence: { type: 'number', minimum: 0, maximum: 1 },
                     limitations: { type: 'array', items: { type: 'string' } },
                     applicability_reason: { type: 'string' },
@@ -2230,78 +2526,7 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
                   required: ['status', 'observed'],
                   additionalProperties: false,
                 },
-                physical_stack_check: {
-                  type: 'object',
-                  description: 'Observed physical scene-stack review. For fresh nontrivial paintings, VALUE and later stages are blocked until opaque masses, depth/occlusion, intentional transparency and Photoshop layer-stack order are coherent on the exact current frame.',
-                  properties: {
-                    status: { type: 'string', enum: [...PHYSICAL_STACK_CHECK_STATUSES] },
-                    observed: { type: 'boolean' },
-                    preview_sha256: { type: 'string', pattern: '^[0-9a-fA-F]{64}$' },
-                    evidence_operation_id: {
-                      type: 'string',
-                      description: 'Guard operation id of the successful visual operation whose preview is the exact current frame being assessed.',
-                    },
-                    confidence: { type: 'number', minimum: 0, maximum: 1 },
-                    limitations: { type: 'array', items: { type: 'string' } },
-                    criteria: {
-                      type: 'object',
-                      properties: Object.fromEntries(PHYSICAL_STACK_CRITERIA.map(key => [key, {
-                        type: 'object',
-                        properties: {
-                          status: { type: 'string', enum: [...PHYSICAL_STACK_CRITERION_STATUSES] },
-                          note: { type: 'string' },
-                        },
-                        required: ['status', 'note'],
-                        additionalProperties: false,
-                      }])),
-                      additionalProperties: false,
-                    },
-                    material_response: {
-                      type: 'object',
-                      description: 'Evidence-bound qualitative decomposition supporting material_light_response. Texture/noise alone cannot resolve this review.',
-                      properties: {
-                        response_role: { type: 'string', enum: [...MATERIAL_RESPONSE_ROLES] },
-                        components: {
-                          type: 'object',
-                          properties: Object.fromEntries(MATERIAL_RESPONSE_COMPONENTS.map(key => [key, {
-                            type: 'object',
-                            properties: {
-                              status: { type: 'string', enum: [...MATERIAL_RESPONSE_REVIEW_STATUSES] },
-                              note: { type: 'string', minLength: 8 },
-                            },
-                            required: ['status', 'note'],
-                            additionalProperties: false,
-                          }])),
-                          required: [...MATERIAL_RESPONSE_COMPONENTS],
-                          additionalProperties: false,
-                        },
-                        microtexture: {
-                          type: 'object',
-                          properties: {
-                            status: { type: 'string', enum: [...MATERIAL_RESPONSE_MICROTEXTURE_REVIEW_STATUSES] },
-                            note: { type: 'string', minLength: 8 },
-                          },
-                          required: ['status', 'note'],
-                          additionalProperties: false,
-                        },
-                        texture_only_treatment: { type: 'boolean' },
-                        style_contract_basis: {
-                          type: 'object',
-                          properties: {
-                            field: { type: 'string', enum: [...MATERIAL_RESPONSE_STYLE_BASIS_FIELDS] },
-                            criterion: { type: 'string', minLength: 8 },
-                          },
-                          required: ['field', 'criterion'],
-                          additionalProperties: false,
-                        },
-                      },
-                      required: ['response_role', 'components', 'microtexture', 'texture_only_treatment'],
-                      additionalProperties: false,
-                    },
-                  },
-                  required: ['status', 'observed'],
-                  additionalProperties: false,
-                },
+                physical_stack_check: physicalStackCheckSchema(),
                 priorities: { type: 'array', minItems: 1, maxItems: 6, items: { type: 'string' } },
                 review_after_microplans: {
                   type: 'number', minimum: 1, maximum: 20,
@@ -2369,9 +2594,8 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
               },
               required: [
                 'directive_id', 'goal', 'style_contract', 'prompt_conflict_preflight',
-                'strategy_validation_after_microplans', 'strategy_validation',
                 'artistic_evaluation_contract', 'composition_freedom', 'composition_exploration',
-                'assessment', 'value_check', 'refinement_check', 'priorities',
+                'assessment', 'perceptual_hierarchy', 'refinement_check', 'priorities',
                 'review_after_microplans', 'tasks',
               ],
               additionalProperties: false,
@@ -2491,6 +2715,10 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
                 observation: { type: 'string' },
                 operation_id: { type: 'string', description: 'Exact artistic-frame operation id. Required when satisfying a pending whole-image boundary.' },
                 frame_sha256: { type: 'string', description: 'Exact 64-hex artistic-frame SHA. Required when satisfying a pending whole-image boundary.' },
+                relationship_audit: {
+                  type: 'object',
+                  description: 'When pending required_relations is nonempty, supply checks[] with relation, status=pass|defect|uncertain, and existing-format review_finding for each defect. Runtime validates the exact bounded scope.',
+                },
               },
               required: ['trigger', 'observation'],
               additionalProperties: false,
@@ -2501,14 +2729,42 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
         },
       },
       handler: async (args) => {
+        const definition = definitions.find(item => item.tool.name === 'photoshop_guard_art_director')!;
+        const errors = collectSchemaErrors(args, definition.tool.inputSchema, 'args');
+        if (args.action === 'review' && args.directive === undefined) errors.push('args.directive is required for action=review');
+        if (args.action === 'review' && args.directive && typeof args.directive === 'object') {
+          const schema = definition.tool.inputSchema as JsonSchemaNode;
+          const directive = args.directive as Record<string, unknown>;
+          for (const field of ['value_check', 'refinement_check']) {
+            const rawCheck = directive[field];
+            if (!rawCheck || typeof rawCheck !== 'object') continue;
+            const check = rawCheck as Record<string, unknown>;
+            const status = typeof check.status === 'string' ? check.status : '';
+            const required = ['status', 'observed'];
+            if (['pass', 'fail', 'override'].includes(status)) required.push('preview_sha256', 'evidence_operation_id', 'criteria');
+            if (field === 'refinement_check' && ['pass', 'fail'].includes(status)) required.push('representation_change');
+            if (field === 'refinement_check' && status === 'pass') required.push('low_frequency_evidence', 'material_response');
+            if (['override', 'style-not-applicable'].includes(status)) required.push('style_contract_basis');
+            errors.push(...collectSchemaErrors(check, { ...schema.properties!.directive!.properties![field], required }, `args.directive.${field}`));
+            if (status === 'pending' && check.observed !== false) errors.push(`args.directive.${field}.observed must be false for pending`);
+            if (['pass', 'fail', 'override'].includes(status) && check.observed !== true) errors.push(`args.directive.${field}.observed must be true for an observed verdict`);
+          }
+        }
+        const semantic = args.action === 'review' ? runtime.collectArtDirectorReviewErrors(args) : [];
+        const issues = [...new Set([...errors, ...semantic])];
+        if (issues.length) return json({ ok: false, code: 'guard_art_director_contract_invalid',
+          issues, visual_mutation_started: false,
+          correction: 'Correct all listed fields in one request using the published schema. Retrieve durable fields with photoshop_guard_resume(director_fields); never inspect source. Fixed composition requires empty hypotheses and no selected_id/selection_reason. Observed checks require current exact-image evidence; pending is legal only for an unobserved check.',
+        }, true);
         try { return json(await runtime.artDirector(args)); }
-        catch (error) { return json({ ok: false, code: 'guard_art_director_rejected', message: error instanceof Error ? error.message : String(error) }, true); }
+        catch (error) { return json({ ok: false, code: 'guard_art_director_rejected', message: error instanceof Error ? error.message : String(error),
+          next: 'Report this exact state/evidence blocker; do not repeat the same directive or inspect source.' }, true); }
       },
     },
     {
       tool: {
         name: 'photoshop_guard_recover_lock',
-        description: 'Recover stale Guard/execution lock files only when their owning process is no longer alive. A live-PID async job whose heartbeat/deadline lease is stalled is reported as embedded_guard_job_stalled and remains locked; restart only the Photoshop MCP child before recovery. Never replays a mutation.',
+        description: 'Release locks only for dead owners; embedded_guard_job_stalled with a live PID requires MCP-child restart before recovery, never mutation replay.',
         inputSchema: { type: 'object', properties: {}, additionalProperties: false },
       },
       handler: async () => {
@@ -2517,4 +2773,5 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
       },
     },
   ];
+  return definitions;
 }

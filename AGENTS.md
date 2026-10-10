@@ -1,6 +1,135 @@
 # AGENTS.md — Photoshop MCP Digital Painting Edition
 
+## ChatGPT Critic role (2026-10-10 source)
+
+Keep the artistic evaluator as a distinct ROLE in the same ChatGPT conversation. At
+artistic_review.critic_role.required, stop planning strokes briefly and act as Critic of the WHOLE
+delivered scene against original_brief; setting, space/light and subject relationships count even
+when the last local component improved. Return previous_observation.critic_review using the exact
+request_id, five pass|fail|unknown criteria, and concrete visible/next_change for each failed criterion.
+Then resume Painter and submit the observation plus next_pass through the SAME ordinary cycle_auto.
+Checkpoints: after three substantial visual passes, every six further visual passes, stage changes
+and final completion. Unfinished initial masses may be kept; their scene findings persist through
+local successes and saves until the corresponding whole-scene criterion is actually reassessed pass.
+Unknown is not success. Small/detail does not require a second reviewer after every stroke.
+
+Optional delegation uses the real exposed Core agents API when the user authorized subagents:
+status once, message a suitable sleeping Critic or spawn once using optional_spawn. Send original
+brief and exact registered BEFORE/AFTER image paths, not Painter justifications/tool-success logs.
+Do not change focus, paint, inspect source or alter model settings. A missing image/report is
+unknown/pending; never fabricate a worker verdict or poll repeatedly. Without Core agents use the
+same-chat role. Neither role labels nor host-reported delegation grant calibrated critic authority.
+No local LM Studio model is automatically called or prepared by PaintPilot.
+
+## Ordinary same-chat pixel review
+
+Preserve the original user task once as original_brief in photoshop_guard_set_art_run. The Director
+endpoint records host plans. At the EXISTING inline/exact-image review boundary, the Painter inspects
+delivered BEFORE/AFTER directly in this chat. Follow artistic_review: describe visible form, proportions,
+perspective and light against the original brief/style in observed; put the largest remaining defect in
+primary_mismatch and judge target honestly. Next pass addresses that defect with a concrete construction
+change; repeated failure calls for changing construction rather than adding texture/highlights. Keep pass,
+task, stage and global finish distinct. Commands and filled fields prove no quality. This is self-review,
+not independent acceptance. No automatic LM Studio/Gemma inference or extra review cycle is used.
+Useful unfinished pixels can remain; preserve exact-image delivery and uncertainty without replay.
+Current workflow and experimental history: [docs/artistic-evaluator.md](docs/artistic-evaluator.md).
+First visual stage/scale inherit durable state or default to GLOBAL_BLOCK_IN/global; bounded marks should
+explicitly declare local/small. A continuation with exactly one outstanding, dispatched, completed
+nonvisual operation inherits its exact durable receipt and derives report/ack internally; the Painter
+does not need to repeat previous_operation_id or emit standalone prose/report. Multiple debts require
+an explicit previous_operation_id. Visual or uncertain work never inherits successful technical closure;
+visual operations still require delivered exact-image evidence and observation.
+
+
 ## First action and every continuation in Chat On Steroids
+
+During painting, including setup, rejection and recovery, never read repository source,
+tests, dist implementations or tool schemas through Core/shell/grep/imports. Never import
+SessionStore or write artificial evidence records. Use public Photoshop/Guard tools and
+returned field-level corrections. If one corrected attempt still lacks an actionable fix,
+report the exact blocker. Source work requires the user's explicit pipeline-development request.
+For a user-confirmed closed target call photoshop_guard_reconcile with id, outcome=abandoned,
+document_closed_confirmed=true and reason; omit documents_id so Guard collects and closes fresh
+evidence internally. Do not review historical pixels to dispose of that closed document.
+
+The first meaningful painting pass contains the requested main subject and recognition cues.
+Establish the setting/path/large masses in the following bounded passes before refinement;
+do not begin with an independent atmosphere-only/gradient task. Preserve editable owner layers
+and the bounded pass contract. Director is optional; its first task should cover whole-scene
+recognition/composition with global/medium scope and the relevant subject/context zones.
+
+Component ownership applies to every rendering profile, including simple_graphic and initial
+block-in. Do not put an entire person/animal/furniture/window on one persistent layer and promise
+to separate it later. Declare scene_ownership_plan.objects with subject_kind and compound-object
+before semantic layer construction; enumerate the visible independently editable parts on
+distinct semantic units, owners and physical layers. For a clothed person this normally includes
+face/body, hair and garment; add separately editable hands/accessories when needed. Construct
+and review one component per pass. single-component means one actual part, not a whole complex
+subject renamed as a silhouette; continuous-field means a continuous background field. Substantial
+temporary objects also require decomposition, and keep cannot bypass component validation.
+Small inseparable accents remain on their component. A typed plan is an editing contract, not
+proof of pixel content or artistic quality. Existing flattened pixels are retained until explicit
+component extraction/reconstruction; never reassign old ownership labels as if pixels were split.
+
+Fresh nontrivial compound owners must use executable construction, not a pure solve followed by guessed
+polygons/transforms. Use chosen distance/ratio constraints or proportion_checks; rigid=true objects keep
+fixed intrinsic shape/scale and share a single origin/rotation across all component layers. Explicit
+reshape_object_ids authorizes shape correction; rebuild and inspect every affected part. Existing parts
+are replaced on exactly one owned raster layer in one reversible transaction so old silhouettes cannot
+accumulate. Model-bound manual pose transforms and stale-part refinement are rejected. Legacy paintings
+retain their existing policy; migrating them needs explicit construction/rebuild, never relabelled pixels.
+Walls, window openings, frames and curtains remain separate semantic components. Flat wall fill is only
+an initial mass when the brief requires room depth/light. Missing reference does not justify flat finish:
+painterly.form_field accepts an explicit authored ellipsoid/light-field and chosen colors/light/clip;
+it uses the bounded stroke planner, not a fake reference or anatomy inference.
+Save/export closure must retain document-wide unresolved critique, primitive-footprint debt and pending
+construction components. Continue a concrete visual correction; explicit user stop/pause always wins.
+Use capabilities command_sets once and tool_names batches (max eight) for actual needed schemas;
+do not guess aliases or serially inspect contracts. Known missing owner pins/final previews repair locally.
+
+For any object whose proportions/connections matter, next_pass.construction can calculate geometry from a
+category-independent model: arbitrary parts, landmarks/relative contour controls, length ratios, angles,
+attachments, symmetry, poses and a shared camera. Supply model once, then durable model_id + part_id + color;
+do not mix authored actions. It generates one component and its independent layer through the existing Guard
+lane. Optional guard_status(construction_model=...) solves without painting; construction_ref inspects durable
+geometry and parts requiring rebuild after a revision. Use the complete public schema and returned corrections,
+never source/examples during painting. Choose proportions from reference/brief or explicit artistic intent;
+the solver cannot infer them from a noun. Compare construction_target with exact delivered pixels at the normal
+review boundary before dependent detail. Numerical success is not anatomy, pixel identity or artistic proof.
+
+
+For articulated reach/contact and pose edits, the same general model supports ik_chains: authored
+absolute object-local joint landmarks, an explicit target and optional interior bend limits. A fixed
+root or shared parent-chain joint anchors each 2D/3D chain; IK.ts solves with original bone lengths.
+Relative/axis-bound part contours follow those joints. Keep each component independently editable.
+Unreachable/limited/conflicting poses return public corrections instead of stretching or accepting
+an approximate contact. Numerical IK is not anatomy, rendered contact or artistic proof. Choose this
+path from the visual problem; it needs no additional tool, source read or model-review round.
+
+Reference-guided painterly refinement uses next_pass.painterly on ONE existing component owner.
+Provide an aligned materialized JPEG reference and canvas bounds, plus clip_contour or a current durable
+construction_ref. Guard computes an omitted reference SHA and derives the exact whole-frame BEFORE internally;
+explicit conflicting SHA/owner/model revisions are rejected. The bounded Hertzmann adapter generates descending
+brush-scale marks inside the existing BRUSH executor budget. It does not invent missing anatomy/light or treat
+a textured block-in as finished form. Read the full public schema/corrections, not repository source. Inspect
+the native preview, including preset fringes outside the intended contour; the planner only bounds the nominal
+round footprint. Replan from the latest frame after observation; never replay the previous generated package.
+
+
+Smooth construction contours use Bezier.js with 0.25-pixel accuracy and a 256-point cap; a cap refusal
+requires reducing projected size/curvature or choosing linear, never silently dropping precision.
+Painterly clip_exclusions explicitly protect up to eight cutout contours. Clipper2's TypeScript port
+unions exclusions, subtracts them and calculates brush-center insets, retaining holes/islands. This
+bounds nominal strokes, not real brush fringes. Continue through the public contract and normal review.
+
+When developing the pipeline, record every external dependency/copied adaptation/algorithm/asset in
+THIRD_PARTY_NOTICES.md and third-party-components.json with author, source, exact revision/version,
+usage paths and licensing relationship. Retain required texts in licenses/; keep npm/MCPB packaging
+and verify:third-party-notices in sync. Library dependencies retain upstream authorship; inspiration
+is separate from copied implementation. Painter work still never reads repository source.
+
+On a fresh unpainted document omit value_check or use {status:pending, observed:false};
+pending creates no evidence claim and never opens the DETAIL gate.
 
 **Production state, 2026-09-18:** the embedded native-MCP Photoshop Guard and the
 dedicated CoS entry point, `dist/cos-plugin.js`, have passed the dedicated live
@@ -16,6 +145,11 @@ must go through `photoshop_guard_cycle_auto`. On interruption or uncertainty, us
 `photoshop_guard_status` / `photoshop_guard_resume`, obtain fresh evidence as required,
 and reconcile rather than replaying a mutation. Long work may return a durable
 `job_id`; continue it with `photoshop_guard_job_poll`.
+
+The MCP connection owns the in-process async worker. Keep the installed plugin connected through
+job completion and final review. A durable job receipt does not detach the worker. Do not pipe a
+single request into a temporary stdio client: EOF closes its MCP child and kills unfinished jobs.
+If Plugins are unavailable, restore the installed plugin rather than launching a second server.
 
 Normal visual continuation uses the compact hot loop: first
 `photoshop_guard_cycle_auto(next_pass=...)` returns a preview; after inspecting it,
@@ -75,10 +209,11 @@ only redundant transport into the conversation is reduced.
 Before the first Painter mutation, every Art Director directive must record a
 `prompt_conflict_preflight`. Do not silently average contradictory artistic requirements.
 Choose one **dominant rendering objective**, keep secondary traits subordinate to it, and
-declare the rendering strategy plus the first 1–3 passes that follow from that choice.
+declare the rendering strategy. First-pass notes are optional; no minimum prose length,
+style-constraint count or pass-list quota proves artistic quality.
 
 Classify a conflict as **structural** when two reasonable interpretations require materially
-different first 1–3 rendering passes (for example, line-first illustration versus
+different initial rendering passes (for example, line-first illustration versus
 value/material-first photorealism). Structural conflicts must be resolved before Painter
 dispatch. When one interpretation is clearly subordinate to the dominant objective, use
 `resolution_mode=declared-interpretation` and state that interpretation to the user before the
@@ -86,13 +221,12 @@ first mutation. When multiple interpretations remain materially reasonable, set
 `requires_user_choice=true`; Guard then requires `resolution_mode=user-confirmed` plus concrete
 user confirmation before Painter work can start.
 
-Every directive must also set `strategy_validation_after_microplans` to **1 or 2** and begin with
-`strategy_validation.status=pending`. Guard counts only Painter passes whose visual significance
-is `meaningful`. After that many meaningful previews, it forces Art Director re-review. Judge
-whether the **dominant objective itself** is becoming more visible, rather than merely whether
-secondary prompt traits are accumulating. Record `pass` to continue, or `replan` with the exact
-current-frame operation id and a genuinely changed rendering strategy / first-pass sequence. A
-replan starts a fresh early strategy-validation window.
+Strategy cadence is advisory: `strategy_validation_after_microplans` is optional (default **2**)
+and initial `strategy_validation` defaults to `pending`. Guard counts meaningful Painter previews
+as telemetry; reaching **1 or 2** does not force a Director call or block painting. Judge the
+dominant objective through the ordinary frame review. Observed failure, uncertainty, protected-quality
+loss and existing task/whole-frame review boundaries still require action. At an actual due strategy
+review, record `pass` or `replan` against the exact current frame; replan must change the rendering strategy.
 
 Do not create a second controller CLI, persistent MCP daemon, ad-hoc MCP REPL, or parallel
 recovery transport. Diagnostics and recovery stay on the embedded Guard surfaces.
@@ -215,11 +349,11 @@ Preparation genuinely required by the immediate first pass belongs inside that s
 Guard enforces this with `premature_future_preparation` (document create/open are exempt), complementing
 the existing `premature_value_analysis` blank-canvas gate.
 
-The current bridge source revision is `compact-v2-20261002-video-trace-readiness`.
+The current bridge source revision is `compact-v2-20261009-component-rebuild`.
 Document create/open use UXP exact-outcome receipts. The remaining catalog migration work is
 implemented under the same UXP-only/fail-closed contract.
-The rebuilt child/current companion load-and-revision preflight is live-accepted; the final
-representative post-migration behavior/no-focus-steal trace remains pending. Do not use older
+The earlier child/companion baseline was live-accepted. The 2026-10-09 source revision still
+requires the managed MCP/UXP reload and a representative behavior/no-focus-steal trace. Do not use older
 migration-era revision strings as readiness targets.
 
 Photoshop 27.8 has one accepted painting quirk: assigning `app.foregroundColor` inside the same
@@ -280,13 +414,13 @@ processes/<subject>-process/polished-01/
 processes/<subject>-process/experiment-01/
 ```
 
-Past process directories are recovery/evaluation evidence, not an inspiration library. When the
-user delegates selection of a fresh subject, do not browse old process frames, plans, commentary or
-folder names to choose it. Read at most `processes/subject-selection-memory.json`, when present, as
-compact negative recency evidence; choose first, append one abstract feature signature, retain only
-the newest 12 entries, then bind the new art run. Initialize a missing file from
-`docs/subject-selection-memory-template.json` when a file-write route is already available; a
-missing/unwritable memory file is non-blocking.
+Past process directories are recovery/evaluation evidence only, never an inspiration library or a
+cross-run artistic memory. When the user delegates selection of a fresh subject, do not browse old
+process frames, plans, commentary, folder names, subject lists, style choices, compositions, motifs,
+method choices or prior artistic outcomes to choose it. Do not maintain or consult a subject-selection
+recency file. Fresh artistic choices derive from the current user brief and current-run evidence only.
+Technical evidence may persist across runs only when it is subject-neutral (for example transport,
+latency, rollback, brush-footprint or capability evidence).
 
 Naming rules:
 
@@ -388,8 +522,8 @@ generic unrelated brush is forbidden. Stamp-only passes bind `brush_pack_id + st
 directly and do not pretend to be media-brush roles. Non-brush Photoshop operations remain available.
 
 After **every completed external action**, emit a distinct ordinary user-visible
-assistant message:
-**Что сделал: … / Зачем: … / Результат: …**. A "Tool called" card, stdout,
+assistant message with the localized semantic fields **Did / Why / Result**
+(`Что сделал / Зачем / Результат` in Russian). A "Tool called" card, stdout,
 internal `commentary`/thought/progress event or saved report is not user-facing
 delivery. Continue after the report without waiting for "continue". The
 controller's `report` command records
@@ -404,9 +538,9 @@ another journal acknowledgment.
 
 Painting commentary has a sticky presentation mode for the current art run:
 
-- `режим техника` — technical/execution commentary;
-- `режим художник` — artist-facing commentary in natural Russian;
-- `режим вместе` — artistic explanation first, then a compact technical note;
+- `режим техника` / `technical` — developer/debug telemetry only;
+- `режим художник` / `artistic` — artist-facing visual reasoning plus practical Photoshop technique;
+- `режим вместе` / `mixed` — artistic explanation first, then a compact separated technical/debug note;
 - `коротко` / `обычно` / `подробно` change commentary detail without changing
   the content mode; `режим кратко` preserves the current mode and sets short detail;
 - `следующий шаг — художник|техника|вместе` is a one-action override and does not
@@ -416,17 +550,31 @@ Default to `режим вместе` + `обычно` when the user has not chos
 long/resumable runs persist `commentary_mode` and `commentary_detail` in painting
 state and restore them on resume.
 
-In `режим художник`, do not expose protocol, transport, schema, ids, hashes,
-internal tool names, runtime/controller/Guard terminology, English jargon, or
-hidden chain-of-thought. Explain only artist-useful rationale: what is visually
-wrong, what result is sought, what Photoshop-native artistic action is being taken
-in Russian, where and with what brush/selection/layer parameters when relevant,
-what must be preserved, and what visibly changed. Ordinary artist terms such as
-слой, маска, кисть, ластик, выделение, непрозрачность, нажим, жёсткость, мягкость,
-размер, цвет, режим наложения and трансформация are allowed. A blocking technical
-failure must be described only by its practical consequence in plain Russian. The
-mandatory Что сделал / Зачем / Результат semantics remain; commentary mode changes
-their wording, not the safety barrier.
+The authoritative commentary classification lives in `src/prompts/host-guidance.ts`.
+Keep this boundary exact:
+
+- `technical` contains observable implementation/debug facts: Photoshop/UXP/MCP connection and
+  operation state, runtime/capability limitations, Guard admission/barriers/evidence/receipts/
+  checkpoints/recovery, internal ids/hashes/protocol/schema, compiler/preflight/repair/retry/
+  fallback diagnostics, errors, timing and capture telemetry. It must not contain artistic
+  rationale or Photoshop craft except the minimum operation label needed to identify the debug event.
+  Technical mode still never exposes hidden chain-of-thought.
+- `artistic` contains everything useful to an artist: visible problem, intended effect,
+  composition/hierarchy/depth/perspective/geometry/form/value/light/color/material/edge logic,
+  Photoshop method choice and why, layer/mask/selection structure, brush preset/settings,
+  opacity/flow/hardness/size/spacing/smoothing/pressure, blend mode, adjustment/filter/gradient/
+  transform parameters, target region, protected qualities, inspected result and next artistic step.
+  Do not expose protocol, transport, schema, ids, hashes, internal tool names, runtime/controller/
+  Guard terminology or other implementation telemetry. A blocking technical failure is stated only
+  as its practical consequence for the artist.
+- `mixed` renders the artistic explanation first and then one clearly separated compact technical
+  note. Do not duplicate facts: artistic states the useful visual/Photoshop consequence, technical
+  states the machine evidence/cause.
+
+Use the effective `presentation_context.language` in every mode (`auto` follows the current user's
+conversation language). `commentary_detail` changes only depth/length inside the selected boundary.
+The mandatory completion-report semantics remain; commentary mode changes their content and wording,
+not the safety barrier.
 
 Before every visual mutation in `artistic` or `mixed` mode, emit the concise
 artist-facing intent as an **ordinary visible assistant message** and pass that
@@ -479,10 +627,9 @@ required between normal visual passes when the pinned `document_id`, materialize
 preview, recorded verdict, closed barrier and normal controller continuation are
 already established.
 
-After a proven systemic failure, allow one compact diagnostic investigation, then
-form a causal replan and return to the next visual pass. A second diagnostic pass
-is allowed only when the first produced no actionable cause. Do not turn an
-ordinary visual verdict into open-ended source/schema/state/status/grep analysis.
+After a proven systemic failure, inspect only the bounded diagnostics returned by public
+tools, then apply a supported correction or report the concrete blocker. Repository/source,
+schema, test and shell investigation is never a painting fallback, even after repeated failure.
 
 For a deterministic Guard preflight rejection with `visual_mutation_started=false`
 and a returned `compact_correction_recipe`, use a payload-only fast path: apply the
@@ -490,9 +637,8 @@ listed violations directly to the rejected cycle and immediately resubmit the sa
 semantic cycle. Do **not** inspect repository source, schemas, tests, status/state,
 or extra previews before that first corrected resubmission when the validation
 message already names the actionable problem. Investigate implementation details
-only if the corrected resubmission repeats the same rejection without an actionable
-field-level cause, or the rejection explicitly reports a systemic runtime/tool
-defect.
+only in a separately authorized pipeline-development task. A repeated rejection without
+an actionable field-level correction requires a concrete blocker report during painting.
 
 When a controller checkpoint becomes due, treat it as a technical barrier:
 save/verify the pinned layered PSD, then continue the next planned visual cycle.
@@ -532,16 +678,18 @@ whole image drifts into blur, contrast collapse, primitive footprint, or another
 systemic failure.
 
 For non-trivial paintings, broad **global/medium** work whose declared construction/method is
-softness-dominant must also close the exact-current `softness_review`. Judge edge hierarchy, mass
+softness-dominant uses the ordinary exact-current whole-frame observation. Judge edge hierarchy, mass
 separation, large-form readability, focal hierarchy and primitive footprint against the declared
 construction/physical role and style contract; do not substitute a generic sharpness score.
 Intentional optical haze may remain soft while preserving underlying structure, but a form-bearing
-soft mass may not dissolve its edge/mass hierarchy. A failed review opens the existing
-`soft-dominance` must-fix problem and therefore blocks finer texture/detail through the ordinary
-stage/scale priority gate.
+soft mass may not dissolve its edge/mass hierarchy. Report concrete failure through the existing
+`soft_dominance` must-fix finding and uncertainty through ordinary review. Detailed `softness_review`
+is optional; omission is not a passed certificate. Observed debt blocks finer texture/detail through
+the ordinary stage/scale priority gate.
 
-At `MATERIAL`, do not equate material with texture. Every visual MATERIAL pass must carry the shared
-qualitative `material_response` decomposition before mutation: base response, form/light response,
+At `MATERIAL`, do not equate material with texture. The shared qualitative `material_response` plan
+is optional before mutation; omission is not evidence of quality or a passed review. A supplied plan covers
+base response, form/light response,
 specular/reflection, transmission when applicable, surface condition, variation scale, edge/contact
 interaction, plus an explicitly subordinate microtexture policy. Keep base material, surface condition
 and optical effect distinct and consistent with semantic `physical_role` / `opacity_role` and any
@@ -602,14 +750,14 @@ Agent routing rules:
 
 - **Canonical:** `Chat_On_Steroids_Plugins` → this project's `dist/cos-plugin.js` → embedded Guard → internal `ToolRegistry` → Photoshop.
 - **Removed:** the former external Core/controller/daemon provider chain is not a supported or recoverable route.
-- The current compact-only native catalog is 133 tools / 16 public Guard tools. Do not interpret a stale legacy connector snapshot as a server limitation.
+- The current compact-only native catalog is 132 tools / 15 public Guard tools. Do not interpret a stale legacy connector snapshot as a server limitation.
 - If the native Plugins route is genuinely absent/stale, inspect its discovery/readiness state and repair that route. Do not silently create or switch to a parallel controller path.
 - `Chat_On_Steroids_Desktop` is for read-only desktop/UI inspection when useful, not the Photoshop MCP transport.
-- The Adobe UXP bridge in `uxp-plugin/` is a separate Photoshop-side runtime; it is not the Chat On Steroids Plugins route. Production semantic Photoshop dispatch is UXP-only and fail-closed for every migrated Photoshop primitive. Raw `photoshop_execute_script` and the production ExtendScript/COM fallback are removed; Guard keeps only negative tombstones for stale callers. The current readiness target is bridge revision `compact-v2-20261002-video-trace-readiness`.
+- The Adobe UXP bridge in `uxp-plugin/` is a separate Photoshop-side runtime; it is not the Chat On Steroids Plugins route. Production semantic Photoshop dispatch is UXP-only and fail-closed for every migrated Photoshop primitive. Raw `photoshop_execute_script` and the production ExtendScript/COM fallback are removed; Guard keeps only negative tombstones for stale callers. The current readiness target is bridge revision `compact-v2-20261009-component-rebuild`.
 
 **Prerequisites:** Photoshop running on Windows 10/11, Node.js 18+. This project intentionally supports Windows only. This is unofficial and not affiliated with Adobe.
 
-**Tool surface:** 130 semantic `photoshop_*` MCP tools; 14 are the public embedded `photoshop_guard_*` façade; 5 MCP guide prompt templates (`ps.*`); no `photoshop_recipe_*` tools remain.
+**Tool surface:** 132 semantic `photoshop_*` MCP tools; 15 are the public embedded `photoshop_guard_*` façade; 5 MCP guide prompt templates (`ps.*`); no `photoshop_recipe_*` tools remain.
 
 ### Continuing painting-pipeline development
 
@@ -653,7 +801,7 @@ PhotoshopMCPServer (Node.js)
 Adobe Photoshop
 
 Primary production lane: UXP bridge plugin (`uxp-plugin/`) on 127.0.0.1:38452 using localhost
-long-poll. Current source/readiness revision is `compact-v2-20261002-video-trace-readiness`.
+long-poll. Current source/readiness revision is `compact-v2-20261009-component-rebuild`.
 Production semantic dispatch is UXP-only / fail-closed for the current catalog; retained legacy
 platform executors are not selectable semantic backends. Repository migration acceptance is green;
 the acceptance matrix remains authoritative for any outstanding real-Photoshop retest.
@@ -696,10 +844,11 @@ above/below layer placement for declared front/behind relations. Glass/transmiss
 surfaces, surface conditions, optical light/glow, atmosphere and camera/post remain
 distinct physical roles; never make an opaque object translucent merely to soften
 its rendering. Before advancing from SHAPE/block-in into VALUE or any later stage,
-Art Director must record an exact-current-frame Physical Stack / Occlusion Gate pass
-covering depth order, occlusion, opaque-mass coverage, transparency intent and
-Photoshop layer-stack alignment. Structural-owner changes make that evidence stale;
-a new structural owner after SHAPE requires a real stage reset and fresh gate.
+record depth order, occlusion, opaque coverage, transparency intent and layer order
+on the ordinary current whole-frame review via previous_observation.physical_stack_check.
+Guard binds frame/owner evidence; Director setup or a separate review call is not required.
+Omission is not a pass. Structural-owner changes stale the check; new structural owners
+after SHAPE require a real stage reset and fresh review.
 
 Every global/shape/form review must include an **independent scene-relationship audit**, not only the current `problem_id`. At normal/thumbnail scale check support/contact, unintended gaps or floating, occlusion/depth order, cast-shadow relationship, accidental tangencies/intersections and silhouette/proportion. A pass may not be accepted merely because its local target improved if one of these structural relationships is visibly broken. Small/detail passes still require a quick regression scan for the same failures before acceptance.
 
@@ -786,3 +935,7 @@ More: [docs/development.md](docs/development.md#8-troubleshooting).
 - Canonical language for code, comments, commits, and PRs: **English**.
 - Before PR: `npm run verify:canonical`.
 - Do not add AI-attribution footers to commits or PR descriptions.
+
+Fresh enforced art runs finish only after the existing exact whole-frame review supplies painting_completion against original_brief (brief_fidelity, form_proportions, light_material, composition_context, editable_parts, contact_and_protection: pass|fail|unknown). Guard binds that assessment to the frame SHA and original brief; all criteria must pass and other debts must be closed. Saves preserve it, later pixels/brief invalidate it. This is Painter self-assessment, not independent quality certification; explicit user pause/stop remains valid. No extra review call or compulsory painting when only final review metadata is missing.
+
+Timing discipline (2026-10-10): inspect the exact inline images once, then combine previous_operation_id + previous_observation + next_pass in ONE cycle_auto call. Lint is optional for a new risky draft; include the same previous observation when linting a continuation, then reuse the complete validated request without a separate closure or repeated successful lint. Do not use lint as a mandatory ritual for ordinary model_id/part_id continuation. First construction declares all editable parts once plus selected part, chosen proportions/IK lengths, material role, authorized scene projection and owner geometry relation; declared support/contact requires numeric boundary witnesses. Reuse model_id/part_id and stable scene/ownership ids afterwards. Capabilities/methods/brush inventory/settings are setup reads once per art run; batch missing exact contracts (tool_names), retain discovery_revision and use if_revision only for an actual recheck. Successful inline delivery needs no review_image follow-up; request missing roles only. force_redelivery requires images-unavailable|delivery-failed, never routine confirmation; an availability blocker is not permission to invent review or read source.

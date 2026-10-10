@@ -47,12 +47,12 @@ function text(value: unknown): string | undefined {
 function parseLimitations(value: unknown): string[] {
   if (value === undefined) return [];
   if (!Array.isArray(value)) {
-    throw new Error('directive.physical_stack_check.limitations must be an array');
+    throw new Error('physical_stack_check.limitations must be an array');
   }
   return value.map((item, index) => {
     const parsed = text(item);
     if (!parsed) {
-      throw new Error(`directive.physical_stack_check.limitations[${index}] must be non-empty`);
+      throw new Error(`physical_stack_check.limitations[${index}] must be non-empty`);
     }
     return parsed;
   });
@@ -62,7 +62,7 @@ function parseConfidence(value: unknown): number | null {
   if (value === undefined) return null;
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed < 0 || parsed > 1) {
-    throw new Error('directive.physical_stack_check.confidence must be between 0 and 1');
+    throw new Error('physical_stack_check.confidence must be between 0 and 1');
   }
   return parsed;
 }
@@ -71,24 +71,24 @@ function parseCriteria(
   value: unknown
 ): Record<PhysicalStackCriterion, PhysicalStackCriterionEvidence> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error('directive.physical_stack_check.criteria is required for pass/fail');
+    throw new Error('physical_stack_check.criteria is required for pass/fail');
   }
   const raw = value as Record<string, unknown>;
   const parsed = {} as Record<PhysicalStackCriterion, PhysicalStackCriterionEvidence>;
   for (const key of PHYSICAL_STACK_CRITERIA) {
     const row = raw[key];
     if (!row || typeof row !== 'object' || Array.isArray(row)) {
-      throw new Error(`directive.physical_stack_check.criteria.${key} is required`);
+      throw new Error(`physical_stack_check.criteria.${key} is required`);
     }
     const record = row as Record<string, unknown>;
     const status = text(record.status)?.toLowerCase() as PhysicalStackCriterionStatus | undefined;
     const note = text(record.note);
     if (!status || !PHYSICAL_STACK_CRITERION_STATUSES.includes(status)) {
       throw new Error(
-        `directive.physical_stack_check.criteria.${key}.status must be one of ${PHYSICAL_STACK_CRITERION_STATUSES.join(', ')}`
+        `physical_stack_check.criteria.${key}.status must be one of ${PHYSICAL_STACK_CRITERION_STATUSES.join(', ')}`
       );
     }
-    if (!note) throw new Error(`directive.physical_stack_check.criteria.${key}.note is required`);
+    if (!note) throw new Error(`physical_stack_check.criteria.${key}.note is required`);
     parsed[key] = { status, note };
   }
   return parsed;
@@ -96,13 +96,13 @@ function parseCriteria(
 
 export function normalizePhysicalStackCheck(raw: unknown): PhysicalStackCheck {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-    throw new Error('directive.physical_stack_check is required');
+    throw new Error('physical_stack_check is required');
   }
   const record = raw as Record<string, unknown>;
   const status = text(record.status)?.toLowerCase() as PhysicalStackCheckStatus | undefined;
   if (!status || !PHYSICAL_STACK_CHECK_STATUSES.includes(status)) {
     throw new Error(
-      `directive.physical_stack_check.status must be one of ${PHYSICAL_STACK_CHECK_STATUSES.join(', ')}`
+      `physical_stack_check.status must be one of ${PHYSICAL_STACK_CHECK_STATUSES.join(', ')}`
     );
   }
   const observed = record.observed === true;

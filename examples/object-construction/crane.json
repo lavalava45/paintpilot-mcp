@@ -1,0 +1,291 @@
+{
+  "model_id": "crane-study",
+  "revision": 1,
+  "basis": "Artist-selected illustrative proportions; these examples do not certify biological or manufactured dimensions.",
+  "objects": [
+    {
+      "id": "crane",
+      "subject_kind": "custom-compound",
+      "origin": [
+        -3,
+        -2,
+        0
+      ]
+    }
+  ],
+  "points": [
+    {
+      "id": "pivot",
+      "object_id": "crane",
+      "position": [
+        0,
+        0,
+        0
+      ],
+      "fixed": true
+    },
+    {
+      "id": "horizontal",
+      "object_id": "crane",
+      "position": [
+        1,
+        0,
+        0
+      ],
+      "fixed": true
+    },
+    {
+      "id": "vertical",
+      "object_id": "crane",
+      "position": [
+        0,
+        1,
+        0
+      ],
+      "fixed": true
+    },
+    {
+      "id": "boom-tip",
+      "object_id": "crane",
+      "position": [
+        3,
+        2,
+        0
+      ],
+      "fixed": false
+    },
+    {
+      "id": "hook",
+      "object_id": "crane",
+      "position": [
+        3,
+        4,
+        0
+      ],
+      "fixed": false
+    },
+    {
+      "id": "base-l",
+      "object_id": "crane",
+      "position": [
+        -1,
+        -0.5,
+        0
+      ],
+      "fixed": true
+    },
+    {
+      "id": "base-r",
+      "object_id": "crane",
+      "position": [
+        1,
+        -0.5,
+        0
+      ],
+      "fixed": true
+    },
+    {
+      "id": "base-br",
+      "object_id": "crane",
+      "position": [
+        1,
+        0.5,
+        0
+      ],
+      "fixed": true
+    },
+    {
+      "id": "base-bl",
+      "object_id": "crane",
+      "position": [
+        -1,
+        0.5,
+        0
+      ],
+      "fixed": true
+    },
+    {
+      "id": "boom-l",
+      "object_id": "crane",
+      "position": [
+        0,
+        -0.15,
+        0
+      ],
+      "fixed": true,
+      "relative_to": "pivot",
+      "axis_to": "boom-tip"
+    },
+    {
+      "id": "boom-r",
+      "object_id": "crane",
+      "position": [
+        0,
+        0.15,
+        0
+      ],
+      "fixed": true,
+      "relative_to": "pivot",
+      "axis_to": "boom-tip"
+    },
+    {
+      "id": "tip-l",
+      "object_id": "crane",
+      "position": [
+        0,
+        0.15,
+        0
+      ],
+      "fixed": true,
+      "relative_to": "boom-tip",
+      "axis_to": "pivot"
+    },
+    {
+      "id": "tip-r",
+      "object_id": "crane",
+      "position": [
+        0,
+        -0.15,
+        0
+      ],
+      "fixed": true,
+      "relative_to": "boom-tip",
+      "axis_to": "pivot"
+    },
+    {
+      "id": "cable-l",
+      "object_id": "crane",
+      "position": [
+        0,
+        -0.025,
+        0
+      ],
+      "fixed": true,
+      "relative_to": "boom-tip",
+      "axis_to": "hook"
+    },
+    {
+      "id": "cable-r",
+      "object_id": "crane",
+      "position": [
+        0,
+        0.025,
+        0
+      ],
+      "fixed": true,
+      "relative_to": "boom-tip",
+      "axis_to": "hook"
+    },
+    {
+      "id": "hook-l",
+      "object_id": "crane",
+      "position": [
+        0,
+        0.025,
+        0
+      ],
+      "fixed": true,
+      "relative_to": "hook",
+      "axis_to": "boom-tip"
+    },
+    {
+      "id": "hook-r",
+      "object_id": "crane",
+      "position": [
+        0,
+        -0.025,
+        0
+      ],
+      "fixed": true,
+      "relative_to": "hook",
+      "axis_to": "boom-tip"
+    }
+  ],
+  "parts": [
+    {
+      "id": "crane-base",
+      "object_id": "crane",
+      "role": "Editable crane support",
+      "outline": [
+        "base-l",
+        "base-r",
+        "base-br",
+        "base-bl"
+      ],
+      "curve": "linear"
+    },
+    {
+      "id": "crane-boom",
+      "object_id": "crane",
+      "role": "Editable rigid crane boom",
+      "outline": [
+        "boom-l",
+        "tip-l",
+        "tip-r",
+        "boom-r"
+      ],
+      "curve": "linear"
+    },
+    {
+      "id": "crane-cable",
+      "object_id": "crane",
+      "role": "Editable crane cable",
+      "outline": [
+        "cable-l",
+        "hook-l",
+        "hook-r",
+        "cable-r"
+      ],
+      "curve": "linear"
+    }
+  ],
+  "constraints": [
+    {
+      "id": "boom-length",
+      "kind": "distance",
+      "points": [
+        "pivot",
+        "boom-tip"
+      ],
+      "value": 5
+    },
+    {
+      "id": "boom-angle",
+      "kind": "angle",
+      "points": [
+        "pivot",
+        "boom-tip",
+        "pivot",
+        "horizontal"
+      ],
+      "value": 30
+    },
+    {
+      "id": "cable-length",
+      "kind": "distance",
+      "points": [
+        "boom-tip",
+        "hook"
+      ],
+      "value": 2
+    },
+    {
+      "id": "vertical-cable",
+      "kind": "parallel",
+      "points": [
+        "boom-tip",
+        "hook",
+        "pivot",
+        "vertical"
+      ]
+    }
+  ],
+  "camera": {
+    "kind": "orthographic",
+    "origin": [
+      550,
+      500
+    ],
+    "scale": 60
+  }
+}

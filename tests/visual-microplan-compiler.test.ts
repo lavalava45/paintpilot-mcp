@@ -117,6 +117,28 @@ describe('microplan request compilation and pre-dispatch diagnostics', () => {
     ]);
   });
 
+  it('closes scale-then-move and stamp passes with exactly one final preview', () => {
+    // Live E.25 reproduction: previously a transform-only compact pass ended
+    // with photoshop_move_layer, triggering a systemic no-dispatch rejection.
+    const transform = compileVisualMicroPlan({
+      steps: [
+        { id: 'scale', tool: 'photoshop_scale_layer', args: { scalePercent: 50, centerAnchor: false } },
+        { id: 'move', tool: 'photoshop_move_layer', args: { deltaX: 80, deltaY: 30 } },
+      ],
+    }) as { steps: Array<{ id: string; tool: string }> };
+    expect(transform.steps.map(step => step.tool)).toEqual([
+      'photoshop_scale_layer',
+      'photoshop_move_layer',
+      'photoshop_get_preview',
+    ]);
+    expect(compileVisualMicroPlan(transform).steps).toEqual(transform.steps);
+
+    const stamp = compileVisualMicroPlan({
+      steps: [{ id: 'stamp', tool: 'photoshop_paint_stamp_instances', args: {} }],
+    }) as { steps: Array<{ tool: string }> };
+    expect(stamp.steps.at(-1)?.tool).toBe('photoshop_get_preview');
+  });
+
   it('never overwrites explicit wrong targets and treats legacy step intent as description', () => {
     const input = template();
     input.steps[1].args.regions[0].layer_id = 999;
@@ -131,6 +153,8 @@ describe('microplan request compilation and pre-dispatch diagnostics', () => {
 
   it('returns independent nested and method errors together without any preparation', async () => {
     const input = template();
+    input.plan_id = '';
+    input.stage = 'INVALID_STAGE';
     input.steps[1].args.regions[0].contours = [];
     input.steps[1].args.regions[0].color.red = 999;
     input.steps[1].method_id = 'invented-method';
@@ -139,6 +163,8 @@ describe('microplan request compilation and pre-dispatch diagnostics', () => {
     const body = JSON.parse((result.content[0] as { text: string }).text);
     expect(body.execution).toBe('not-executed');
     expect(body.message).toMatch(/contours/);
+    expect(body.message).toMatch(/plan_id must be a non-empty string/);
+    expect(body.message).toMatch(/stage must be one of/);
     expect(body.message).toMatch(/red/);
     expect(body.message).toMatch(/invented-method/);
     expect(body.message).toMatch(/region-block-in/);
@@ -238,6 +264,29 @@ describe('microplan request compilation and pre-dispatch diagnostics', () => {
     expect(resultBody(rejection!).errors.join('\n')).toMatch(/outside document 42 bounds/);
   });
 
+  it('reuses request-local authoritative document bounds without listing documents again', async () => {
+    const input = template();
+    input.steps[1].args.regions[0].contours[0].points[1].x = 101;
+    const { registry: tools } = registry();
+    let listCalls = 0;
+    const list = tools.get('photoshop_list_documents')!;
+    tools.register('photoshop_list_documents', {
+      ...list,
+      handler: async (args: Record<string, unknown>) => {
+        listCalls += 1;
+        return list.handler(args);
+      },
+    });
+    const rejection = await preflightVisualMicroPlanForExecution(
+      input,
+      tools,
+      { documentId: 42, width: 100, height: 100 }
+    );
+    expect(rejection).toBeDefined();
+    expect(resultBody(rejection!).errors.join('\n')).toMatch(/outside document 42 bounds/);
+    expect(listCalls).toBe(0);
+  });
+
   it('returns independent stage, method, schema, and bounds errors in one rejection while ignoring step prose', async () => {
     const input = template();
     input.stage = 'BLOCKIIN';
@@ -296,7 +345,7 @@ describe('microplan request compilation and pre-dispatch diagnostics', () => {
     expect(calls).toEqual([]);
   });
 
-  it('replays the car-failure sequence as one pre-Photoshop rejection without oscillation', async () => {
+  it('replays the secondaryForm-failure sequence as one pre-Photoshop rejection without oscillation', async () => {
     const input = template();
     input.stage = 'BLOCKIN';
     input.steps[1].method_id = 'region-fill-closed-contours';

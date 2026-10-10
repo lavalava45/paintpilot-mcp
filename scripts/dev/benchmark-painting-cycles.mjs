@@ -3,6 +3,7 @@ import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
+import { benchmarkArchiveEvidence } from './benchmark-throughput-archive.mjs';
 
 const GENERATED_START = '<!-- BEGIN GENERATED PAINTING CYCLE BENCHMARK -->';
 const GENERATED_END = '<!-- END GENERATED PAINTING CYCLE BENCHMARK -->';
@@ -261,8 +262,10 @@ function discoverRunState({ root, selectedRecords, operationPrefix }) {
   return { state, path: statePath, warning: null };
 }
 
-function scopedThroughput({ state, operationPrefix, boundaries, selectedOperationIds }) {
-  const rawEvents = Array.isArray(state?.artistic_throughput?.recent_events)
+function scopedThroughput({ state, operationPrefix, boundaries, selectedOperationIds, archiveEvidence = null }) {
+  const rawEvents = archiveEvidence?.integrity === 'consistent'
+    ? archiveEvidence.events
+    : Array.isArray(state?.artistic_throughput?.recent_events)
     ? state.artistic_throughput.recent_events
     : null;
   if (!rawEvents || !boundaries.start_at || !boundaries.end_at) {
@@ -280,7 +283,11 @@ function scopedThroughput({ state, operationPrefix, boundaries, selectedOperatio
       auto_split_count: null,
       model_semantic_ambiguity_count: null,
       preflight_rejection_exposed_to_model_count: null,
+      deterministic_violations_encountered_count: null,
+      deterministic_violations_repaired_count: null,
+      deterministic_violations_unresolved_count: null,
       unkeyed_time_window_events: null,
+      undated_potential_events: null,
       warning: 'Run-scoped artistic-throughput events are unavailable.',
     };
   }
@@ -291,10 +298,15 @@ function scopedThroughput({ state, operationPrefix, boundaries, selectedOperatio
     .map(event => ({ ...event, _at_ms: parseTimestamp(event?.at) }))
     .filter(event => event._at_ms !== null)
     .sort((a, b) => a._at_ms - b._at_ms);
-  const retainedWindowMayBeTruncated = rawEvents.length >= 64
-    && datedEvents.length > 0
-    && datedEvents[0]._at_ms > startMs;
-  if (retainedWindowMayBeTruncated) {
+  // An empty mirror is not evidence of zero host calls for a journaled run:
+  // telemetry may have been lost during interruption or state replacement.
+  const emptyRetainedWindow = rawEvents.length === 0;
+  // The store retains at most 64 events. At equal millisecond precision an
+  // evicted event may share the oldest retained timestamp with the run start.
+  // Only an event strictly BEFORE start establishes coverage of that boundary.
+  const retainedWindowMayBeTruncated = archiveEvidence?.integrity !== 'consistent' && rawEvents.length >= 64
+    && (datedEvents.length === 0 || datedEvents[0]._at_ms >= startMs);
+  if (emptyRetainedWindow || retainedWindowMayBeTruncated) {
     return {
       available: true,
       complete: false,
@@ -309,42 +321,99 @@ function scopedThroughput({ state, operationPrefix, boundaries, selectedOperatio
       auto_split_count: null,
       model_semantic_ambiguity_count: null,
       preflight_rejection_exposed_to_model_count: null,
+      deterministic_violations_encountered_count: null,
+      deterministic_violations_repaired_count: null,
+      deterministic_violations_unresolved_count: null,
       unkeyed_time_window_events: null,
-      warning: 'The retained artistic_throughput.recent_events window is capped at 64 and begins after the selected run start; exact run-scoped counters are unavailable rather than being reported as zero.',
+      undated_potential_events: null,
+      warning: emptyRetainedWindow
+        ? 'The linked run has no retained artistic_throughput.recent_events. An empty mirror cannot prove zero model-visible calls; exact run-scoped counters are unavailable.'
+        : 'The retained artistic_throughput.recent_events window is capped at 64 and does not establish coverage before the selected run start; exact run-scoped counters are unavailable rather than being reported as zero.',
     };
   }
 
+  // A timestamp and a matching process-state mirror do not prove which run
+  // emitted an unkeyed event. In particular, overlapping chats can share the
+  // same document/process directory. Never assign those events to this run.
+  const unkeyedWindowEvents = datedEvents.filter(event =>
+    (typeof event.operation_id !== 'string' || !event.operation_id.trim())
+      && event._at_ms >= startMs && event._at_ms <= endMs
+  );
+  // Missing or malformed timestamps are not evidence that an event occurred
+  // outside the selected run. Owned and unkeyed events could fall anywhere in
+  // its window; dropping them would silently undercount exact round trips.
+  // A foreign operation id is sufficient to exclude an undated event.
+  const undatedPotentialEvents = rawEvents.filter(event => {
+    if (parseTimestamp(event?.at) !== null) return false;
+    const operationId = typeof event?.operation_id === 'string' ? event.operation_id.trim() : '';
+    return !operationId || operationId.startsWith(operationPrefix);
+  });
   const events = datedEvents.filter(event => {
     if (event._at_ms < startMs) return false;
-    const operationId = typeof event.operation_id === 'string' ? event.operation_id : null;
-    if (operationId) {
-      if (!operationId.startsWith(operationPrefix)) return false;
-      if (event._at_ms <= endMs) return true;
-      return selectedOperationIds.has(operationId) && event._at_ms <= endMs + KEYED_THROUGHPUT_TAIL_MS;
-    }
-    return event._at_ms <= endMs;
+    const operationId = typeof event.operation_id === 'string' ? event.operation_id.trim() : '';
+    if (!operationId || !operationId.startsWith(operationPrefix)) return false;
+    if (event._at_ms <= endMs) return true;
+    return selectedOperationIds.has(operationId) && event._at_ms <= endMs + KEYED_THROUGHPUT_TAIL_MS;
   });
+  if (unkeyedWindowEvents.length || undatedPotentialEvents.length) {
+    return {
+      available: true,
+      complete: false,
+      events,
+      model_visible_guard_round_trips: null,
+      semantic_dispatch_round_trips: null,
+      bookkeeping_only_round_trips: null,
+      recovery_only_round_trips: null,
+      rejected_before_dispatch_round_trips: null,
+      semantic_artistic_actions_dispatched: null,
+      auto_repair_count: null,
+      auto_split_count: null,
+      model_semantic_ambiguity_count: null,
+      preflight_rejection_exposed_to_model_count: null,
+      deterministic_violations_encountered_count: null,
+      deterministic_violations_repaired_count: null,
+      deterministic_violations_unresolved_count: null,
+      unkeyed_time_window_events: unkeyedWindowEvents.length,
+      undated_potential_events: undatedPotentialEvents.length,
+      warning: `${unkeyedWindowEvents.length} throughput event(s) within the journal window lack operation_id; ${undatedPotentialEvents.length} potentially owned event(s) lack valid timestamps. Exact run ownership is unproven or temporal coverage is missing, so round-trip and repair counters are unknown; dated keyed events are retained only as diagnostic evidence.`,
+    };
+  }
   const modelVisible = events.filter(event => event.model_visible !== false);
   const countKind = kind => modelVisible.filter(event => event.kind === kind).length;
+  const measuredCount = (event, field) => Number.isSafeInteger(event[field]) && event[field] >= 0;
   const sumOptionalCount = field => {
-    const observed = modelVisible.filter(event => Object.prototype.hasOwnProperty.call(event, field));
-    if (!observed.length) return null;
-    return observed.reduce((sum, event) => {
-      const value = Number(event[field]);
-      return Number.isFinite(value) && value > 0 ? sum + Math.trunc(value) : sum;
-    }, 0);
+    // One measured event cannot prove the total across the entire run.
+    // Missing or malformed values are unknown, not implicit zero. An empty
+    // fully covered run is the only case where absence itself proves zero.
+    if (modelVisible.some(event => !measuredCount(event, field))) return null;
+    return modelVisible.reduce((sum, event) => sum + event[field], 0);
   };
+  // This counts dispatched actions, including calls not exposed to the model.
+  // Unlike a best-effort diagnostic subtotal, an exact run count cannot treat
+  // missing, coerced or invalid measurements as zero. Guard emits integer
+  // counts; reject legacy partial mirrors and unsafe aggregate overflow.
   const semanticActions = events.reduce((sum, event) => {
-    const value = Number(event.semantic_actions);
-    return Number.isFinite(value) && value > 0 ? sum + value : sum;
+    const value = event.semantic_actions;
+    if (sum === null || !Number.isSafeInteger(value) || value < 0) return null;
+    const next = sum + value;
+    return Number.isSafeInteger(next) ? next : null;
   }, 0);
 
   const keyedTailEvents = modelVisible.filter(event =>
     typeof event.operation_id === 'string' && event._at_ms > endMs
   );
   const warnings = [];
-  if (modelVisible.some(event => typeof event.operation_id !== 'string')) {
-    warnings.push('Recovery/bookkeeping events without operation_id are attributed by the selected journal time window; keyed events must also match the operation prefix.');
+  const optionalFields = [
+    'auto_repair_count', 'auto_split_count', 'model_semantic_ambiguity_count',
+    'preflight_rejection_exposed_to_model_count', 'deterministic_violations_encountered_count',
+    'deterministic_violations_repaired_count', 'deterministic_violations_unresolved_count',
+  ];
+  const incompleteFields = optionalFields.filter(field => modelVisible.some(event => !measuredCount(event, field)));
+  if (incompleteFields.length) {
+    warnings.push(`Exact optional throughput totals are unknown for incompletely measured event fields: ${incompleteFields.join(', ')}.`);
+  }
+  if (semanticActions === null) {
+    warnings.push('Exact semantic_actions total is unknown: at least one selected event has a missing, invalid or unsafe action count.');
   }
   if (keyedTailEvents.length) {
     warnings.push(`Included ${keyedTailEvents.length} selected-operation throughput event(s) within ${KEYED_THROUGHPUT_TAIL_MS} ms after the journal-derived run end to account for Guard state-persistence ordering; run wall time itself remains journal-derived.`);
@@ -363,7 +432,11 @@ function scopedThroughput({ state, operationPrefix, boundaries, selectedOperatio
     auto_split_count: sumOptionalCount('auto_split_count'),
     model_semantic_ambiguity_count: sumOptionalCount('model_semantic_ambiguity_count'),
     preflight_rejection_exposed_to_model_count: sumOptionalCount('preflight_rejection_exposed_to_model_count'),
-    unkeyed_time_window_events: modelVisible.filter(event => typeof event.operation_id !== 'string').length,
+    deterministic_violations_encountered_count: sumOptionalCount('deterministic_violations_encountered_count'),
+    deterministic_violations_repaired_count: sumOptionalCount('deterministic_violations_repaired_count'),
+    deterministic_violations_unresolved_count: sumOptionalCount('deterministic_violations_unresolved_count'),
+    unkeyed_time_window_events: 0,
+    undated_potential_events: 0,
     warning: warnings.length ? warnings.join(' ') : null,
   };
 }
@@ -396,6 +469,34 @@ function timingValue(record, field, startField, endField) {
   const start = record?.[startField] ?? record?.latency?.[startField];
   const end = record?.[endField] ?? record?.latency?.[endField];
   return elapsedMs(start, end);
+}
+
+export function scopedDeterministicRepairAccounting(events) {
+  const result = { complete: true, scope: 'next_operation', encountered: 0, repaired: 0, unresolved: 0 };
+  for (const event of events) {
+    if (event.model_visible === false) continue;
+    const rows = event.violation_accounting;
+    if (!Array.isArray(rows)) {
+      if (event.deterministic_violations_encountered_count !== 0
+        && (['semantic-dispatch', 'rejected'].includes(event.kind)
+          || event.deterministic_violations_encountered_count !== undefined)) result.complete = false;
+      continue;
+    }
+    if (rows.length && typeof event.operation_id !== 'string') { result.complete = false; continue; }
+    for (const row of rows) {
+      if (!['cycle', 'finalization', 'next_operation'].includes(row?.scope)
+        || !['AUTO_NORMALIZE', 'AUTO_PATCH', 'SPLIT_DEFER', 'MODEL_SEMANTIC_DECISION', 'SYSTEMIC_FAILURE'].includes(row?.repair_class)
+        || typeof row?.code !== 'string'
+        || !['encountered', 'repaired', 'unresolved'].every(key => Number.isSafeInteger(row[key]) && row[key] >= 0)
+        || row.repaired + row.unresolved !== row.encountered) { result.complete = false; continue; }
+      if (row.scope !== 'next_operation'
+        || !['AUTO_NORMALIZE', 'AUTO_PATCH', 'SPLIT_DEFER'].includes(row.repair_class)) continue;
+      result.encountered += row.encountered;
+      result.repaired += row.repaired;
+      result.unresolved += row.unresolved;
+    }
+  }
+  return { ...result, percent: result.complete && result.encountered > 0 ? result.repaired / result.encountered : null };
 }
 
 function hotLoopPasses(visualRows, throughput, boundaries) {
@@ -473,13 +574,8 @@ function sumLatency(records, field) {
   }, 0);
 }
 
-function sumObserved(values) {
-  const finiteValues = values.map(finite).filter(value => value !== null);
-  if (!finiteValues.length) return null;
-  return finiteValues.reduce((sum, value) => sum + value, 0);
-}
-
 function buildHotLoopSummary({ selectedRecords, visualRows, throughput, boundaries }) {
+  const scopedAccounting = throughput.complete ? scopedDeterministicRepairAccounting(throughput.events) : null;
   const passes = hotLoopPasses(visualRows, throughput, boundaries);
   const runPhotoshopMs = sumLatency(selectedRecords, 'photoshop_dispatch_wall_ms');
   const visualCount = visualRows.length;
@@ -505,20 +601,21 @@ function buildHotLoopSummary({ selectedRecords, visualRows, throughput, boundari
       model_visible_guard_round_trips: throughput.complete ? throughput.model_visible_guard_round_trips : null,
       rejected_before_dispatch_round_trips: throughput.complete ? throughput.rejected_before_dispatch_round_trips : null,
       recovery_only_round_trips: throughput.complete ? throughput.recovery_only_round_trips : null,
-      auto_repair_count: throughput.complete && throughput.auto_repair_count !== null
-        ? throughput.auto_repair_count
-        : sumObserved(passes.map(row => row.auto_repair_count)),
-      auto_split_count: throughput.complete && throughput.auto_split_count !== null
-        ? throughput.auto_split_count
-        : sumObserved(passes.map(row => row.auto_split_count)),
-      model_semantic_ambiguity_count: throughput.complete && throughput.model_semantic_ambiguity_count !== null
-        ? throughput.model_semantic_ambiguity_count
-        : sumObserved(passes.map(row => row.model_semantic_ambiguity_count)),
-      preflight_rejection_exposed_to_model_count: throughput.complete && throughput.preflight_rejection_exposed_to_model_count !== null
-        ? throughput.preflight_rejection_exposed_to_model_count
-        : sumObserved(passes.map(row => row.preflight_rejection_exposed_to_model_count)),
-      deterministic_violations_repaired_locally_percent: null,
-      deterministic_repair_rate_limitation: 'Exact deterministic-violation repair percentage is unavailable because current telemetry records applied repair operations and exposed preflight-rejection calls, but not a typed total count of deterministic violations encountered.',
+      // Visual journals cover only dispatched passes; they cannot fill gaps
+      // from rejected/recovery/bookkeeping calls or an incomplete event mirror.
+      auto_repair_count: throughput.complete ? throughput.auto_repair_count : null,
+      auto_split_count: throughput.complete ? throughput.auto_split_count : null,
+      model_semantic_ambiguity_count: throughput.complete ? throughput.model_semantic_ambiguity_count : null,
+      preflight_rejection_exposed_to_model_count: throughput.complete ? throughput.preflight_rejection_exposed_to_model_count : null,
+      deterministic_violations_repaired_locally_percent: throughput.complete
+        ? scopedAccounting.percent : null,
+      scoped_violation_accounting: throughput.complete
+        ? scopedAccounting : null,
+      deterministic_repair_rate_limitation:
+        !throughput.complete || !scopedAccounting.complete
+          ? 'Exact repair percentage is unavailable: selected events lack owned, typed violation scopes.'
+          : scopedAccounting.encountered === 0
+            ? 'No deterministic next-operation violations were encountered in the selected run.' : null,
       photoshop_dispatch_ms_observed: runPhotoshopMs,
       photoshop_share_of_run_wall:
         boundaries.wall_ms && boundaries.wall_ms > 0 ? runPhotoshopMs / boundaries.wall_ms : null,
@@ -574,7 +671,12 @@ export function buildBenchmark({
     const boundaries = runBoundaries(selectedRecords);
     const runState = discoverRunState({ root, selectedRecords, operationPrefix });
     const selectedOperationIds = new Set(selectedRecords.map(record => String(record?.id ?? '')).filter(Boolean));
-    const throughput = scopedThroughput({ state: runState.state, operationPrefix, boundaries, selectedOperationIds });
+    const archiveEvidence = benchmarkArchiveEvidence(path.dirname(operationsDir), runState.state);
+    const throughput = archiveEvidence?.integrity === 'unverified'
+      ? { ...scopedThroughput({ state: null, operationPrefix, boundaries, selectedOperationIds }),
+        available: true, warning: archiveEvidence.warning, evidence_source: 'unverified_archive' }
+      : { ...scopedThroughput({ state: runState.state, operationPrefix, boundaries, selectedOperationIds, archiveEvidence }),
+        evidence_source: archiveEvidence?.integrity === 'consistent' ? 'verified_archive' : 'bounded_mirror' };
     const hotLoop = buildHotLoopSummary({ selectedRecords, visualRows: visualMicroplans, throughput, boundaries });
     runScope = {
       operation_prefix: operationPrefix,
@@ -670,6 +772,7 @@ function renderRunScope(runScope, out) {
   out.push('## Run-scoped hot-loop efficiency');
   out.push('');
   out.push(`Operation-id prefix: \`${runScope.operation_prefix}\`. Selected journals: **${runScope.selected_operation_count}**.`);
+  out.push(`Throughput evidence: **${throughput.evidence_source}** (exact counters only where ownership and measurements are complete).`);
   out.push('');
   out.push(`Run boundary: **${boundaries.start_at ?? 'unknown'} → ${boundaries.end_at ?? 'unknown'}** (${fmt(boundaries.wall_ms)} ms). ${boundaries.rule}.`);
   out.push('');

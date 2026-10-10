@@ -19,6 +19,8 @@ import path from 'node:path';
 import { Logger } from '../utils/logger.js';
 import { executionTimeoutMs } from '../core/execution-context.js';
 import { UXP_BRIDGE_REVISION } from '../core/guard/protocol-version.js';
+import { SessionStore } from '../core/guard/session-store.js';
+import { UserConfigValidationError } from '../core/user-config.js';
 import {
   probeProcessVideoTraceReadiness,
   readProcessVideoTraceSetting,
@@ -112,9 +114,11 @@ const eventListeners = new Set<(event: UxpBridgeEvent) => void | Promise<void>>(
 let lastPluginPollAt = 0;
 let pluginPollCount = 0;
 let pluginBridgeRevision: string | null = null;
+let pluginRuntimeInstanceWitness: string | null = null;
 let pluginPhotoshopVersion: string | null = null;
 let pluginDocumentCount: number | null = null;
-let pluginActiveDocument: { id?: number; name?: string } | null = null;
+let pluginActiveDocument: { id?: number; name?: string; instance_witness?: string } | null = null;
+let pluginDocumentGeometryRevision = 0;
 
 const LONG_POLL_TIMEOUT_MS = 20_000;
 // Guard calls can spend ~20s in connector/validation work before their final
@@ -138,6 +142,23 @@ const DEFAULT_RECEIPT_DIRECTORY = fileURLToPath(
 
 function receiptDirectory(): string {
   return process.env.PHOTOSHOP_UXP_RECEIPT_DIR?.trim() || DEFAULT_RECEIPT_DIRECTORY;
+}
+
+const DEFAULT_CONTROLLER_RUNTIME_DIRECTORY = fileURLToPath(
+  new URL('../../.photoshop-runtime/controller/', import.meta.url)
+);
+
+function controllerRuntimeDirectory(): string {
+  return process.env.PHOTOSHOP_CONTROLLER_RUNTIME_DIR?.trim() || DEFAULT_CONTROLLER_RUNTIME_DIRECTORY;
+}
+
+function userConfigStore(): SessionStore {
+  return new SessionStore(controllerRuntimeDirectory());
+}
+
+function activeSettingsDocumentId(): number | undefined {
+  const documentId = Number(pluginActiveDocument?.id);
+  return Number.isSafeInteger(documentId) && documentId > 0 ? documentId : undefined;
 }
 
 function receiptFile(commandId: string): string {
@@ -423,10 +444,12 @@ export function getUxpBridgeHealthSnapshot(now = Date.now()) {
     plugin_poll_count: pluginPollCount,
     transport: 'long-poll' as const,
     bridge_revision: pluginBridgeRevision,
+    runtime_instance_witness: pluginRuntimeInstanceWitness,
     expected_bridge_revision: UXP_BRIDGE_REVISION,
     photoshop_version: pluginPhotoshopVersion,
     document_count: pluginDocumentCount,
     active_document: pluginActiveDocument,
+    document_geometry_revision: pluginDocumentGeometryRevision,
   };
 }
 
@@ -494,7 +517,7 @@ export async function ensureUxpBridgeServer(): Promise<number> {
         });
         req.on('end', async () => {
           try {
-            const parsed = JSON.parse(body) as Partial<UxpBridgeEvent>;
+            const parsed = JSON.parse(body) as Partial<Omit<UxpBridgeEvent, 'event'>> & { event?: string };
             if (parsed.protocol !== UXP_BRIDGE_EVENT_PROTOCOL) {
               json(res, 409, {
                 ok: false,
@@ -502,6 +525,16 @@ export async function ensureUxpBridgeServer(): Promise<number> {
                 event_protocol: parsed.protocol ?? null,
                 expected_event_protocol: UXP_BRIDGE_EVENT_PROTOCOL,
               });
+              return;
+            }
+            if (parsed.event === 'document_geometry_changed') {
+              const documentId = Number(parsed.document_id);
+              if (!Number.isSafeInteger(documentId) || documentId <= 0) {
+                json(res, 400, { ok: false, error: 'document_id_required' });
+                return;
+              }
+              pluginDocumentGeometryRevision += 1;
+              json(res, 200, { ok: true, delivered_to: 0 });
               return;
             }
             if (parsed.event !== 'document_closed') {
@@ -542,6 +575,47 @@ export async function ensureUxpBridgeServer(): Promise<number> {
             json(res, 400, {
               ok: false,
               error: error instanceof SyntaxError ? 'invalid_json' : `uxp_event_rejected:${error instanceof Error ? error.message : String(error)}`,
+            });
+          }
+        });
+        return;
+      }
+
+      if (req.method === 'GET' && url.pathname === '/settings/user-config') {
+        try {
+          json(res, 200, { ok: true, ...userConfigStore().userConfig(activeSettingsDocumentId()) });
+        } catch (error) {
+          json(res, 500, {
+            ok: false,
+            error: 'user_config_read_failed:' + (error instanceof Error ? error.message : String(error)),
+          });
+        }
+        return;
+      }
+
+      if (req.method === 'POST' && url.pathname === '/settings/user-config') {
+        let body = '';
+        req.on('data', (chunk) => {
+          body += chunk;
+          if (body.length > 8 * 1024) req.destroy();
+        });
+        req.on('end', () => {
+          try {
+            const parsed = JSON.parse(body) as Record<string, unknown>;
+            json(res, 200, {
+              ok: true,
+              ...userConfigStore().setUserConfig(parsed, activeSettingsDocumentId()),
+            });
+          } catch (error) {
+            const validationError = error instanceof UserConfigValidationError;
+            const clientError = validationError || error instanceof SyntaxError;
+            json(res, clientError ? 400 : 500, {
+              ok: false,
+              error: validationError
+                ? error.message
+                : error instanceof SyntaxError
+                  ? 'invalid_json'
+                  : 'user_config_write_failed:' + (error instanceof Error ? error.message : String(error)),
             });
           }
         });
@@ -589,6 +663,7 @@ export async function ensureUxpBridgeServer(): Promise<number> {
         if (announcedProtocol !== UXP_BRIDGE_REGISTRATION_PROTOCOL) {
           lastPluginPollAt = 0;
           pluginBridgeRevision = null;
+          pluginRuntimeInstanceWitness = null;
           pluginPhotoshopVersion = null;
           pluginDocumentCount = null;
           pluginActiveDocument = null;
@@ -606,6 +681,7 @@ export async function ensureUxpBridgeServer(): Promise<number> {
         if (announcedRevision !== UXP_BRIDGE_REVISION) {
           lastPluginPollAt = 0;
           pluginBridgeRevision = announcedRevision;
+          pluginRuntimeInstanceWitness = null;
           pluginPhotoshopVersion = null;
           pluginDocumentCount = null;
           pluginActiveDocument = null;
@@ -620,13 +696,19 @@ export async function ensureUxpBridgeServer(): Promise<number> {
         lastPluginPollAt = Date.now();
         pluginPollCount += 1;
         pluginBridgeRevision = announcedRevision;
+        pluginRuntimeInstanceWitness = url.searchParams.get('runtimeInstanceWitness')?.trim() || null;
         pluginPhotoshopVersion = url.searchParams.get('photoshopVersion')?.trim() || null;
         const documentCount = Number(url.searchParams.get('documentCount'));
         pluginDocumentCount = Number.isSafeInteger(documentCount) && documentCount >= 0 ? documentCount : null;
         const activeDocumentId = Number(url.searchParams.get('activeDocumentId'));
         const activeDocumentName = url.searchParams.get('activeDocumentName')?.trim() || undefined;
+        const activeDocumentInstanceWitness = url.searchParams.get('activeDocumentInstanceWitness')?.trim() || undefined;
         pluginActiveDocument = Number.isSafeInteger(activeDocumentId) && activeDocumentId > 0
-          ? { id: activeDocumentId, ...(activeDocumentName ? { name: activeDocumentName } : {}) }
+          ? {
+              id: activeDocumentId,
+              ...(activeDocumentName ? { name: activeDocumentName } : {}),
+              ...(activeDocumentInstanceWitness ? { instance_witness: activeDocumentInstanceWitness } : {}),
+            }
           : activeDocumentName ? { name: activeDocumentName } : null;
         const cmd = pendingCommands.shift();
         if (cmd) {

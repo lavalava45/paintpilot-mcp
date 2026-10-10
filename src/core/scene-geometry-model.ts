@@ -28,6 +28,7 @@ export interface SceneGeometryModel {
   protocol: typeof SCENE_GEOMETRY_MODEL_PROTOCOL;
   model_id: string; revision: number; applicability: SceneGeometryApplicability;
   applicability_rationale?: string;
+  applicability_style_contract_basis?: { field: string; criterion: string };
   source_frame: {
     document_id: number; document_incarnation: string; width: number; height: number;
     operation_id?: string; preview_sha256?: string;
@@ -81,6 +82,14 @@ export function normalizeSceneGeometryModel(value: unknown): SceneGeometryModel 
   }
   const rationale = raw.applicability_rationale === undefined ? undefined
     : asString(raw.applicability_rationale, 'scene_geometry_model.applicability_rationale');
+  let applicabilityStyleContractBasis: SceneGeometryModel['applicability_style_contract_basis'];
+  if (raw.applicability_style_contract_basis !== undefined) {
+    const basis = asRecord(raw.applicability_style_contract_basis, 'scene_geometry_model.applicability_style_contract_basis');
+    applicabilityStyleContractBasis = {
+      field: asId(basis.field, 'scene_geometry_model.applicability_style_contract_basis.field'),
+      criterion: asString(basis.criterion, 'scene_geometry_model.applicability_style_contract_basis.criterion'),
+    };
+  }
   const source = asRecord(raw.source_frame, 'scene_geometry_model.source_frame');
   const sourceFrame: SceneGeometryModel['source_frame'] = {
     document_id: asPositiveInteger(source.document_id, 'scene_geometry_model.source_frame.document_id'),
@@ -196,9 +205,26 @@ export function normalizeSceneGeometryModel(value: unknown): SceneGeometryModel 
   return {
     protocol: SCENE_GEOMETRY_MODEL_PROTOCOL, model_id: modelId, revision, applicability,
     ...(rationale ? { applicability_rationale: rationale } : {}), source_frame: sourceFrame,
+    ...(applicabilityStyleContractBasis ? { applicability_style_contract_basis: applicabilityStyleContractBasis } : {}),
     projection: { kind, ...(horizon ? { horizon } : {}), vanishing_points: vanishingPoints.sort((a, b) => a.id.localeCompare(b.id)) },
     line_families: lineFamilies.sort((a, b) => a.id.localeCompare(b.id)),
     support_planes: supportPlanes.sort((a, b) => a.id.localeCompare(b.id)),
     scale_anchors: scaleAnchors.sort((a, b) => a.id.localeCompare(b.id)),
   };
+}
+
+export function geometryOptOutAuthorityIssue(
+  model: SceneGeometryModel,
+  styleContract: Record<string, unknown> | null | undefined,
+): string | undefined {
+  if (model.applicability === 'coherent_3d' || model.applicability === 'insufficient_evidence') return undefined;
+  const basis = model.applicability_style_contract_basis;
+  if (!basis) return 'geometry opt-out requires applicability_style_contract_basis bound to the active durable style contract';
+  const activeCriterion = typeof styleContract?.[basis.field] === 'string'
+    ? String(styleContract[basis.field]).trim()
+    : '';
+  if (!activeCriterion || activeCriterion !== basis.criterion) {
+    return `geometry opt-out style-contract basis ${basis.field} does not exactly match the active durable style contract`;
+  }
+  return undefined;
 }

@@ -20,7 +20,7 @@ Once a task enters Photoshop/COS/MCP mode, that execution mode is sticky until t
 - In Chat On Steroids, the canonical route is `Chat_On_Steroids_Plugins → dist/cos-plugin.js → embedded Guard → internal ToolRegistry → Photoshop`. The former external Core/controller/daemon provider chain is removed. Use Desktop only for read-only UI inspection when needed.
 - In ChatGPT/CoS, treat `photoshop_guard_cycle_auto` as a large-schema orchestration tool: when Code Mode discovery is available, resolve and invoke the same `Chat_On_Steroids_Plugins` tool through that surface by default rather than first probing a direct catalog call that may exceed the host schema limit. Small reads such as `photoshop_ping` and `photoshop_guard_status` may remain direct. If another canonical Plugins tool is omitted/rejected specifically because of catalog/schema size, rediscover and invoke that exact Plugins tool through Code Mode immediately. This is still the same canonical Plugins/Guard route, not a backend fallback; schema-size failure never authorizes raw mutations, the retired controller, Desktop mutation or another image engine.
 - `dist/cos-plugin.js` enables `PHOTOSHOP_GUARD_MODE=required`: known read-only tools remain directly callable; public raw mutating tools fail closed with `guard_required` and normal visual mutations must be submitted as compact `next_pass` requests through `photoshop_guard_cycle_auto`. Removed legacy full-operation/closure payloads are not public authoring options.
-- A previous native-route live acceptance passed for the pre-v2 surface. Do not interpret a stale legacy Plugins snapshot as a server limitation; the current compact-only source surface is 133 tools / 16 public Guard tools, and its own v2 live acceptance is required before final completion.
+- A previous native-route live acceptance passed for the pre-v2 surface. Do not interpret a stale legacy Plugins snapshot as a server limitation; the current compact-only source surface is 132 tools / 15 public Guard tools, and its own v2 live acceptance is required before final completion.
 - The current controller also uses a real two-level Art Director / Painter contract. Art Director owns whole-image assessment and directive/review cadence; Painter owns bounded local/medium VisualMicroPlans and keeps the ordinary local preview/verdict barrier.
 - From the repository root (`<repo-root>`), after `npm run build:server` the canonical CoS route targets `<repo-root>/dist/cos-plugin.js`. Keep machine-specific checkout paths out of this canonical skill.
 - The `uxp-plugin/` bridge is a separate Photoshop-side runtime and must not be confused with the Chat On Steroids Plugins UI. Production semantic Photoshop dispatch is UXP-only and fail-closed for all migrated primitives. The production ExtendScript/COM fallback and raw-script mutation bypass are removed. See the generated backend/access inventory in `docs/available-tools.md` for current per-tool status.
@@ -55,21 +55,18 @@ architectural/spatial situation. At most one candidate may be a scenic landscape
 architecture-led vista. Different weather, palette or time of day does not make the same basic
 subject into a different candidate.
 
-Use recent motifs only as negative evidence. If `processes/subject-selection-memory.json` is
-available, read that compact file only; never inspect previous process folders, images, plans or
-commentary to obtain ideas. Reject a candidate whose feature signature substantially repeats a
-recent entry unless the user requests a variation. Missing or unwritable memory is advisory and
-must not block the first visual action.
+Do not consult cross-run artistic memory. Never inspect previous process folders, images, plans,
+commentary, subject lists, style choices, compositions, motifs or prior artistic outcomes to obtain
+ideas or to reject a candidate. Candidate diversity is evaluated only within the current choice set
+and against the current user brief.
 
 Each surviving candidate must specify a concrete subject, setting, action/relationship and spatial
-problem. Test whether the premise remains interesting without a dramatic celestial body, sunset,
-fog, glowing window, water reflection or similar atmospheric shortcut. These motifs are not banned,
-but their presence cannot be the candidate's only idea. Compare specificity, structural interest,
+problem. Test whether the premise remains interesting without a dramatic atmospheric or lighting
+shortcut. Such motifs are not banned, but their presence cannot be the candidate's only idea. Compare specificity, structural interest,
 fit to the requested medium/finish and executable feasibility; never choose solely because a scene
 is easy to decompose into background bands and a simple silhouette.
 
-Commit to one candidate, summarize it as the brief, append one abstract feature signature to the
-memory (newest 12 only), and continue to composition. Do not show all candidates unless requested.
+Commit to one candidate, summarize it as the brief, and continue to composition. Do not show all candidates unless requested.
 Do not reopen the choice during painting unless the user changes the brief or execution proves the
 selected premise impossible rather than merely difficult.
 
@@ -91,12 +88,20 @@ perceive → plan → mutate a short semantic pass → inspect → accept/correc
 
 For a new subject, do **not** spend multiple passes perfecting one large silhouette while the image still lacks the cues that make the subject identifiable. Until the first recognizable whole-frame preview exists, enter **Recognition Block-In** before ordinary hierarchy refinement.
 
-1. Derive **3–7 recognition features** from the brief/reference: the smallest useful set of visual cues that distinguishes the requested subject from plausible lookalikes. Feature size does not determine priority; a small eye, beak, wheel, handle or opening may carry more identity than a large contour correction.
+1. Derive **3–7 recognition features** from the brief/reference: the smallest useful set of visual cues that distinguishes the requested subject from plausible lookalikes. Feature size does not determine priority; a small distinguishing feature may carry more identity than a large contour correction.
 2. If style is part of the request, include at least **one large, unmistakable style cue** in the same early hypothesis. Do not postpone all style evidence until finish/detail.
 3. Build the **whole rough image**, not one perfected part: major silhouette/masses plus all selected recognition features in approximate placement/value/color. Prefer `photoshop_paint_regions` for broad closed color/value masses when it can express the block-in cheaply; use strokes/dabs only where their topology is actually useful.
 4. Judge the whole preview at normal/thumbnail scale. The exit question is not “is the contour clean?” but “does the subject read without relying on the prompt, and is the requested style direction visibly present when applicable?”
 5. While recognizability is still absent, defer contour polishing, texture, material microstructure and other cleanup unless they directly block recognition. Fix the largest **recognition barrier** instead.
 6. Once the image is recognizable, leave Recognition Block-In and resume the normal `COMPOSITION → SHAPE → VALUE → FORM → EDGE → MATERIAL → DETAIL` hierarchy. Recognition is an early milestone, not Definition of Done.
+
+Low detail is not permission to downgrade a semantic object into a pictogram. A coarse circle, polygon,
+flat silhouette or other cheap primitive may be useful as a temporary scaffold, but `recognition.subject=yes`
+does not make that owner's representation resolved. For representational owners, an observed
+`primitive_footprint=suspect` remains owner-local scaffold debt until a later reviewed pass establishes a
+non-primitive/structurally faithful representation. Intentional flat, iconic or primitive representation is
+the existing style exception and must be backed by an exact relevant `style_contract` field/value rather
+than inferred from low detail, small screen size or secondary importance.
 
 Persist `recognition_features`, their current visible status, and any feature destroyed by a later pass when useful. A pass that erases or obscures an already-established recognition feature is a regression unless the replan intentionally replaces that feature with a stronger equivalent.
 
@@ -317,7 +322,7 @@ painting:
 
 1. what visually feels wrong or unresolved;
 2. what visual effect is sought now;
-3. what the hand will do in Photoshop, where, and with which artist-relevant
+3. what the Photoshop operation will do, where, and with which artist-relevant
    settings when useful;
 4. what relationship must be preserved;
 5. what the inspected result actually changed.

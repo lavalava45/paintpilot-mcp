@@ -6,14 +6,18 @@ Do not converge automatically to `round brush`, `soft brush`, `eraser` and opaci
 visual intent → impact class → method → registered runtime tool → fallback
 ```
 
+For a new solid object, establish body coverage before translucent form/light modelling; glazing over an empty layer does not occlude the older scene. Use the painting receipt's actual layer/parent opacity, fill and blend mode, together with the prepared brush opacity/flow, pressure and mask behavior. `opacity_role=opaque` and 100% brush opacity do not certify covered pixels. Preserve deliberate glass, fog and glazes; inspect unwanted show-through in the ordinary exact-frame review. Per-mark size/opacity/flow overrides are local; omission uses the prepared brush baseline and each internal batch restores it. Persistent changes use `photoshop_set_brush`.
+
 Use `photoshop_get_painting_method_capabilities` when the available method surface is uncertain or after runtime/schema changes. Use `photoshop_select_painting_method` to choose from that actual surface before committing to a method when several mechanisms could solve the same visual problem.
 
-The capability map must distinguish **available**, **conditional**, and **unavailable** methods. Never infer an API merely because Photoshop has a UI feature. In the current runtime, for example, Pencil and Smudge are verified execution modes of `photoshop_paint_strokes`; installed textured/dry/scatter/bristle-like brushes are conditional on brush-preset discovery; the exposed gradient primitive is a linear layer-mask gradient; Clone Stamp, Mixer Brush and arbitrary radial paint/fill are not exposed as dedicated verified primitives and therefore require an explicit fallback.
+`SHAPE` has no automatic region-fill priority. Polygon count, contour complexity, a brush name and successful execution cannot prove modelled form. Review the requested light/value turns, contact, depth and material response on the exact frame; use existing owner-local scaffold debt for observed failures and preserve exact intentional-flat style exemptions. An unchanged comparable decoded whole frame cannot close a painting goal: its false improvement claim is normalized to neutral/unresolved and returned in the existing closure response, without a prose-repair turn. This is execution evidence, not an artistic quality metric.
+
+The capability map must distinguish **available**, **conditional**, and **unavailable** methods. Never infer an API merely because Photoshop has a UI feature. In the current runtime, for example, Pencil and Smudge are verified execution modes of `photoshop_paint_strokes`; installed textured/dry/scatter/bristle-like brushes are conditional on brush-preset discovery; linear raster color fields and layer-mask gradients are exposed; Clone Stamp, Mixer Brush and arbitrary radial paint/fill are not exposed as dedicated verified primitives and therefore require an explicit fallback.
 
 Prefer a method because its causal effect matches the visual problem:
 
 - line / crisp construction → Pencil or hard-line method;
-- broad silhouette/value mass → region block-in rather than hundreds of round-brush dabs;
+- broad initial silhouette → region block-in when closed masses fit; established form/value areas → brush-built patches, planes and transitions matched to the remaining light/depth/material problem;
 - transition / lost edge → gradient mask, Smudge, controlled soft buildup or blur according to whether the target is compositing, paint-form or raster smoothing;
 - texture → discovered textured preset or procedural noise/detail method rather than default round-brush stippling;
 - smoothing → Smudge / Smart Blur / Gaussian Blur according to whether shape must be pushed or merely filtered;
@@ -25,7 +29,7 @@ Prefer a method because its causal effect matches the visual problem:
 
 A fallback is not permission to use a generic brush automatically. It must be the next **available method that preserves the original visual intent and impact class**. Record unavailable preferred methods explicitly when that fact changes the plan.
 
-For **global or medium** softness-dominant/environmental passes, `construction_role` is mandatory before mechanism selection. Classify the pass as `continuous-field`, `volumetric-soft-mass`, or `optical-veil`; do not leave a broad sky/fog/glow/smooth-field operation as an untyped `soft-transition` or generic brush pass. `continuous-field` routes to `continuous-color-field` by default. Using another mechanism requires an explicit fallback from `continuous-color-field` with a concrete reason. `optical-veil` must not silently collapse to the legacy Soft Round / `soft-brush-build` dab-chain: that route is allowed only when the plan names the preferred non-dab method in `fallback_from_method_id` and records a concrete `fallback_reason` explaining why it cannot be used for the current target.
+For **global or medium** softness-dominant/environmental passes, classify the current construction as `continuous-field`, `volumetric-soft-mass`, or `optical-veil`; uniquely derivable execution metadata is compiler-owned. Continuous fields may use a linear color gradient, installed-brush strokes or soft-brush buildup. A compatible primary brush method needs no invented gradient-fallback history. The role describes the current pass, not completion of the entire depicted area: base fill plus accents/texture cannot prove required spatial light, form or depth. Use the ordinary frame observation and task assessment, respecting intentionally plain/flat briefs. `optical-veil` retains its existing explicit `fallback_from_method_id` requirement for the legacy soft dab-chain; `fallback_reason` is optional artistic explanation, not admission authority.
 
 #### Two-level Art Director / Painter loop
 
@@ -60,16 +64,16 @@ photoshop_guard_art_director(action=review)
 Edge character is an explicit boundary-level decision, not a global brush-hardness preference. Declare edge intent for a concrete **region pair / boundary**:
 
 ```text
-region: left_cheek
+region: local_region_a
 
 edges:
-  cheek/background: lost
-  cheek/nose: soft
-  jaw/collar: firm
-  beard/background: broken
+  local_region_a/background: lost
+  local_region_a/adjacent_form: soft
+  lower_boundary/adjacent_region: firm
+  texture_region/background: broken
 ```
 
-Supported edge classes are `hard`, `firm`, `soft`, `lost`, and `broken`. `hard` should read crisp and clearly separated; `firm` remains readable without a cut-out feel; `soft` transitions gradually; `lost` intentionally dissolves into the neighbor; `broken` varies/discontinues the contour and is especially useful for hair, beard, net, fabric, water and rough surfaces.
+Supported edge classes are `hard`, `firm`, `soft`, `lost`, and `broken`. `hard` should read crisp and clearly separated; `firm` remains readable without a cut-out feel; `soft` transitions gradually; `lost` intentionally dissolves into the neighbor; `broken` varies/discontinues the contour and is especially useful for irregular, textured, porous or discontinuous boundaries.
 
 Edge intent must alter method selection. The runtime compiler selects only from methods that actually exist in the capability map. Typical preferences are:
 
@@ -113,6 +117,15 @@ The check records the exact current-frame preview/operation plus:
 - `selective_detail` — any detail is structurally useful and non-uniform;
 - `residual_block_in` — temporary scaffold geometry no longer dominates the representation.
 
+`residual_block_in` also has an owner-local consequence. When an exact-frame verdict marks a
+representational semantic owner with `primitive_footprint=suspect`, Guard records that owner as
+`scaffold-debt` (`representation_change=insufficient`, `residual_block_in=debt`). Recognizability may still
+be `yes`, but that owner cannot be closed as resolved, cannot support a passing representational
+`refinement_check`, and blocks progression into `DETAIL`/finalization while the debt survives. A later
+reviewed pass with `primitive_footprint=none|acceptable` may clear it as structurally faithful. The only
+primitive-final exception is the existing exact `style-not-applicable`/`style_contract` path; there is no
+subject-specific lookup table or recipe for what the replacement shape must be.
+
 For a representational `refinement_check.status=pass`, `major_form_modelling` must also be backed by
 an observed **low-frequency structure view** derived from the exact same current frame. The canonical
 `photoshop_analyze_value_structure` result includes a downsampled grayscale low-frequency image that
@@ -137,15 +150,16 @@ restart/resume.
 
 #### Qualitative material-response decomposition
 
-`MATERIAL` is not a synonym for texture. Before a MATERIAL mutation, declare one qualitative
-`material_response` contract. It distinguishes **base material**, **surface condition**, and
+`MATERIAL` is not a synonym for texture. The qualitative `material_response` plan is optional before
+mutation and validated when supplied; omission proves no quality or completion. It distinguishes **base material**,
+**surface condition**, and
 **optical effect**, then states the intended visible response for: base/local color-value family,
 form-driven light/shadow, specular/reflection character, transmission/translucency when applicable,
 surface condition, scale/frequency of variation, and edge/contact interaction. Microtexture is
 explicitly `deferred`, `supporting-only`, or `not-applicable`; it is never proof by itself that the
 material reads.
 
-Components may be `not-applicable` when physics/style genuinely does not require them. A transmissive
+In a supplied plan, components may be `not-applicable` when physics/style genuinely does not require them. A transmissive
 physical owner must still declare transmission; a surface-condition owner must actually describe the
 condition; optical/atmospheric owners remain optical effects rather than silently becoming base
 material. Intentionally flat/stylized work may omit otherwise form-bearing response only through an
@@ -177,11 +191,11 @@ This guard exists specifically to catch sequences such as repeated soft glazing,
 
 #### Soft-dominance / over-smoothing review
 
-For a non-trivial painting, any **global or medium** pass whose declared construction/method is broadly softness-dominant must also supply a structured `softness_review` when the exact current frame is classified. This covers broad `volumetric-soft-mass` / `optical-veil` work, atmospheric/soft-transition/lost-edge/smoothing intents, Smudge, broad soft-brush build, and blur-family methods. Ordinary small/local edge softening stays under the existing edge-observation path and does not acquire a second review tax.
+For a non-trivial painting, **global or medium** softness-dominant work is assessed through the ordinary exact-current whole-frame observation: edge hierarchy, mass separation, large-form readability, focal hierarchy and primitive footprint. This covers broad `volumetric-soft-mass` / `optical-veil`, atmospheric/soft-transition/lost-edge/smoothing intents, Smudge, soft-brush build and blur. Report concrete failure as an existing `soft_dominance` must-fix finding; keep uncertainty in ordinary review. No second five-field certificate is required, and omission does not record a pass. Ordinary small/local edge softening retains its existing edge-observation path.
 
-The review is contextual, not a numeric sharpness score. It records `resolved|debt|uncertain|not-applicable` evidence for `edge_hierarchy`, `mass_separation`, `large_form_readability`, `focal_hierarchy`, and `primitive_footprint`, all bound internally to the exact current preview SHA. A form-bearing `volumetric-soft-mass` cannot pass while edge hierarchy or mass separation is unresolved; an `optical-veil` may legitimately make its own edge hierarchy not applicable, but the underlying masses, large-form read and focal hierarchy must remain resolved. `style-not-applicable` is allowed only against an exact durable `style_contract` field/value and cannot be used as a generic fog/softness escape hatch.
+The optional detailed `softness_review` remains contextual, not a numeric sharpness score. When supplied, it records `resolved|debt|uncertain|not-applicable` evidence for all five criteria, bound internally to the exact current preview SHA. A form-bearing `volumetric-soft-mass` cannot pass while edge hierarchy or mass separation is unresolved; an `optical-veil` may legitimately make its own edge hierarchy not applicable, but underlying masses, large-form read and focal hierarchy must remain resolved. `style-not-applicable` still requires an exact durable `style_contract` field/value basis.
 
-A failed review cannot be accepted or marked target-resolved. It immediately opens the existing `soft-dominance` **must-fix** visual problem at the affected broad scale, so the normal stage/scale priority gate blocks finer texture/detail work until a real corrective pass restores structure. Failures also emit the stable negative `soft-dominance` trend signal; visible soft-round/mechanical footprint debt additionally requires top-level `primitive_footprint=suspect` and emits `soft-round-footprint`, feeding the existing primitive-footprint/cumulative-trend machinery rather than creating a parallel quality score.
+A failed detailed review or ordinary `soft_dominance` must-fix finding cannot be accepted or marked target-resolved. Both open existing **must-fix** visual debt and emit `soft-dominance`, preserving the stage/scale priority gate and cumulative-trend machinery. Visible repeated primitive footprint stays `primitive_footprint=suspect`; detailed footprint debt retains its `soft-round-footprint` signal and consistency checks. Ordinary findings carry their supplied negative signals without a second questionnaire.
 
 The controller enforces this with a persistent **stage/scale priority gate**. Keep `current_stage` plus open visual problems with `problem_id`, `scale` (`global|medium|small`) and `severity` (`must-fix|should-fix|optional`). Before every visual mutation, the Guard finds the largest unresolved `must-fix`; a finer-scale mutation is rejected until that problem is resolved/reclassified. Free-text `replan`, including words such as “override”, “probe” or “diagnostic”, does not bypass this ordering. Use `photoshop_guard_set_priorities` on the native route to seed/update this non-Photoshop planning state. Native `photoshop_guard_status` / `photoshop_guard_resume` expose the current gate. Any duplicate legacy priority/replan field is subject to the 13b audit and 13a removal; do not author a second workflow around it.
 
@@ -316,7 +330,7 @@ Derive only the brush roles needed by the current image or near-term pass. Typic
 - broken rock/material/texture mark;
 - fine line / detail;
 - glaze / light;
-- subject-specific roles such as hair/foliage only when actually needed.
+- subject-specific roles only when the current brief actually requires them; generic fixtures must not name concrete depicted objects.
 
 Use **progressive widening** rather than exhaustive search:
 
@@ -363,7 +377,7 @@ Useful diagnostic:
 approx stamp interval px ≈ brush size × spacing% / 100
 ```
 
-For example, a 200 px brush at 25% spacing places brush tips roughly 50 px apart. That is an obvious warning for a supposedly continuous atmospheric stroke, but it is not a universal failure threshold. Spacing is **role-dependent**: dense/low spacing usually suits continuous low-frequency mass, while larger spacing may be desirable for charcoal, broken rock, foliage or other textured marks.
+For example, a 200 px brush at 25% spacing places brush tips roughly 50 px apart. That is an obvious warning for a supposedly continuous atmospheric stroke, but it is not a universal failure threshold. Spacing is **role-dependent**: dense/low spacing usually suits continuous low-frequency mass, while larger spacing may be desirable for intentionally broken or textured marks.
 
 If the controller changes brush settings after selection, the role map must record the **effective settings actually used**, not just the preset defaults.
 
@@ -426,7 +440,7 @@ representation mechanism rather than adding decoration over polygon fills.
 #### Mark topology and surface coverage
 
 - Use **2D area patches** when they best express continuous coverage, broad tonal/form transitions or irregular mass construction. A valid patch is 2D coverage, not a regular grid or mechanical stamp field; vary placement/density/boundary falloff while keeping a compact quantized style family.
-- **Directional strokes are valid for surfaces and volume** when their footprint supports the depicted plane, turning form, gesture or material direction. Broad wall planes, folds, light bands, hair masses, terrain flow and other non-linear regions may legitimately use wide directional strokes.
+- **Directional strokes are valid for surfaces and volume** when their footprint supports the depicted plane, turning form, gesture or material direction. Broad planar regions, curved masses, light bands and material-flow regions may legitimately use wide directional strokes.
 - Use narrow line-oriented strokes for genuinely linear structures such as seams, cables, railings, selected hard edges, lashes/hairs or narrow accents.
 - Reject the **wrong visible footprint**, not the primitive category itself. A ribbon, sausage, scallop chain, circular stamp field or mechanical sweep that reads before the depicted form is a failure unless the style explicitly licenses it.
 - The same region may legitimately progress `mass patch / broad stroke → planar/facet marks → small texture → edge correction`.

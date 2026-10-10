@@ -200,8 +200,8 @@ const SEEDS: CapabilitySeed[] = [
     id: 'soft-brush-build',
     label: 'Soft brush/dab buildup',
     methodClass: 'paint',
-    impactClasses: ['tone', 'transition'],
-    visualIntents: ['soft-transition', 'lost-edge', 'light-sculpt'],
+    impactClasses: ['construct', 'tone', 'transition'],
+    visualIntents: ['continuous-field', 'painted-mass', 'soft-transition', 'lost-edge', 'light-sculpt'],
     primaryTool: 'photoshop_paint_dabs',
     preparationTools: ['photoshop_set_brush'],
     requiredTools: ['photoshop_paint_dabs', 'photoshop_set_brush'],
@@ -242,6 +242,7 @@ const SEEDS: CapabilitySeed[] = [
       'atmospheric-mass',
       'directional-mass',
       'surface-flow',
+      'continuous-field',
       'texture',
       'line',
       'hard-edge',
@@ -258,13 +259,14 @@ const SEEDS: CapabilitySeed[] = [
   },
   {
     id: 'continuous-color-field',
-    label: 'Continuous linear color/value field',
+    label: 'Continuous solid or linear color/value field',
     methodClass: 'gradient',
     impactClasses: ['construct', 'tone', 'transition'],
     visualIntents: ['continuous-field', 'soft-transition'],
     primaryTool: 'photoshop_paint_color_gradient',
+    executionTools: ['photoshop_paint_color_gradient', 'photoshop_fill_layer'],
     requiredTools: ['photoshop_paint_color_gradient'],
-    limitations: ['Linear raster color field with 2–4 bounded stops; distinct from transparency/mask gradients.'],
+    limitations: ['Use fill_layer for an explicitly uniform base, or a linear gradient with 2–4 bounded stops only when spatial color variation is intended. Distinct from transparency/mask gradients. A base field does not prove that a depicted area or its required form/light/material structure is finished.'],
   },
   {
     id: 'gradient-mask',
@@ -494,7 +496,7 @@ const INTENT_PREFERENCE: Record<PaintingVisualIntent, string[]> = {
   'atmospheric-mass': ['installed-brush-preset', 'soft-brush-build', 'smudge-shape', 'gradient-mask'],
   'directional-mass': ['installed-brush-preset', 'hard-brush-line', 'soft-brush-build'],
   'surface-flow': ['installed-brush-preset', 'soft-brush-build', 'smudge-shape'],
-  'continuous-field': ['continuous-color-field'],
+  'continuous-field': ['continuous-color-field', 'installed-brush-preset', 'soft-brush-build'],
   'soft-transition': ['gradient-mask', 'smudge-shape', 'soft-brush-build', 'smart-blur', 'gaussian-blur', 'radial-gradient'],
   'hard-edge': ['region-block-in', 'pencil-line', 'hard-brush-line', 'selection-mask', 'unsharp-sharpen'],
   'lost-edge': ['smudge-shape', 'soft-brush-build', 'gaussian-blur', 'eraser-carve'],
@@ -546,14 +548,8 @@ export function selectPaintingConstructionMethod(
 export interface PaintingMethodSelectionOptions {
   stage?: string;
   styleTraitEvidence?: StyleMethodTraitEvidence[];
-}
-
-function isEarlyBlockInStage(stage: string | undefined): boolean {
-  const normalized = stage?.trim().toUpperCase().replace(/[\s-]+/g, '_');
-  return normalized === 'RECOGNITION_BLOCK_IN'
-    || normalized === 'COMPOSITION'
-    || normalized === 'SHAPE'
-    || normalized === 'GLOBAL_BLOCK_IN';
+  preferredMethodId?: string;
+  executionTools?: string[];
 }
 
 function methodSemanticTraits(capability: PaintingMethodCapability): Set<string> {
@@ -621,9 +617,7 @@ export function selectPaintingMethod(
 ): PaintingMethodSelection {
   const capabilities = paintingMethodCapabilities(registry);
   const byId = new Map(capabilities.map(capability => [capability.id, capability]));
-  const preference = visualIntent === 'mass' && isEarlyBlockInStage(options.stage)
-    ? ['region-block-in', 'installed-brush-preset', 'hard-brush-line']
-    : (INTENT_PREFERENCE[visualIntent] ?? []);
+  const preference = INTENT_PREFERENCE[visualIntent] ?? [];
   const ordered = preference
     .map(id => byId.get(id))
     .filter((value): value is PaintingMethodCapability => !!value)
@@ -632,7 +626,23 @@ export function selectPaintingMethod(
     .sort((a, b) => b.score - a.score || a.index - b.index)
     .map(row => row.capability);
   const avoided = new Set(avoidMethodIds);
-  const selected = ordered.find(capability => capability.availability !== 'unavailable' && !avoided.has(capability.id));
+  const usable = (capability: PaintingMethodCapability) => capability.availability !== 'unavailable'
+    && !avoided.has(capability.id)
+    && capability.visualIntents.includes(visualIntent)
+    && capability.impactClasses.includes(impactClass);
+  const preferred = options.preferredMethodId ? byId.get(options.preferredMethodId) : undefined;
+  if (options.preferredMethodId && (!preferred || !usable(preferred))) {
+    throw new Error(`Preferred method ${options.preferredMethodId} is unavailable, avoided or incompatible with ${visualIntent}/${impactClass}`);
+  }
+  // A recommendation is not an exclusive construction recipe. Preserve a
+  // uniquely compatible mechanism already present in the concrete actions.
+  const executed = options.executionTools?.length ? ordered.filter(capability => {
+    const tools = capability.executionTools?.length ? capability.executionTools
+      : capability.primaryTool ? [capability.primaryTool] : [];
+    return usable(capability) && options.executionTools!.every(tool => tools.includes(tool));
+  }) : [];
+  const selected = preferred ?? (executed.length === 1 ? executed[0] : undefined)
+    ?? ordered.find(capability => capability.availability !== 'unavailable' && !avoided.has(capability.id));
   if (!selected) {
     throw new Error(`No available method for visual_intent=${visualIntent}, impact_class=${impactClass}`);
   }

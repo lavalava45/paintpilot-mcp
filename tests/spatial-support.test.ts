@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { canvasToPreview, carryRelationsForward, mapRect, previewToCanvas, verifyRasterPlacement } from '../src/core/spatial-support.js';
+import { canvasToPreview, carryRelationsForward, mapRect, previewToCanvas, previewToCanvasAffine, verifyRasterPlacement } from '../src/core/spatial-support.js';
 
 const sha = 'a'.repeat(64);
 
@@ -17,6 +17,16 @@ describe('spatial support', () => {
     };
     expect(mapRect({ left: 400, top: 250, right: 800, bottom: 550 }, transform)).toEqual({
       left: 100, top: 75, right: 300, bottom: 225,
+    });
+  });
+
+  it('exposes the crop/resize projection as an affine transform for connected geometry', () => {
+    const transform = {
+      documentId: 91, canvasWidth: 1200, canvasHeight: 800, outputWidth: 400, outputHeight: 300,
+      crop: { left: 200, top: 100, right: 1000, bottom: 700 },
+    };
+    expect(previewToCanvasAffine(transform)).toEqual({
+      scale_x: 2, scale_y: 2, translate_x: 200, translate_y: 100,
     });
   });
 
@@ -41,7 +51,7 @@ describe('spatial support', () => {
 
   it('preserves relation provenance and uncertainty through continuation', () => {
     const relations = [{
-      id: 'hand-supports-cup', type: 'support' as const, subjectId: 'hand', objectId: 'cup',
+      id: 'segmentB-supports-supportedForm', type: 'support' as const, subjectId: 'segmentB', objectId: 'supportedForm',
       provenance: 'agent-estimated' as const,
       uncertainty: { status: 'bounded' as const, radiusPx: 12, note: 'occluded contact' },
     }];
@@ -53,7 +63,7 @@ describe('spatial support', () => {
 
   it('questions contradicted relations without silently deleting them', () => {
     const relations = [{
-      id: 'figure-overlap', type: 'overlap' as const, subjectId: 'figure', objectId: 'boat',
+      id: 'figure-overlap', type: 'overlap' as const, subjectId: 'figure', objectId: 'secondaryForm',
       provenance: 'reference-derived' as const, uncertainty: { status: 'bounded' as const, radiusPx: 2 },
     }];
     expect(carryRelationsForward(relations, new Set(), new Set(['figure-overlap']))[0].state).toBe('questioned');

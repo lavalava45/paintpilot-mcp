@@ -71,3 +71,13 @@ Upstream distribution identifiers
 The upstream website, npm scope/package, MCP Registry identity, release channels, and author
 branding belong to the original project. They are not distribution channels or ownership claims
 for Photoshop MCP — Digital Painting Edition.
+
+Runtime dependencies and algorithm attribution
+----------------------------------------------
+
+Third-party runtime dependencies retain their own authorship and licenses.
+See THIRD_PARTY_NOTICES.md, third-party-components.json and licenses/ for versions,
+source revisions, actual usage, and retained notices. These files ship with the
+npm file set and MCPB server. Project-authored adapters do not relicense the
+underlying components. Algorithm inspiration is recorded separately from copied
+code or installed dependencies; the existing historical provenance above remains.

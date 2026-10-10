@@ -1,15 +1,22 @@
 # PaintPilot hot-loop optimization plan
 
+**Historical technical reference — 2026-10-04.** E.8d implemented the engineering foundation below;
+P0-A…P0-H and the proposed new modules are not a fresh implementation backlog. Use the
+[current Roadmap](PAINTING-ROADMAP.md) for remaining hardening, coding order and acceptance.
+The 2026-10-02 engineering gate does not close total painting time or artistic quality: its live run exercised
+zero automatic repairs/splits, and the exact review-to-intent interval remained unknown. Preserve the
+[benchmark evidence](hotloop-final5-20261002-benchmark.md); E.8 owns fresh quality/time and repair/split live proof.
+
 ## Purpose
 
-This document is the implementation brief for reducing the two dominant latency classes exposed by the
+This historical implementation brief records the work on two dominant latency classes exposed by the
 2026-10-02 rainy-tram-stop live benchmark:
 
 1. excessive latency between a completed visual review and a dispatch-ready next pass;
 2. deterministic Guard preflight rejection / recovery churn that produces many model-visible round trips
    without Photoshop mutations.
 
-This is an implementation plan, not a proposal to weaken Guard safety, visual review, no-replay behavior,
+The work preserves Guard safety, visual review, no-replay behavior,
 document-incarnation binding, checkpointing, or artistic-quality gates.
 
 The intended end state is:
@@ -1077,8 +1084,8 @@ readiness is evaluated, and art-run setup binds the live UXP document-incarnatio
 written. New-owner PaintingIntent compilation also injects the just-created layer step reference and deterministic
 opaque stack facts when uniquely implied.
 
-The one rejected visual attempt was `structured_mass_iconic_primitive_compound`: this was a genuine semantic/form
-decision, not deterministic protocol boilerplate, and correcting it did not enter recovery. Full acceptance after the
+The one rejected visual attempt was `structured_mass_iconic_primitive_compound`: the historical vertex-count heuristic
+was retired on 2026-10-04 because extra contour points do not prove form quality. That earlier correction did not enter recovery. Full acceptance after the
 implementation changes is **93/93 test files, 939/939 tests**.
 
 This closes the **engineering hot-loop performance gate**. Artistic parity/quality remains independently evaluated by

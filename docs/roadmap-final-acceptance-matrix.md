@@ -1,5 +1,57 @@
 # Roadmap final acceptance matrix
 
+## 2026-10-10 E.8a per-event completeness (Agent 2)
+
+**Repo-pass for missing-versus-zero event integrity; live-pending.**
+`src/core/guard/session-store.ts` now retains only supplied optional per-event
+repair/ambiguity/typed-violation measurements. The new regression in
+`tests/throughput-integrity.test.ts` verifies persisted events and benchmark
+completeness. Document-wide historical totals remain additive and cannot prove
+complete run ownership. Concurrent/interrupted live host and quality/time
+acceptance are still open; see CHANGELOG for checks.
+
+## 2026-10-10 E.8a benchmark event-ownership correction (Agent 2)
+
+**Repo-pass for a narrow accounting defect; E.8a remains live-pending.**
+`scripts/dev/benchmark-painting-cycles.mjs` now leaves run-scoped throughput totals
+unknown if an unkeyed event occurs inside the selected journal window; it no
+longer silently assigns overlapping recovery/bookkeeping calls to a prefix.
+`tests/benchmark-painting-cycles.test.ts` covers interleaved run prefixes and
+out-of-window unkeyed events. Complete event ownership at emission, real
+concurrent/interrupted runs, checkpoint cost and image-quality/time comparison
+are still unverified. See CHANGELOG for actual check results.
+
+## 2026-10-10 historical dirty-tree machine gate (Agent 3, before repairs)
+
+**Historical failed snapshot, not current machine-gate status.** That canonical run failed (42 tests in 10 suites).
+Focused rechecks after repairs pass `geometry-contract-repair`, `mask-and-rejection` and
+`session-store-regressions` (128/128), plus four adjacent painting/throughput suites (36/36).
+`uxp-bridge-server` passed an isolated rerun. The two currently reproduced failing suites are
+`compact-contract-regressions` (32) and `embedded-guard` (1). Subsequent repairs and the
+complete canonical PASS are recorded in the 2026-10-10 Agent 3/Agent 1 CHANGELOG entries;
+the later Agent 1 gate passed 129/129 files and 1472/1472 tests. Managed-child activation,
+real Photoshop and independent artistic acceptance remain open.
+
+## 2026-10-10 source-only Critic incarnation boundary
+
+**Repo-pass, live-pending:** ChatGPT Critic reviews and carried unresolved findings now bind to the
+same numeric document id **and stable document incarnation** as the current exact frame. Reused
+document ids and identical briefs cannot inherit a previous canvas's checkpoint or findings;
+legacy reviews lacking this binding require fresh assessment. Two new focused regressions pass.
+This does not close the real-Photoshop checkpoint, independent human calibration or E.8
+better-image/time acceptance; activation requires the current managed Plugins child revision.
+
+## Architecture update — 2026-10-05
+
+Public/executor stage-scale defaults, aggregate preflight construction/envelope errors, completed nonvisual
+closure and modal-safe bootstrap identity: repo-pass; new canonical reload/live is pending. Independent
+vision evaluation is integrated at existing review boundaries for every stage, with exact identity and
+uncertainty/contradiction handling; repository checks and stored local inference controls pass their
+scoped claims. Calibration, actual post-reload integration and better-images-sooner acceptance remain
+live-pending/human-required. See [evaluator limits](artistic-evaluator.md) and the active Roadmap; none of
+these engineering checks closes E.7e/E.8 artistic improvement or the human critic gates.
+
+
 Date: 2026-09-28. Scope: current working tree plus preserved compact-v2 live evidence under `.photoshop-runtime/`, `processes/compact-v2-live-acceptance-process/`, and `processes/p1c1-continuous-field-live-process/run-01/`. The P1/P2/P3 catalog source migration is included in the current tree. The rebuilt child and UXP migration acceptance are verified; the machine-enforceable P0-B state/evidence/review correctness block, P0-E.1–P0-E.6 repository contracts, and P1-C repository/live acceptance are complete, while P0-E.7 and unrelated live/human acceptance items retain their individual statuses below.
 
 This matrix re-checks the literal **Acceptance** bullets in `PAINTING-ROADMAP.md` for Tasks 6–23 and every 13a subpart. It is the authoritative record of their current acceptance status; superseded intermediate audit conclusions are retained only in Git history.
@@ -37,6 +89,7 @@ has been completed.
 | P1-E.18a/E.18b — durable Scene Geometry Model + mandatory entry gate | **repo-pass / further E.18 work pending** | The compact contract carries a document-incarnation-bound `scene_geometry_model` with explicit applicability and revision identity. Committed nontrivial `structured-mass` work is rejected before dispatch when no applicable model exists or applicability remains `insufficient_evidence`; explicit orthographic/diagrammatic, flat/collage and intentional non-Euclidean opt-outs remain legal, and temporary hypotheses remain exempt until commitment. Initial model admission is checked against a fresh exact UXP document-instance witness before mutation, while durable continuation remains bound to the same incarnation. Focused verification passes 99/99 tests; the full canonical gate at closure passed 77/77 files and 786/786 tests. E.18d quantitative preflight and later E.18 dependency/revalidation work remain forward work. |
 | P1-E.18c — Object Geometry Binding | **repo-pass / further E.18 work pending** | Committed coherent-3D `structured-mass` semantic owners require one normalized durable `photoshop.guard.geometry_binding.v1` tied to the exact current scene model id/revision before dispatch. Guard fails closed on a missing binding, owner mismatch, stale scene revision, unknown support plane, unknown vanishing family or unknown structural dependency/constraint reference. Accepted bindings persist with the semantic owner, appear unchanged through compact status/resume, are inherited on continuation, and cannot be silently replaced in-place; explicit non-coherent-3D scene opt-outs do not require a coherent-3D owner binding. Focused verification passes 4/4 files and 162/162 tests; the full canonical gate passes 77/77 files and 788/788 tests with lint at 0 errors. E.18d quantitative Geometry Preflight is the next forward gate. |
 | P1-E.18d — mandatory quantitative Geometry Preflight | **repo-pass / further E.18 work pending** | Before dispatching committed coherent-3D structured construction, Guard resolves the durable owner binding against the exact current scene model revision into `photoshop.guard.geometry_preflight.v1`. The receipt carries exact source-frame/document-incarnation identity, bounded near/mid/far control geometry, family/support/dependency ids, deterministic tolerance and explicit uncertainty. Perspective-sensitive construction requires at least two depth-separated control sections plus far termination; centerline/vanishing-family residuals, numeric support-corridor contact and optional scale-with-depth progression are checked before Photoshop. Projection, support, general constraint and insufficient-evidence failures are fail-closed with machine-readable codes; a valid receipt is journal-backed and projected through status/resume only while its scene model/incarnation remains current. Focused verification passes 5/5 files and 167/167 tests; the full canonical gate passes 78/78 files and 793/793 tests with lint at 0 errors / 31 warnings. E.18e reusable deterministic helper extraction is next. |
+| P1-E.25 — exact executable geometry and physical owner verification | **source slices verified / live-pending** | The source validator bounds exact raster tolerance to 0–2 px, and restored landmark-transform provenance is independently subject to the same limit before fresh active-layer identity/bounds comparison. A red-before-fix regression showed that a persisted 1000 px tolerance could otherwise certify a displaced physical layer; focused geometry tests passed 48/48 after the fix (2026-10-08). The managed Plugins child still predates the rebuild. Actual Photoshop scale→move pixels, mixed paint/owner targeting and connected-object acceptance remain live-pending; source tests do not close them. |
 | P1-A — autonomous-product cleanup / legacy retirement | **repo-pass** | Actual package/import/test reachability showed the external Core/controller/daemon provider chain had no maintained consumer. Sixteen retired provider/helper/historical-consumer files were physically deleted; maintained docs/prompts no longer advertise the route; retirement regression asserts file absence; compact-v2 audit/verifier record deletion as complete. P1-A.5 retained still-live UI/tool substrate for P2 rather than deleting by ancestry alone. Full post-deletion `npm run verify:canonical` passes 660/660 tests plus all structural gates. |
 | P2.1–P2.2 — provenance ownership + product-specific substrate reduction | **repo-pass** | `docs/ownership-and-retirement.md` records provenance/ownership, P1-A retirement evidence and keep/remove decisions for the live substrate. Generic batch/business recipes, Data Sets/mail-merge, opaque Action playback, raw-script/public recipe surfaces and dead compatibility modules were removed rather than preserved for upstream parity. The public surface is now 129 semantic tools, 0 recipe tools and 5 guide prompts. |
 | P2.3 — UXP-only production backend cutover | **repo-pass / live-pass** | Option 2 is implemented: `PhotoshopBackendRouter` configures only UXP, missing readiness fails closed with `uxp_bridge_unavailable`, the shared ExtendScript API/snippet layer and production fallback branches are removed, and document pinning is enforced once inside the UXP companion rather than through a duplicate COM preflight. The rebuilt P0-2 run-10 real-Photoshop trace subsequently closed the post-cutover live gate with direct UXP execution, pinned document targeting, no legacy replay and zero final Guard debt. |

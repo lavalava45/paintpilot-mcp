@@ -1,6 +1,6 @@
 import jpeg from 'jpeg-js';
 
-export const VALUE_CHECK_STATUSES = ['pass', 'fail', 'override', 'style-not-applicable'] as const;
+export const VALUE_CHECK_STATUSES = ['pending', 'pass', 'fail', 'override', 'style-not-applicable'] as const;
 export type ValueCheckStatus = (typeof VALUE_CHECK_STATUSES)[number];
 
 export const VALUE_CHECK_CRITERIA = [

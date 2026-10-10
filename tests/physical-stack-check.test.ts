@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import jpeg from 'jpeg-js';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import {
@@ -8,6 +10,7 @@ import {
   PHYSICAL_STACK_CRITERIA,
 } from '../src/core/physical-stack-check.js';
 import { SessionStore } from '../src/core/guard/session-store.js';
+import { createGuardTools } from '../src/tools/guard-tools.js';
 
 const dirs: string[] = [];
 
@@ -105,6 +108,34 @@ function valueRequest() {
   };
 }
 
+function reviewedFrame(s: SessionStore) {
+  const dir = mkdtempSync(path.join(tmpdir(), 'physical-stack-frame-'));
+  dirs.push(dir);
+  const bytes = jpeg.encode({ width: 8, height: 8, data: Buffer.alloc(8 * 8 * 4, 160) }, 90).data;
+  const file = path.join(dir, 'frame.jpg');
+  writeFileSync(file, bytes);
+  const sha = createHash('sha256').update(bytes).digest('hex');
+  s.write({
+    id: 'shape-frame', tool: 'photoshop_paint_strokes', args: { document_id: 42, stage: 'SHAPE', problem_id: 'value-structure' },
+    problem_id: 'value-structure', stage: 'SHAPE', summary: 'Shape frame', purpose: 'Review ordinary physical stack', hash: 'shape-hash', sequence: 10,
+    created_at: new Date(10000).toISOString(), completed_at: new Date(10001).toISOString(),
+    phase: 'completed', visual: true, failed: false,
+    preview: { sha256: sha, document_id: 42, materialized_path: file, width: 8, height: 8 },
+  });
+  s.updatePaintingState(42, current => ({
+    ...current, current_stage: 'SHAPE', current_frame: { operation_id: 'shape-frame', sha256: sha },
+  }));
+  return {
+    id: 'shape-frame', preview_id: 'shape-frame', sha256: sha,
+    verdict: 'neutral', disposition: 'accept', target_resolved: 'uncertain',
+    observed_change: 'The current frame keeps opaque subjects above the background.',
+    observations: [{ region: 'whole frame', visible: 'Depth and opaque coverage remain visible.' }],
+    primary_mismatch: 'The larger artistic task is still unfinished.',
+    regressions: [], uncertainty: 'Form modelling remains unfinished.',
+    global_readability: 'unknown', primitive_footprint: 'unknown', trend_signals: [],
+  };
+}
+
 describe('physical stack / occlusion gate', () => {
   it('gates VALUE and later but leaves SHAPE/block-in available', () => {
     expect(isPhysicalStackGatedStage('GLOBAL_BLOCK_IN')).toBe(false);
@@ -190,16 +221,78 @@ describe('physical stack / occlusion gate', () => {
       ...current,
       art_director: {
         ...current.art_director,
-        physical_stack_check: {
-          ...normalizePhysicalStackCheck(passingCheck()),
-          owner_signature: ownerSignature,
-        },
       },
+      physical_stack_check: { ...normalizePhysicalStackCheck(passingCheck()), owner_signature: ownerSignature },
     }));
     expect(() => s.plannerGate(42, valueRequest())).not.toThrow();
 
     s.write(physicalOwnerRecord('front-owner-shape', 'front-owner', 8));
     expect(() => s.plannerGate(42, valueRequest())).toThrow(/physical_stack_check_stale/);
+  });
+
+  it.each([false, true])('uses the ordinary visual verdict with Director active=%s and keeps omission pending', async directorActive => {
+    const s = store();
+    s.setArtRunState({ document_id: 42, process_dir: 'processes/physical-ordinary-process/run-01',
+      painting_profile: 'nontrivial_painting', commentary_mode: 'technical' });
+    s.write(physicalOwnerRecord('owner', 'rear-owner', 7));
+    const input = reviewedFrame(s);
+    if (directorActive) s.updatePaintingState(42, current => ({ ...current, art_director: {
+      directive_id: 'physical-directive', status: 'active', current_task_id: 'value-pass',
+      tasks: [{ task_id: 'value-pass', status: 'active', allowed_scales: ['medium'], allowed_global_changes: [] }],
+      physical_stack_check: normalizePhysicalStackCheck({ status: 'pending', observed: false }),
+    } }));
+    s.verdict(input);
+    expect(() => s.plannerGate(42, valueRequest())).toThrow(/physical_stack_check_required/);
+    // Exact provenance is supplied by closure, not retyped in the observation.
+    s.verdict({ ...input, physical_stack_check: { status: 'pass', observed: true, criteria: criteria() } });
+    expect(s.paintingState().documents['42'].physical_stack_check).toMatchObject({
+      status: 'pass', preview_sha256: input.sha256, evidence_operation_id: input.id,
+    });
+    expect(() => s.plannerGate(42, valueRequest())).not.toThrow();
+    expect(s.statusCompact().documents['42'].physical_stack_check.status).toBe('pass');
+    s.write(physicalOwnerRecord('new-front', 'front-owner', 8));
+    expect(() => s.plannerGate(42, valueRequest())).toThrow(/physical_stack_check_stale/);
+  });
+
+  it('retains observed physical debt and refuses false completion on the same ordinary review', () => {
+    const s = store();
+    s.setArtRunState({ document_id: 42, process_dir: 'processes/physical-debt-process/run-01',
+      painting_profile: 'nontrivial_painting', commentary_mode: 'technical' });
+    const input = reviewedFrame(s);
+    const physical_stack_check = { status: 'fail', observed: true, criteria: criteria({ opaque_mass_coverage: 'debt' }) };
+    expect(() => s.verdict({ ...input, physical_stack_check, target_resolved: 'yes' })).toThrow(/physical_stack_debt_unresolved/);
+    s.verdict({ ...input, physical_stack_check });
+    expect(() => s.plannerGate(42, valueRequest())).toThrow(/physical_stack_debt_unresolved/);
+    s.verdict(input); // Omitting the check cannot erase the known debt.
+    expect(() => s.plannerGate(42, valueRequest())).toThrow(/physical_stack_debt_unresolved/);
+  });
+
+  it('rejects forged, stale and crop-bound ordinary review evidence and does not persist rolled-back evidence', () => {
+    const s = store();
+    s.setArtRunState({ document_id: 42, process_dir: 'processes/physical-provenance-process/run-01',
+      painting_profile: 'nontrivial_painting', commentary_mode: 'technical' });
+    s.write(physicalOwnerRecord('owner', 'rear-owner', 7));
+    const input = reviewedFrame(s);
+    const check = { status: 'pass', observed: true, criteria: criteria() };
+    expect(() => s.verdict({ ...input, physical_stack_check: { ...check, preview_sha256: 'b'.repeat(64) } })).toThrow(/preview_sha256 must match/);
+    expect(() => s.verdict({ ...input, physical_stack_check: { ...check, evidence_operation_id: 'owner' } })).toThrow(/preview_sha256 must match|whole-frame preview/);
+    const frame = s.read('shape-frame');
+    s.write({ ...frame, preview: { ...frame.preview, region: { left: 0, top: 0, right: 4, bottom: 4 } } });
+    expect(() => s.verdict({ ...input, physical_stack_check: check })).toThrow(/whole-frame preview/);
+    s.write(frame);
+    s.updatePaintingState(42, current => ({ ...current, current_frame: { operation_id: 'later-frame', sha256: input.sha256 } }));
+    expect(() => s.verdict({ ...input, physical_stack_check: check })).toThrow(/current document frame operation/);
+    s.updatePaintingState(42, current => ({ ...current, current_frame: { operation_id: input.id, sha256: input.sha256 } }));
+    s.verdict({ ...input, physical_stack_check: check, disposition: 'rollback' });
+    expect(s.paintingState().documents['42'].physical_stack_check.status).toBe('pending');
+  });
+
+  it('exposes one shared physical-stack schema in ordinary observation and Director directive', () => {
+    const tools = createGuardTools({} as any);
+    const cycle = tools.find(tool => tool.tool.name === 'photoshop_guard_cycle_auto')!.tool.inputSchema as any;
+    const director = tools.find(tool => tool.tool.name === 'photoshop_guard_art_director')!.tool.inputSchema as any;
+    expect(cycle.properties.previous_observation.properties.physical_stack_check)
+      .toEqual(director.properties.directive.properties.physical_stack_check);
   });
 
   it('binds observed physical-stack evidence to the exact current visual frame', () => {

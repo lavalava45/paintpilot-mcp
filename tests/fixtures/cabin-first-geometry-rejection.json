@@ -1,0 +1,1362 @@
+{
+  "next_pass": {
+    "request_key": "cabin-blockin-main-subject-01",
+    "problem_id": "scene-recognition",
+    "document_id": 2942,
+    "goal": "Первичный цельный подмалёвок интерьерной сцены: большие оконные рамы, озеро и лес, кровать, ковер, спящий белый пушистый кот.",
+    "artistic_commentary": "На холсте выстраиваю основные формы и глубину: тёплые стены и пол, светлый высокий оконный проём с зелёным берегом и озером, белые оконные рамы, кровать с шалфейным одеялом и белого кота на плетёном ковре. Это единый композиционный проход без декоративной фактуры.",
+    "stage": "GLOBAL_BLOCK_IN",
+    "scale": "global",
+    "material_role": "architectural interior, bedding, lake landscape and cat silhouette",
+    "visual_intent": "mass",
+    "preferred_method_id": "region-block-in",
+    "construction_role": "structured-mass",
+    "scene_ownership_plan": {
+      "plan_id": "cabin-semantic-owners-v1",
+      "units": [
+        {
+          "semantic_id": "color-key",
+          "owner_id": "base-scene-blockin",
+          "role": "global color underpainting",
+          "editability": "independent"
+        },
+        {
+          "semantic_id": "window-lake",
+          "owner_id": "window-lake-owner",
+          "role": "window aperture and landscape",
+          "editability": "independent"
+        },
+        {
+          "semantic_id": "window-frames",
+          "owner_id": "window-frames-owner",
+          "role": "window casement architecture",
+          "editability": "independent"
+        },
+        {
+          "semantic_id": "furniture",
+          "owner_id": "wood-furniture-owner",
+          "role": "wooden bed and long sill",
+          "editability": "independent"
+        },
+        {
+          "semantic_id": "textiles",
+          "owner_id": "sage-textiles-owner",
+          "role": "bedding and green fabrics",
+          "editability": "independent"
+        },
+        {
+          "semantic_id": "cat",
+          "owner_id": "white-cat-owner",
+          "role": "longhair sleeping cat",
+          "editability": "independent"
+        },
+        {
+          "semantic_id": "plants",
+          "owner_id": "plants-owner",
+          "role": "vines and indoor foliage",
+          "editability": "independent"
+        },
+        {
+          "semantic_id": "rug",
+          "owner_id": "rug-owner",
+          "role": "woven area rug",
+          "editability": "independent"
+        },
+        {
+          "semantic_id": "sunlight",
+          "owner_id": "sunlight-owner",
+          "role": "morning sunlight and lamp",
+          "editability": "independent"
+        }
+      ]
+    },
+    "scene_geometry_model": {
+      "model_id": "cabin-weak-perspective-v1",
+      "revision": 1,
+      "applicability": "coherent_3d",
+      "applicability_rationale": "Frontal window and interior room have modest linear perspective; foreground floor and bed recede toward central window.",
+      "source_frame": {
+        "document_id": 2942,
+        "document_incarnation": "uxp-mv00tjng-b5iv1gupfk:1",
+        "width": 1400,
+        "height": 1000
+      },
+      "projection": {
+        "kind": "weak_perspective",
+        "horizon": {
+          "y": 450
+        },
+        "vanishing_points": [
+          {
+            "id": "interior-vp",
+            "x": 820,
+            "y": 448
+          }
+        ]
+      },
+      "line_families": [
+        {
+          "id": "floor-depth",
+          "direction": "converge to 820,448"
+        },
+        {
+          "id": "window-verticals",
+          "direction": "vertical"
+        }
+      ],
+      "support_planes": [
+        {
+          "id": "floor",
+          "polygon": [
+            [
+              0,
+              704
+            ],
+            [
+              1400,
+              704
+            ],
+            [
+              1400,
+              1000
+            ],
+            [
+              0,
+              1000
+            ]
+          ]
+        },
+        {
+          "id": "window",
+          "polygon": [
+            [
+              347,
+              100
+            ],
+            [
+              1275,
+              100
+            ],
+            [
+              1275,
+              671
+            ],
+            [
+              347,
+              671
+            ]
+          ]
+        }
+      ]
+    },
+    "layer_separation_check": {
+      "change_kind": "new-plane",
+      "substantial": true,
+      "rollback_value": "high",
+      "independent_adjustment_expected": true,
+      "reasons": [
+        "Подмалёвок нужен как отдельная недеструктивная база, будущие объекты получат свои слои."
+      ]
+    },
+    "logical_layer": {
+      "decision": "create-new",
+      "hypothesis_id": "base-scene-blockin",
+      "hypothesis": "Компоновка больших цветовых полей, узнаваемых форм комнаты, пейзажа и белого кота",
+      "rollback_value": "high",
+      "expected_independent_rollback": true,
+      "layer_name": "01 Scene / Color Block-in",
+      "physical_role": "opaque-mass",
+      "opacity_role": "opaque",
+      "construction_tier": "primary"
+    },
+    "actions": [
+      {
+        "tool": "photoshop_create_layer",
+        "args": {
+          "name": "01 Scene / Color Block-in",
+          "document_id": 2942
+        }
+      },
+      {
+        "tool": "photoshop_paint_regions",
+        "args": {
+          "regions": [
+            {
+              "id": "warm-walls",
+              "color": {
+                "red": 160,
+                "green": 115,
+                "blue": 86
+              },
+              "contours": [
+                {
+                  "points": [
+                    {
+                      "x": 0,
+                      "y": 0
+                    },
+                    {
+                      "x": 1400,
+                      "y": 0
+                    },
+                    {
+                      "x": 1400,
+                      "y": 1000
+                    },
+                    {
+                      "x": 0,
+                      "y": 1000
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "ceiling",
+              "color": {
+                "red": 107,
+                "green": 70,
+                "blue": 54
+              },
+              "contours": [
+                {
+                  "points": [
+                    {
+                      "x": 0,
+                      "y": 0
+                    },
+                    {
+                      "x": 1400,
+                      "y": 0
+                    },
+                    {
+                      "x": 1400,
+                      "y": 57
+                    },
+                    {
+                      "x": 0,
+                      "y": 35
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "wall-glow",
+              "color": {
+                "red": 194,
+                "green": 149,
+                "blue": 108
+              },
+              "contours": [
+                {
+                  "points": [
+                    {
+                      "x": 30,
+                      "y": 58
+                    },
+                    {
+                      "x": 1380,
+                      "y": 75
+                    },
+                    {
+                      "x": 1380,
+                      "y": 713
+                    },
+                    {
+                      "x": 30,
+                      "y": 713
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "floor",
+              "color": {
+                "red": 104,
+                "green": 71,
+                "blue": 55
+              },
+              "contours": [
+                {
+                  "points": [
+                    {
+                      "x": 0,
+                      "y": 714
+                    },
+                    {
+                      "x": 1400,
+                      "y": 704
+                    },
+                    {
+                      "x": 1400,
+                      "y": 1000
+                    },
+                    {
+                      "x": 0,
+                      "y": 1000
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "floor-light",
+              "color": {
+                "red": 167,
+                "green": 122,
+                "blue": 84
+              },
+              "contours": [
+                {
+                  "points": [
+                    {
+                      "x": 770,
+                      "y": 703
+                    },
+                    {
+                      "x": 1245,
+                      "y": 701
+                    },
+                    {
+                      "x": 1400,
+                      "y": 988
+                    },
+                    {
+                      "x": 1083,
+                      "y": 1000
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "window-recess",
+              "color": {
+                "red": 88,
+                "green": 62,
+                "blue": 51
+              },
+              "contours": [
+                {
+                  "points": [
+                    {
+                      "x": 326,
+                      "y": 80
+                    },
+                    {
+                      "x": 1297,
+                      "y": 91
+                    },
+                    {
+                      "x": 1294,
+                      "y": 716
+                    },
+                    {
+                      "x": 327,
+                      "y": 722
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "sky",
+              "color": {
+                "red": 226,
+                "green": 220,
+                "blue": 186
+              },
+              "contours": [
+                {
+                  "points": [
+                    {
+                      "x": 376,
+                      "y": 118
+                    },
+                    {
+                      "x": 1250,
+                      "y": 118
+                    },
+                    {
+                      "x": 1250,
+                      "y": 632
+                    },
+                    {
+                      "x": 376,
+                      "y": 632
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "sky-blue",
+              "color": {
+                "red": 178,
+                "green": 206,
+                "blue": 181
+              },
+              "contours": [
+                {
+                  "points": [
+                    {
+                      "x": 379,
+                      "y": 146
+                    },
+                    {
+                      "x": 1247,
+                      "y": 146
+                    },
+                    {
+                      "x": 1247,
+                      "y": 488
+                    },
+                    {
+                      "x": 379,
+                      "y": 488
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "forest-back",
+              "color": {
+                "red": 119,
+                "green": 147,
+                "blue": 123
+              },
+              "contours": [
+                {
+                  "points": [
+                    {
+                      "x": 378,
+                      "y": 431
+                    },
+                    {
+                      "x": 452,
+                      "y": 404
+                    },
+                    {
+                      "x": 516,
+                      "y": 412
+                    },
+                    {
+                      "x": 574,
+                      "y": 376
+                    },
+                    {
+                      "x": 638,
+                      "y": 412
+                    },
+                    {
+                      "x": 714,
+                      "y": 392
+                    },
+                    {
+                      "x": 785,
+                      "y": 417
+                    },
+                    {
+                      "x": 843,
+                      "y": 389
+                    },
+                    {
+                      "x": 917,
+                      "y": 419
+                    },
+                    {
+                      "x": 991,
+                      "y": 381
+                    },
+                    {
+                      "x": 1089,
+                      "y": 412
+                    },
+                    {
+                      "x": 1177,
+                      "y": 392
+                    },
+                    {
+                      "x": 1248,
+                      "y": 420
+                    },
+                    {
+                      "x": 1248,
+                      "y": 548
+                    },
+                    {
+                      "x": 378,
+                      "y": 548
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "forest-front",
+              "color": {
+                "red": 66,
+                "green": 105,
+                "blue": 77
+              },
+              "contours": [
+                {
+                  "points": [
+                    {
+                      "x": 378,
+                      "y": 503
+                    },
+                    {
+                      "x": 451,
+                      "y": 475
+                    },
+                    {
+                      "x": 511,
+                      "y": 486
+                    },
+                    {
+                      "x": 582,
+                      "y": 453
+                    },
+                    {
+                      "x": 644,
+                      "y": 475
+                    },
+                    {
+                      "x": 720,
+                      "y": 455
+                    },
+                    {
+                      "x": 818,
+                      "y": 474
+                    },
+                    {
+                      "x": 887,
+                      "y": 441
+                    },
+                    {
+                      "x": 963,
+                      "y": 476
+                    },
+                    {
+                      "x": 1041,
+                      "y": 457
+                    },
+                    {
+                      "x": 1134,
+                      "y": 483
+                    },
+                    {
+                      "x": 1248,
+                      "y": 467
+                    },
+                    {
+                      "x": 1248,
+                      "y": 555
+                    },
+                    {
+                      "x": 378,
+                      "y": 555
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "lake",
+              "color": {
+                "red": 114,
+                "green": 165,
+                "blue": 155
+              },
+              "contours": [
+                {
+                  "points": [
+                    {
+                      "x": 377,
+                      "y": 548
+                    },
+                    {
+                      "x": 1250,
+                      "y": 531
+                    },
+                    {
+                      "x": 1250,
+                      "y": 634
+                    },
+                    {
+                      "x": 377,
+                      "y": 634
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "water-glitter",
+              "color": {
+                "red": 204,
+                "green": 218,
+                "blue": 178
+              },
+              "contours": [
+                {
+                  "points": [
+                    {
+                      "x": 558,
+                      "y": 550
+                    },
+                    {
+                      "x": 832,
+                      "y": 545
+                    },
+                    {
+                      "x": 1150,
+                      "y": 579
+                    },
+                    {
+                      "x": 1250,
+                      "y": 586
+                    },
+                    {
+                      "x": 1250,
+                      "y": 592
+                    },
+                    {
+                      "x": 760,
+                      "y": 574
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "white-frame-left",
+              "color": {
+                "red": 242,
+                "green": 232,
+                "blue": 211
+              },
+              "contours": [
+                {
+                  "points": [
+                    {
+                      "x": 346,
+                      "y": 101
+                    },
+                    {
+                      "x": 385,
+                      "y": 103
+                    },
+                    {
+                      "x": 384,
+                      "y": 671
+                    },
+                    {
+                      "x": 346,
+                      "y": 681
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "white-frame-right",
+              "color": {
+                "red": 239,
+                "green": 225,
+                "blue": 199
+              },
+              "contours": [
+                {
+                  "points": [
+                    {
+                      "x": 1238,
+                      "y": 107
+                    },
+                    {
+                      "x": 1276,
+                      "y": 107
+                    },
+                    {
+                      "x": 1276,
+                      "y": 674
+                    },
+                    {
+                      "x": 1238,
+                      "y": 674
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "white-frame-top",
+              "color": {
+                "red": 241,
+                "green": 233,
+                "blue": 216
+              },
+              "contours": [
+                {
+                  "points": [
+                    {
+                      "x": 344,
+                      "y": 96
+                    },
+                    {
+                      "x": 1276,
+                      "y": 96
+                    },
+                    {
+                      "x": 1276,
+                      "y": 129
+                    },
+                    {
+                      "x": 344,
+                      "y": 129
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "white-frame-sill",
+              "color": {
+                "red": 232,
+                "green": 219,
+                "blue": 186
+              },
+              "contours": [
+                {
+                  "points": [
+                    {
+                      "x": 346,
+                      "y": 628
+                    },
+                    {
+                      "x": 1277,
+                      "y": 628
+                    },
+                    {
+                      "x": 1277,
+                      "y": 672
+                    },
+                    {
+                      "x": 346,
+                      "y": 672
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "white-mullion",
+              "color": {
+                "red": 244,
+                "green": 232,
+                "blue": 208
+              },
+              "contours": [
+                {
+                  "points": [
+                    {
+                      "x": 798,
+                      "y": 111
+                    },
+                    {
+                      "x": 826,
+                      "y": 111
+                    },
+                    {
+                      "x": 824,
+                      "y": 628
+                    },
+                    {
+                      "x": 800,
+                      "y": 628
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "white-transom",
+              "color": {
+                "red": 231,
+                "green": 224,
+                "blue": 199
+              },
+              "contours": [
+                {
+                  "points": [
+                    {
+                      "x": 381,
+                      "y": 319
+                    },
+                    {
+                      "x": 1248,
+                      "y": 319
+                    },
+                    {
+                      "x": 1248,
+                      "y": 338
+                    },
+                    {
+                      "x": 381,
+                      "y": 338
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "sill-shadow",
+              "color": {
+                "red": 78,
+                "green": 53,
+                "blue": 43
+              },
+              "contours": [
+                {
+                  "points": [
+                    {
+                      "x": 310,
+                      "y": 666
+                    },
+                    {
+                      "x": 1300,
+                      "y": 664
+                    },
+                    {
+                      "x": 1320,
+                      "y": 709
+                    },
+                    {
+                      "x": 290,
+                      "y": 711
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "sill-table",
+              "color": {
+                "red": 157,
+                "green": 103,
+                "blue": 68
+              },
+              "contours": [
+                {
+                  "points": [
+                    {
+                      "x": 317,
+                      "y": 649
+                    },
+                    {
+                      "x": 1300,
+                      "y": 649
+                    },
+                    {
+                      "x": 1313,
+                      "y": 679
+                    },
+                    {
+                      "x": 298,
+                      "y": 682
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "bed-frame",
+              "color": {
+                "red": 94,
+                "green": 63,
+                "blue": 49
+              },
+              "contours": [
+                {
+                  "points": [
+                    {
+                      "x": 58,
+                      "y": 690
+                    },
+                    {
+                      "x": 755,
+                      "y": 617
+                    },
+                    {
+                      "x": 818,
+                      "y": 858
+                    },
+                    {
+                      "x": 105,
+                      "y": 942
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "mattress",
+              "color": {
+                "red": 212,
+                "green": 195,
+                "blue": 165
+              },
+              "contours": [
+                {
+                  "points": [
+                    {
+                      "x": 87,
+                      "y": 650
+                    },
+                    {
+                      "x": 654,
+                      "y": 601
+                    },
+                    {
+                      "x": 783,
+                      "y": 746
+                    },
+                    {
+                      "x": 223,
+                      "y": 838
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "sage-blanket",
+              "color": {
+                "red": 182,
+                "green": 201,
+                "blue": 164
+              },
+              "contours": [
+                {
+                  "points": [
+                    {
+                      "x": 147,
+                      "y": 693
+                    },
+                    {
+                      "x": 531,
+                      "y": 642
+                    },
+                    {
+                      "x": 728,
+                      "y": 741
+                    },
+                    {
+                      "x": 751,
+                      "y": 811
+                    },
+                    {
+                      "x": 211,
+                      "y": 860
+                    },
+                    {
+                      "x": 120,
+                      "y": 765
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "white-pillow",
+              "color": {
+                "red": 242,
+                "green": 233,
+                "blue": 208
+              },
+              "contours": [
+                {
+                  "points": [
+                    {
+                      "x": 128,
+                      "y": 646
+                    },
+                    {
+                      "x": 319,
+                      "y": 622
+                    },
+                    {
+                      "x": 390,
+                      "y": 670
+                    },
+                    {
+                      "x": 202,
+                      "y": 711
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "throw-fold",
+              "color": {
+                "red": 118,
+                "green": 148,
+                "blue": 115
+              },
+              "contours": [
+                {
+                  "points": [
+                    {
+                      "x": 391,
+                      "y": 695
+                    },
+                    {
+                      "x": 543,
+                      "y": 666
+                    },
+                    {
+                      "x": 731,
+                      "y": 744
+                    },
+                    {
+                      "x": 744,
+                      "y": 804
+                    },
+                    {
+                      "x": 613,
+                      "y": 830
+                    },
+                    {
+                      "x": 471,
+                      "y": 760
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "rug-shadow",
+              "color": {
+                "red": 78,
+                "green": 55,
+                "blue": 47
+              },
+              "contours": [
+                {
+                  "points": [
+                    {
+                      "x": 697,
+                      "y": 818
+                    },
+                    {
+                      "x": 1083,
+                      "y": 735
+                    },
+                    {
+                      "x": 1325,
+                      "y": 839
+                    },
+                    {
+                      "x": 1299,
+                      "y": 976
+                    },
+                    {
+                      "x": 863,
+                      "y": 994
+                    },
+                    {
+                      "x": 681,
+                      "y": 925
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "woven-rug",
+              "color": {
+                "red": 180,
+                "green": 148,
+                "blue": 113
+              },
+              "contours": [
+                {
+                  "points": [
+                    {
+                      "x": 725,
+                      "y": 815
+                    },
+                    {
+                      "x": 1071,
+                      "y": 763
+                    },
+                    {
+                      "x": 1285,
+                      "y": 850
+                    },
+                    {
+                      "x": 1270,
+                      "y": 950
+                    },
+                    {
+                      "x": 877,
+                      "y": 968
+                    },
+                    {
+                      "x": 711,
+                      "y": 908
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "sleeping-white-cat",
+              "color": {
+                "red": 240,
+                "green": 235,
+                "blue": 219
+              },
+              "contours": [
+                {
+                  "points": [
+                    {
+                      "x": 1143,
+                      "y": 856
+                    },
+                    {
+                      "x": 1133,
+                      "y": 886
+                    },
+                    {
+                      "x": 1104,
+                      "y": 911
+                    },
+                    {
+                      "x": 1062,
+                      "y": 928
+                    },
+                    {
+                      "x": 1011,
+                      "y": 934
+                    },
+                    {
+                      "x": 960,
+                      "y": 928
+                    },
+                    {
+                      "x": 918,
+                      "y": 911
+                    },
+                    {
+                      "x": 889,
+                      "y": 886
+                    },
+                    {
+                      "x": 879,
+                      "y": 856
+                    },
+                    {
+                      "x": 889,
+                      "y": 826
+                    },
+                    {
+                      "x": 918,
+                      "y": 801
+                    },
+                    {
+                      "x": 960,
+                      "y": 784
+                    },
+                    {
+                      "x": 1011,
+                      "y": 778
+                    },
+                    {
+                      "x": 1062,
+                      "y": 784
+                    },
+                    {
+                      "x": 1104,
+                      "y": 801
+                    },
+                    {
+                      "x": 1133,
+                      "y": 826
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "cat-head",
+              "color": {
+                "red": 252,
+                "green": 244,
+                "blue": 230
+              },
+              "contours": [
+                {
+                  "points": [
+                    {
+                      "x": 1161,
+                      "y": 808
+                    },
+                    {
+                      "x": 1157,
+                      "y": 829
+                    },
+                    {
+                      "x": 1145,
+                      "y": 847
+                    },
+                    {
+                      "x": 1126,
+                      "y": 859
+                    },
+                    {
+                      "x": 1105,
+                      "y": 863
+                    },
+                    {
+                      "x": 1084,
+                      "y": 859
+                    },
+                    {
+                      "x": 1065,
+                      "y": 847
+                    },
+                    {
+                      "x": 1053,
+                      "y": 829
+                    },
+                    {
+                      "x": 1049,
+                      "y": 808
+                    },
+                    {
+                      "x": 1053,
+                      "y": 787
+                    },
+                    {
+                      "x": 1065,
+                      "y": 769
+                    },
+                    {
+                      "x": 1084,
+                      "y": 757
+                    },
+                    {
+                      "x": 1105,
+                      "y": 753
+                    },
+                    {
+                      "x": 1126,
+                      "y": 757
+                    },
+                    {
+                      "x": 1145,
+                      "y": 769
+                    },
+                    {
+                      "x": 1157,
+                      "y": 787
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "ear-one",
+              "color": {
+                "red": 248,
+                "green": 241,
+                "blue": 225
+              },
+              "contours": [
+                {
+                  "points": [
+                    {
+                      "x": 1071,
+                      "y": 789
+                    },
+                    {
+                      "x": 1074,
+                      "y": 738
+                    },
+                    {
+                      "x": 1110,
+                      "y": 780
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "ear-two",
+              "color": {
+                "red": 251,
+                "green": 243,
+                "blue": 228
+              },
+              "contours": [
+                {
+                  "points": [
+                    {
+                      "x": 1119,
+                      "y": 780
+                    },
+                    {
+                      "x": 1157,
+                      "y": 744
+                    },
+                    {
+                      "x": 1151,
+                      "y": 809
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "terracotta-pot",
+              "color": {
+                "red": 163,
+                "green": 96,
+                "blue": 66
+              },
+              "contours": [
+                {
+                  "points": [
+                    {
+                      "x": 1168,
+                      "y": 610
+                    },
+                    {
+                      "x": 1238,
+                      "y": 610
+                    },
+                    {
+                      "x": 1234,
+                      "y": 654
+                    },
+                    {
+                      "x": 1178,
+                      "y": 654
+                    }
+                  ]
+                }
+              ]
+            }
+          ],
+          "document_id": 2942
+        }
+      }
+    ]
+  }
+}

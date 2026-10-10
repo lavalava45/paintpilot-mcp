@@ -4,9 +4,11 @@ import {
   changedSceneCameraDependencyIds,
   normalizeCameraBinding,
   normalizeSceneCameraImagingModel,
+  SCENE_CAMERA_IMAGING_MODEL_SCHEMA,
   SCENE_CAMERA_IMAGING_MODEL_PROTOCOL,
 } from './scene-camera-imaging-model.js';
 import { normalizeSceneLightingColorModel } from './scene-lighting-color-model.js';
+import { collectSchemaErrors } from './guard/cycle-compiler.js';
 
 const cameraModel = {
   model_id: 'station-camera-01', revision: 1,
@@ -33,6 +35,19 @@ describe('E.20a Scene Camera & Imaging Model', () => {
       lighting_color_model_id: 'station-light-color-01', lighting_color_model_revision: 2,
       camera: { view_character: 'wide' },
     });
+  });
+
+  it('publishes a round-trip schema with the runtime-required camera model fields', () => {
+    const normalized = normalizeSceneCameraImagingModel(cameraModel);
+    expect(collectSchemaErrors(normalized, SCENE_CAMERA_IMAGING_MODEL_SCHEMA, 'scene_camera_imaging_model')).toEqual([]);
+    expect(SCENE_CAMERA_IMAGING_MODEL_SCHEMA.required).toEqual(expect.arrayContaining([
+      'model_id', 'revision', 'source_frame', 'geometry_model_id', 'geometry_model_revision',
+      'camera', 'focus', 'motion', 'optical_response', 'capture_finish',
+    ]));
+    const missingFocus = { ...normalized } as Record<string, unknown>;
+    delete missingFocus.focus;
+    expect(collectSchemaErrors(missingFocus, SCENE_CAMERA_IMAGING_MODEL_SCHEMA, 'scene_camera_imaging_model'))
+      .toContain('scene_camera_imaging_model.focus is required');
   });
 
   it('keeps qualitative optics instead of inventing a physical lens solver', () => {

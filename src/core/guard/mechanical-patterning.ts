@@ -40,7 +40,7 @@ export type MechanicalPatterningAnalysis = {
   }>;
 };
 
-const DISTRIBUTION_INTENTS = ['organic-clustered', 'directional-broken', 'perspective-regular', 'intentional-uniform'] as const;
+export const DISTRIBUTION_INTENTS = ['organic-clustered', 'directional-broken', 'perspective-regular', 'intentional-uniform'] as const;
 type DistributionIntent = (typeof DISTRIBUTION_INTENTS)[number];
 
 function distributionIntent(request: Record<string, any>): DistributionIntent | undefined {
@@ -88,10 +88,8 @@ function distributionFailure(request: Record<string, any>): { kind: MechanicalPa
   return null;
 }
 
-const ORGANIC_RE =
-  /(?:\bbird\b|\bbirds\b|\bninja\b|\bninjas\b|\bcharacter\b|\bcharacters\b|\bfigure\b|\bfigures\b|\bcreature\b|\bcreatures\b|\banimal\b|\banimals\b|\borganic\b|\bflower\b|\bflowers\b|\bfoliage\b|\bperson\b|\bpeople\b|\bhuman\b)/i;
-const REGULAR_RE =
-  /(?:\bwindow grid\b|\bwindows\b|\brailing\b|\brail posts?\b|\btiles?\b|\bmachine[- ]made\b|\bmodules?\b|\buniform formation\b|\bclone formation\b|\bregular pattern\b)/i;
+const ORGANIC_CATEGORY_RE = /^(?:organic|organic-instance|irregular-instance)$/i;
+const REGULAR_CATEGORY_RE = /^(?:regular|regular-module|intentional-regular)$/i;
 
 function text(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
@@ -408,18 +406,11 @@ function semanticClassification(request: Record<string, any>): 'organic_instance
         .filter(Boolean)
         .join(' ')
     : '';
-  const semantic = [
-    request.summary,
-    request.purpose,
-    micro.summary,
-    micro.intent,
-    micro.region,
-    micro.expected_visual_result,
-    motifCategories,
-  ].filter(value => typeof value === 'string').join(' ');
-
-  if (ORGANIC_RE.test(semantic)) return 'organic_instances';
-  if (REGULAR_RE.test(semantic)) return 'intentional_regular';
+  // Do not infer artistic semantics from depicted-object vocabulary. The same
+  // geometry can represent any subject, so classification must come from the
+  // explicit pattern contract or a neutral semantic motif category.
+  if (motifCategories.split(/\s+/).some(value => ORGANIC_CATEGORY_RE.test(value))) return 'organic_instances';
+  if (motifCategories.split(/\s+/).some(value => REGULAR_CATEGORY_RE.test(value))) return 'intentional_regular';
   return 'unclassified';
 }
 

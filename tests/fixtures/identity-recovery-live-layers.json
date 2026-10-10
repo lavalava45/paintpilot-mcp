@@ -1,0 +1,138 @@
+{
+  "provenance": "Frozen read-only CoS cabin layer/owner results, 2026-10-09; no pixels or runtime modifications",
+  "layer_result": {
+    "ok": true,
+    "summary": "Listed 6 layers",
+    "next_suggested_tool": "photoshop_select_layer_by_name",
+    "details": {
+      "layerCount": 6,
+      "layers": [
+        {
+          "name": "02 Plants and Cascading Vines",
+          "typename": "ArtLayer",
+          "depth": 0,
+          "path": "02 Plants and Cascading Vines",
+          "visible": true,
+          "opacity": 100,
+          "blendMode": "BlendMode.NORMAL",
+          "id": 3,
+          "kind": "LayerKind.NORMAL"
+        },
+        {
+          "name": "05 Bed / Mass and Textile",
+          "typename": "ArtLayer",
+          "depth": 0,
+          "path": "05 Bed / Mass and Textile",
+          "visible": true,
+          "opacity": 100,
+          "blendMode": "BlendMode.NORMAL",
+          "id": 6,
+          "kind": "LayerKind.NORMAL"
+        },
+        {
+          "name": "04 Sleeping White Cat / Form",
+          "typename": "ArtLayer",
+          "depth": 0,
+          "path": "04 Sleeping White Cat / Form",
+          "visible": true,
+          "opacity": 100,
+          "blendMode": "BlendMode.NORMAL",
+          "id": 5,
+          "kind": "LayerKind.NORMAL"
+        },
+        {
+          "name": "03 Sage Curtains",
+          "typename": "ArtLayer",
+          "depth": 0,
+          "path": "03 Sage Curtains",
+          "visible": true,
+          "opacity": 100,
+          "blendMode": "BlendMode.NORMAL",
+          "id": 4,
+          "kind": "LayerKind.NORMAL"
+        },
+        {
+          "name": "01 Scene Underpainting",
+          "typename": "ArtLayer",
+          "depth": 0,
+          "path": "01 Scene Underpainting",
+          "visible": true,
+          "opacity": 100,
+          "blendMode": "BlendMode.NORMAL",
+          "id": 2,
+          "kind": "LayerKind.NORMAL"
+        },
+        {
+          "name": "Background",
+          "typename": "ArtLayer",
+          "depth": 0,
+          "path": "Background",
+          "visible": true,
+          "opacity": 100,
+          "blendMode": "BlendMode.NORMAL",
+          "id": 1,
+          "kind": "LayerKind.NORMAL"
+        }
+      ],
+      "context": {
+        "hasDocument": true,
+        "document": {
+          "id": 2942,
+          "instanceWitness": {
+            "protocol": "photoshop.uxp.document_instance_witness.v1",
+            "session_id": "uxp-mv0mh3i5-bh4ee37017l",
+            "token": "uxp-mv0mh3i5-bh4ee37017l:1"
+          },
+          "name": "Untitled-1",
+          "width": 1400,
+          "height": 1000,
+          "resolution": 144,
+          "colorMode": "DocumentMode.RGB",
+          "layerCount": 6,
+          "hasSelection": true
+        },
+        "activeLayer": {
+          "name": "05 Bed / Mass and Textile",
+          "kind": "LayerKind.NORMAL",
+          "opacity": 100,
+          "blendMode": "BlendMode.NORMAL",
+          "visible": true,
+          "locked": false,
+          "isBackground": false,
+          "bounds": {
+            "left": 58,
+            "top": 601,
+            "right": 810,
+            "bottom": 941
+          }
+        }
+      }
+    },
+    "document_target": {
+      "id": 2942,
+      "pinned": true
+    }
+  },
+  "owners": [
+    {
+      "hypothesis_id": "base-scene-blockin",
+      "layer_id": 2
+    },
+    {
+      "hypothesis_id": "plants-owner",
+      "layer_id": 3
+    },
+    {
+      "hypothesis_id": "window-owner",
+      "layer_id": 4
+    },
+    {
+      "hypothesis_id": "cat-owner",
+      "layer_id": 5
+    },
+    {
+      "hypothesis_id": "bed-owner",
+      "layer_id": 6
+    }
+  ]
+}

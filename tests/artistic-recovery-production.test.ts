@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -11,6 +11,7 @@ import {
 const dirs: string[] = [];
 
 afterEach(() => {
+  vi.restoreAllMocks();
   while (dirs.length) rmSync(dirs.pop()!, { recursive: true, force: true });
 });
 
@@ -55,7 +56,7 @@ function microplan(
     tool: 'photoshop_execute_visual_microplan',
     args: {
       document_id: 42,
-      problem_id: 'cheek-edge',
+      problem_id: 'localRegion-edge',
       stage: 'FORM_AND_LIGHT',
       scale: 'small',
       change_domains: ['local-tone'],
@@ -67,7 +68,7 @@ function microplan(
       steps: [{
         tool: stepTool,
         method_id: stepTool === 'photoshop_paint_regions' ? 'region-shape' : 'edge-stroke',
-        region: 'cheek',
+        region: 'localRegion',
         args: stepTool === 'photoshop_paint_regions'
           ? {
               opacity,
@@ -81,11 +82,11 @@ function microplan(
           : { opacity, color, strokes },
       }],
     },
-    problem_id: 'cheek-edge',
+    problem_id: 'localRegion-edge',
     stage: 'FORM_AND_LIGHT',
     scale: 'small',
     change_domains: ['local-tone'],
-    summary: 'Recover the cheek edge.',
+    summary: 'Recover the localRegion edge.',
     purpose: 'Resolve the same bounded artistic problem.',
   };
 }
@@ -119,6 +120,100 @@ function failedRecord(request: Record<string, any>, sequence = 1) {
 }
 
 describe('production artistic recovery policy', () => {
+  it('delivers same-problem strategy outcomes through the existing continuation without fresh journal/state reads', () => {
+    const { store } = fixture();
+    store.write({ ...failedRecord(microplan('feedback-failed'), 1), strategy_family: 'cosmetic-surface' });
+    const regressive = failedRecord(microplan('feedback-regressive'), 2);
+    store.write({ ...regressive, strategy_family: 'contour-rebuild', rolled_back: true,
+      verdict: { ...regressive.verdict, verdict: 'regression', disposition: 'rollback' },
+    });
+    const promising = failedRecord(microplan('feedback-promising'), 3);
+    store.write({ ...promising, strategy_family: 'tonal-modeling', preview: { sha256: 'retained-frame' },
+      verdict: { ...promising.verdict, verdict: 'improvement', disposition: 'accept' },
+    });
+    const unrelated = failedRecord(microplan('unrelated-failure'), 4);
+    store.write({ ...unrelated, problem_id: 'other-problem', args: { ...unrelated.args, problem_id: 'other-problem' }, strategy_family: 'other-family' });
+    store.updatePaintingState(42, current => ({ ...current,
+      workflow_lifecycle: { status: 'active' }, active_problem: { problem_id: 'localRegion-edge', scale: 'small' },
+    }));
+    const projection = store.captureProjectionContext();
+    const recovery = store.artisticRecoveryForProblem(42, 'localRegion-edge', undefined, projection.records, projection);
+    expect(recovery.strategy_feedback).toMatchObject({
+      failed: { families: ['cosmetic-surface'], omitted: 0 },
+      regressive: { families: ['contour-rebuild'], omitted: 0 },
+      promising: { families: ['tonal-modeling'], omitted: 0 },
+      required_change: 'distinct_executable_strategy',
+    });
+    expect(recovery.strongest_known_frame).toEqual({ operation_id: 'feedback-promising', sha256: 'retained-frame' });
+    vi.spyOn(store, 'records').mockImplementation(() => { throw new Error('unexpected journal rescan'); });
+    vi.spyOn(store, 'paintingState').mockImplementation(() => { throw new Error('unexpected state reload'); });
+    const action = store.closeOnlyNextRequiredAction(42, projection);
+    expect(action).toContain('strategy_history=' + JSON.stringify(recovery.strategy_feedback));
+    expect(action).not.toContain('other-family');
+  });
+
+  it('bounds strategy feedback bytes while retaining complete strategy identities for admission', () => {
+    const { store } = fixture();
+    for (let index = 0; index < 24; index++) {
+      const record = failedRecord(microplan('bounded-family-' + index), index + 1);
+      store.write({ ...record, strategy_family: index + '-' + '🔥'.repeat(100),
+        verdict: { ...record.verdict,
+          verdict: index % 3 === 1 ? 'regression' : index % 3 === 2 ? 'improvement' : 'neutral',
+          disposition: index % 3 === 1 ? 'rollback' : index % 3 === 2 ? 'accept' : 'correct',
+        },
+      });
+    }
+    const recovery = store.artisticRecoveryForProblem(42, 'localRegion-edge', microplan('next'));
+    expect(recovery.strategy_families_tried).toHaveLength(24);
+    for (const outcome of ['failed', 'regressive', 'promising']) {
+      expect(recovery.strategy_feedback[outcome]).toMatchObject({ families: expect.any(Array), omitted: 5 });
+      expect(recovery.strategy_feedback[outcome].families).toHaveLength(3);
+      expect(recovery.strategy_feedback[outcome].families.every(label => label.endsWith('…'))).toBe(true);
+    }
+    expect(Buffer.byteLength(JSON.stringify(recovery.strategy_feedback), 'utf8')).toBeLessThan(1024);
+  });
+
+  it.each([
+    { rolled_back: true },
+    { current_frame_authority: false },
+  ])('keeps failed history when a resolved attempt loses retained-frame authority: %j', invalidation => {
+    const { store } = fixture();
+    store.write(failedRecord(microplan('retained-stroke-failure'), 1));
+    store.write(failedRecord(microplan('retained-region-failure', { stepTool: 'photoshop_paint_regions' }), 2));
+    const candidate = failedRecord(microplan('invalidated-resolution'), 3);
+    store.write({ ...candidate, ...invalidation,
+      preview: { sha256: 'invalidated-frame' },
+      verdict: { ...candidate.verdict, verdict: 'improvement', disposition: 'accept', target_resolved: 'yes' },
+    });
+    const projection = store.captureProjectionContext();
+    const recovery = store.artisticRecoveryForProblem(42, 'localRegion-edge', microplan('next'), projection.records, projection);
+    expect(recovery).toMatchObject({
+      attempt_count: 3, decision: 'block_dependent_problem', strongest_known_frame: null,
+      preserve_useful_partial_work: false,
+    });
+    expect(store.read('invalidated-resolution').verdict.target_resolved).toBe('yes');
+    const resolved = failedRecord(microplan('retained-resolution'), 4);
+    store.write({ ...resolved,
+      verdict: { ...resolved.verdict, verdict: 'improvement', disposition: 'accept', target_resolved: 'yes' },
+    });
+    expect(store.artisticRecoveryForProblem(42, 'localRegion-edge', microplan('after-resolution'))).toBeNull();
+  });
+
+  it('does not advertise an accepted neutral or rolled-back improvement as useful retained work', () => {
+    const { store } = fixture();
+    const neutral = failedRecord(microplan('neutral-accepted'), 1);
+    store.write({ ...neutral, preview: { sha256: 'neutral-frame' },
+      verdict: { ...neutral.verdict, disposition: 'accept' },
+    });
+    const improvement = failedRecord(microplan('rolled-improvement'), 2);
+    store.write({ ...improvement, rolled_back: true, preview: { sha256: 'rolled-frame' },
+      verdict: { ...improvement.verdict, verdict: 'improvement', disposition: 'accept' },
+    });
+    expect(store.artisticRecoveryForProblem(42, 'localRegion-edge', microplan('next'))).toMatchObject({
+      attempt_count: 2, strongest_known_frame: null, preserve_useful_partial_work: false,
+    });
+  });
+
   it('does not treat color, opacity, preset, or primitive-count jitter as a distinct strategy', () => {
     const base = microplan('base');
     const jittered = microplan('jittered', {
@@ -165,7 +260,7 @@ describe('production artistic recovery policy', () => {
     const dependent = microplan('third-dependent', { stepTool: 'photoshop_paint_regions' });
     const dependentResolution = store.artisticRecoveryForProblem(
       42,
-      'cheek-edge',
+      'localRegion-edge',
       dependent,
       undefined,
       undefined
@@ -178,11 +273,11 @@ describe('production artistic recovery policy', () => {
     const independent = {
       ...microplan('independent-background'),
       independent_region: true,
-      preservation_facts: ['The cheek and face layers are excluded from this background-only pass.'],
+      preservation_facts: ['The localRegion and focalForm layers are excluded from this background-only pass.'],
     };
     const independentResolution = store.artisticRecoveryForProblem(
       42,
-      'cheek-edge',
+      'localRegion-edge',
       independent,
       undefined,
       undefined
@@ -273,13 +368,13 @@ describe('production artistic recovery policy', () => {
     const { dir, store } = fixture();
     store.write(failedRecord(microplan('restart-stroke-failure'), 1));
     store.write(failedRecord(microplan('restart-region-failure', { stepTool: 'photoshop_paint_regions' }), 2));
-    const before = store.artisticRecoveryForProblem(42, 'cheek-edge', microplan('next'), undefined, undefined);
+    const before = store.artisticRecoveryForProblem(42, 'localRegion-edge', microplan('next'), undefined, undefined);
 
     const restarted = new SessionStore(path.join(dir, 'controller'), {
       visualBarrierDirectory: path.join(dir, 'barriers'),
       workspaceRoot: dir,
     });
-    const after = restarted.artisticRecoveryForProblem(42, 'cheek-edge', microplan('next'), undefined, undefined);
+    const after = restarted.artisticRecoveryForProblem(42, 'localRegion-edge', microplan('next'), undefined, undefined);
     expect(after).toEqual(before);
     expect(after?.decision).toBe('block_dependent_problem');
   });
@@ -309,7 +404,7 @@ describe('production artistic recovery policy', () => {
       },
     });
 
-    const recovery = store.artisticRecoveryForProblem(42, 'cheek-edge', microplan('history-next'));
+    const recovery = store.artisticRecoveryForProblem(42, 'localRegion-edge', microplan('history-next'));
     expect(recovery).toMatchObject({
       attempt_count: 2,
       consecutive_unresolved: 2,
@@ -327,11 +422,11 @@ describe('production artistic recovery policy', () => {
     store.updatePaintingState(42, current => ({
       ...current,
       art_director: {
-        directive_id: 'tree-rebuild',
+        directive_id: 'primaryForm-rebuild',
         status: 'active',
         review_due: false,
         tasks: [{
-          task_id: 'cheek-edge',
+          task_id: 'localRegion-edge',
           status: 'active',
           allowed_scales: ['small'],
           construction_plan: {
@@ -344,8 +439,8 @@ describe('production artistic recovery policy', () => {
     }));
     const first = {
       ...microplan('exit-soften-1'),
-      planner_directive_id: 'tree-rebuild',
-      planner_task_id: 'cheek-edge',
+      planner_directive_id: 'primaryForm-rebuild',
+      planner_task_id: 'localRegion-edge',
       painter_scope: 'local',
       causal_strategy_id: 'surface-soften',
       strategy_family: 'surface-cosmetic',
@@ -353,8 +448,8 @@ describe('production artistic recovery policy', () => {
     };
     const second = {
       ...microplan('exit-soften-2', { preset: 'Preset B' }),
-      planner_directive_id: 'tree-rebuild',
-      planner_task_id: 'cheek-edge',
+      planner_directive_id: 'primaryForm-rebuild',
+      planner_task_id: 'localRegion-edge',
       painter_scope: 'local',
       causal_strategy_id: 'surface-breakup',
       strategy_family: 'surface-cosmetic',
@@ -365,8 +460,8 @@ describe('production artistic recovery policy', () => {
 
     const dependentDetail = {
       ...microplan('exit-more-detail'),
-      planner_directive_id: 'tree-rebuild',
-      planner_task_id: 'cheek-edge',
+      planner_directive_id: 'primaryForm-rebuild',
+      planner_task_id: 'localRegion-edge',
       painter_scope: 'local',
       causal_strategy_id: 'surface-detail',
       strategy_family: 'surface-cosmetic',
@@ -393,9 +488,9 @@ describe('production artistic recovery policy', () => {
   it('allows only one cosmetic exploratory correction for a persistent structural mismatch', () => {
     const { store } = fixture();
     const cosmetic = {
-      ...microplan('tree-cosmetic-1'),
-      problem_id: 'tree-silhouette',
-      args: { ...microplan('tree-cosmetic-1').args, problem_id: 'tree-silhouette' },
+      ...microplan('primaryForm-cosmetic-1'),
+      problem_id: 'primaryForm-silhouette',
+      args: { ...microplan('primaryForm-cosmetic-1').args, problem_id: 'primaryForm-silhouette' },
       causal_strategy_id: 'surface-breakup',
       strategy_family: 'surface-cosmetic',
       causal_escalation_level: 1,
@@ -404,14 +499,14 @@ describe('production artistic recovery policy', () => {
       ...failedRecord(cosmetic, 1),
       verdict: {
         ...failedRecord(cosmetic, 1).verdict,
-        primary_mismatch: 'The polygonal tree silhouette and negative space remain structurally wrong.',
+        primary_mismatch: 'The polygonal primaryForm silhouette and negative space remain structurally wrong.',
       },
     });
 
     const anotherCosmetic = {
-      ...microplan('tree-cosmetic-2', { preset: 'Preset B' }),
-      problem_id: 'tree-silhouette',
-      args: { ...microplan('tree-cosmetic-2', { preset: 'Preset B' }).args, problem_id: 'tree-silhouette' },
+      ...microplan('primaryForm-cosmetic-2', { preset: 'Preset B' }),
+      problem_id: 'primaryForm-silhouette',
+      args: { ...microplan('primaryForm-cosmetic-2', { preset: 'Preset B' }).args, problem_id: 'primaryForm-silhouette' },
       causal_strategy_id: 'edge-noise-stamps',
       strategy_family: 'surface-cosmetic',
       causal_escalation_level: 2,
@@ -422,7 +517,7 @@ describe('production artistic recovery policy', () => {
 
     const structuralRebuild = {
       ...anotherCosmetic,
-      id: 'tree-structural-rebuild',
+      id: 'primaryForm-structural-rebuild',
       causal_strategy_id: 'negative-space-carve',
       strategy_family: 'structural-shape',
     };
@@ -434,9 +529,9 @@ describe('production artistic recovery policy', () => {
   it('does not require a numerical causal escalation label for a safe structural repair', () => {
     const { store } = fixture();
     const cosmetic = {
-      ...microplan('tree-label-free-cosmetic'),
-      problem_id: 'tree-label-free',
-      args: { ...microplan('tree-label-free-cosmetic').args, problem_id: 'tree-label-free' },
+      ...microplan('primaryForm-label-free-cosmetic'),
+      problem_id: 'primaryForm-label-free',
+      args: { ...microplan('primaryForm-label-free-cosmetic').args, problem_id: 'primaryForm-label-free' },
       causal_strategy_id: 'surface-breakup',
       strategy_family: 'surface-cosmetic',
     };
@@ -444,15 +539,15 @@ describe('production artistic recovery policy', () => {
       ...failedRecord(cosmetic, 1),
       verdict: {
         ...failedRecord(cosmetic, 1).verdict,
-        primary_mismatch: 'The polygonal tree silhouette and negative space remain structurally wrong.',
+        primary_mismatch: 'The polygonal primaryForm silhouette and negative space remain structurally wrong.',
       },
     });
 
-    const structuralBase = microplan('tree-label-free-structural', { stepTool: 'photoshop_paint_regions' });
+    const structuralBase = microplan('primaryForm-label-free-structural', { stepTool: 'photoshop_paint_regions' });
     const structural = {
       ...structuralBase,
-      problem_id: 'tree-label-free',
-      args: { ...structuralBase.args, problem_id: 'tree-label-free' },
+      problem_id: 'primaryForm-label-free',
+      args: { ...structuralBase.args, problem_id: 'primaryForm-label-free' },
       causal_strategy_id: 'negative-space-rebuild',
       strategy_family: 'structural-shape',
     };
@@ -462,7 +557,7 @@ describe('production artistic recovery policy', () => {
   });
 
   it('does not turn attempt count into an artistic veto for a genuinely distinct visual strategy', () => {
-    // The maintained homestead-tree benchmark below keeps the motivating
+    // The maintained sceneA-primaryForm benchmark below keeps the motivating
     // bad-scaffold failure shape measurable rather than only testing the gate in isolation.
     const { store } = fixture();
     store.write(failedRecord(microplan('stroke-failure'), 1));
@@ -497,22 +592,22 @@ describe('production artistic recovery policy', () => {
     )).toBe(true);
   });
 
-  it('benchmarks homestead tree correction and forces structural escalation after one cosmetic attempt', () => {
+  it('benchmarks sceneA primaryForm correction and forces structural escalation after one cosmetic attempt', () => {
     const { store } = fixture();
-    const problemId = 'homestead-tree-silhouette';
+    const problemId = 'sceneA-primaryForm-silhouette';
     const makeAttempt = (id: string, strategy: string, family: string, level: number) => {
       const base = microplan(id);
       return { ...base, problem_id: problemId, args: { ...base.args, problem_id: problemId },
         causal_strategy_id: strategy, strategy_family: family, causal_escalation_level: level,
         causal_level_change: level >= 3 };
     };
-    const first = makeAttempt('tree-surface-breakup', 'surface-breakup', 'surface-cosmetic', 1);
+    const first = makeAttempt('primaryForm-surface-breakup', 'surface-breakup', 'surface-cosmetic', 1);
     const failed = failedRecord(first, 1);
     store.write({ ...failed, verdict: { ...failed.verdict,
-      primary_mismatch: 'The polygonal tree silhouette and negative space remain structurally wrong.' } });
+      primary_mismatch: 'The polygonal primaryForm silhouette and negative space remain structurally wrong.' } });
 
-    const second = makeAttempt('tree-edge-noise', 'edge-noise-stamps', 'surface-cosmetic', 2);
-    const structural = makeAttempt('tree-negative-space-rebuild', 'negative-space-carve', 'structural-shape', 3);
+    const second = makeAttempt('primaryForm-edge-noise', 'edge-noise-stamps', 'surface-cosmetic', 2);
+    const structural = makeAttempt('primaryForm-negative-space-rebuild', 'negative-space-carve', 'structural-shape', 3);
     const secondBlocked = store.collectPreflightErrors(second, { stateOnly: true })
       .some(error => error.startsWith('causal_strategy_exhausted:'));
     const structuralBlocked = store.collectPreflightErrors(structural, { stateOnly: true })
@@ -556,7 +651,7 @@ describe('production artistic recovery policy', () => {
       args: { ...microplan('unrelated-history').args, problem_id: 'unrelated-problem' },
     }, 3));
 
-    expect(store.artisticRecoveryForProblem(42, 'cheek-edge', microplan('next'))).toBeNull();
+    expect(store.artisticRecoveryForProblem(42, 'localRegion-edge', microplan('next'))).toBeNull();
     expect(store.artisticRecoveryForProblem(42, 'unrelated-problem', {
       ...microplan('next-unrelated'),
       problem_id: 'unrelated-problem',

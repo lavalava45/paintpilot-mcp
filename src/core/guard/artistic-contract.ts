@@ -278,6 +278,13 @@ export function normalizeGlobalBriefAssessment(
   input: {
     contract?: ArtisticEvaluationContract | null;
     frame?: { sha256?: string | null } | null;
+    criticResult?: {
+      result_id?: string | null;
+      authority_class?: string | null;
+      frame_sha256?: string | null;
+      contract_id?: string | null;
+      contract_revision?: number | null;
+    } | null;
   }
 ): Record<string, unknown> {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
@@ -304,7 +311,14 @@ export function normalizeGlobalBriefAssessment(
     && contractId === input.contract.contract_id
     && contractRevision === input.contract.revision;
   const exactFrame = !!input.frame?.sha256 && frameSha === String(input.frame.sha256).toLowerCase();
-  const authorizedCritic = criticAuthority === 'authorized' && !!criticResultId;
+  const registeredCritic = input.criticResult;
+  const authorizedCritic = criticAuthority === 'authorized'
+    && !!criticResultId
+    && text(registeredCritic?.result_id) === criticResultId
+    && text(registeredCritic?.authority_class)?.toLowerCase() === 'authorized'
+    && text(registeredCritic?.frame_sha256)?.toLowerCase() === frameSha
+    && text(registeredCritic?.contract_id) === contractId
+    && Number(registeredCritic?.contract_revision) === contractRevision;
   const criteria = assessment.criteria === undefined
     ? []
     : strings(assessment.criteria, 'global_brief_assessment.criteria', { max: 16 });
@@ -445,6 +459,7 @@ export function normalizePreFinalHostileReview(
     if (effectCheck?.status === 'clear') throw new Error('pre_final_hostile_review cannot mark physical effects clear while E.17d/E.19 debt exists');
   }
   const hardDefects = majorDefects.filter(defect => defect.debt_class === 'hard');
+  const completionBlockingChecks = checks.filter(check => check.status === 'defect');
   const resultRows = Array.isArray(input.globalAssessment?.brief_item_results) ? input.globalAssessment.brief_item_results : [];
   const resultById = new Map(resultRows.map(row => [row?.item_id, row]));
   for (const defect of hardDefects) {
@@ -460,6 +475,6 @@ export function normalizePreFinalHostileReview(
     checks,
     major_defects: majorDefects,
     hard_defects: hardDefects,
-    completion_allowed: hardDefects.length === 0,
+    completion_allowed: completionBlockingChecks.length === 0 && hardDefects.length === 0,
   };
 }

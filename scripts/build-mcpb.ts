@@ -66,12 +66,16 @@ function packMcpb(outFile: string): void {
 }
 
 function main(): void {
+  run('npm run verify:third-party-notices');
   console.log('Building server…');
   run('npm run build');
 
   assertExists(join(ROOT, 'dist', 'index.js'), 'dist/index.js');
 
   const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')) as Pkg;
+  const attribution = JSON.parse(readFileSync(join(ROOT, 'third-party-components.json'), 'utf8')) as {
+    components: Array<{ package: string; version: string }>;
+  };
 
   rmSync(STAGING, { recursive: true, force: true });
   mkdirSync(SERVER_DIR, { recursive: true });
@@ -85,6 +89,9 @@ function main(): void {
   cpSync(join(ROOT, 'uxp-plugin'), join(SERVER_DIR, 'uxp-plugin'), { recursive: true });
   copyFileSync(join(ROOT, 'LICENSE'), join(SERVER_DIR, 'LICENSE'));
   copyFileSync(join(ROOT, 'NOTICE'), join(SERVER_DIR, 'NOTICE'));
+  copyFileSync(join(ROOT, 'THIRD_PARTY_NOTICES.md'), join(SERVER_DIR, 'THIRD_PARTY_NOTICES.md'));
+  copyFileSync(join(ROOT, 'third-party-components.json'), join(SERVER_DIR, 'third-party-components.json'));
+  cpSync(join(ROOT, 'licenses'), join(SERVER_DIR, 'licenses'), { recursive: true });
 
   const bundlePkg = {
     name: pkg.name,
@@ -93,7 +100,9 @@ function main(): void {
     type: pkg.type ?? 'module',
     main: 'dist/index.js',
     engines: pkg.engines ?? { node: '>=18.0.0' },
-    dependencies: pkg.dependencies ?? {},
+    // Registry is checked against the installed tree/lockfile above. Do not resolve newer
+    // dependencies into a bundle whose shipped attribution describes older versions.
+    dependencies: Object.fromEntries(attribution.components.map(c => [c.package, c.version])),
   };
   writeFileSync(join(SERVER_DIR, 'package.json'), JSON.stringify(bundlePkg, null, 2) + '\n');
 

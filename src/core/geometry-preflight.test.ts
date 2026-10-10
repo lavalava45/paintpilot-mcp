@@ -63,6 +63,23 @@ describe('geometry preflight', () => {
     ]));
   });
 
+  it('does not certify a depth-scale progression that the same preflight rejects', () => {
+    const reversed = binding({
+      control_sections: [
+        { id: 'near', at: { x: 600, y: 650 }, expected_bounds: { left: 550, top: 600, right: 650, bottom: 700 } },
+        { id: 'mid', at: { x: 600, y: 470 }, expected_bounds: { left: 510, top: 380, right: 690, bottom: 560 } },
+      ],
+    });
+    const rejected = runGeometryPreflight(reversed, scene());
+    expect(rejected.issues.map(issue => issue.code)).toContain('geometry_constraint_conflict');
+    expect(rejected.report.checks).not.toContainEqual(expect.objectContaining({
+      kind: 'depth-scale', status: 'pass',
+    }));
+    expect(runGeometryPreflight(binding(), scene()).report.checks).toContainEqual(expect.objectContaining({
+      kind: 'depth-scale', status: 'pass',
+    }));
+  });
+
   it('rejects a centerline that contradicts the accepted vanishing family', () => {
     const bad = binding({
       anchors: {

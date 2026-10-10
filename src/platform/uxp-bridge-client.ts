@@ -20,11 +20,12 @@ export interface UxpBridgeReadiness {
   transport: 'uxp';
   bridge_transport: string | null;
   bridge_revision: string | null;
+  runtime_instance_witness?: string | null;
   expected_bridge_revision: string;
   revision_match: boolean;
   photoshop_version: string | null;
   document_count: number | null;
-  active_document: { id?: number; name?: string } | null;
+  active_document: { id?: number; name?: string; instance_witness?: string } | null;
   plugin_connected: boolean;
   reason: string | null;
   checked_at: string;
@@ -35,7 +36,39 @@ export interface UxpBridgeReadiness {
   };
 }
 
-let readinessCache: { checkedAtMs: number; value: Omit<UxpBridgeReadiness, 'cache'> } | undefined;
+let readinessCache: {
+  checkedAtMs: number;
+  routeKey: string;
+  value: Omit<UxpBridgeReadiness, 'cache'>;
+} | undefined;
+
+function readinessRouteKey(health: {
+  ok?: boolean;
+  plugin_connected?: boolean;
+  transport?: string;
+  bridge_revision?: string | null;
+  runtime_instance_witness?: string | null;
+  document_count?: number | null;
+  active_document?: { id?: number; name?: string; instance_witness?: string } | null;
+  document_geometry_revision?: number;
+}): string {
+  return JSON.stringify({
+    ok: health.ok === true,
+    plugin_connected: health.plugin_connected === true,
+    transport: typeof health.transport === 'string' ? health.transport : null,
+    bridge_revision: typeof health.bridge_revision === 'string' ? health.bridge_revision : null,
+    runtime_instance_witness: typeof health.runtime_instance_witness === 'string' ? health.runtime_instance_witness : null,
+    document_count: typeof health.document_count === 'number' ? health.document_count : null,
+    active_document_id: typeof health.active_document?.id === 'number' ? health.active_document.id : null,
+    active_document_name: typeof health.active_document?.name === 'string' ? health.active_document.name : null,
+    active_document_instance_witness: typeof health.active_document?.instance_witness === 'string'
+      ? health.active_document.instance_witness
+      : null,
+    document_geometry_revision: typeof health.document_geometry_revision === 'number'
+      ? health.document_geometry_revision
+      : 0,
+  });
+}
 
 const UXP_DOCUMENT_TARGET_EXEMPT_ACTIONS = new Set([
   // These actions either create the target or explicitly navigate to another
@@ -92,7 +125,11 @@ export async function getUxpBridgeReadiness(
 ): Promise<UxpBridgeReadiness> {
   const now = Date.now();
   if (!options.forceRefresh && readinessCache && now - readinessCache.checkedAtMs <= READINESS_CACHE_TTL_MS) {
-    return withReadinessCacheMeta(readinessCache.value, readinessCache.checkedAtMs, true, now);
+    const currentHealth = getUxpBridgeHealthSnapshot(now);
+    if (readinessCache.routeKey === readinessRouteKey(currentHealth)) {
+      return withReadinessCacheMeta(readinessCache.value, readinessCache.checkedAtMs, true, now);
+    }
+    readinessCache = undefined;
   }
 
   const checkedAtMs = now;
@@ -102,6 +139,7 @@ export async function getUxpBridgeReadiness(
     transport: 'uxp' as const,
     bridge_transport: null,
     bridge_revision: null,
+    runtime_instance_witness: null,
     expected_bridge_revision: EXPECTED_UXP_BRIDGE_REVISION,
     revision_match: false,
     photoshop_version: null,
@@ -119,9 +157,11 @@ export async function getUxpBridgeReadiness(
       plugin_connected?: boolean;
       transport?: string;
       bridge_revision?: string | null;
+      runtime_instance_witness?: string | null;
       photoshop_version?: string | null;
       document_count?: number | null;
-      active_document?: { id?: number; name?: string } | null;
+      active_document?: { id?: number; name?: string; instance_witness?: string } | null;
+      document_geometry_revision?: number;
     } = {};
     health = getUxpBridgeHealthSnapshot();
 
@@ -138,10 +178,11 @@ export async function getUxpBridgeReadiness(
         ...base,
         bridge_transport: typeof health.transport === 'string' ? health.transport : null,
         bridge_revision: announcedRevision,
+        runtime_instance_witness: typeof health.runtime_instance_witness === 'string' ? health.runtime_instance_witness : null,
         plugin_connected: health.plugin_connected === true,
         reason: revisionReason ?? (health.ok === true ? 'uxp_plugin_not_connected' : 'uxp_bridge_health_failed'),
       };
-      readinessCache = { checkedAtMs, value };
+      readinessCache = { checkedAtMs, routeKey: readinessRouteKey(health), value };
       return withReadinessCacheMeta(value, checkedAtMs, false, Date.now());
     }
 
@@ -154,6 +195,7 @@ export async function getUxpBridgeReadiness(
       transport: 'uxp',
       bridge_transport: typeof health.transport === 'string' ? health.transport : null,
       bridge_revision: bridgeRevision,
+      runtime_instance_witness: typeof health.runtime_instance_witness === 'string' ? health.runtime_instance_witness : null,
       expected_bridge_revision: EXPECTED_UXP_BRIDGE_REVISION,
       revision_match: revisionMatch,
       photoshop_version: typeof health.photoshop_version === 'string' ? health.photoshop_version : null,
@@ -167,14 +209,14 @@ export async function getUxpBridgeReadiness(
       reason: revisionMatch ? null : bridgeRevision ? 'uxp_bridge_revision_mismatch' : 'uxp_bridge_revision_missing',
       checked_at: checkedAt,
     };
-    readinessCache = { checkedAtMs, value };
+    readinessCache = { checkedAtMs, routeKey: readinessRouteKey(health), value };
     return withReadinessCacheMeta(value, checkedAtMs, false, Date.now());
   } catch (error) {
     const value: Omit<UxpBridgeReadiness, 'cache'> = {
       ...base,
       reason: error instanceof Error ? error.message : String(error),
     };
-    readinessCache = { checkedAtMs, value };
+    readinessCache = undefined;
     return withReadinessCacheMeta(value, checkedAtMs, false, Date.now());
   }
 }
@@ -268,6 +310,7 @@ async function invokeUxpStableCommand<T extends Record<string, unknown>>(
     | 'paint_stamp_instances'
     | 'paint_regions'
     | 'paint_strokes'
+    | 'paint_mask_strokes'
     | 'paint_dabs'
     | 'set_foreground_color',
   params: Record<string, unknown>,
@@ -440,6 +483,7 @@ export async function invokeUxpCreateLayerMask(params: {
 
 export async function invokeUxpApplyGradientMask(params: {
   document_id?: number;
+  layer_id?: number;
   direction: 'top_to_bottom' | 'bottom_to_top' | 'left_to_right' | 'right_to_left';
   start_pct: number;
   end_pct: number;
@@ -885,6 +929,7 @@ export async function invokeUxpColorGradient(params: {
 
 export async function invokeUxpPaintRegions(params: {
   document_id?: number;
+  replace_contents?: boolean;
   regions: unknown[];
   clip_bounds?: { left: number; top: number; right: number; bottom: number };
 }, commandId?: string): Promise<{
@@ -918,6 +963,7 @@ export async function invokeUxpPaintStrokes(params: {
   document_id?: number;
   layer_id?: number;
   strokes: unknown[];
+  paint_target?: 'layer-mask';
 }, commandId?: string): Promise<{
   ok: boolean;
   data?: Record<string, unknown>;
@@ -926,15 +972,17 @@ export async function invokeUxpPaintStrokes(params: {
   receipt?: UxpBridgeCommandReceipt | null;
   pre_dispatch_rejected?: boolean;
 }> {
+  // A distinct command prevents an older companion from silently painting RGB pixels.
+  const action = params.paint_target === 'layer-mask' ? 'paint_mask_strokes' : 'paint_strokes';
   if (commandId?.trim()) {
     return invokeUxpStableCommand<Record<string, unknown>>(
-      'paint_strokes',
+      action,
       params,
       commandId,
       60_000
     );
   }
-  const result = await invokeUxpBridge('paint_strokes', params, 60_000);
+  const result = await invokeUxpBridge(action, params, 60_000);
   if (!result.ok) return { ok: false, error: result.error ?? 'uxp_paint_strokes_failed' };
   return {
     ok: true,

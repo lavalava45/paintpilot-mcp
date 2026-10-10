@@ -1,5 +1,21 @@
 import { createHash } from 'node:crypto';
 
+/** Fill omitted technical keys without changing caller-owned references or input. */
+export function normalizeGuardActionIds(input: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
+  const actions = structuredClone(input);
+  const explicitIds = new Set(actions.flatMap(step => step && typeof step === 'object' && !Array.isArray(step)
+    && typeof step.id === 'string' ? [step.id] : []));
+  for (let index = 0; index < actions.length; index++) {
+    const step = actions[index];
+    if (!step || typeof step !== 'object' || Array.isArray(step) || step.id !== undefined) continue;
+    let id = `guard_action_${index + 1}`;
+    while (explicitIds.has(id)) id += '_';
+    step.id = id;
+    explicitIds.add(id);
+  }
+  return actions;
+}
+
 export const PAINTING_INTENT_ACTIONS = [
   'add',
   'refine',
@@ -51,6 +67,7 @@ export interface PaintingIntent {
   problem_id: string;
   document_id: number;
   goal: string;
+  artistic_commentary?: string;
   target_owner_id?: string;
   region?: string;
   region_bounds?: PaintingIntentBounds;
@@ -99,8 +116,7 @@ function nonEmptyText(value: unknown): string | undefined {
 }
 
 function positiveDocumentId(value: unknown): number | undefined {
-  const parsed = Number(value);
-  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : undefined;
 }
 
 function bounds(value: unknown): PaintingIntentBounds | undefined {
@@ -115,7 +131,8 @@ function bounds(value: unknown): PaintingIntentBounds | undefined {
     right: Number(row.right),
     bottom: Number(row.bottom),
   };
-  if (!Object.values(parsed).every(Number.isFinite) || parsed.right <= parsed.left || parsed.bottom <= parsed.top) {
+  if (![row.left, row.top, row.right, row.bottom].every(value => typeof value === 'number' && Number.isFinite(value))
+    || parsed.right <= parsed.left || parsed.bottom <= parsed.top) {
     throw new PaintingIntentError(
       'painting_intent_region_bounds_invalid',
       'PaintingIntent region_bounds must contain finite left/top/right/bottom coordinates with positive width and height.'
@@ -137,40 +154,49 @@ export function parsePaintingIntent(value: unknown): PaintingIntent {
   const visualIntent = nonEmptyText(raw.visual_intent)?.toLowerCase();
   const scale = nonEmptyText(raw.scale)?.toLowerCase();
 
-  if (!requestKey) throw new PaintingIntentError('painting_intent_request_key_required', 'PaintingIntent request_key is required.');
-  if (!problemId) throw new PaintingIntentError('painting_intent_problem_id_required', 'PaintingIntent problem_id is required.');
-  if (!documentId) throw new PaintingIntentError('painting_intent_document_required', 'PaintingIntent document_id must be a positive integer.');
-  if (!goal) throw new PaintingIntentError('painting_intent_goal_required', 'PaintingIntent goal is required.');
+  const errors: PaintingIntentError[] = [];
+  if (!requestKey) errors.push(new PaintingIntentError('painting_intent_request_key_required', 'PaintingIntent request_key is required.'));
+  if (!problemId) errors.push(new PaintingIntentError('painting_intent_problem_id_required', 'PaintingIntent problem_id is required.'));
+  if (!documentId) errors.push(new PaintingIntentError('painting_intent_document_required', 'PaintingIntent document_id must be a positive integer.'));
+  if (!goal) errors.push(new PaintingIntentError('painting_intent_goal_required', 'PaintingIntent goal is required.'));
   if (!action || !PAINTING_INTENT_ACTIONS.includes(action as PaintingIntentAction)) {
-    throw new PaintingIntentError(
+    errors.push(new PaintingIntentError(
       'painting_intent_action_invalid',
       `PaintingIntent action must be one of ${PAINTING_INTENT_ACTIONS.join('|')}.`
-    );
+    ));
   }
   if (!visualIntent || !PAINTING_INTENT_VISUAL_INTENTS.includes(visualIntent as PaintingIntentVisualIntent)) {
-    throw new PaintingIntentError(
+    errors.push(new PaintingIntentError(
       'painting_intent_visual_intent_invalid',
       `PaintingIntent visual_intent must be one of ${PAINTING_INTENT_VISUAL_INTENTS.join('|')}.`
-    );
+    ));
   }
-  if (scale && !PAINTING_INTENT_SCALES.includes(scale as PaintingIntentScale)) {
-    throw new PaintingIntentError(
+  if (raw.scale !== undefined && (!scale || !PAINTING_INTENT_SCALES.includes(scale as PaintingIntentScale))) {
+    errors.push(new PaintingIntentError(
       'painting_intent_scale_invalid',
       `PaintingIntent scale must be one of ${PAINTING_INTENT_SCALES.join('|')} when supplied.`
-    );
+    ));
   }
   if (raw.actions !== undefined && !Array.isArray(raw.actions)) {
-    throw new PaintingIntentError('painting_intent_actions_invalid', 'PaintingIntent actions must be an array when supplied.');
+    errors.push(new PaintingIntentError('painting_intent_actions_invalid', 'PaintingIntent actions must be an array when supplied.'));
   }
 
+  let regionBounds: PaintingIntentBounds | undefined;
+  try { regionBounds = bounds(raw.region_bounds); }
+  catch (error) { if (error instanceof PaintingIntentError) errors.push(error); else throw error; }
+  if (errors.length) throw new PaintingIntentError(errors[0]!.code,
+    errors.map(error => error.message).join('\n'),
+    { errors: errors.map(error => ({ code: error.code, message: error.message })) });
+
   return {
-    request_key: requestKey,
-    problem_id: problemId,
-    document_id: documentId,
-    goal,
+    request_key: requestKey!,
+    problem_id: problemId!,
+    document_id: documentId!,
+    goal: goal!,
+    ...(nonEmptyText(raw.artistic_commentary) ? { artistic_commentary: nonEmptyText(raw.artistic_commentary) } : {}),
     ...(nonEmptyText(raw.target_owner_id) ? { target_owner_id: nonEmptyText(raw.target_owner_id) } : {}),
     ...(nonEmptyText(raw.region) ? { region: nonEmptyText(raw.region) } : {}),
-    ...(raw.region_bounds !== undefined ? { region_bounds: bounds(raw.region_bounds) } : {}),
+    ...(raw.region_bounds !== undefined ? { region_bounds: regionBounds } : {}),
     action: action as PaintingIntentAction,
     ...(scale ? { scale: scale as PaintingIntentScale } : {}),
     visual_intent: visualIntent as PaintingIntentVisualIntent,

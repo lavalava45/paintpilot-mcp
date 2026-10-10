@@ -1,5 +1,14 @@
 # Visual Evaluation and Adaptive Multiscale Verification
 
+## Same-chat review in the current source
+
+[Ordinary review](artistic-evaluator.md) asks the Painter in this chat to inspect exact BEFORE/AFTER
+against the original brief/style, identify the largest visible construction defect and fix it next.
+No automatic local inference is used. Pass gain, task/stage readiness and whole-image finish differ;
+self-review is not independent acceptance. Missing evidence stays uncertain, and useful unfinished pixels
+can remain. A technically delivered image or populated form is not a passed artistic assessment.
+
+
 This document is the canonical visual-evaluation reference for the digital-painting project. It
 combines the adaptive multiscale verification model with the practical painting evaluation suite.
 
@@ -246,21 +255,21 @@ not actually delivered to the visual review channel.
 
 These exercises test transfer across different visual problems rather than memorized scene geometry.
 
-### 8.1 Sphere — value and transition control
+### 8.1 Rounded volumetric mass — value and transition control
 
-Goal: render one sphere with readable light/shadow families, turning form and contact/cast-shadow
+Goal: render one rounded volumetric mass with readable light/shadow families, turning form and contact/cast-shadow
 relationship.
 
 Success evidence:
 
 - clean silhouette;
 - grouping reads at thumbnail scale;
-- continuous form without airbrush haze or stamp scallops;
+- continuous form without generic soft-brush veil or stamp scallops;
 - highlights/reflected light do not flatten hierarchy.
 
-### 8.2 Cube or simple building — planes, perspective and edges
+### 8.2 Planar structured mass — planes, perspective and edges
 
-Goal: render a box-like form with three readable planes and intentional edge hierarchy.
+Goal: render a simple planar form with three readable planes and intentional edge hierarchy.
 
 Success evidence:
 
@@ -269,9 +278,9 @@ Success evidence:
 - marks reinforce planes rather than creating ribbons/grids;
 - local detail does not disguise a broken silhouette or plane relationship.
 
-### 8.3 Small still life — overlap and negative space
+### 8.3 Multi-form arrangement — overlap and negative space
 
-Goal: arrange 2–4 simple objects with overlap and meaningful negative space.
+Goal: arrange 2–4 simple forms with overlap and meaningful negative space.
 
 Success evidence:
 
@@ -280,9 +289,9 @@ Success evidence:
 - negative spaces remain intentional;
 - correction seams do not become equal-or-worse defects.
 
-### 8.4 Small portrait study — proportion and selective detail
+### 8.4 Proportion-sensitive focal study — proportion and selective detail
 
-Goal: produce a compact head study with stable major proportions, value grouping and selective
+Goal: produce a compact focal-form study with stable major proportions, value grouping and selective
 feature detail.
 
 Success evidence:
@@ -500,8 +509,8 @@ Persist generic observations such as:
 - a batch size repeatedly approaches timeout on this Photoshop/runtime setup;
 - a critic view at a particular scale exposes seams missed in the overview.
 
-Do not persist scene-specific coordinates, successful tower/portrait/object geometry or other
-task-specific execution traces as reusable painting knowledge.
+Do not persist scene-specific coordinates, successful task-specific geometry or other execution
+traces as reusable painting knowledge.
 
 ## 16. Scope
 

@@ -25,16 +25,16 @@ function tempStore() {
 
 function assessment() {
   return {
-    composition: 'Stable portrait composition.',
-    focal_hierarchy: 'Face is focal.',
-    large_value_masses: 'Light face, dark coat, mid background.',
+    composition: 'Stable focalStudy composition.',
+    focal_hierarchy: 'FocalForm is focal.',
+    large_value_masses: 'Light focalForm, dark coat, mid background.',
     lighting: 'Single coherent key light.',
-    silhouette: 'Head separates from background.',
-    depth: 'Face forward, background back.',
-    likeness_main_shape: 'Main head shape stable.',
+    silhouette: 'PrimaryForm separates from background.',
+    depth: 'FocalForm forward, background back.',
+    likeness_main_shape: 'Main primaryForm shape stable.',
     overall_detail_level: 'Form modelling, before micro-detail.',
     mood: 'Calm restrained study with no unnecessary theatrical contrast.',
-    color_relationships: 'Muted warm/cool balance supports the focal face.',
+    color_relationships: 'Muted warm/cool balance supports the focal focalForm.',
     shape_language: 'Naturalistic grouped masses with restrained small accents.',
     edge_hierarchy: 'Focal edges are selective; secondary transitions stay soft.',
     intentional_omission: 'Secondary texture remains suppressed until value structure is secure.',
@@ -49,7 +49,7 @@ function criteria(overrides: Record<string, string> = {}) {
   });
   return {
     large_value_grouping: row('large_value_grouping', 'Large light/mid/dark groups remain coherent.'),
-    focal_hierarchy: row('focal_hierarchy', 'The focal face reads clearly in grayscale.'),
+    focal_hierarchy: row('focal_hierarchy', 'The focal focalForm reads clearly in grayscale.'),
     silhouette_separation: row('silhouette_separation', 'Figure remains separated from the background.'),
     local_contrast_budget: row('local_contrast_budget', 'Secondary contrast stays below the focal area.'),
     detail_before_form: row('detail_before_form', 'Large form is stable enough for detail.'),
@@ -94,10 +94,10 @@ function directive(valueCheck: Record<string, unknown>) {
       revision: 1,
       mode: 'ranked',
       zones: [
-        { id: 'face-zone', owner_ids: ['face-owner'], priority: 'primary', contrast_budget: 'high', detail_budget: 'high', edge_certainty: 'high', chroma_accent: 'allowed' },
+        { id: 'focalForm-zone', owner_ids: ['focalForm-owner'], priority: 'primary', contrast_budget: 'high', detail_budget: 'high', edge_certainty: 'high', chroma_accent: 'allowed' },
         { id: 'background-zone', owner_ids: ['background-owner'], priority: 'support', contrast_budget: 'low', detail_budget: 'low', edge_certainty: 'low', chroma_accent: 'restricted' },
       ],
-      ordering: ['face-zone', 'background-zone'],
+      ordering: ['focalForm-zone', 'background-zone'],
     },
     assessment: assessment(),
     value_check: valueCheck,
@@ -117,7 +117,7 @@ function directive(valueCheck: Record<string, unknown>) {
       {
         task_id: 'detail-pass',
         summary: 'Add restrained detail after value gate.',
-        region: 'face',
+        region: 'focalForm',
         allowed_scales: ['detail', 'small'],
       },
     ],
@@ -136,7 +136,7 @@ function painterDetailRequest() {
       change_domains: ['local-texture'],
       stage: 'DETAIL',
       scale: 'detail',
-      region: 'face',
+      region: 'focalForm',
       problem_id: 'detail-pass',
     },
     summary: 'Detail pass after value gate.',
@@ -276,6 +276,33 @@ describe('luminance preview analysis', () => {
 });
 
 describe('stage-aware value gate', () => {
+  it('initializes an unpainted Director without blank-canvas analysis but keeps DETAIL blocked', () => {
+    const store = tempStore();
+    const initial = directive({ status: 'pending', observed: false });
+    delete (initial as Partial<typeof initial>).value_check;
+    const state = store.setArtDirectorState({ document_id: 42, action: 'review', directive: initial });
+    expect(state.art_director.value_check).toMatchObject({ status: 'pending', observed: false });
+    expect(store.records().filter(record => record.tool === 'photoshop_analyze_value_structure')).toEqual([]);
+    expect(() => store.plannerGate(42, painterDetailRequest())).toThrow(/value_check_required/);
+  });
+
+  it('does not accept fabricated evidence under pending value review', () => {
+    const store = tempStore();
+    expect(() => store.setArtDirectorState({
+      document_id: 42, action: 'review',
+      directive: directive({ status: 'pending', observed: true, preview_sha256: 'a'.repeat(64) }),
+    })).toThrow(/pending is unobserved/);
+  });
+
+  it('does not silently replace an existing observed value review when its field is omitted', () => {
+    const store = tempStore();
+    store.updatePaintingState(42, state => ({ ...state, current_frame: { operation_id: 'already-painted' } }));
+    const initial = directive({ status: 'pending', observed: false });
+    delete (initial as Partial<typeof initial>).value_check;
+    expect(() => store.setArtDirectorState({ document_id: 42, action: 'review', directive: initial }))
+      .toThrow(/value_check is required/);
+  });
+
   it('recognizes detail stages without treating ordinary form stages as detail', () => {
     expect(isDetailStage('DETAIL')).toBe(true);
     expect(isDetailStage('MICRO_DETAIL')).toBe(true);

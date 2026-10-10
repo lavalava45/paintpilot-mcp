@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { isVisual, parseTexts } from './session-store.js';
+import { commentaryLanguageNotice, isVisual, parseTexts, reviewEvidenceRole } from './session-store.js';
 import { hostProgressPayload, operationNarrative, progressPayload } from './operation-narrative.js';
 import { guardCapabilities } from './guard-capabilities.js';
 import { compileVisualMicroPlan } from '../visual-microplan-compiler.js';
@@ -17,8 +17,43 @@ function resultSummary(result, limit = 700) {
   return JSON.stringify(bodies).slice(0, limit);
 }
 
+export function confirmedPaintTargets(result) {
+  const targets = new Map();
+  const collect = payload => {
+    if (!payload || typeof payload !== 'object') return;
+    if (Array.isArray(payload.content)) {
+      for (const body of parseTexts(payload)) collect(body);
+      return;
+    }
+    const details = payload.details ?? payload;
+    const add = target => {
+      if (!Number.isSafeInteger(target?.layer_id) || target.layer_id <= 0) return;
+      // Execution facts, never an assertion of pixel coverage or opacity_role.
+      targets.set(target.layer_id, {
+        layer_id: target.layer_id,
+        ...(Number.isFinite(target.opacity) ? { opacity: target.opacity } : {}),
+        ...(Number.isFinite(target.fill_opacity) ? { fill_opacity: target.fill_opacity } : {}),
+        ...(typeof target.blend_mode === 'string' ? { blend_mode: target.blend_mode } : {}),
+        ...(Array.isArray(target.parent_groups) ? { parent_groups: structuredClone(target.parent_groups) } : {}),
+      });
+    };
+    add(details.paint_target);
+    if (Array.isArray(details.painted_regions)) {
+      for (const region of details.painted_regions) add(region?.paint_target);
+    }
+    collect(payload.mutation_result);
+    if (payload.mutation_results && typeof payload.mutation_results === 'object') {
+      for (const mutation of Object.values(payload.mutation_results)) collect(mutation);
+    }
+  };
+  collect(result);
+  return [...targets.values()];
+}
+
 function confirmedTargets(record) {
   const layerIds = new Set();
+  const paintTargets = confirmedPaintTargets(record?.result);
+  for (const target of paintTargets) layerIds.add(target.layer_id);
   const logicalLayers = [];
   let documentId = Number.isSafeInteger(record?.args?.document_id) ? record.args.document_id : undefined;
   if (!documentId && Number.isSafeInteger(record?.bootstrap_outcome?.document_id)) {
@@ -89,6 +124,7 @@ function confirmedTargets(record) {
     ...(documentId ? { document_id: documentId } : {}),
     ...(layerIds.size ? { layer_ids: [...layerIds] } : {}),
     ...(logicalLayers.length ? { logical_layers: logicalLayers } : {}),
+    ...(paintTargets.length ? { paint_targets: paintTargets } : {}),
   };
 }
 
@@ -100,6 +136,7 @@ export function compactClosedPrevious(value) {
     operation_acknowledged: !!value.operation_ack,
     report_delivery: value.report_delivery,
     verdict_recorded: !!value.verdict_recorded,
+    ...(value.execution_claim_correction ? { execution_claim_correction: value.execution_claim_correction } : {}),
   };
 }
 
@@ -196,7 +233,7 @@ export function visualReviewPackage(record, significance) {
   const reviewEvidence = Array.isArray(record.review_evidence)
     ? record.review_evidence
         .filter(frame => frame?.bound_whole_sha256 === record.preview.sha256)
-        .map(frame => ({ ...frame }))
+        .map(frame => ({ ...frame, role: reviewEvidenceRole(frame) }))
     : [];
   const beforeDocumentMatched = !!before && documentId !== null && before.document_id === documentId;
   const afterDocumentMatched = !!after && documentId !== null && after.document_id === documentId;
@@ -246,7 +283,16 @@ export function visualReviewPackage(record, significance) {
   };
 }
 
-export function cycleEnvelope(store, record, { replay = false, closed_previous } = {}) {
+export function cycleEnvelope(store, record, { replay = false, closed_previous, projectionContext } = {}) {
+  const presentationDocumentId = Number(record?.args?.document_id);
+  const presentationContext = typeof store?.presentationContext === 'function'
+    ? store.presentationContext(
+        Number.isSafeInteger(presentationDocumentId) && presentationDocumentId > 0
+          ? presentationDocumentId
+          : undefined,
+        projectionContext?.paintingState
+      )
+    : undefined;
   const narrativeState = record.phase === 'completed' ? 'completed' : 'uncertain';
   const healthyCompletion = record.phase === 'completed' && !record.failed && !record.error;
   const state = nextState(record);
@@ -271,11 +317,20 @@ export function cycleEnvelope(store, record, { replay = false, closed_previous }
         ? pendingReview
           ? `Call photoshop_guard_review_image for operation ${record.id} and inspect the escalated crop evidence, then call photoshop_guard_cycle_auto again with previous_operation_id=${record.id} + previous_observation. This is the same artistic operation; do not replay its mutation. Include next_pass only when resubmitting the reviewed observation.`
           : `Call photoshop_guard_review_image with operation_id=${record.id}, inspect the exact delivered review image(s), then call photoshop_guard_cycle_auto once with previous_operation_id + previous_observation. Include next_pass to continue, or omit it to finalize the last pass. Guard derives the technical report and exact durable receipt acknowledgement internally.`
-        : 'Continue through photoshop_guard_cycle_auto. For a completed non-visual prior operation, Guard-owned technical closure stays behind the compact facade; do not switch to standalone report/ack/verdict tools or a next_operation payload.';
+        : `Continue through photoshop_guard_cycle_auto with the next_pass or painting_intent. Guard inherits the one outstanding confirmed nonvisual operation and closes its technical report/receipt internally. For explicit closure use previous_operation_id=${record.id}, without previous_observation. Do not switch to standalone report/ack/verdict tools or a next_operation payload.`;
   const significance = store.visualSignificance(record.id);
   const visualReview = visualReviewPackage(record, significance);
+  const problemId = record.problem_id ?? record.args?.problem_id
+    ?? projectionContext?.paintingState?.documents?.[String(presentationDocumentId)]?.active_problem?.problem_id;
+  const recovery = healthyCompletion && record.visual && record.tool !== 'photoshop_undo'
+    && record.args?.action_class !== 'ROLLBACK' && projectionContext && problemId
+    ? store.artisticRecoveryForProblem(presentationDocumentId, problemId, record, projectionContext.records, projectionContext)
+    : null;
+  const commentaryNotice = commentaryLanguageNotice(record, presentationContext);
   const envelope = {
     mode: 'photoshop-mcp-cycle',
+    ...(presentationContext ? { presentation_context: presentationContext } : {}),
+    ...(commentaryNotice ? { commentary_notice: commentaryNotice } : {}),
     ...(replay ? { replayed_from_disk: true } : {}),
     ...(closed_previous !== undefined ? { closed_previous: compactClosedPrevious(closed_previous) } : {}),
     execution: {
@@ -289,12 +344,19 @@ export function cycleEnvelope(store, record, { replay = false, closed_previous }
     preview: record.preview,
     significance,
     ...(visualReview ? { visual_review: visualReview } : {}),
+    ...(recovery ? { continuation_recovery: {
+      problem_id: problemId,
+      decision: recovery.decision,
+      attempt_count: recovery.attempt_count,
+      strategy_feedback: recovery.strategy_feedback,
+      strongest_known_frame: recovery.strongest_known_frame,
+    } } : {}),
     operation_receipt: terminalNotExecuted || terminalBootstrapFailure ? null : (record.operation_receipt ?? null),
     required_user_report: terminalNotExecuted || terminalBootstrapFailure || (bootstrap && state === 'awaiting_reconcile') ? null : {
       operation_id: record.id,
       compatibility_only: true,
       required_for_compact_model_path: false,
-      format: 'Что сделал: ...\nЗачем: ...\nРезультат: ...',
+      format: 'Localized Did / Why / Result headings according to presentation_context.language',
       did_hint: record.summary,
       why_hint: record.purpose,
       result_hint: resultSummary(record.result),
@@ -321,16 +383,27 @@ export function cycleEnvelope(store, record, { replay = false, closed_previous }
     journal_record_path: store.file(record.id),
   };
   if (!healthyCompletion) {
-    envelope.blocking_issue = record.error ?? (record.failed ? 'operation failed or requires reconciliation' : 'operation outcome is uncertain');
+    const failedBody = parseTexts(record.result).find(body => body?.ok === false);
+    const step = failedBody?.failed_mutation_step;
+    const mutationFailure = step ? failedBody?.mutation_results?.[step] : failedBody;
+    envelope.execution_failure = {
+      mutation: mutationFailure ? { code: mutationFailure.code, message: mutationFailure.message, step } : null,
+      followup_error: record.error ?? null, mutation_replay_permitted: false,
+    };
+    envelope.blocking_issue = mutationFailure?.message ?? record.error ?? (record.failed ? 'operation failed or requires reconciliation' : 'operation outcome is uncertain');
+    if (!bootstrap && ['awaiting_reconcile', 'awaiting_preview_recovery'].includes(state)) envelope.delivery_recovery = {
+      tool: 'photoshop_guard_reconcile', args: { id: record.id, capture_evidence: true },
+      next: 'Inspect fresh inline state/image, then reconcile with returned evidence ids and an honest outcome. Capture alone does not classify execution; never replay.',
+    };
     envelope.diagnostics = {
       route: 'MCP host -> embedded Photoshop Guard -> project dist/index.js -> Photoshop',
       summary: record.summary,
       purpose: record.purpose,
       error: record.error,
       result: compactResult(record.result),
-      narrative: operationNarrative(record, narrativeState),
-      progress: progressPayload(record, narrativeState),
-      host_progress: hostProgressPayload(record, narrativeState),
+      narrative: operationNarrative(record, narrativeState, presentationContext),
+      progress: progressPayload(record, narrativeState, presentationContext),
+      host_progress: hostProgressPayload(record, narrativeState, presentationContext),
       guard_capabilities: guardCapabilities(),
     };
   }
@@ -376,6 +449,11 @@ export async function executeLogicalOperation({
   const timing = {
     before_preview_ms: null,
     photoshop_dispatch_wall_ms: null,
+    recorder_prepare_ms: null,
+    recorder_finalize_ms: null,
+    recorder_settle_ms: null,
+    recorder_stop_ms: null,
+    recorder_postprocess_ms: null,
     after_preview_ms: null,
     preview_capture_materialization_ms: null,
   };
@@ -446,10 +524,13 @@ export async function executeLogicalOperation({
     store.markDispatched(activeRecord);
     await onProgress?.('mutation');
     let mutationTraceToken;
+    const recorderPrepareStartedAt = Date.now();
     try {
       mutationTraceToken = await mutationLifecycle?.beforeMutation?.(activeRecord);
     } catch {
       // Recorder/observability failure must never alter canonical mutation semantics.
+    } finally {
+      if (mutationLifecycle?.beforeMutation) timing.recorder_prepare_ms = Date.now() - recorderPrepareStartedAt;
     }
     const mutationStartedAt = Date.now();
     let result;
@@ -460,13 +541,21 @@ export async function executeLogicalOperation({
       mutationError = error;
       throw error;
     } finally {
+      // End the dispatch clock before any recorder wait, including failed dispatches.
+      timing.photoshop_dispatch_wall_ms = Date.now() - mutationStartedAt;
+      const recorderFinalizeStartedAt = Date.now();
       try {
-        await mutationLifecycle?.afterMutation?.(activeRecord, mutationTraceToken, mutationError);
+        const traceTiming = await mutationLifecycle?.afterMutation?.(activeRecord, mutationTraceToken, mutationError);
+        for (const field of ['recorder_settle_ms', 'recorder_stop_ms', 'recorder_postprocess_ms']) {
+          const value = traceTiming?.[field];
+          if (typeof value === 'number' && Number.isFinite(value) && value >= 0) timing[field] = value;
+        }
       } catch {
         // Trace finalization is best-effort and cannot make a dispatched mutation replayable.
+      } finally {
+        if (mutationLifecycle?.afterMutation) timing.recorder_finalize_ms = Date.now() - recorderFinalizeStartedAt;
       }
     }
-    timing.photoshop_dispatch_wall_ms = Date.now() - mutationStartedAt;
     let completed = store.complete(activeRecord, result);
     activeRecord = completed;
 

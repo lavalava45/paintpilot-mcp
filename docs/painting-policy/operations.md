@@ -67,7 +67,7 @@ An **atomic visual bundle** is narrow by definition. All included marks must:
 - belong to the same stage/scale decision;
 - support one clear before/after acceptance question.
 
-If any of those conditions is false, split the work and preview between parts. Independent sky, land/water, foliage, architecture, subject-detail or other separately judgeable passes are **never one bundle** merely because they can be encoded in one MCP/script call.
+If any of those conditions is false, split the work and preview between parts. Independent semantic regions, owners, effects or other separately judgeable passes are **never one bundle** merely because they can be encoded in one MCP/script call.
 
 - Never launch another Photoshop mutation while the previous call is outstanding. A session/process id is not completion.
 - No next visual mutation may begin until the previous mutation/atomic bundle has **completed → been captured → been visually inspected → been classified** as improvement, neutral or regression. This is a hard barrier, not a suggestion.
@@ -243,7 +243,7 @@ Stroke count is a soft planning budget unless the user explicitly makes it a har
 Call `prompts/get` for `ps.digital_painting_control`, for example:
 
 ```text
-subject: cat portrait
+subject: <brief-defined subject>
 style: anime cel-shaded
 finish_level: study
 constraints: white background; three layers maximum

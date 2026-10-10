@@ -1,6 +1,6 @@
 # Photoshop MCP — Digital Painting Edition
 
-> Independently maintained Windows-first Photoshop MCP system — 133 tools including painting, VisualMicroPlan execution, color sampling, landmarks/guides, previews, embedded Guard orchestration and 0 recipes. Not affiliated with Adobe.
+> Independently maintained Windows-first Photoshop MCP system — 132 tools including painting, VisualMicroPlan execution, color sampling, landmarks/guides, previews, embedded Guard orchestration and 0 recipes. Not affiliated with Adobe.
 
 **Project:** https://github.com/lavalava45/paintpilot-mcp
 **Historical provenance:** `NOTICE`
@@ -47,7 +47,7 @@ Compose supported semantic `photoshop_*` tools directly. Use the five `ps.*` gui
 
 ## Tool surface
 
-- **133 tools** — semantic `photoshop_*` surface; 16 are the embedded `photoshop_guard_*` façade
+- **132 tools** — semantic `photoshop_*` surface; 15 are the embedded `photoshop_guard_*` façade
 - **5 MCP prompts** — including `ps.digital_painting_control`
 - **Native Sky Replacement** — optional sky replacement using Photoshop's built-in feature
 - **State** — `photoshop_get_state`, `photoshop_get_preview`, `photoshop_get_capabilities`

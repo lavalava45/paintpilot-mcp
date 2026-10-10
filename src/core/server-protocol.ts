@@ -22,8 +22,8 @@ import type { ToolDefinition, ToolRegistry } from './tool-registry.js';
 
 const COMPACT_SCHEMA_DESCRIPTION_TOOLS = new Set([
   'photoshop_execute_visual_microplan',
-  'photoshop_guard_cycle',
   'photoshop_guard_cycle_auto',
+  'photoshop_guard_art_director',
 ]);
 
 function firstSentence(value: string): string {
@@ -51,10 +51,30 @@ export function compactToolForPublishedCatalog(
   return {
     ...tool,
     description: describeToolForGuardMode(tool.name, tool.description),
-    inputSchema: COMPACT_SCHEMA_DESCRIPTION_TOOLS.has(tool.name)
+    inputSchema: ['photoshop_guard_lint_next_pass', 'photoshop_guard_status'].includes(tool.name)
+      ? { ...tool.inputSchema, properties: { ...tool.inputSchema.properties, next_pass: { type: 'object',
+        description: 'Use the exact next_pass schema published by photoshop_guard_cycle_auto; validation returns all field corrections without mutation.' } } }
+      : COMPACT_SCHEMA_DESCRIPTION_TOOLS.has(tool.name)
       ? compactSchemaDescriptions(tool.inputSchema) as ToolDefinition['tool']['inputSchema']
       : tool.inputSchema,
   };
+}
+
+// Guard keeps the complete executor registry internally. Publishing blocked raw
+// mutations wastes the host's finite tool/schema budget and can hide recovery.
+export function publishedToolCatalog(tools: ToolDefinition['tool'][], guardRequired = EMBEDDED_GUARD_REQUIRED) {
+  const essential = [
+    'photoshop_guard_cycle_auto', 'photoshop_guard_art_director',
+    'photoshop_guard_resume', 'photoshop_guard_review_image',
+    'photoshop_guard_job_poll', 'photoshop_guard_reconcile',
+    'photoshop_guard_set_art_run', 'photoshop_guard_status',
+  ];
+  const selected = guardRequired ? tools.filter(tool => !shouldBlockRawTool(tool.name, 'required')) : tools;
+  return [...selected].sort((a, b) => {
+    const rank = (name: string) => essential.includes(name) ? essential.indexOf(name)
+      : name.startsWith('photoshop_guard_') ? essential.length : essential.length + 1;
+    return guardRequired ? rank(a.name) - rank(b.name) : 0;
+  }).map(compactToolForPublishedCatalog);
 }
 
 export interface ProtocolRuntime {
@@ -90,7 +110,7 @@ export function installProtocolHandlers(runtime: ProtocolRuntime): void {
   const { server, tools, prompts, guard, lease } = runtime;
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: tools.list().map(compactToolForPublishedCatalog),
+    tools: publishedToolCatalog(tools.list()),
   }));
 
   server.setRequestHandler(ListPromptsRequestSchema, async () => ({
@@ -124,7 +144,12 @@ export function installProtocolHandlers(runtime: ProtocolRuntime): void {
         { guardRequired: EMBEDDED_GUARD_REQUIRED, runtimeDirectory: guard.runtimeDirectory }
       );
       const deadlineAt = requestDeadline(request.params);
-      const executionContext = deadlineAt === undefined ? {} : { deadlineAt };
+      const contextId = request.params._meta?.['paintpilot/review-context'];
+      const executionContext = {
+        ...(deadlineAt === undefined ? {} : { deadlineAt }),
+        ...(typeof contextId === 'string' && contextId.trim() && contextId.length <= 256
+          ? { reviewContextId: contextId } : {}),
+      };
       const result = await withToolExecutionContext(
         executionContext,
         () => tools.execute(name, args)

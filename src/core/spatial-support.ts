@@ -67,6 +67,24 @@ export function previewToCanvas(point: PixelPoint, transform: PreviewTransform):
   };
 }
 
+/**
+ * Returns the exact affine projection used to convert preview-local geometry back
+ * into pinned document/canvas coordinates. Keeping this as explicit provenance
+ * prevents crop-local coordinates from being persisted as if they were canvas
+ * coordinates when constructing connected owners from review evidence.
+ */
+export function previewToCanvasAffine(transform: PreviewTransform): {
+  scale_x: number; scale_y: number; translate_x: number; translate_y: number;
+} {
+  const crop = sourceRect(transform);
+  return {
+    scale_x: (crop.right - crop.left) / transform.outputWidth,
+    scale_y: (crop.bottom - crop.top) / transform.outputHeight,
+    translate_x: crop.left,
+    translate_y: crop.top,
+  };
+}
+
 export function mapRect(rect: PixelRect, transform: PreviewTransform): PixelRect {
   assertRect(rect);
   const tl = canvasToPreview({ x: rect.left, y: rect.top }, transform);

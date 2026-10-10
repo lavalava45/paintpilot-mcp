@@ -1,0 +1,20 @@
+IK.ts 1.3.7
+Author: Leonard Goldstein
+Repository: https://github.com/goldst/IK.ts
+Source revision: 40b7e2859082f08df88655160ad18fa22b72d02e
+
+Unmodified npm runtime dependency, used by a project-authored bounded adapter.
+The following upstream credit section is retained verbatim (Calico spelling is upstream):
+
+## License and credits
+[MIT](LICENSE)
+
+This library is a TypeScript port of and based on
+- [Fullik](https://github.com/lo-th/fullik) by [lo-th](https://github.com/lo-th), which is a JavaScript port of
+- [Calico](https://github.com/FedUni/caliko) by Alastair Lansley and the Federation University Australia, which is an implementation of the
+- [FABRIK algorithm](http://andreasaristidou.com/publications/papers/FABRIK.pdf) by Andreas Aristidou and Joan Lasenby
+
+This library differs from Fullik:
+- IK.ts is written TypeScript, Fullik is JavaScript. You can use IK.ts with JavaScript nevertheless!
+- Fullik is not in the npm registry and doesn't provide you documentation for installation and usage. It does, however, contain demos, from which the correct usage can be deduced. I added some usage information to this document and plan to add more detailed documentation for IK.ts for each method and class based on the calico documentation.
+- IK.ts doesn't have the three.js dependency. If you are developing a three.js project, consider using Fullik instead – both projects work, but the latter is made specifically for usage with three.js

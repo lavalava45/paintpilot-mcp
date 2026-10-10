@@ -69,7 +69,11 @@ export function createMethodPaletteTools(registry: ToolRegistry): ToolDefinition
           if (!constructionRole && !visualIntent) {
             throw new Error('construction_role or visual_intent is required');
           }
-          const options = { stage: typeof args.stage === 'string' ? args.stage : undefined };
+          const options = {
+            stage: typeof args.stage === 'string' ? args.stage : undefined,
+            preferredMethodId: typeof args.preferred_method_id === 'string' && !args.edge_class
+              ? args.preferred_method_id : undefined,
+          };
           const selection = constructionRole
             ? selectPaintingConstructionMethod(registry, constructionRole, impactClass, avoid, options)
             : selectPaintingMethod(registry, visualIntent!, impactClass, avoid, options);

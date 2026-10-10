@@ -1,14 +1,20 @@
 // @ts-nocheck
+import { chatCriticRequest, validateChatCritic, persistChatCritic } from './chat-critic.js';
+import { normalizeBrushAllowedScales } from './brush-scale-fit.js';
+import { artisticContinuation, documentArtisticDebt, bindPaintingCompletion } from './document-artistic-debt.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
+import { appendThroughputArchiveEvent, readThroughputArchivePage } from './throughput-event-archive.js';
+import { currentToolExecutionContext } from '../execution-context.js';
 import {
   assessVisualSignificance,
   VISUAL_SIGNIFICANCE_MODES,
 } from './visual-significance.js';
-import { operationNarrative } from './operation-narrative.js';
+import { formatOperationNarrative, operationNarrative } from './operation-narrative.js';
 import { jobsDirectory, readJob } from './async-job.js';
 import { OPERATION_ACK_PROTOCOL, OPERATION_RECEIPT_PROTOCOL } from './guard-capabilities.js';
+import { normalizeConstructionModel, solveConstruction } from '../object-construction.js';
 import type {
   GuardActiveJobProjection,
   GuardProjectionContext,
@@ -71,15 +77,345 @@ import {
   softDominanceContextForOperation,
   softDominanceRiskForOperation,
 } from './soft-dominance-review.js';
-import { normalizeSceneOwnershipPlan, sceneOwnershipOwnerIds } from '../scene-ownership-plan.js';
+import { normalizeSceneOwnershipPlan, extendSceneOwnershipPlan, promoteTemporarySceneOwnershipUnit, sceneOwnershipOwnerIds, sceneComponentScopeIssue } from '../scene-ownership-plan.js';
 import { normalizeSceneGeometryModel } from '../scene-geometry-model.js';
 import { lightingColorBindingStaleness, normalizeSceneLightingColorModel } from '../scene-lighting-color-model.js';
+import { normalizeImagingPreflight } from '../imaging-preflight.js';
 import { cameraBindingStaleness, normalizeCameraBinding, normalizeSceneCameraImagingModel } from '../scene-camera-imaging-model.js';
-import { changedSceneGeometryDependencyIds, geometryBindingStaleness, normalizeGeometryBinding } from '../geometry-binding.js';
+import { changedSceneGeometryDependencyIds, geometryBindingStaleness, normalizeGeometryBinding, transformGeometryBinding } from '../geometry-binding.js';
+import { generatedGeometryProvenanceState } from '../executable-geometry-validation.js';
 import { normalizeMaterialResponsePlan } from '../material-response.js';
 import { attentionBindingStaleness, normalizeAttentionBinding, normalizePerceptualHierarchy } from '../perceptual-hierarchy.js';
+import { normalizeUserConfig, parseUserConfigPatch, USER_CONFIG_VERSION } from '../user-config.js';
 
 export const ROUTE = 'MCP host -> embedded Photoshop Guard -> project dist/index.js -> Photoshop';
+function hasCyrillic(value) {
+  return /[А-Яа-яЁё]/.test(String(value ?? ''));
+}
+function sidecarLanguage(configuredLanguage, ...samples) {
+  if (configuredLanguage === 'ru' || configuredLanguage === 'en') return configuredLanguage;
+  return samples.some(hasCyrillic) ? 'ru' : 'en';
+}
+function commentaryText(value, fallback) {
+  const candidate = typeof value === 'string' ? value.trim() : '';
+  // Localized scaffolding cannot translate source prose. Preserve it rather than
+  // erase artistic evidence when the caller did not follow the language preference.
+  return candidate || fallback;
+}
+function prePassCommentary(record, review = record?.verdict) {
+  // Presentation correction is separate from the immutable technical goal/actions.
+  return textOrUndefined(review?.artistic_commentary)
+    ?? textOrUndefined(record?.artistic_commentary)
+    ?? textOrUndefined(record?.args?.intent)
+    ?? textOrUndefined(record?.summary);
+}
+export function commentaryLanguageNotice(record, presentation) {
+  const intent = prePassCommentary(record);
+  const language = presentation?.language;
+  const mismatch = intent && (language === 'ru'
+    ? /[A-Za-z]/.test(intent) && !hasCyrillic(intent)
+    : language === 'en' && hasCyrillic(intent));
+  if (!mismatch) return undefined;
+  // Script mismatch is a presentation hint, never a painting/review admission gate.
+  return {
+    code: 'commentary_language_mismatch',
+    expected_language: language,
+    repair: language === 'ru'
+      ? 'Комментарий должен быть на русском языке. Передай русское намерение в previous_observation.artistic_commentary вместе с обычным наблюдением после прохода. Для следующих проходов используй русский goal или artistic_commentary. Дополнительный Guard-цикл не нужен.'
+      : 'Commentary must be in English. Supply the English pre-pass narration as previous_observation.artistic_commentary during ordinary review closure. For future passes use an English goal or artistic_commentary. No extra Guard cycle is needed.',
+  };
+}
+function lowerInitial(value) {
+  const text = String(value ?? '').trim();
+  return text ? text.charAt(0).toLocaleLowerCase('ru-RU') + text.slice(1) : text;
+}
+function sentenceWithoutTerminalPunctuation(value) {
+  return String(value ?? '').trim().replace(/[.!?]+\s*$/, '');
+}
+function artisticObservedResult(verdict) {
+  return textOrUndefined(verdict?.observed_change)
+    ?? (Array.isArray(verdict?.observations)
+      ? textOrUndefined(verdict.observations.map(item => textOrUndefined(item?.visible)).filter(Boolean).join('\n\n'))
+      : undefined);
+}
+function completedArtisticSentence(value, language) {
+  const text = sentenceWithoutTerminalPunctuation(value);
+  if (!text) return language === 'ru' ? 'Я сделал следующий художественный шаг.' : 'I completed the next artistic step.';
+  if (language !== 'ru') return `I completed this step: ${lowerInitial(text)}.`;
+  const replacements = [
+    ['усилить', 'усилил'], ['создать', 'создал'], ['добавить', 'добавил'], ['сделать', 'сделал'],
+    ['уточнить', 'уточнил'], ['отделить', 'отделил'], ['настроить', 'настроил'], ['построить', 'построил'],
+    ['смягчить', 'смягчил'], ['затемнить', 'затемнил'], ['осветлить', 'осветлил'], ['исправить', 'исправил'],
+    ['нарисовать', 'нарисовал'], ['наложить', 'наложил'], ['провести', 'провёл'], ['проработать', 'проработал'],
+    ['сформировать', 'сформировал'], ['выстроить', 'выстроил'], ['доработать', 'доработал'], ['сохранить', 'сохранил'],
+  ];
+  const lower = text.toLocaleLowerCase('ru-RU');
+  for (const [infinitive, past] of replacements) {
+    if (lower.startsWith(`${infinitive} `) || lower === infinitive) {
+      return `Я ${past}${text.slice(infinitive.length)}.`;
+    }
+  }
+  if (/^я\s+/i.test(text)) return `${text}.`;
+  return `Я сделал следующий шаг: ${lowerInitial(text)}.`;
+}
+function artisticToolDescription(record, language, detail = 'normal') {
+  const steps = Array.isArray(record?.args?.steps)
+    ? record.args.steps : [{ tool: record?.tool, args: record?.args }];
+  const toolNames = [];
+  const brushSettings = [];
+  const parameters = [];
+  const ru = language === 'ru';
+  const add = (name) => { if (name && !toolNames.includes(name)) toolNames.push(name); };
+  if (record?.args?.logical_layer?.layer_name) {
+    parameters.push(`${ru ? 'Рабочий слой' : 'Working layer'}: ${record.args.logical_layer.layer_name}.`);
+  }
+  for (const step of steps) {
+    const tool = String(step?.tool ?? '');
+    const args = step?.args ?? {};
+    if (tool === 'photoshop_set_brush') brushSettings.push(args);
+    if (tool === 'photoshop_select_brush_preset' && args.name) {
+      parameters.push(`${ru ? 'Кисть' : 'Brush preset'}: ${args.name}.`);
+    }
+    if (tool === 'photoshop_select_brush_preset') add(language === 'ru' ? 'кисть' : 'brush');
+    if (tool === 'photoshop_paint_dabs') {
+      add(language === 'ru' ? 'кисть' : 'brush');
+      brushSettings.push(args, ...(Array.isArray(args.dabs) ? args.dabs : []));
+    }
+    if (tool === 'photoshop_paint_strokes') {
+      brushSettings.push(args);
+      const strokes = Array.isArray(step?.args?.strokes) ? step.args.strokes : [];
+      for (const stroke of strokes) {
+        brushSettings.push(stroke);
+        const strokeTool = String(stroke?.tool ?? 'BRUSH').toUpperCase();
+        if (strokeTool === 'PENCIL') add(language === 'ru' ? 'карандаш' : 'pencil');
+        else if (strokeTool === 'SMUDGE') add(language === 'ru' ? 'палец / Smudge' : 'Smudge tool');
+        else if (strokeTool === 'ERASER') add(language === 'ru' ? 'ластик' : 'eraser');
+        else add(language === 'ru' ? 'кисть' : 'brush');
+      }
+    }
+    const mappings = {
+      photoshop_apply_gaussian_blur: ['размытие по Гауссу', 'Gaussian Blur'],
+      photoshop_apply_smart_blur: ['Smart Blur', 'Smart Blur'],
+      photoshop_paint_regions: ['заливку контуров', 'filled regions'],
+      photoshop_fill_layer: ['заливку слоя', 'layer fill'],
+      photoshop_select_rectangle: ['прямоугольное выделение', 'rectangular selection'],
+      photoshop_select_ellipse: ['эллиптическое выделение', 'elliptical selection'],
+      photoshop_create_layer_mask: ['маску слоя', 'layer mask'],
+      photoshop_apply_gradient_mask: ['градиент на маске', 'gradient mask'],
+      photoshop_paint_color_gradient: ['градиент', 'gradient'],
+      photoshop_move_layer: ['перемещение слоя', 'layer move'],
+      photoshop_scale_layer: ['масштабирование слоя', 'layer scaling'],
+      photoshop_rotate_layer: ['поворот слоя', 'layer rotation'],
+      photoshop_set_layer_blend_mode: ['режим наложения слоя', 'layer blend mode'],
+      photoshop_set_layer_opacity: ['непрозрачность слоя', 'layer opacity'],
+      photoshop_adjust_curves: ['Кривые', 'Curves'],
+      photoshop_auto_levels: ['Уровни', 'Levels'],
+      photoshop_content_aware_fill: ['заливку с учётом содержимого', 'Content-Aware Fill'],
+    };
+    if (mappings[tool]) add(mappings[tool][language === 'ru' ? 0 : 1]);
+    if (tool === 'photoshop_apply_gaussian_blur' && Number.isFinite(args.radius)) {
+      parameters.push(`${ru ? 'Размытие по Гауссу: радиус' : 'Gaussian Blur: radius'} ${args.radius} px.`);
+    }
+    if (tool === 'photoshop_set_layer_blend_mode' && args.blendMode) {
+      parameters.push(`${ru ? 'Режим наложения' : 'Blend mode'}: ${args.blendMode}.`);
+    }
+    if (tool === 'photoshop_set_layer_opacity' && Number.isFinite(args.opacity)) {
+      parameters.push(`${ru ? 'Непрозрачность слоя' : 'Layer opacity'}: ${args.opacity}%.`);
+    }
+    if (tool === 'photoshop_select_layer_by_name' && args.name) {
+      parameters.push(`${ru ? 'Рабочий слой' : 'Working layer'}: ${args.name}.`);
+    }
+    if (tool === 'photoshop_paint_regions') {
+      const regions = Array.isArray(args.regions) ? args.regions : [];
+      if (detail !== 'detailed' && regions.length) {
+        parameters.push(`${ru ? 'Контурных заливок' : 'Region fills'}: ${regions.length}.`);
+      }
+      for (const region of detail === 'detailed' ? regions : []) {
+        const color = region.color;
+        const parts = [];
+        if (color && [color.red, color.green, color.blue].every(Number.isFinite)) {
+          parts.push(`RGB(${color.red}, ${color.green}, ${color.blue})`);
+        }
+        if (Number.isFinite(region.opacity)) parts.push(`${ru ? 'непрозрачность' : 'opacity'} ${region.opacity}%`);
+        if (parts.length) parameters.push(`${ru ? 'Контурная заливка' : 'Region fill'}: ${parts.join(', ')}.`);
+      }
+    }
+    if (tool === 'photoshop_apply_gradient_mask') {
+      const directions = { right_to_left: 'справа налево', left_to_right: 'слева направо',
+        top_to_bottom: 'сверху вниз', bottom_to_top: 'снизу вверх' };
+      if (args.direction) parameters.push(`${ru ? 'Направление градиента маски' : 'Mask gradient direction'}: ${ru ? directions[args.direction] ?? args.direction : args.direction}.`);
+      if (Number.isFinite(args.start_pct) && Number.isFinite(args.end_pct)) {
+        parameters.push(`${ru ? 'Границы градиента маски' : 'Mask gradient bounds'}: ${args.start_pct}% → ${args.end_pct}%.`);
+      }
+    }
+    if (tool === 'photoshop_paint_color_gradient') {
+      const point = value => value && Number.isFinite(value.x) && Number.isFinite(value.y)
+        ? `(${value.x}, ${value.y})` : undefined;
+      const from = point(args.from), to = point(args.to);
+      if (from && to) parameters.push(`${ru ? 'Градиент' : 'Gradient'}: ${from} → ${to} px.`);
+      const stops = (Array.isArray(args.stops) ? args.stops : [])
+        .filter(stop => [stop.position, stop.red, stop.green, stop.blue].every(Number.isFinite))
+        .map(stop => `${stop.position}: RGB(${stop.red}, ${stop.green}, ${stop.blue})`);
+      if (detail === 'detailed' && stops.length) parameters.push(`${ru ? 'Цветовые точки' : 'Color stops'}: ${stops.join('; ')}.`);
+    }
+  }
+  if (!toolNames.length && !parameters.length && !brushSettings.length) return undefined;
+  if (language === 'ru') {
+    const sentence = toolNames.length ? `В Photoshop я использую ${toolNames.join(', ')}.` : '';
+    if (detail === 'short') return sentence || undefined;
+    for (const settings of brushSettings) {
+      const parts = [];
+      if (Number.isFinite(settings.size)) parts.push(`размер ${settings.size} px`);
+      for (const [key, label] of [['hardness', 'жёсткость'], ['opacity', 'непрозрачность'], ['flow', 'поток'], ['spacing', 'интервал'], ['smoothing', 'сглаживание']]) {
+        if (Number.isFinite(settings[key])) parts.push(`${label} ${settings[key]}%`);
+      }
+      if (parts.length) parameters.push(`Для кисти ставлю ${parts.join(', ')}.`);
+    }
+    return [sentence, ...new Set(parameters)].filter(Boolean).join(detail === 'detailed' ? '\n' : ' ');
+  }
+  const sentence = toolNames.length ? `In Photoshop I use the ${toolNames.join(', ')}.` : '';
+  if (detail === 'short') return sentence || undefined;
+  for (const settings of brushSettings) {
+    const parts = [];
+    if (Number.isFinite(settings.size)) parts.push(`${settings.size} px size`);
+    for (const key of ['hardness', 'opacity', 'flow', 'spacing', 'smoothing']) {
+      if (Number.isFinite(settings[key])) parts.push(`${settings[key]}% ${key}`);
+    }
+    if (parts.length) parameters.push(`Brush settings: ${parts.join(', ')}.`);
+  }
+  return [sentence, ...new Set(parameters)].filter(Boolean).join(detail === 'detailed' ? '\n' : ' ');
+}
+const ANCHOR_SEMANTIC_FIELDS = [
+  'current_stage', 'last_stage_reset', 'active_scale', 'active_problem', 'visual_problems',
+  'owner_representation_state', 'physical_stack_check', 'confirmed_goal_frame',
+  'brief_debt_overrides', 'priority_review_required', 'last_critique', 'cumulative_trend_guard', 'relation_review',
+];
+const ANCHOR_FINISH_FIELDS = ['global_brief_assessment', 'global_brief_outcome', 'final_artistic_frame'];
+const ANCHOR_DIRECTOR_FIELDS = [
+  'status', 'current_task_id', 'completed_microplans', 'task_successful_microplans', 'task_autonomy_remaining',
+  'strategy_meaningful_microplans', 'review_due', 'review_reason', 'interrupt', 'whole_image_glance',
+  'last_painter_stage', 'last_painter_operation_id', 'last_painter_verdict_at', 'last_stage_reset',
+  'assessment', 'physical_stack_check', 'value_check', 'refinement_check', 'strategy_validation',
+  'global_brief_assessment', 'global_brief_completion_allowed', 'pre_final_hostile_review',
+  'visual_development_gate', 'final_comparison', 'completed_at',
+];
+function snapshotFields(source, keys) {
+  return Object.fromEntries(keys.filter(key => source[key] !== undefined).map(key => [key, structuredClone(source[key])]));
+}
+function replaceSnapshotFields(target, fields, keys) {
+  for (const key of keys) delete target[key];
+  Object.assign(target, structuredClone(fields));
+}
+function frameSemanticSnapshot(current, documentId, operationId, sha256) {
+  return {
+    document_id: documentId, anchor_operation_id: operationId, anchor_sha256: sha256,
+    document_incarnation: normalizeDocumentInstanceWitness(current.document_instance?.host_witness)?.token
+      ?? current.document_instance?.bootstrap_operation_id ?? null,
+    fields: snapshotFields(current, ANCHOR_SEMANTIC_FIELDS),
+    finish_fields: snapshotFields(current, ANCHOR_FINISH_FIELDS),
+    director_state: current.art_director?.directive_id ? {
+      directive_id: current.art_director.directive_id, revision: current.art_director.revision,
+      fields: snapshotFields(current.art_director, ANCHOR_DIRECTOR_FIELDS),
+      tasks: (current.art_director.tasks ?? []).map(task => ({
+        task_id: task.task_id, fields: snapshotFields(task, ['status', 'successful_microplans']),
+      })),
+    } : null,
+  };
+}
+function validateFrameSemanticSnapshot(snapshot, documentId, operationId, sha256, errorCode) {
+  const fieldsMatchScope = (fields, keys) => fields && typeof fields === 'object' && !Array.isArray(fields)
+    && Object.keys(fields).every(key => keys.includes(key));
+  const director = snapshot?.director_state;
+  if (!snapshot || snapshot.document_id !== documentId || snapshot.anchor_operation_id !== operationId
+    || snapshot.anchor_sha256 !== sha256 || !fieldsMatchScope(snapshot.fields, ANCHOR_SEMANTIC_FIELDS)
+    || (Object.hasOwn(snapshot, 'director_state') && (
+      !fieldsMatchScope(snapshot.finish_fields, ANCHOR_FINISH_FIELDS)
+      || (director !== null && (!director?.directive_id || !Number.isSafeInteger(director.revision) || director.revision < 1
+        || !fieldsMatchScope(director.fields, ANCHOR_DIRECTOR_FIELDS) || !Array.isArray(director.tasks)
+        || new Set(director.tasks.map(task => task?.task_id)).size !== director.tasks.length
+        || director.tasks.some(task => !task?.task_id || !fieldsMatchScope(task.fields, ['status', 'successful_microplans']))))))) {
+    throw new Error(`${errorCode}: semantic snapshot is not bound to this exact frame/scope`);
+  }
+}
+function restoreFrameSemantics(current, snapshot, frame) {
+  const restored = { ...current };
+  replaceSnapshotFields(restored, snapshot.fields, ANCHOR_SEMANTIC_FIELDS);
+  let directorScope = 'unavailable';
+  if (Object.hasOwn(snapshot, 'director_state')) {
+    const saved = snapshot.director_state;
+    const art = current.art_director;
+    const sameDirective = saved === null ? !art?.directive_id
+      : art?.directive_id === saved.directive_id && art.revision === saved.revision
+        && (art.tasks ?? []).length === saved.tasks.length
+        && (art.tasks ?? []).every(task => saved.tasks.some(row => row.task_id === task.task_id));
+    if (sameDirective) {
+      directorScope = 'exact_directive_revision';
+      replaceSnapshotFields(restored, snapshot.finish_fields, ANCHOR_FINISH_FIELDS);
+      if (saved) {
+        const director = { ...art };
+        replaceSnapshotFields(director, saved.fields, ANCHOR_DIRECTOR_FIELDS);
+        director.tasks = (art.tasks ?? []).map(task => {
+          const result = { ...task };
+          replaceSnapshotFields(result, saved.tasks.find(row => row.task_id === task.task_id).fields, ['status', 'successful_microplans']);
+          return result;
+        });
+        restored.art_director = director;
+      }
+    } else {
+      directorScope = 'newer_directive_preserved_review_required';
+      replaceSnapshotFields(restored, {}, ANCHOR_FINISH_FIELDS);
+      delete restored.brief_debt_overrides;
+      if (art) {
+        const director = { ...art };
+        replaceSnapshotFields(director, {}, ANCHOR_DIRECTOR_FIELDS);
+        restored.art_director = {
+          ...director, status: 'review_due', review_due: true, review_reason: `${frame.restore_kind ?? 'accepted_anchor'}_restored_under_newer_directive`,
+          physical_stack_check: normalizePhysicalStackCheck({ status: 'pending', observed: false }),
+          refinement_check: normalizeRefinementCheck({ status: 'pending', observed: false }),
+          whole_image_glance: { due: true, reason: `${frame.restore_kind ?? 'accepted_anchor'}_restore`, required_operation_id: frame.operation_id,
+            required_frame_sha256: frame.sha256 },
+        };
+      }
+    }
+  }
+  return { restored, directorScope };
+}
+function restoredBoundedUndoState(current, recovery, record, frame, review) {
+  const incarnation = normalizeDocumentInstanceWitness(current.document_instance?.host_witness)?.token
+    ?? current.document_instance?.bootstrap_operation_id ?? null;
+  if (recovery.snapshot.document_incarnation !== incarnation) {
+    throw new Error('bounded_undo_restore_unverified: document incarnation changed before semantic persistence');
+  }
+  const { restored, directorScope } = restoreFrameSemantics(current, recovery.snapshot, { ...frame, restore_kind: 'bounded_undo' });
+  if (review.regressions.length > 0 || review.global_readability === 'degraded'
+    || (review.review_findings ?? []).some(finding => finding.severity === 'must-fix')) {
+    replaceSnapshotFields(restored, {}, ANCHOR_FINISH_FIELDS);
+    delete restored.confirmed_goal_frame;
+    restored.priority_review_required = true;
+    if (restored.art_director) restored.art_director = { ...restored.art_director,
+      status: 'review_due', review_due: true, review_reason: 'restored_frame_has_observed_defects' };
+  }
+  return { directorScope, state: { ...restored, pending_rollback: undefined, current_frame: frame, accepted_frame: frame,
+    last_operation_id: record.id, last_critique: { operation_id: record.id, observations: review.observations,
+      primary_mismatch: review.primary_mismatch, observed_change: review.observed_change, target_resolved: review.target_resolved,
+      regressions: review.regressions, uncertainty: review.uncertainty, verdict: review.verdict },
+    last_rollback: { operation_id: record.id, source_operation_id: recovery.source.id,
+      completed_at: record.completed_at, required_undo_steps: recovery.expectedSteps,
+      semantic_state_restored: true, director_restore_scope: directorScope } } };
+}
+function confirmedUndoSteps(result) {
+  for (let body of parseTexts(result)) {
+    // The native history tool preserves its public text layout; only its exact
+    // structured UXP result suffix is execution evidence, never the prose count.
+    if (typeof body.text === 'string' && /^Undo successful \([^\n]+\)\r?\nResult: /u.test(body.text)) {
+      try { body = JSON.parse(body.text.slice(body.text.indexOf('Result: ') + 8)); } catch { continue; }
+    }
+    const explicit = positiveHistoryStepCount(body.undo_history_states_consumed ?? body.details?.undo_history_states_consumed);
+    if (explicit) return explicit;
+    if (body.undone === true) return positiveHistoryStepCount(body.steps);
+  }
+  return 0;
+}
 const READS = new Set([
   'photoshop_ping', 'photoshop_get_version', 'photoshop_get_capabilities',
   'photoshop_get_state', 'photoshop_get_preview', 'photoshop_list_documents',
@@ -109,6 +445,7 @@ export function isRead(tool) { return READS.has(tool); }
 export function isVisual(tool) {
   return !isRead(tool)
     && !PREPARATION.has(tool)
+    && tool !== 'photoshop_export_as'
     && tool !== 'photoshop_save_document'
     && tool !== 'photoshop_close_document';
 }
@@ -163,6 +500,73 @@ const PHYSICAL_STACK_SIGNATURE_ROLES = new Set([
   'support-surface',
   'transmissive-surface',
 ]);
+const REPRESENTATION_STYLE_BASIS_FIELDS = new Set([
+  'shape_language',
+  'material_treatment',
+  'primitive_footprint_tolerance',
+  'finish_criteria',
+]);
+function guardedBlurReceipts(record) {
+  if (/^photoshop_apply_(?:gaussian|motion|smart)_blur$/.test(record?.tool ?? '')) {
+    return parseTexts(record.result).map(body => ({ data: body.details ?? body, requested_layer_id: record.args?.layer_id }));
+  }
+  if (record?.tool !== 'photoshop_execute_visual_microplan' || record.args?.method_class !== 'filter') return [];
+  const filters = (record.args.steps ?? []).filter(step => step.tool === 'photoshop_apply_gaussian_blur');
+  if (filters.length !== 1) return [];
+  return parseTexts(record.result).flatMap(body => {
+    const result = body.mutation_results?.[filters[0].id];
+    return result?.ok === true ? [{ data: result.details ?? result, requested_layer_id: filters[0].args?.layer_id }] : [];
+  });
+}
+function representationOwnerContext(record) {
+  const blur = /^photoshop_apply_(?:gaussian|motion|smart)_blur$/.test(record?.tool ?? '');
+  if (record?.tool !== 'photoshop_execute_visual_microplan' && !blur) return null;
+  const logical = blur ? record?.logical_layer : record?.args?.logical_layer;
+  if (!logical || typeof logical !== 'object' || Array.isArray(logical)) return null;
+  const ownerId = textOrUndefined(logical.hypothesis_id);
+  const physicalRole = textOrUndefined(logical.physical_role)?.toLowerCase();
+  let layerId = logical.layer_id;
+  if ((blur || record.args?.method_class === 'filter') && record.phase === 'completed' && !record.failed) {
+    for (const { data, requested_layer_id } of guardedBlurReceipts(record)) {
+      if (data.original_preserved === true && data.filter_mode === 'smart-filter'
+        && data.source_layer_id === requested_layer_id && data.source_layer_id === layerId && Number.isSafeInteger(data.layer_id) && data.layer_id > 0) layerId = data.layer_id;
+    }
+  }
+  if (!ownerId || !PHYSICAL_STACK_SIGNATURE_ROLES.has(physicalRole)) return null;
+  return {
+    owner_id: ownerId,
+    physical_role: physicalRole,
+    layer_id: Number.isSafeInteger(layerId) && layerId > 0 ? layerId : null,
+  };
+}
+function exactRepresentationStyleExemption(record, documentState) {
+  const styleContract = documentState?.art_director?.style_contract ?? {};
+  const rawBasis = record?.args?.style_contract_basis;
+  if (rawBasis && typeof rawBasis === 'object' && !Array.isArray(rawBasis)) {
+    const field = textOrUndefined(rawBasis.field);
+    const criterion = textOrUndefined(rawBasis.criterion);
+    if (field && criterion && REPRESENTATION_STYLE_BASIS_FIELDS.has(field) && styleContract[field] === criterion) {
+      return { source: 'pass', field, criterion };
+    }
+  }
+  const refinement = documentState?.art_director?.refinement_check;
+  if (refinement?.status === 'style-not-applicable') {
+    const basis = refinement.style_contract_basis;
+    const field = textOrUndefined(basis?.field);
+    const criterion = textOrUndefined(basis?.criterion);
+    if (field && criterion && REPRESENTATION_STYLE_BASIS_FIELDS.has(field) && styleContract[field] === criterion) {
+      return { source: 'refinement_check', field, criterion };
+    }
+  }
+  return null;
+}
+function ownerRepresentationDebt(documentState) {
+  const states = documentState?.owner_representation_state;
+  if (!states || typeof states !== 'object' || Array.isArray(states)) return [];
+  return Object.values(states)
+    .filter(row => row && typeof row === 'object' && ['scaffold-debt', 'assessment-pending'].includes(row.state))
+    .sort((a, b) => String(a.owner_id ?? '').localeCompare(String(b.owner_id ?? '')));
+}
 const SEVERITIES = new Set(['must-fix', 'should-fix', 'optional']);
 const ART_DIRECTOR_INTERRUPT_REASONS = new Set([
   'serious_visual_error',
@@ -310,6 +714,7 @@ function parseBrushPreflight(raw) {
     const purpose = textOrUndefined(role.purpose);
     const preferredPreset = textOrUndefined(role.preferred_preset);
     const workingScale = textOrUndefined(role.working_scale);
+    const allowedScales = normalizeBrushAllowedScales(role.allowed_scales);
     const pressurePolicy = textOrUndefined(role.pressure_policy)?.toLowerCase();
     const probeStatus = textOrUndefined(role.probe_status)?.toLowerCase();
     if (!roleId || !idPattern.test(roleId) || seen.has(roleId)) {
@@ -419,6 +824,7 @@ function parseBrushPreflight(raw) {
       candidate_evidence: candidateEvidence,
       effective_settings: effectiveSettings,
       working_scale: workingScale,
+      ...(allowedScales ? { allowed_scales: allowedScales } : {}),
       pressure_policy: pressurePolicy,
       probe_status: probeStatus,
       caveat: textOrUndefined(role.caveat) ?? null,
@@ -434,6 +840,7 @@ function parseBrushPreflight(raw) {
     inventory_query: inventoryQuery,
     inventory_scope: brushPackId ? 'brush-pack' : inventoryQuery ? 'filtered' : 'full',
     brush_pack_id: brushPackId,
+    runtime_instance_witness: textOrUndefined(raw.runtime_instance_witness) ?? null,
     roles,
     recorded_at: new Date().toISOString(),
   };
@@ -687,6 +1094,12 @@ function parseValueCheck(raw) {
     styleContractBasis = { field, criterion };
   }
 
+  if (status === 'pending') {
+    if (observed || previewSha || evidenceOperationId || raw.criteria !== undefined || raw.confidence !== undefined) {
+      throw new Error('value_check pending is unobserved; omit evidence, criteria and confidence until a real grayscale review');
+    }
+    return { status, observed: false, preview_sha256: null, criteria: {}, confidence: null, limitations };
+  }
   if (status === 'style-not-applicable') {
     const reason = textOrUndefined(raw.applicability_reason);
     if (!styleContractBasis) throw new Error('value_check style-not-applicable requires style_contract_basis');
@@ -1001,6 +1414,55 @@ export function alive(pid) {
   try { process.kill(pid, 0); return true; }
   catch (error) { if (error.code === 'ESRCH') return false; return true; }
 }
+export function reviewEvidenceRole(evidence) {
+  const sequence = evidence?.capture_sequence;
+  const level = evidence?.review_level;
+  return Number.isSafeInteger(sequence) && sequence > 0 && ['object', 'micro'].includes(level)
+    ? `${level}_after_${sequence}`
+    : evidence?.role;
+}
+function visualDeliveryState(record, receipt) {
+  const sourceReviewFrames = (record.review_evidence ?? [])
+    .filter(frame => frame?.bound_whole_sha256 === record.preview.sha256);
+  const reviewFrames = sourceReviewFrames.map(frame => ({ ...frame, role: reviewEvidenceRole(frame) }));
+  const before = record.before_preview ?? record.baseline_preview;
+  const frames = [
+    { role: 'after', sha256: record.preview.sha256 },
+    { role: 'after_crop', sha256: record.preview.focus?.sha256 },
+    { role: 'before', sha256: before?.sha256 },
+    { role: 'before_crop', sha256: before?.focus?.sha256 },
+    ...reviewFrames,
+  ];
+  // Resolve old transport aliases by exact artifact SHA; persisted evidence remains immutable.
+  const delivered = (receipt?.delivered ?? []).map(item => {
+    if (frames.some(frame => frame.role === item.role && frame.sha256 === item.sha256)) return item;
+    const aliases = sourceReviewFrames.filter(frame => frame.role === item.role && frame.sha256 === item.sha256);
+    return aliases.length === 1 ? { ...item, role: reviewEvidenceRole(aliases[0]) } : item;
+  });
+  const expectedRoles = [...new Set([
+    ...(receipt?.expected_roles ?? []).filter(role => typeof role === 'string').flatMap(role => {
+      if (frames.some(frame => frame.role === role)) return [role];
+      const aliases = sourceReviewFrames.filter(frame => frame.role === role).map(reviewEvidenceRole);
+      return aliases.length ? aliases : [role];
+    }),
+    'after',
+    ...reviewFrames.map(frame => frame.role),
+    ...(record.preview.focus?.sha256 ? ['after_crop'] : []),
+  ])];
+  const undeliveredRoles = expectedRoles.filter(role => {
+    const matchingFrames = frames.filter(frame => frame.role === role && typeof frame.sha256 === 'string');
+    if (matchingFrames.length !== 1) return true;
+    return !delivered.some(item => item.role === role
+      && item.sha256 === matchingFrames[0].sha256 && item.image_delivered_for_review === true);
+  });
+  return {
+    expected_roles: expectedRoles,
+    delivered,
+    undelivered_roles: undeliveredRoles,
+    delivery_complete: expectedRoles.length > 0 && undeliveredRoles.length === 0,
+  };
+}
+
 export function parseTexts(result) {
   return (result?.content ?? []).filter(c => c.type === 'text').map(c => {
     try { return JSON.parse(c.text); } catch { return { text: c.text }; }
@@ -1258,6 +1720,7 @@ function stageResetStatePatch(current, context, operationId, at) {
   };
   return {
     last_stage_reset: durableReset,
+    physical_stack_check: normalizePhysicalStackCheck({ status: 'pending', observed: false }),
     ...(current.art_director ? {
       art_director: {
         ...current.art_director,
@@ -1494,10 +1957,12 @@ function continuationLatencySegments(record) {
     guard_response_to_review_request_ms: responseReadyAt && reviewRequestAt
       ? elapsedMs(responseReadyAt, reviewRequestAt)
       : null,
-    review_image_service_ms: reviewRequestAt && reviewReadyAt
+    review_image_service_ms: timing.review_image_response_boundary_complete !== false && reviewRequestAt && reviewReadyAt
       ? elapsedMs(reviewRequestAt, reviewReadyAt)
       : null,
-    review_delivery_to_review_finished_marker_ms: reviewReadyAt && reviewFinishedAt
+    review_image_service_prefix_ms: timing.review_image_response_boundary_complete === false && reviewRequestAt && reviewReadyAt
+      ? elapsedMs(reviewRequestAt, reviewReadyAt) : null,
+    review_delivery_to_review_finished_marker_ms: timing.review_image_response_boundary_complete !== false && reviewReadyAt && reviewFinishedAt
       ? elapsedMs(reviewReadyAt, reviewFinishedAt)
       : null,
     review_finished_to_next_pass_ready_marker_ms: reviewFinishedAt && nextPassReadyAt
@@ -1506,10 +1971,41 @@ function continuationLatencySegments(record) {
     next_pass_ready_marker_to_guard_ms: nextPassReadyAt && nextGuardAt
       ? elapsedMs(nextPassReadyAt, nextGuardAt)
       : null,
-    review_delivery_to_next_guard_ms: reviewReadyAt && nextGuardAt
+    review_delivery_to_next_guard_ms: timing.review_image_response_boundary_complete !== false && reviewReadyAt && nextGuardAt
       ? elapsedMs(reviewReadyAt, nextGuardAt)
       : null,
   };
+}
+function throughputJournalEvidence(records) {
+  let actions = 0;
+  let unknown = 0;
+  let operations = 0;
+  for (const record of records) {
+    if (!record.visual || record.execution === 'not-executed') continue;
+    const bodies = parseTexts(record.result);
+    let count;
+    if (record.tool === 'photoshop_execute_visual_microplan') {
+      for (const body of bodies) {
+        const entries = body?.pass_execution?.actions;
+        if (Array.isArray(entries) && entries.some(row => row?.kind === 'visual-mutation')) {
+          const visual = entries.filter(row => row?.kind === 'visual-mutation');
+          if (visual.every(row => ['not-started', 'started', 'completed', 'failed', 'uncertain', 'failed-or-uncertain'].includes(row.state))) {
+            count = visual.filter(row => row.state !== 'not-started').length;
+            break;
+          }
+        }
+        if (record.phase === 'completed' && !record.failed && Number.isSafeInteger(body?.mutation_count) && body.mutation_count >= 0) {
+          count = body.mutation_count;
+          break;
+        }
+      }
+    } else if (record.dispatched === true || record.execution === 'completed' || (record.phase === 'completed' && !record.failed)) {
+      count = 1;
+    }
+    if (count !== undefined) { actions += count; operations++; }
+    else if (record.dispatched || record.phase === 'completed') unknown++;
+  }
+  return { actions, operations, unknown };
 }
 function percentile(values, fraction) {
   const sorted = values.filter(value => typeof value === 'number' && Number.isFinite(value) && value >= 0).sort((a, b) => a - b);
@@ -1533,6 +2029,7 @@ function reportedToolExecutionMs(record) {
 export class SessionStore {
   constructor(directory, options = {}) {
     this.directory = directory;
+    this.reviewResponseTimings = new Map();
     this.workspaceRoot = options.workspaceRoot
       ? path.resolve(options.workspaceRoot)
       : path.resolve(directory, '..', '..');
@@ -1606,6 +2103,22 @@ export class SessionStore {
         && Object.keys(mutationResults).length > 0) return true;
       return false;
     });
+  }
+  isIdentityRecoveryPending(record) {
+    // Abandonment settles the work lifecycle, not the historical execution
+    // phase. Never erase uncertainty or claim those old pixels were undone.
+    return !!record && record.phase !== 'completed' && !isAbandonedRecovery(record)
+      && !this.hasDurableNotExecutedProof(record);
+  }
+  identityRecoveryBlockers(suppliedRecords = this.records(), suppliedJobs = this.activeJobs(undefined)) {
+    return [
+      ...suppliedJobs.map(job => ({ kind: 'job', job_id: job.job_id,
+        operation_id: job.operation_id ?? null, document_id: job.document_id ?? null, state: job.state })),
+      ...suppliedRecords.filter(record => this.isIdentityRecoveryPending(record)).map(record => ({
+        kind: 'operation', operation_id: record.id, document_id: record.args?.document_id ?? null,
+        phase: record.phase, claimed_resolution: record.resolved?.outcome ?? null,
+      })),
+    ];
   }
   hasDurableNotExecutedProof(record) {
     if (!record || this.hasPositiveMutationEvidence(record)) return false;
@@ -1701,11 +2214,100 @@ export class SessionStore {
     }
     catch (e) { if (e.code === 'ENOENT') throw runtimeStateSchemaError('missing-painting-state'); throw e; }
   }
+  userConfig(documentId, suppliedState: GuardProjectionContext['paintingState'] | undefined = undefined) {
+    const state = suppliedState ?? this.paintingState();
+    const normalized = normalizeUserConfig(state.user_config);
+    const effective = {
+      language: normalized.config.language,
+      commentary_mode: normalized.config.commentary_mode,
+      commentary_detail: normalized.config.commentary_detail,
+    };
+    const sources = {
+      language: normalized.sources.language === 'stored' ? 'user_config' : 'default',
+      commentary_mode: normalized.sources.commentary_mode === 'stored' ? 'user_config' : 'default',
+      commentary_detail: normalized.sources.commentary_detail === 'stored' ? 'user_config' : 'default',
+    };
+    const warnings = [...normalized.warnings];
+    const validDocumentId = Number.isSafeInteger(documentId) && documentId > 0 ? documentId : undefined;
+    const documentState = validDocumentId ? state.documents?.[String(validDocumentId)] : undefined;
+    if (documentState?.commentary_mode !== undefined) {
+      const stickyMode = textOrUndefined(documentState.commentary_mode)?.toLowerCase();
+      if (stickyMode && ART_RUN_COMMENTARY_MODES.has(stickyMode)) {
+        effective.commentary_mode = stickyMode;
+        sources.commentary_mode = 'art_run';
+      } else {
+        warnings.push('invalid sticky commentary_mode ignored; using user config/default');
+      }
+    }
+    if (documentState?.commentary_detail !== undefined) {
+      const stickyDetail = textOrUndefined(documentState.commentary_detail)?.toLowerCase();
+      if (stickyDetail && ART_RUN_COMMENTARY_DETAILS.has(stickyDetail)) {
+        effective.commentary_detail = stickyDetail;
+        sources.commentary_detail = 'art_run';
+      } else {
+        warnings.push('invalid sticky commentary_detail ignored; using user config/default');
+      }
+    }
+    return {
+      config_version: USER_CONFIG_VERSION,
+      configured: {
+        language: normalized.config.language,
+        commentary_mode: normalized.config.commentary_mode,
+        commentary_detail: normalized.config.commentary_detail,
+      },
+      effective,
+      sources,
+      warnings,
+      document_id: validDocumentId ?? null,
+      updated_at: normalized.config.updated_at ?? null,
+    };
+  }
+  presentationContext(documentId, suppliedState: GuardProjectionContext['paintingState'] | undefined = undefined) {
+    const resolved = this.userConfig(documentId, suppliedState);
+    return {
+      protocol: 'photoshop.presentation_context.v1',
+      language: resolved.effective.language,
+      commentary_mode: resolved.effective.commentary_mode,
+      commentary_detail: resolved.effective.commentary_detail,
+      sources: resolved.sources,
+      ...(resolved.warnings.length ? { warnings: resolved.warnings } : {}),
+    };
+  }
+  setUserConfig(input, documentId) {
+    const patch = parseUserConfigPatch(input);
+    const state = this.paintingState();
+    const normalized = normalizeUserConfig(state.user_config);
+    const now = new Date().toISOString();
+    state.user_config = {
+      ...normalized.config,
+      ...patch,
+      config_version: USER_CONFIG_VERSION,
+      updated_at: now,
+    };
+    let updatedDocument;
+    if (Number.isSafeInteger(documentId) && documentId > 0) {
+      const key = String(documentId);
+      const existing = state.documents?.[key];
+      if (existing) {
+        updatedDocument = {
+          ...existing,
+          ...(patch.commentary_mode ? { commentary_mode: patch.commentary_mode } : {}),
+          ...(patch.commentary_detail ? { commentary_detail: patch.commentary_detail } : {}),
+        };
+        state.documents[key] = updatedDocument;
+      }
+    }
+    state.revision = Number(state.revision ?? 0) + 1;
+    state.updated_at = now;
+    atomicJson(this.paintingStateFile(), state);
+    if (updatedDocument?.process_dir) this.persistProjectState(documentId, updatedDocument);
+    return this.userConfig(documentId);
+  }
   captureProjectionContext(options: GuardProjectionContextOptions = {}): GuardProjectionContext {
     const capturedAt = Number.isFinite(options.capturedAt) ? options.capturedAt : Date.now();
     const records = options.records ?? this.records();
     const paintingState = options.paintingState ?? this.paintingState();
-    const activeJobs = options.activeJobs ?? this.activeJobs(undefined, undefined, capturedAt);
+    const activeJobs = options.activeJobs ?? this.activeJobs(undefined, undefined, capturedAt, paintingState);
     return { records, paintingState, activeJobs, capturedAt };
   }
   readJobProjection(jobId, capturedAt) {
@@ -1743,8 +2345,11 @@ export class SessionStore {
     }
     if (create) {
       fs.mkdirSync(target, { recursive: true });
-      for (const name of ['frames', 'checkpoints', 'final']) {
+      for (const name of ['checkpoints', 'final']) {
         fs.mkdirSync(path.join(target, name), { recursive: true });
+      }
+      for (const name of ['frames', 'videos']) {
+        fs.mkdirSync(path.join(target, 'export', name), { recursive: true });
       }
       const realRoot = fs.realpathSync(processesRoot);
       const realTarget = fs.realpathSync(target);
@@ -1761,6 +2366,37 @@ export class SessionStore {
     if (!doc?.process_dir) return undefined;
     return this.resolveProcessDir(doc.process_dir, { create: true }).target;
   }
+  reserveExportSequence(documentId, operationId) {
+    if (!Number.isSafeInteger(documentId) || documentId <= 0) return undefined;
+    const stableId = validId(operationId);
+    let reserved;
+    this.updatePaintingState(documentId, current => {
+      const existingMap = current.export_sequences && typeof current.export_sequences === 'object'
+        ? current.export_sequences
+        : {};
+      const existing = Number(existingMap[stableId]);
+      if (Number.isSafeInteger(existing) && existing > 0) {
+        reserved = existing;
+        return current;
+      }
+      const next = Math.max(0, Number(current.export_sequence_counter ?? 0)) + 1;
+      reserved = next;
+      return {
+        ...current,
+        export_sequence_counter: next,
+        export_sequences: { ...existingMap, [stableId]: next },
+      };
+    });
+    return reserved;
+  }
+  exportSequenceForOperation(documentId, operationId) {
+    if (!Number.isSafeInteger(documentId) || documentId <= 0) return undefined;
+    const state = this.paintingState().documents?.[String(documentId)];
+    const existing = Number(state?.export_sequences?.[validId(operationId)]);
+    return Number.isSafeInteger(existing) && existing > 0
+      ? existing
+      : this.reserveExportSequence(documentId, operationId);
+  }
   persistProjectState(documentId, documentState) {
     if (!documentState?.process_dir) return;
     const { target } = this.resolveProcessDir(documentState.process_dir, { create: true });
@@ -1772,18 +2408,33 @@ export class SessionStore {
     });
   }
   setArtRunState(input) {
+    if (input.original_brief !== undefined && (typeof input.original_brief !== 'string'
+      || !input.original_brief.trim() || input.original_brief.length > 16000)) {
+      throw new Error('original_brief must be non-empty user task text of at most 16000 characters');
+    }
     const documentId = Number(input?.document_id);
     if (!Number.isSafeInteger(documentId) || documentId <= 0) {
       throw new Error('Art run requires a positive document_id');
     }
+    this.assertDocumentIdentityVerified(documentId);
     const { normalized, target } = this.resolveProcessDir(input?.process_dir, { create: true });
-    const existing = this.paintingState().documents?.[String(documentId)];
+    const paintingState = this.paintingState();
+    const existing = paintingState.documents?.[String(documentId)];
+    const userConfig = normalizeUserConfig(paintingState.user_config).config;
+    const existingModeCandidate = textOrUndefined(existing?.commentary_mode)?.toLowerCase();
+    const existingDetailCandidate = textOrUndefined(existing?.commentary_detail)?.toLowerCase();
+    const existingMode = existingModeCandidate && ART_RUN_COMMENTARY_MODES.has(existingModeCandidate)
+      ? existingModeCandidate
+      : undefined;
+    const existingDetail = existingDetailCandidate && ART_RUN_COMMENTARY_DETAILS.has(existingDetailCandidate)
+      ? existingDetailCandidate
+      : undefined;
     const mode = textOrUndefined(input?.commentary_mode)?.toLowerCase()
-      ?? existing?.commentary_mode
-      ?? 'mixed';
+      ?? existingMode
+      ?? userConfig.commentary_mode;
     const detail = textOrUndefined(input?.commentary_detail)?.toLowerCase()
-      ?? existing?.commentary_detail
-      ?? 'normal';
+      ?? existingDetail
+      ?? userConfig.commentary_detail;
     const paintingProfile = textOrUndefined(input?.painting_profile)?.toLowerCase()
       ?? existing?.painting_profile
       ?? 'nontrivial_painting';
@@ -1801,9 +2452,73 @@ export class SessionStore {
         `process_dir is immutable for document ${documentId}; current run is already bound to ${existing.process_dir}`
       );
     }
-    const brushPreflight = input?.brush_preflight === undefined
-      ? existing?.brush_preflight
-      : parseBrushPreflight(input.brush_preflight);
+    let brushPreflight = existing?.brush_preflight;
+    if (input?.brush_preflight !== undefined) {
+      const candidateBrushPreflight = parseBrushPreflight(input.brush_preflight);
+      if (existing?.brush_preflight) {
+        const withoutRecordedAt = value => {
+          const copy = structuredClone(value);
+          if (copy && typeof copy === 'object') delete copy.recorded_at;
+          return copy;
+        };
+        const unchanged = JSON.stringify(withoutRecordedAt(existing.brush_preflight))
+          === JSON.stringify(withoutRecordedAt(candidateBrushPreflight));
+        if (unchanged) {
+          // Run-level brush evidence is intentionally durable. Re-submitting the same
+          // inventory/role/settings evidence must not manufacture a fresh probe epoch.
+          brushPreflight = existing.brush_preflight;
+        } else {
+          const explicitInvalidation = textOrUndefined(input?.brush_preflight_invalidation)?.toLowerCase();
+          const presetIdentity = preflight => (preflight?.roles ?? [])
+            .flatMap(role => [role?.preferred_preset, ...(role?.alternative_presets ?? [])])
+            .filter(Boolean)
+            .map(String)
+            .sort();
+          const catalogChanged = existing.brush_preflight.inventory_total !== candidateBrushPreflight.inventory_total
+            || existing.brush_preflight.inventory_scope !== candidateBrushPreflight.inventory_scope
+            || existing.brush_preflight.brush_pack_id !== candidateBrushPreflight.brush_pack_id
+            || JSON.stringify(presetIdentity(existing.brush_preflight)) !== JSON.stringify(presetIdentity(candidateBrushPreflight));
+          const roleSettings = preflight => (preflight?.roles ?? []).map(role => ({
+            role_id: role?.role_id,
+            preferred_preset: role?.preferred_preset,
+            effective_settings: role?.effective_settings,
+            pressure_policy: role?.pressure_policy,
+            probe_status: role?.probe_status,
+          }));
+          const settingsChanged = JSON.stringify(roleSettings(existing.brush_preflight))
+            !== JSON.stringify(roleSettings(candidateBrushPreflight));
+          const runtimeChanged = !!existing.brush_preflight.runtime_instance_witness
+            && !!candidateBrushPreflight.runtime_instance_witness
+            && existing.brush_preflight.runtime_instance_witness !== candidateBrushPreflight.runtime_instance_witness;
+          const inferredInvalidation = catalogChanged
+            ? 'catalog_changed'
+            : settingsChanged
+              ? 'settings_changed'
+              : runtimeChanged
+                ? 'runtime_changed'
+                : undefined;
+          const invalidation = explicitInvalidation ?? inferredInvalidation;
+          if (!['catalog_changed', 'settings_changed', 'runtime_changed'].includes(invalidation)) {
+            throw new Error(
+              'brush_preflight_reprobe_requires_invalidation: replacing durable run-level brush evidence requires '
+              + 'brush_preflight_invalidation=catalog_changed|settings_changed|runtime_changed'
+            );
+          }
+          brushPreflight = {
+            ...candidateBrushPreflight,
+            invalidated_previous_at: existing.brush_preflight.recorded_at ?? null,
+            invalidation_reason: invalidation,
+            invalidation_source: explicitInvalidation
+              ? 'explicit'
+              : runtimeChanged
+                ? 'bridge_runtime_witness'
+                : 'observed_preflight_diff',
+          };
+        }
+      } else {
+        brushPreflight = candidateBrushPreflight;
+      }
+    }
     const brushPackPolicy = input?.brush_pack_policy === undefined
       ? existing?.brush_pack_policy
       : parseBrushPackPolicy(input.brush_pack_policy, brushPreflight);
@@ -1827,7 +2542,16 @@ export class SessionStore {
     const document = this.updatePaintingState(documentId, current => ({
       ...current,
       process_dir: normalized,
+      ...(input.original_brief !== undefined ? { original_brief: input.original_brief.trim() } : {}),
       painting_profile: paintingProfile,
+      ...(!current.project_started_at && paintingProfile === 'nontrivial_painting'
+        && (!current.current_frame?.operation_id || (current.document_instance?.bootstrap_tool === 'photoshop_create_document'
+          && current.current_frame.operation_id === current.document_instance.bootstrap_operation_id))
+        ? { construction_policy: 'enforced' } : {}),
+      ...(paintingProfile === 'nontrivial_painting' && !current.current_stage
+        && !current.physical_stack_check && !current.art_director?.physical_stack_check
+        ? { physical_stack_check: normalizePhysicalStackCheck({ status: 'pending', observed: false }) }
+        : {}),
       commentary_mode: mode,
       commentary_detail: detail,
       ...(brushPreflight ? { brush_preflight: brushPreflight } : {}),
@@ -1840,7 +2564,9 @@ export class SessionStore {
       document_id: documentId,
       process_dir: normalized,
       project_directory: target,
-      frames_directory: path.join(target, 'frames'),
+      export_directory: path.join(target, 'export'),
+      frames_directory: path.join(target, 'export', 'frames'),
+      videos_directory: path.join(target, 'export', 'videos'),
       checkpoints_directory: path.join(target, 'checkpoints'),
       final_directory: path.join(target, 'final'),
       commentary_mode: mode,
@@ -1864,6 +2590,42 @@ export class SessionStore {
     atomicJson(this.paintingStateFile(), state);
     this.persistProjectState(documentId, state.documents[key]);
     return state.documents[key];
+  }
+  registerAuthorizedCriticResult(documentId, input) {
+    if (!Number.isSafeInteger(documentId) || documentId <= 0) {
+      throw new Error('authorized critic result requires a positive document_id');
+    }
+    const resultId = textOrUndefined(input?.result_id);
+    const frameSha = textOrUndefined(input?.frame_sha256)?.toLowerCase();
+    const contractId = textOrUndefined(input?.contract_id);
+    const contractRevision = Number(input?.contract_revision);
+    if (!resultId || !frameSha || !/^[0-9a-f]{64}$/.test(frameSha) || !contractId
+      || !Number.isSafeInteger(contractRevision) || contractRevision < 1) {
+      throw new Error('authorized critic result requires result_id, exact frame_sha256, contract_id and positive contract_revision');
+    }
+    if (input?.authority_class !== 'authorized') {
+      throw new Error('authorized critic result authority_class must be authorized');
+    }
+    const authoritySource = textOrUndefined(input?.authority_source);
+    if (!authoritySource) throw new Error('authorized critic result requires durable authority_source');
+    return this.updatePaintingState(documentId, current => {
+      const results = { ...(current.authorized_critic_results ?? {}) };
+      const existing = results[resultId];
+      const record = {
+        result_id: resultId,
+        authority_class: 'authorized',
+        authority_source: authoritySource,
+        frame_sha256: frameSha,
+        contract_id: contractId,
+        contract_revision: contractRevision,
+        registered_at: existing?.registered_at ?? new Date().toISOString(),
+      };
+      if (existing && JSON.stringify({ ...existing, registered_at: undefined }) !== JSON.stringify({ ...record, registered_at: undefined })) {
+        throw new Error(`authorized critic result ${resultId} is immutable once registered`);
+      }
+      results[resultId] = record;
+      return { ...current, authorized_critic_results: results };
+    });
   }
   artRunState(documentId, projectionContext) {
     if (!Number.isSafeInteger(documentId) || documentId <= 0) return undefined;
@@ -1920,12 +2682,35 @@ export class SessionStore {
       };
     }
 
-    if (sameDocumentInstanceWitness(existingWitness, witness)) {
+    const confirmedWitness = normalizeDocumentInstanceWitness(existing?.document_instance?.confirmed_host_witness) ?? existingWitness;
+    if (sameDocumentInstanceWitness(confirmedWitness, witness)) {
+      if (existing.document_instance.identity_pending) {
+        const { identity_pending: _identityPending, ...instance } = existing.document_instance;
+        this.updatePaintingState(documentId, current => ({ ...current, document_instance: instance }));
+      }
       return {
         status: 'match',
         reset_performed: false,
-        host_witness: witness,
+        host_witness: existingWitness,
       };
+    }
+
+    // A new UXP session loses its WeakMap. That is missing identity evidence,
+    // not proof that Photoshop replaced the document. Keep the work quarantined.
+    if (confirmedWitness.session_id !== witness.session_id) {
+      state.documents[key] = {
+        ...existing,
+        document_instance: {
+          ...existing.document_instance,
+          identity_pending: { witness, observed_at: observedAt, reason: 'host_session_changed' },
+        },
+      };
+      state.revision = Number(state.revision ?? 0) + 1;
+      state.updated_at = observedAt;
+      atomicJson(this.paintingStateFile(), state);
+      this.persistProjectState(documentId, state.documents[key]);
+      return { status: 'identity_unverified', reset_performed: false, host_witness: existingWitness,
+        next_public_call: { tool: 'photoshop_guard_resume', args: { document_id: documentId, same_document_confirmed: true } } };
     }
 
     const records = this.records();
@@ -1954,6 +2739,23 @@ export class SessionStore {
       superseded_process_dir: previousProcessDir,
       superseded_through_sequence: supersededThroughSequence,
     };
+  }
+  confirmDocumentSession(documentId, witness, expectedFrameSha) {
+    const current = this.artRunState(documentId);
+    if (!sameDocumentInstanceWitness(current?.document_instance?.identity_pending?.witness, witness)
+      || current?.current_frame?.sha256 !== expectedFrameSha) {
+      throw new Error('document_identity_evidence_changed: collect fresh recovery evidence again');
+    }
+    return this.updatePaintingState(documentId, state => {
+      const { identity_pending: _identityPending, ...instance } = state.document_instance;
+      return { ...state, document_instance: { ...instance, confirmed_host_witness: witness,
+        recovery: { source: 'public_resume', frame_sha256: expectedFrameSha, confirmed_at: new Date().toISOString() } } };
+    });
+  }
+  assertDocumentIdentityVerified(documentId) {
+    if (this.artRunState(documentId)?.document_instance?.identity_pending) {
+      throw new Error(`document_identity_unverified: preserve existing work; call photoshop_guard_resume with document_id=${documentId} and same_document_confirmed=true after user confirmation. Do not read source or overwrite the art run.`);
+    }
   }
   bindBootstrapDocumentInstance(record, documentId) {
     if (!isDocumentBootstrap(record) || !Number.isSafeInteger(documentId) || documentId <= 0) return undefined;
@@ -2042,16 +2844,15 @@ export class SessionStore {
     }
     return { ok: true, document_id: documentId };
   }
-  closeOnlyNextRequiredAction(documentId) {
+  closeOnlyNextRequiredAction(documentId, projectionContext) {
     if (!Number.isSafeInteger(documentId) || documentId <= 0) return 'ready';
-    const state = this.paintingState().documents?.[String(documentId)];
-    if (state?.pending_rollback) {
-      const remaining = positiveHistoryStepCount(state.pending_rollback.remaining_undo_steps)
-        || positiveHistoryStepCount(state.pending_rollback.required_undo_steps)
-        || 1;
-      return `rollback required for ${state.pending_rollback.operation_id}: ${remaining} history step${remaining === 1 ? '' : 's'} remaining; execute photoshop_undo or a VisualMicroPlan with action_class=ROLLBACK before any further visual mutation`;
-    }
-    return 'ready';
+    const technical = this.documentNextRequiredAction(documentId, projectionContext?.records, projectionContext);
+    if (technical !== 'ready') return technical;
+    const state = (projectionContext?.paintingState ?? this.paintingState()).documents?.[String(documentId)];
+    const bindings = this.constructionBindings(documentId, projectionContext?.records, projectionContext);
+    const pending = bindings.filter(b => !b.constructed || b.needs_rebuild);
+    if (pending.length) return `Continue next_pass.construction for pending components: ${pending.slice(0,8).map(b => `${b.model_id}@${b.revision}/${b.owner_id}`).join(', ')}. A saved file does not close stale/unconstructed geometry; inspect each delivered component.`;
+    return artisticContinuation(state) ?? technical;
   }
   assertProjectSavePath(documentId, file) {
     const projectDir = this.projectDirectory(documentId);
@@ -2067,22 +2868,95 @@ export class SessionStore {
     const preview = record?.preview;
     const commentPath = preview?.commentary_path;
     if (!commentPath) return undefined;
+    const documentId = Number(record?.args?.document_id);
+    const presentation = this.presentationContext(
+      Number.isSafeInteger(documentId) && documentId > 0 ? documentId : undefined
+    );
+    const language = sidecarLanguage(
+      presentation.language,
+      record.artistic_commentary,
+      record.report?.did,
+      record.report?.why,
+      record.report?.result
+    );
+    const copy = language === 'ru'
+      ? {
+          frame: 'Кадр', operation: 'Операция', stage: 'Этап', region: 'Область',
+          before: 'Перед проходом:', after: 'После прохода:',
+          did: 'Что сделал', why: 'Зачем', result: 'Результат',
+          missing: 'Художественный комментарий перед проходом не был записан.',
+        }
+      : {
+          frame: 'Frame', operation: 'Operation', stage: 'Stage', region: 'Region',
+          before: 'Before pass:', after: 'After pass:',
+          did: 'Did', why: 'Why', result: 'Result',
+          missing: 'No pre-pass artistic commentary was recorded.',
+        };
+    const beforeCommentary = commentaryText(
+      prePassCommentary(record),
+      copy.missing
+    );
+    if (presentation.commentary_mode !== 'technical') {
+      const lines = [beforeCommentary];
+      const toolDescription = artisticToolDescription(record, language, presentation.commentary_detail);
+      if (toolDescription) lines.push(toolDescription);
+      if (record.report) {
+        const did = commentaryText(record.report.did, language === 'ru'
+          ? 'Выполнение прохода не подтверждено.' : 'Pass execution is unconfirmed.');
+        const compact = record.report.source === 'guard_compact_closure';
+        const completed = compact ? did : completedArtisticSentence(did, language);
+        const why = commentaryText(
+          record.report.why,
+          beforeCommentary
+        );
+        const result = commentaryText(
+          artisticObservedResult(record.verdict) ?? record.report.result,
+          language === 'ru'
+            ? 'Визуальный результат ещё не оценён.'
+            : 'The visual result is not yet assessed.'
+        );
+        lines.push(
+          '',
+          ...(!compact || deriveExecutionOutcome(record) !== 'completed' ? [completed] : []),
+          ...(!compact && why !== beforeCommentary ? [language === 'ru'
+            ? `Для того чтобы ${lowerInitial(sentenceWithoutTerminalPunctuation(why))}.`
+            : `This is to ${lowerInitial(sentenceWithoutTerminalPunctuation(why))}.`] : []),
+          compact ? result : language === 'ru'
+            ? `В результате ${lowerInitial(sentenceWithoutTerminalPunctuation(result))}.`
+            : `As a result, ${lowerInitial(sentenceWithoutTerminalPunctuation(result))}.`
+        );
+        if (record.verdict?.disposition === 'rollback') {
+          lines.push(language === 'ru'
+            ? 'Проход признан неудачным; выбран откат.'
+            : 'The pass was rejected; rollback was selected.');
+        }
+      }
+      if (presentation.commentary_mode === 'mixed') {
+        lines.push('', language === 'ru' ? 'Техническая запись:' : 'Technical record:',
+          `${copy.frame}: ${path.basename(preview.project_path ?? preview.materialized_path ?? '')}`,
+          `${copy.operation}: ${record.id}`,
+          ...(record.stage ? [`${copy.stage}: ${record.stage}`] : []),
+          ...(record.region ? [`${copy.region}: ${record.region}`] : []));
+      }
+      fs.writeFileSync(commentPath, `${lines.join('\n')}\n`, 'utf8');
+      return commentPath;
+    }
     const lines = [
-      `Кадр: ${path.basename(preview.project_path ?? preview.materialized_path ?? '')}`,
-      `Операция: ${record.id}`,
-      ...(record.stage ? [`Этап: ${record.stage}`] : []),
-      ...(record.region ? [`Область: ${record.region}`] : []),
+      `${copy.frame}: ${path.basename(preview.project_path ?? preview.materialized_path ?? '')}`,
+      `${copy.operation}: ${record.id}`,
+      ...(record.stage ? [`${copy.stage}: ${record.stage}`] : []),
+      ...(record.region ? [`${copy.region}: ${record.region}`] : []),
       '',
-      'Перед проходом:',
-      textOrUndefined(record.artistic_commentary) ?? 'Художественный комментарий перед проходом не был записан.',
+      copy.before,
+      beforeCommentary ?? copy.missing,
     ];
     if (record.report) {
       lines.push(
         '',
-        'После прохода:',
-        `Что сделал: ${record.report.did}`,
-        `Зачем: ${record.report.why}`,
-        `Результат: ${record.report.result}`
+        copy.after,
+        `${copy.did}: ${record.report.did}`,
+        `${copy.why}: ${record.report.why}`,
+        `${copy.result}: ${record.report.result}`
       );
     }
     fs.writeFileSync(commentPath, `${lines.join('\n')}\n`, 'utf8');
@@ -2094,11 +2968,14 @@ export class SessionStore {
     if (!projectDir || !preview?.materialized_path || !fs.existsSync(preview.materialized_path)) {
       return preview;
     }
-    const seq = String(Number(record.sequence ?? 0)).padStart(4, '0');
-    const stem = `frame_${seq}_${validId(record.id)}`;
+    if (record?.visual !== true) return preview;
+    const exportSequence = this.exportSequenceForOperation(Number(documentId), record.id);
+    if (!Number.isSafeInteger(exportSequence) || exportSequence <= 0) return preview;
+    const seq = String(exportSequence).padStart(4, '0');
+    const stem = `${seq}_${validId(record.id)}`;
     const ext = path.extname(preview.materialized_path) || '.jpg';
-    const projectPath = path.join(projectDir, 'frames', `${stem}${ext}`);
-    const commentaryPath = path.join(projectDir, 'frames', `${stem}.txt`);
+    const projectPath = path.join(projectDir, 'export', 'frames', `${stem}${ext}`);
+    const commentaryPath = path.join(projectDir, 'export', 'frames', `${stem}.txt`);
     fs.copyFileSync(preview.materialized_path, projectPath);
     const archived = {
       ...preview,
@@ -2111,9 +2988,56 @@ export class SessionStore {
     record.preview = previousPreview;
     return archived;
   }
+  collectArtDirectorReviewErrors(input) {
+    if (input?.action !== 'review' || !input.directive || typeof input.directive !== 'object') return [];
+    const directive = input.directive;
+    const documentId = Number(input.document_id);
+    const state = this.paintingState().documents?.[String(documentId)] ?? {};
+    const errors = [];
+    const check = (field, fn) => { try { return fn(); } catch (error) { errors.push(`${field}: ${error instanceof Error ? error.message : String(error)}`); } };
+    const composition = directive.composition_exploration;
+    const hypotheses = Array.isArray(composition?.hypotheses) ? composition.hypotheses : [];
+    if (directive.composition_freedom === 'fixed' && (hypotheses.length || composition?.selected_id
+      || composition?.selection_reason || composition?.material_choice_unresolved === true)) {
+      errors.push('directive.composition_exploration: composition_freedom=fixed forbids composition variant branching');
+    }
+    if (directive.composition_freedom === 'free' || (directive.composition_freedom === 'constrained' && composition?.material_choice_unresolved === true)) {
+      if (hypotheses.length < 2 || (directive.composition_freedom === 'constrained' && hypotheses.length > 4)) errors.push('directive.composition_exploration.hypotheses: requires a bounded comparison (free: at least 2; constrained: 2-4)');
+      if (!hypotheses.some(row => row?.id === composition?.selected_id)) errors.push('directive.composition_exploration.selected_id: must reference a declared hypothesis');
+    }
+    const hierarchy = check('directive.perceptual_hierarchy', () => normalizePerceptualHierarchy(directive.perceptual_hierarchy));
+    if (hierarchy) {
+      const previous = state.art_director?.perceptual_hierarchy;
+      if (previous && JSON.stringify(hierarchy) !== JSON.stringify(previous) && hierarchy.revision <= previous.revision) errors.push('directive.perceptual_hierarchy.revision: changed hierarchy requires a higher revision');
+      const ids = new Set(hierarchy.zones.map(zone => zone.id));
+      for (const [index, task] of (Array.isArray(directive.tasks) ? directive.tasks : []).entries()) {
+        for (const zone of Array.isArray(task?.perceptual_zone_ids) ? task.perceptual_zone_ids : []) {
+          if (!ids.has(zone)) errors.push(`directive.tasks[${index}].perceptual_zone_ids: unknown zone=${zone}; allowed=${[...ids].join('|')}`);
+        }
+      }
+    }
+    check('directive.artistic_evaluation_contract', () => normalizeArtisticEvaluationContract(directive.artistic_evaluation_contract, state.art_director?.artistic_evaluation_contract));
+    const value = check('directive.value_check', () => parseValueCheck(directive.value_check ?? state.art_director?.value_check
+      ?? (!state.current_frame?.operation_id ? { status: 'pending', observed: false } : undefined)));
+    if (value && !['pending', 'style-not-applicable'].includes(value.status)) check('directive.value_check.evidence', () => this.validateValueCheckEvidence(documentId, value));
+    const refinement = check('directive.refinement_check', () => normalizeRefinementCheck(directive.refinement_check));
+    if (refinement && !['pending', 'style-not-applicable'].includes(refinement.status)) {
+      check('directive.refinement_check.evidence', () => this.validateRefinementCheckEvidence(documentId, refinement));
+      check('directive.refinement_check.low_frequency_evidence', () => this.validateRefinementLowFrequencyEvidence(documentId, refinement));
+    }
+    for (const [field, checked] of [['value_check', value], ['refinement_check', refinement]]) {
+      if (checked && ['override', 'style-not-applicable'].includes(checked.status)) {
+        const basis = checked.style_contract_basis ?? checked.styleContractBasis;
+        if (!basis || directive.style_contract?.[basis.field] !== basis.criterion) errors.push(`directive.${field}.style_contract_basis: must exactly match declared style_contract`);
+      }
+    }
+    return errors;
+  }
+
   setArtDirectorState(input) {
     const documentId = Number(input?.document_id);
     if (!Number.isSafeInteger(documentId) || documentId <= 0) throw new Error('Art Director state requires a positive document_id');
+    this.assertDocumentIdentityVerified(documentId);
     const action = textOrUndefined(input?.action)?.toLowerCase();
     if (!['review', 'interrupt', 'complete'].includes(action)) {
       throw new Error('Art Director action must be review|interrupt|complete');
@@ -2194,6 +3118,16 @@ export class SessionStore {
         const paintingProfile = textOrUndefined(artRunForDirective?.painting_profile)
           ?? textOrUndefined(current.painting_profile);
         const refinementCheck = existing.refinement_check ?? null;
+        const unresolvedOwnerRepresentation = ownerRepresentationDebt(current);
+        if (
+          paintingProfile === 'nontrivial_painting'
+          && unresolvedOwnerRepresentation.length
+          && refinementCheck?.status !== 'style-not-applicable'
+        ) {
+          throw new Error(
+            `visual_development_incomplete: owner-local primitive scaffold debt remains: ${unresolvedOwnerRepresentation.map(row => row.owner_id).join(', ')}`
+          );
+        }
         if (paintingProfile === 'nontrivial_painting' && refinementCheck?.status === 'pass') {
           this.validateRefinementCheckEvidence(documentId, refinementCheck);
         }
@@ -2286,6 +3220,11 @@ export class SessionStore {
             `Cannot complete Art Director directive while whole-image review is still due (${existing.whole_image_glance.reason ?? 'pending'}); supply the exact-current whole_image_glance with action=complete`
           );
         }
+        if ((completionGlanceRecord?.relationship_audit?.checks ?? []).some(check => check?.status === 'defect')) {
+          throw new Error(
+            'whole_image_glance_defect_requires_review_action: persist the evidence-backed structural review finding with action=review before attempting completion'
+          );
+        }
         const completionWholeImageGlance = completionGlanceRecord ? {
           due: false,
           reason: null,
@@ -2315,6 +3254,9 @@ export class SessionStore {
           {
             contract: existing.artistic_evaluation_contract,
             frame: current.current_frame,
+            criticResult: current.authorized_critic_results?.[
+              input?.global_brief_assessment?.critic_result_id ?? existing.global_brief_assessment?.critic_result_id
+            ],
           }
         );
         this.validateNamedRecognitionBriefEvidence(
@@ -2435,9 +3377,6 @@ export class SessionStore {
       const value = textOrUndefined(rawStyleContract[field]);
       if (value) styleContract[field] = value;
     }
-    if (Object.keys(styleContract).length < 3) {
-      throw new Error('directive.style_contract must define at least three relevant artistic constraints');
-    }
     const rawPromptPreflight = directive.prompt_conflict_preflight;
     if (!rawPromptPreflight || typeof rawPromptPreflight !== 'object' || Array.isArray(rawPromptPreflight)) {
       throw new Error('directive.prompt_conflict_preflight is required before Painter execution');
@@ -2446,14 +3385,17 @@ export class SessionStore {
     const chosenRenderingStrategy = textOrUndefined(rawPromptPreflight.chosen_rendering_strategy);
     const resolutionRationale = textOrUndefined(rawPromptPreflight.resolution_rationale);
     const resolutionMode = textOrUndefined(rawPromptPreflight.resolution_mode)?.toLowerCase();
-    if (!dominantObjective || dominantObjective.length < 8) {
-      throw new Error('prompt_conflict_preflight.dominant_objective must be concrete');
+    if (!dominantObjective) {
+      throw new Error('prompt_conflict_preflight.dominant_objective must be non-empty');
     }
-    if (!chosenRenderingStrategy || chosenRenderingStrategy.length < 12) {
-      throw new Error('prompt_conflict_preflight.chosen_rendering_strategy must define the structural rendering approach');
+    if (!chosenRenderingStrategy) {
+      throw new Error('prompt_conflict_preflight.chosen_rendering_strategy must be non-empty');
     }
     if (!PROMPT_CONFLICT_RESOLUTION_MODES.has(resolutionMode)) {
       throw new Error('prompt_conflict_preflight.resolution_mode must be none|declared-interpretation|user-confirmed');
+    }
+    if (rawPromptPreflight.first_pass_strategy !== undefined && !Array.isArray(rawPromptPreflight.first_pass_strategy)) {
+      throw new Error('prompt_conflict_preflight.first_pass_strategy must be an array when supplied');
     }
     const firstPassStrategy = Array.isArray(rawPromptPreflight.first_pass_strategy)
       ? rawPromptPreflight.first_pass_strategy.map((value, index) => {
@@ -2462,9 +3404,6 @@ export class SessionStore {
           return parsed;
         })
       : [];
-    if (firstPassStrategy.length < 1 || firstPassStrategy.length > 3) {
-      throw new Error('prompt_conflict_preflight.first_pass_strategy must contain 1-3 initial rendering passes');
-    }
     const secondaryTraits = Array.isArray(rawPromptPreflight.secondary_traits)
       ? rawPromptPreflight.secondary_traits.map(textOrUndefined).filter(Boolean).slice(0, 8)
       : [];
@@ -2497,7 +3436,7 @@ export class SessionStore {
     if (conflicts.some(conflict => conflict.requires_user_choice) && resolutionMode !== 'user-confirmed') {
       throw new Error('prompt conflict leaves materially different reasonable interpretations; user-confirmed resolution is required before Painter mutation');
     }
-    if (resolutionMode === 'user-confirmed' && (!userConfirmation || userConfirmation.length < 4)) {
+    if (resolutionMode === 'user-confirmed' && !userConfirmation) {
       throw new Error('prompt_conflict_preflight user-confirmed resolution requires user_confirmation evidence');
     }
     const promptConflictPreflight = {
@@ -2511,13 +3450,16 @@ export class SessionStore {
       ...(userConfirmation ? { user_confirmation: userConfirmation } : {}),
     };
 
-    const strategyValidationAfter = Number(directive.strategy_validation_after_microplans);
-    if (!Number.isSafeInteger(strategyValidationAfter) || strategyValidationAfter < 1 || strategyValidationAfter > 2) {
+    const configuredStrategyValidationAfter = directive.strategy_validation_after_microplans === undefined
+      ? undefined : Number(directive.strategy_validation_after_microplans);
+    if (configuredStrategyValidationAfter !== undefined
+      && (!Number.isSafeInteger(configuredStrategyValidationAfter) || configuredStrategyValidationAfter < 1 || configuredStrategyValidationAfter > 2)) {
       throw new Error('directive.strategy_validation_after_microplans must be 1 or 2');
     }
-    const rawStrategyValidation = directive.strategy_validation;
+    const rawStrategyValidation = directive.strategy_validation === undefined
+      ? { status: 'pending' } : directive.strategy_validation;
     if (!rawStrategyValidation || typeof rawStrategyValidation !== 'object' || Array.isArray(rawStrategyValidation)) {
-      throw new Error('directive.strategy_validation is required');
+      throw new Error('directive.strategy_validation must be an object when supplied');
     }
     const strategyValidationStatus = textOrUndefined(rawStrategyValidation.status)?.toLowerCase();
     if (!STRATEGY_VALIDATION_STATUSES.has(strategyValidationStatus)) {
@@ -2579,25 +3521,17 @@ export class SessionStore {
       material_choice_unresolved: materialChoiceUnresolved,
     };
     const perceptualHierarchy = normalizePerceptualHierarchy(directive.perceptual_hierarchy);
-    const physicalStackCheck = normalizePhysicalStackCheck(
-      directive.physical_stack_check ?? { status: 'pending', observed: false }
-    );
-    if (physicalStackCheck.status !== 'pending') {
-      this.validatePhysicalStackCheckEvidence(documentId, physicalStackCheck);
-      physicalStackCheck.owner_signature = this.physicalStackOwnerSignature(documentId);
-      if (
-        physicalStackCheck.status === 'pass'
-        && textOrUndefined(artRunForDirective?.painting_profile) === 'nontrivial_painting'
-        && !this.semanticLayerOwners(documentId).some(owner =>
-          PHYSICAL_STACK_SIGNATURE_ROLES.has(textOrUndefined(owner.physical_role)?.toLowerCase())
-        )
-      ) {
-        throw new Error(
-          'physical_stack_check.status=pass requires at least one semantically owned physical scene layer in a fresh nontrivial painting'
-        );
-      }
-    }
-    const valueCheck = parseValueCheck(directive.value_check);
+    const physicalStackState = this.paintingState().documents?.[String(documentId)];
+    const physicalStackCheck = directive.physical_stack_check === undefined
+      ? physicalStackState?.physical_stack_check
+        ?? physicalStackState?.art_director?.physical_stack_check
+        ?? normalizePhysicalStackCheck({ status: 'pending', observed: false })
+      : this.preparePhysicalStackCheck(documentId, directive.physical_stack_check);
+    // A first construction has no value structure to inspect. Absence is a
+    // pending review, never fabricated PASS/FAIL evidence or a style exception.
+    const valueCheck = parseValueCheck(directive.value_check
+      ?? physicalStackState?.art_director?.value_check
+      ?? (!physicalStackState?.current_frame?.operation_id ? { status: 'pending', observed: false } : undefined));
     if (['override', 'style-not-applicable'].includes(valueCheck.status)) {
       const basis = valueCheck.style_contract_basis;
       const declared = basis ? styleContract[basis.field] : undefined;
@@ -2607,10 +3541,17 @@ export class SessionStore {
         );
       }
     }
-    if (valueCheck.status !== 'style-not-applicable') {
+    if (!['pending', 'style-not-applicable'].includes(valueCheck.status)) {
       this.validateValueCheckEvidence(documentId, valueCheck);
     }
     const refinementCheck = normalizeRefinementCheck(directive.refinement_check);
+    const currentDocumentStateForRefinement = this.paintingState().documents?.[String(documentId)] ?? {};
+    const unresolvedOwnerRepresentation = ownerRepresentationDebt(currentDocumentStateForRefinement);
+    if (refinementCheck.status === 'pass' && unresolvedOwnerRepresentation.length) {
+      throw new Error(
+        `refinement_check.status=pass cannot close owner-local primitive scaffold debt: ${unresolvedOwnerRepresentation.map(row => row.owner_id).join(', ')}. Recognition/low detail is not sufficient representation fidelity; refine those owners or use the existing exact style-not-applicable contract.`
+      );
+    }
     if (refinementCheck.status === 'style-not-applicable') {
       const basis = refinementCheck.style_contract_basis;
       const declared = basis ? styleContract[basis.field] : undefined;
@@ -2734,6 +3675,8 @@ export class SessionStore {
     const now = new Date().toISOString();
     return this.updatePaintingState(documentId, current => {
       const previous = current.art_director;
+      const strategyValidationAfter = configuredStrategyValidationAfter
+        ?? (previous?.directive_id === directiveId ? previous.strategy_validation_after_microplans ?? 2 : 2);
       const strategyReviewDue = previous?.directive_id === directiveId
         && previous?.review_due === true
         && String(previous?.review_reason ?? '').startsWith('strategy_validation:');
@@ -2785,6 +3728,7 @@ export class SessionStore {
       const globalBriefAssessment = normalizeGlobalBriefAssessment(input?.global_brief_assessment, {
         contract: artisticEvaluationContract,
         frame: current.current_frame,
+        criticResult: current.authorized_critic_results?.[input?.global_brief_assessment?.critic_result_id],
       });
       this.validateNamedRecognitionBriefEvidence(
         documentId,
@@ -2827,6 +3771,7 @@ export class SessionStore {
         last_record: glanceRecord,
         history: [...(previousGlance.history ?? []), glanceRecord].slice(-4),
       } : previousGlance;
+      const wholeImageGlanceFindingState = this.applyWholeImageGlanceFindings(current, glanceRecord);
       const previousHierarchy = previous?.perceptual_hierarchy;
       const hierarchyChanged = previousHierarchy
         && JSON.stringify(previousHierarchy) !== JSON.stringify(perceptualHierarchy);
@@ -2840,9 +3785,11 @@ export class SessionStore {
       return {
         ...current,
         ...anchorState,
+        ...wholeImageGlanceFindingState,
         global_brief_assessment: globalBriefAssessment,
         global_brief_outcome: globalBriefAssessment.outcome,
         brief_debt_overrides: briefDebtOverrides,
+        physical_stack_check: physicalStackCheck,
         art_director: {
           directive_id: directiveId,
           revision,
@@ -3106,6 +4053,61 @@ export class SessionStore {
     const currentFrame = current.current_frame ?? null;
     const suppliedOperationId = textOrUndefined(raw.operation_id);
     const suppliedFrameSha = textOrUndefined(raw.frame_sha256)?.toLowerCase();
+    const requiredRelations = Array.isArray(pending?.required_relations)
+      ? [...new Set(pending.required_relations.map(textOrUndefined).filter(Boolean))]
+      : [];
+    let relationshipAudit;
+    if (requiredRelations.length) {
+      const rawAudit = raw.relationship_audit;
+      if (!rawAudit || typeof rawAudit !== 'object' || Array.isArray(rawAudit) || !Array.isArray(rawAudit.checks)) {
+        throw new Error(
+          `whole_image_glance.relationship_audit must cover the applicable scene relations: ${requiredRelations.join(', ')}`
+        );
+      }
+      const seen = new Set();
+      const checks = rawAudit.checks.map((check, index) => {
+        if (!check || typeof check !== 'object' || Array.isArray(check)) {
+          throw new Error(`whole_image_glance.relationship_audit.checks[${index}] must be an object`);
+        }
+        const relation = textOrUndefined(check.relation);
+        const status = textOrUndefined(check.status)?.toLowerCase();
+        if (!relation || !requiredRelations.includes(relation)) {
+          throw new Error(`whole_image_glance.relationship_audit.checks[${index}].relation must match an applicable required relation`);
+        }
+        if (seen.has(relation)) {
+          throw new Error(`whole_image_glance.relationship_audit relation ${relation} may be checked only once`);
+        }
+        seen.add(relation);
+        if (!['pass', 'defect', 'uncertain'].includes(status)) {
+          throw new Error(`whole_image_glance.relationship_audit.checks[${index}].status must be pass|defect|uncertain`);
+        }
+        let reviewFinding;
+        if (status === 'defect') {
+          const normalized = this.normalizeReviewFindings(check.review_finding === undefined ? [] : [check.review_finding]);
+          if (normalized.length !== 1 || !STRUCTURAL_REVIEW_FINDING_KINDS.has(normalized[0].kind)) {
+            throw new Error(
+              `whole_image_glance.relationship_audit defect for ${relation} requires one structural review_finding`
+            );
+          }
+          reviewFinding = normalized[0];
+        } else if (check.review_finding !== undefined) {
+          throw new Error(`whole_image_glance.relationship_audit ${status} check for ${relation} must not invent a defect review_finding`);
+        }
+        return {
+          relation,
+          status,
+          ...(reviewFinding ? { review_finding: reviewFinding } : {}),
+        };
+      });
+      const missing = requiredRelations.filter(relation => !seen.has(relation));
+      if (missing.length) {
+        throw new Error(`whole_image_glance.relationship_audit is missing applicable relations: ${missing.join(', ')}`);
+      }
+      relationshipAudit = {
+        required_relations: requiredRelations,
+        checks,
+      };
+    }
     if (pending?.due) {
       const requiredOperationId = textOrUndefined(pending.required_operation_id);
       const requiredFrameSha = textOrUndefined(pending.required_frame_sha256)?.toLowerCase();
@@ -3136,8 +4138,49 @@ export class SessionStore {
       observation,
       operation_id: operationId,
       frame_sha256: frameSha,
+      ...(relationshipAudit ? { relationship_audit: relationshipAudit } : {}),
       directive_id: review.directive_id,
       at: review.reviewed_at,
+    };
+  }
+  applyWholeImageGlanceFindings(current, glanceRecord) {
+    const findings = (glanceRecord?.relationship_audit?.checks ?? [])
+      .map(check => check?.review_finding)
+      .filter(Boolean);
+    if (!findings.length) return {};
+    const problems = { ...(current.visual_problems ?? {}) };
+    for (const finding of findings) {
+      if (finding.severity !== 'must-fix') continue;
+      const problemId = textOrUndefined(finding.problem_id) ?? `review-${finding.kind}`;
+      const priorProblem = problems[problemId];
+      const findingScale = finding.level === 'composition'
+        ? 'global'
+        : finding.level === 'object' ? 'medium' : 'small';
+      problems[problemId] = {
+        ...(priorProblem ?? {}),
+        problem_id: problemId,
+        scale: findingScale,
+        severity: 'must-fix',
+        status: 'open',
+        region: finding.level === 'composition' ? 'whole-frame' : 'review-region',
+        hypothesis: `Exact-frame whole-image review found a must-fix ${finding.kind} relation defect.`,
+        source_operation_id: glanceRecord.operation_id,
+        evidence_sha256: glanceRecord.frame_sha256,
+        source_review_kind: finding.kind,
+        source_review_level: finding.level,
+        structural_review: STRUCTURAL_REVIEW_FINDING_KINDS.has(finding.kind),
+        review_source: 'whole_image_glance.relationship_audit',
+        ...(finding.requested_region ? { review_region_bounds: finding.requested_region } : {}),
+      };
+    }
+    const primaryBlocker = this.primaryBlockingProblem(problems);
+    return {
+      visual_problems: problems,
+      ...(primaryBlocker ? {
+        active_problem: primaryBlocker,
+        active_scale: primaryBlocker.scale,
+        priority_review_required: true,
+      } : {}),
     };
   }
   applyArtisticLossUpdates(current, updates, record) {
@@ -3301,6 +4344,10 @@ export class SessionStore {
     if (evidence.args?.document_id !== documentId) {
       throw new Error('physical_stack_check evidence must target the same pinned document');
     }
+    if (evidence.preview?.document_id !== documentId || evidence.preview?.region
+      || (evidence.preview?.frame_kind && evidence.preview.frame_kind !== 'whole-frame')) {
+      throw new Error('physical_stack_check evidence must be a whole-frame preview of the pinned document');
+    }
     const evidenceSha = textOrUndefined(evidence.preview?.sha256)?.toLowerCase();
     if (!evidenceSha || evidenceSha !== physicalStackCheck.preview_sha256) {
       throw new Error('physical_stack_check preview_sha256 must match the referenced visual operation preview');
@@ -3314,55 +4361,41 @@ export class SessionStore {
     }
     return physicalStackCheck;
   }
-  plannerGate(documentId, request, projectionContext) {
-    if (!isVisual(request.tool)) return null;
-    if (!Number.isSafeInteger(documentId) || documentId <= 0) return null;
-    const documentState = (projectionContext ? projectionContext.paintingState : this.paintingState()).documents?.[String(documentId)];
-    const art = documentState?.art_director;
-    if (!art?.directive_id) return null;
-    if (art.status === 'interrupted' || art.review_due) {
-      throw new Error(`planner_review_required: directive ${art.directive_id} requires Art Director review before another Painter mutation (${art.review_reason ?? art.status})`);
+  preparePhysicalStackCheck(documentId, raw) {
+    const check = normalizePhysicalStackCheck(raw);
+    if (check.status === 'pending') return check;
+    this.validatePhysicalStackCheckEvidence(documentId, check);
+    const owners = this.semanticLayerOwners(documentId);
+    if (check.status === 'pass'
+      && this.artRunState(documentId)?.painting_profile === 'nontrivial_painting'
+      && !owners.some(owner => PHYSICAL_STACK_SIGNATURE_ROLES.has(textOrUndefined(owner.physical_role)?.toLowerCase()))) {
+      throw new Error('physical_stack_check.status=pass requires at least one semantically owned physical scene layer in a fresh nontrivial painting');
     }
-    if (art.status === 'completed') {
-      throw new Error(`planner_review_required: directive ${art.directive_id} is completed; issue a new Art Director directive before more Painter work`);
-    }
-    const context = visualContext(request);
-    const rawMaterialResponse = request?.tool === 'photoshop_execute_visual_microplan'
-      ? request?.args?.material_response
-      : request?.material_response;
-    if (rawMaterialResponse && typeof rawMaterialResponse === 'object' && !Array.isArray(rawMaterialResponse)) {
-      const rawBasis = rawMaterialResponse.style_contract_basis ?? rawMaterialResponse.styleContractBasis;
-      if (rawBasis && typeof rawBasis === 'object' && !Array.isArray(rawBasis)) {
-        const field = textOrUndefined(rawBasis.field);
-        const criterion = textOrUndefined(rawBasis.criterion);
-        if (!field || !criterion || art.style_contract?.[field] !== criterion) {
-          throw new Error(
-            'material_response_style_basis_mismatch: material response style_contract_basis must exactly match the active Art Director style_contract'
-          );
-        }
-      }
-    }
+    check.owner_signature = this.physicalStackOwnerSignature(documentId);
+    return check;
+  }
+  physicalStackGate(documentId, documentState, context, projectionContext) {
     if (
       documentState?.painting_profile === 'nontrivial_painting'
       && isPhysicalStackGatedStage(context.stage)
     ) {
-      const physicalStackCheck = art.physical_stack_check;
+      const physicalStackCheck = documentState.physical_stack_check ?? documentState.art_director?.physical_stack_check;
       const durableStageRank = paintingStageRank(documentState.current_stage);
       // Journals created before the physical-stack contract may already be in
       // VALUE or later with no such field. Do not deadlock those continuations;
-      // any fresh directive/reset receives an explicit pending check.
+      // fresh nontrivial runs/resets receive an explicit pending check.
       const legacyAlreadyPastGate = !physicalStackCheck
         && durableStageRank !== undefined
         && durableStageRank >= 3;
       if (!legacyAlreadyPastGate) {
         if (!physicalStackCheck || physicalStackCheck.status === 'pending') {
           throw new Error(
-            `physical_stack_check_required: ${context.stage} is blocked until Art Director confirms coherent depth/occlusion, opaque mass coverage, intentional transparency and layer-stack order for directive ${art.directive_id}`
+            `physical_stack_check_required: ${context.stage} is blocked until the ordinary current-frame review records coherent depth/occlusion, opaque coverage, transparency intent and layer order in previous_observation.physical_stack_check`
           );
         }
         if (physicalStackCheck.status === 'fail') {
           throw new Error(
-            `physical_stack_debt_unresolved: ${context.stage} is blocked while physical scene-stack debt remains for directive ${art.directive_id}`
+            `physical_stack_debt_unresolved: ${context.stage} is blocked while physical scene-stack debt remains`
           );
         }
         if (physicalStackCheck.status !== 'pass') {
@@ -3385,6 +4418,59 @@ export class SessionStore {
         }
       }
     }
+  }
+  plannerGate(documentId, request, projectionContext, deferPhysicalStackReview = false) {
+    if (!isVisual(request.tool)) return null;
+    if (!Number.isSafeInteger(documentId) || documentId <= 0) return null;
+    const documentState = (projectionContext ? projectionContext.paintingState : this.paintingState()).documents?.[String(documentId)];
+    const art = documentState?.art_director;
+    const context = visualContext(request);
+    // Combined closure+continuation installs the reviewed check first. Runtime
+    // revalidates this gate from durable state before any Photoshop dispatch.
+    if (!deferPhysicalStackReview) this.physicalStackGate(documentId, documentState, context, projectionContext);
+
+    const representationDebts = ownerRepresentationDebt(documentState);
+    const targetOwner = representationOwnerContext(request);
+    const targetDebt = targetOwner && representationDebts.find(row => row.owner_id === targetOwner.owner_id);
+    const stage = canonicalPaintingStage(context.stage);
+    const textureOnly = ['MATERIAL', 'TEXTURE'].includes(stage) || String(request?.args?.action_class).toUpperCase() === 'TEXTURE';
+    const styleExemption = exactRepresentationStyleExemption(request, documentState);
+    if (!styleExemption && ((isRefinementGatedStage(context.stage) && representationDebts.length) || (textureOnly && targetDebt))) {
+      const blocked = isRefinementGatedStage(context.stage) ? representationDebts : [targetDebt];
+      throw new Error('refinement_owner_representation_debt: review/refine object form before dependent material/texture/detail work: ' + blocked.map(row => row.owner_id).join(', '));
+    }
+    if (!art?.directive_id) return null;
+    if (art.whole_image_glance?.due === true) {
+      const requiredOperationId = textOrUndefined(art.whole_image_glance.required_operation_id);
+      const requiredFrameSha = textOrUndefined(art.whole_image_glance.required_frame_sha256)?.toLowerCase();
+      const exactFrame = requiredOperationId && requiredFrameSha
+        ? ` exact frame ${requiredOperationId} / ${requiredFrameSha}`
+        : ' its exact bound frame';
+      throw new Error(
+        `whole_image_glance_required: directive ${art.directive_id} must review${exactFrame} for ${art.whole_image_glance.reason ?? 'pending boundary'} before another Painter mutation`
+      );
+    }
+    if (art.status === 'interrupted' || art.review_due) {
+      throw new Error(`planner_review_required: directive ${art.directive_id} requires Art Director review before another Painter mutation (${art.review_reason ?? art.status})`);
+    }
+    if (art.status === 'completed') {
+      throw new Error(`planner_review_required: directive ${art.directive_id} is completed; issue a new Art Director directive before more Painter work`);
+    }
+    const rawMaterialResponse = request?.tool === 'photoshop_execute_visual_microplan'
+      ? request?.args?.material_response
+      : request?.material_response;
+    if (rawMaterialResponse && typeof rawMaterialResponse === 'object' && !Array.isArray(rawMaterialResponse)) {
+      const rawBasis = rawMaterialResponse.style_contract_basis ?? rawMaterialResponse.styleContractBasis;
+      if (rawBasis && typeof rawBasis === 'object' && !Array.isArray(rawBasis)) {
+        const field = textOrUndefined(rawBasis.field);
+        const criterion = textOrUndefined(rawBasis.criterion);
+        if (!field || !criterion || art.style_contract?.[field] !== criterion) {
+          throw new Error(
+            'material_response_style_basis_mismatch: material response style_contract_basis must exactly match the active Art Director style_contract'
+          );
+        }
+      }
+    }
     if (isDetailStage(context.stage)) {
       const valueCheck = art.value_check;
       if (!valueCheck) {
@@ -3399,6 +4485,15 @@ export class SessionStore {
     }
     if (isRefinementGatedStage(context.stage)) {
       const refinementCheck = art.refinement_check;
+      const unresolvedOwnerRepresentation = ownerRepresentationDebt(documentState);
+      if (
+        unresolvedOwnerRepresentation.length
+        && refinementCheck?.status !== 'style-not-applicable'
+      ) {
+        throw new Error(
+          `refinement_owner_representation_debt: DETAIL is blocked while primitive scaffold representation remains on semantic owners: ${unresolvedOwnerRepresentation.map(row => row.owner_id).join(', ')}`
+        );
+      }
       if (!refinementCheck) {
         throw new Error(
           `refinement_check_required: DETAIL is blocked until Art Director records durable progressive-refinement evidence for directive ${art.directive_id}`
@@ -3512,7 +4607,10 @@ export class SessionStore {
 
     const completedMicroplans = Number(art.completed_microplans ?? 0) + 1;
     const taskAssessment = record.verdict?.planner_task_assessment ?? input.planner_task_assessment;
-    const taskResolved = taskAssessment?.status === 'completed';
+    // Task completion must refer to retained pixels, not a discarded attempt.
+    const taskResolved = taskAssessment?.status === 'completed'
+      && input.disposition === 'accept'
+      && input.verdict !== 'regression';
     const taskBlocked = taskAssessment?.status === 'blocked';
     const taskFailed = input.verdict === 'regression' && input.disposition === 'rollback';
     const passSuccessful = input.verdict === 'improvement'
@@ -3576,13 +4674,27 @@ export class SessionStore {
       last_record: null,
       history: [],
     };
-    const bindWholeImageGlanceDue = (reason) => ({
-      ...wholeImageGlance,
-      due: true,
-      reason,
-      required_operation_id: current.current_frame?.operation_id ?? record.id,
-      required_frame_sha256: textOrUndefined(current.current_frame?.sha256 ?? record.preview?.sha256)?.toLowerCase() ?? null,
-    });
+    const bindWholeImageGlanceDue = (reason) => {
+      const requiredRelations = new Set(context.affected_relations ?? []);
+      if (reason === 'final_review') {
+        for (const candidate of tasks) {
+          for (const relation of candidate.affected_relations ?? []) requiredRelations.add(relation);
+        }
+      }
+      const changeDomains = new Set(context.change_domains ?? []);
+      if (changeDomains.has('composition') || changeDomains.has('background-scope') || changeDomains.has('large-value')) {
+        requiredRelations.add('negative-space/composition');
+      }
+      if (changeDomains.has('depth-structure')) requiredRelations.add('occlusion/depth');
+      return {
+        ...wholeImageGlance,
+        due: true,
+        reason,
+        required_operation_id: current.current_frame?.operation_id ?? record.id,
+        required_frame_sha256: textOrUndefined(current.current_frame?.sha256 ?? record.preview?.sha256)?.toLowerCase() ?? null,
+        required_relations: [...requiredRelations],
+      };
+    };
     if (stageBoundary) {
       wholeImageGlance = bindWholeImageGlanceDue('stage_boundary');
     }
@@ -3972,14 +5084,39 @@ export class SessionStore {
     try {
       const record = JSON.parse(fs.readFileSync(this.file(id), 'utf8'));
       assertCurrentRuntimeRecord(record, id);
-      return record;
+      return this.applyReviewResponseTiming(record);
     } catch (e) { if (e.code === 'ENOENT') return undefined; throw e; }
   }
-  write(record) { atomicJson(this.file(record.id), { ...record, runtime_state_version: RUNTIME_STATE_VERSION }); }
+  write(record) {
+    this.applyReviewResponseTiming(record);
+    atomicJson(this.file(record.id), { ...record, runtime_state_version: RUNTIME_STATE_VERSION });
+    this.reviewResponseTimings.delete(record.id);
+  }
+  applyReviewResponseTiming(record) {
+    const pending = this.reviewResponseTimings.get(record.id);
+    if (pending && record.preview?.sha256 === pending.sha256
+      && record.visual_delivery?.recorded_at === pending.receipt_at) {
+      record.continuation_timing = { ...record.continuation_timing,
+        review_image_result_ready_at: pending.ready_at, review_image_response_boundary_complete: true };
+      if (record.latency) Object.assign(record.latency, continuationLatencySegments(record));
+    }
+    return record;
+  }
+  recordReviewResponseBoundary(id, receipt, readyAt) {
+    if (receipt?.operation_id !== id || !receipt.bound_whole_sha256 || !receipt.recorded_at
+      || !Number.isFinite(Date.parse(readyAt))) throw new Error('Review response boundary requires its exact delivery receipt');
+    this.reviewResponseTimings.set(id, { sha256: receipt.bound_whole_sha256,
+      receipt_at: receipt.recorded_at, ready_at: readyAt });
+    if (this.reviewResponseTimings.size > 128) this.reviewResponseTimings.delete(this.reviewResponseTimings.keys().next().value);
+  }
   snapshotClosureState(id) {
     const record = this.read(id);
     if (!record) throw new Error(`Unknown previous_operation_id: ${id}`);
     const paths = new Set([this.file(id), this.paintingStateFile()]);
+    if (record.undo_source_operation_id) {
+      const source = this.read(record.undo_source_operation_id);
+      if (source?.args?.document_id === record.args?.document_id && source.sequence < record.sequence) paths.add(this.file(source.id));
+    }
     const documentId = record.args?.document_id;
     if (Number.isSafeInteger(documentId) && documentId > 0) {
       paths.add(this.visualBarrierFile(documentId));
@@ -4037,6 +5174,7 @@ export class SessionStore {
       preview_capture_materialization_ms: null,
       guard_response_to_review_request_ms: null,
       review_image_service_ms: null,
+      review_image_service_prefix_ms: null,
       review_delivery_to_review_finished_marker_ms: null,
       review_finished_to_next_pass_ready_marker_ms: null,
       next_pass_ready_marker_to_guard_ms: null,
@@ -4158,10 +5296,17 @@ export class SessionStore {
       'decision_model_gap_ms',
       'guard_preflight_ms',
       'photoshop_dispatch_wall_ms',
+      'automatic_checkpoint_wall_ms',
+      'recorder_prepare_ms',
+      'recorder_finalize_ms',
+      'recorder_settle_ms',
+      'recorder_stop_ms',
+      'recorder_postprocess_ms',
       'photoshop_reported_execution_ms',
       'preview_capture_materialization_ms',
       'guard_response_to_review_request_ms',
       'review_image_service_ms',
+      'review_image_service_prefix_ms',
       'review_delivery_to_review_finished_marker_ms',
       'review_finished_to_next_pass_ready_marker_ms',
       'next_pass_ready_marker_to_guard_ms',
@@ -4204,7 +5349,10 @@ export class SessionStore {
         const nextGuardAt = textOrUndefined(latency.next_cycle_received_at);
         const continuationTiming = record.continuation_timing ?? {};
         const reviewRequestAt = textOrUndefined(continuationTiming.review_image_request_received_at);
-        const reviewReadyAt = textOrUndefined(continuationTiming.review_image_result_ready_at);
+        const reviewReadyAt = continuationTiming.review_image_response_boundary_complete === false
+          ? undefined : textOrUndefined(continuationTiming.review_image_result_ready_at);
+        const reviewPrefixAt = continuationTiming.review_image_response_boundary_complete === false
+          ? textOrUndefined(continuationTiming.review_image_result_ready_at) : undefined;
         const reviewFinishedAt = textOrUndefined(continuationTiming.review_finished_marker_received_at);
         const nextPassReadyAt = textOrUndefined(continuationTiming.next_pass_ready_marker_received_at);
         return {
@@ -4215,6 +5363,7 @@ export class SessionStore {
             ...(responseReadyAt ? [{ kind: 'guard_response_ready', at: responseReadyAt }] : []),
             ...(reviewRequestAt ? [{ kind: 'review_image_request_received', at: reviewRequestAt }] : []),
             ...(reviewReadyAt ? [{ kind: 'review_image_result_ready', at: reviewReadyAt }] : []),
+            ...(reviewPrefixAt ? [{ kind: 'review_image_service_prefix_end', at: reviewPrefixAt }] : []),
             ...(reviewFinishedAt ? [{ kind: 'review_finished_marker_received', at: reviewFinishedAt }] : []),
             ...(nextPassReadyAt ? [{ kind: 'next_pass_ready_marker_received', at: nextPassReadyAt }] : []),
             ...(nextGuardAt ? [{ kind: 'next_guard_continuation_received', at: nextGuardAt }] : []),
@@ -4229,6 +5378,7 @@ export class SessionStore {
             marker_semantics: 'server_observed_diagnostic_boundaries_not_pure_model_reasoning_time',
             guard_response_to_review_request_ms: latency.guard_response_to_review_request_ms ?? null,
             review_image_service_ms: latency.review_image_service_ms ?? null,
+            ...(reviewPrefixAt ? { review_image_service_prefix_ms: latency.review_image_service_prefix_ms ?? null } : {}),
             review_delivery_to_review_finished_marker_ms: latency.review_delivery_to_review_finished_marker_ms ?? null,
             review_finished_to_next_pass_ready_marker_ms: latency.review_finished_to_next_pass_ready_marker_ms ?? null,
             next_pass_ready_marker_to_guard_ms: latency.next_pass_ready_marker_to_guard_ms ?? null,
@@ -4253,14 +5403,16 @@ export class SessionStore {
   }
   recordArtisticThroughputEvent(documentId, event = {}) {
     if (!Number.isSafeInteger(documentId) || documentId <= 0) return undefined;
-    return this.updatePaintingState(documentId, current => {
+    const updated = this.updatePaintingState(documentId, current => {
       const existing = current.artistic_throughput && typeof current.artistic_throughput === 'object'
         ? current.artistic_throughput
         : {};
       const modelVisible = event.model_visible !== false;
-      const semanticActions = Number.isFinite(Number(event.semantic_actions))
-        ? Math.max(0, Math.trunc(Number(event.semantic_actions)))
-        : 0;
+      // Preserve the difference between an observed zero and a missing/invalid
+      // action count. The run benchmark cannot recover evidence coerced here.
+      const hasMeasuredCount = key => typeof event[key] === 'number'
+        && Number.isSafeInteger(event[key]) && event[key] >= 0;
+      const semanticActions = hasMeasuredCount('semantic_actions') ? event.semantic_actions : 0;
       const autoRepairCount = Number.isFinite(Number(event.auto_repair_count))
         ? Math.max(0, Math.trunc(Number(event.auto_repair_count)))
         : 0;
@@ -4273,6 +5425,43 @@ export class SessionStore {
       const exposedRejectionCount = Number.isFinite(Number(event.preflight_rejection_exposed_to_model_count))
         ? Math.max(0, Math.trunc(Number(event.preflight_rejection_exposed_to_model_count)))
         : 0;
+      const deterministicEncountered = Number.isFinite(Number(event.deterministic_violations_encountered_count))
+        ? Math.max(0, Math.trunc(Number(event.deterministic_violations_encountered_count))) : 0;
+      const deterministicRepaired = Number.isFinite(Number(event.deterministic_violations_repaired_count))
+        ? Math.max(0, Math.trunc(Number(event.deterministic_violations_repaired_count))) : 0;
+      const deterministicUnresolved = Number.isFinite(Number(event.deterministic_violations_unresolved_count))
+        ? Math.max(0, Math.trunc(Number(event.deterministic_violations_unresolved_count))) : 0;
+      const violationAccounting = Array.isArray(event.violation_accounting) ? event.violation_accounting : [];
+      // Document-wide legacy totals remain additive, but an absent per-call
+      // measurement is not evidence of zero. The run-scoped benchmark uses
+      // these retained events to distinguish complete counts from unknowns.
+      const byClassCode = { ...(existing.violation_accounting_by_class_code ?? {}) };
+      const byScopeClassCode = { ...(existing.violation_accounting_by_scope_class_code ?? {}) };
+      for (const row of violationAccounting) {
+        const repairClass = textOrUndefined(row?.repair_class);
+        const code = textOrUndefined(row?.code);
+        if (!repairClass || !code) continue;
+        const key = `${repairClass}:${code}`;
+        const previous = byClassCode[key] ?? {};
+        byClassCode[key] = {
+          repair_class: repairClass, code,
+          encountered: Number(previous.encountered ?? 0) + Math.max(0, Math.trunc(Number(row.encountered) || 0)),
+          repaired: Number(previous.repaired ?? 0) + Math.max(0, Math.trunc(Number(row.repaired) || 0)),
+          unresolved: Number(previous.unresolved ?? 0) + Math.max(0, Math.trunc(Number(row.unresolved) || 0)),
+        };
+      }
+      for (const row of violationAccounting) {
+        if (!['cycle', 'finalization', 'next_operation'].includes(row?.scope)
+          || !textOrUndefined(row?.repair_class) || !textOrUndefined(row?.code)) continue;
+        const key = JSON.stringify([row.scope, row.repair_class, row.code]);
+        const previous = byScopeClassCode[key] ?? {};
+        byScopeClassCode[key] = {
+          scope: row.scope, repair_class: row.repair_class, code: row.code,
+          encountered: Number(previous.encountered ?? 0) + Math.max(0, Math.trunc(Number(row.encountered) || 0)),
+          repaired: Number(previous.repaired ?? 0) + Math.max(0, Math.trunc(Number(row.repaired) || 0)),
+          unresolved: Number(previous.unresolved ?? 0) + Math.max(0, Math.trunc(Number(row.unresolved) || 0)),
+        };
+      }
       const kind = textOrUndefined(event.kind) ?? 'bookkeeping';
       const totals = {
         model_visible_guard_round_trips: Number(existing.model_visible_guard_round_trips ?? 0) + (modelVisible ? 1 : 0),
@@ -4285,6 +5474,11 @@ export class SessionStore {
         auto_split_count: Number(existing.auto_split_count ?? 0) + autoSplitCount,
         model_semantic_ambiguity_count: Number(existing.model_semantic_ambiguity_count ?? 0) + semanticAmbiguityCount,
         preflight_rejection_exposed_to_model_count: Number(existing.preflight_rejection_exposed_to_model_count ?? 0) + exposedRejectionCount,
+        deterministic_violations_encountered_count: Number(existing.deterministic_violations_encountered_count ?? 0) + deterministicEncountered,
+        deterministic_violations_repaired_count: Number(existing.deterministic_violations_repaired_count ?? 0) + deterministicRepaired,
+        deterministic_violations_unresolved_count: Number(existing.deterministic_violations_unresolved_count ?? 0) + deterministicUnresolved,
+        violation_accounting_by_class_code: byClassCode,
+        violation_accounting_by_scope_class_code: byScopeClassCode,
       };
       const ratio = totals.model_visible_guard_round_trips > 0
         ? totals.semantic_artistic_actions_dispatched / totals.model_visible_guard_round_trips
@@ -4295,26 +5489,59 @@ export class SessionStore {
           at: new Date().toISOString(),
           kind,
           model_visible: modelVisible,
-          semantic_actions: semanticActions,
-          auto_repair_count: autoRepairCount,
-          auto_split_count: autoSplitCount,
-          model_semantic_ambiguity_count: semanticAmbiguityCount,
-          preflight_rejection_exposed_to_model_count: exposedRejectionCount,
+          ...(hasMeasuredCount('semantic_actions') ? { semantic_actions: semanticActions } : {}),
+          ...(hasMeasuredCount('auto_repair_count') ? { auto_repair_count: autoRepairCount } : {}),
+          ...(hasMeasuredCount('auto_split_count') ? { auto_split_count: autoSplitCount } : {}),
+          ...(hasMeasuredCount('model_semantic_ambiguity_count') ? { model_semantic_ambiguity_count: semanticAmbiguityCount } : {}),
+          ...(hasMeasuredCount('preflight_rejection_exposed_to_model_count') ? { preflight_rejection_exposed_to_model_count: exposedRejectionCount } : {}),
+          ...(hasMeasuredCount('deterministic_violations_encountered_count') ? { deterministic_violations_encountered_count: deterministicEncountered } : {}),
+          ...(hasMeasuredCount('deterministic_violations_repaired_count') ? { deterministic_violations_repaired_count: deterministicRepaired } : {}),
+          ...(hasMeasuredCount('deterministic_violations_unresolved_count') ? { deterministic_violations_unresolved_count: deterministicUnresolved } : {}),
+          ...(Array.isArray(event.violation_accounting) ? { violation_accounting: structuredClone(violationAccounting) } : {}),
           ...(textOrUndefined(event.operation_id) ? { operation_id: textOrUndefined(event.operation_id) } : {}),
           ...(textOrUndefined(event.job_id) ? { job_id: textOrUndefined(event.job_id) } : {}),
         },
       ].slice(-64);
+      const previousSequence = existing.archive_sequence ?? 0;
+      if (!Number.isSafeInteger(previousSequence) || previousSequence < 0
+        || previousSequence >= Number.MAX_SAFE_INTEGER) throw new Error('invalid throughput archive sequence');
       return {
         ...current,
         artistic_throughput: {
           protocol: 'photoshop.guard.artistic_throughput.v1',
           ...totals,
+          archive_sequence: previousSequence + 1,
+          archive_legacy_history_unverified: existing.archive_legacy_history_unverified === true
+            || (existing.archive_sequence === undefined && (
+              (Array.isArray(existing.recent_events) && existing.recent_events.length > 0)
+              || Number(existing.model_visible_guard_round_trips ?? 0) > 0
+              || Number(existing.semantic_artistic_actions_dispatched ?? 0) > 0)),
           artistic_actions_per_model_visible_guard_round_trip: Number(ratio.toFixed(3)),
           recent_events: recentEvents,
           note: 'Diagnostic only. Do not maximize this ratio by bundling unrelated work or weakening review/recovery.',
         },
       };
     });
+    // Commit the bounded state first. A crash or append failure leaves a
+    // detectable sequence gap; never silently reconstruct missing host calls.
+    const throughput = updated?.artistic_throughput;
+    if (throughput) {
+      const instance = updated.document_instance;
+      const incarnation = instance?.identity_pending ? null
+        : textOrUndefined(normalizeDocumentInstanceWitness(instance?.host_witness)?.token)
+          ?? textOrUndefined(instance?.bootstrap_operation_id) ?? null;
+      appendThroughputArchiveEvent(this.directory, documentId, throughput.archive_sequence,
+        incarnation, throughput.recent_events[throughput.recent_events.length - 1]);
+    }
+    return updated;
+  }
+  throughputArchivePage(documentId, options = {}) {
+    const page = readThroughputArchivePage(this.directory, documentId, options);
+    const throughput = this.paintingState().documents?.[String(documentId)]?.artistic_throughput ?? {};
+    const reasons = [...page.reasons];
+    if (page.last_sequence !== Number(throughput.archive_sequence ?? 0)) reasons.push('archive_state_sequence_mismatch');
+    if (throughput.archive_legacy_history_unverified === true) reasons.push('legacy_history_not_archived');
+    return { ...page, integrity: reasons.length ? 'unverified' : 'consistent', reasons };
   }
   recordCompilerAttemptAudit(documentId, event = {}) {
     if (!Number.isSafeInteger(documentId) || documentId <= 0) return undefined;
@@ -4372,6 +5599,24 @@ export class SessionStore {
       suppliedRecords ?? projectionContext?.records ?? this.records(),
       projectionContext
     );
+    const journal = throughputJournalEvidence(records);
+    const reportedActions = Number(stored.semantic_artistic_actions_dispatched ?? 0);
+    const reportedRounds = Number(stored.model_visible_guard_round_trips ?? 0);
+    const categoryRounds = ['semantic_dispatch_round_trips', 'bookkeeping_only_round_trips',
+      'recovery_only_round_trips', 'rejected_before_dispatch_round_trips']
+      .reduce((sum, key) => sum + Number(stored[key] ?? 0), 0);
+    const recordIds = new Set(records.map(record => record.id));
+    const unowned = (Array.isArray(stored.recent_events) ? stored.recent_events : []).filter(event => Number(event.semantic_actions) > 0
+      && (!event.operation_id || !recordIds.has(event.operation_id))).length;
+    const unmeasuredRecentActions = (Array.isArray(stored.recent_events) ? stored.recent_events : [])
+      .filter(event => !Number.isSafeInteger(event?.semantic_actions) || event.semantic_actions < 0).length;
+    const reasons = [];
+    if (!Number.isFinite(reportedActions) || reportedActions < journal.actions) reasons.push('dispatch_mirror_below_journal');
+    if (journal.operations > 0 && journal.unknown === 0 && unowned === 0 && reportedActions !== journal.actions) reasons.push('dispatch_mirror_disagrees_with_journal');
+    if (!Number.isFinite(reportedRounds) || reportedRounds < 0 || reportedRounds !== categoryRounds) reasons.push('round_trip_categories_disagree');
+    const accountingStatus = reasons.length ? 'stale'
+      : journal.unknown || unowned || unmeasuredRecentActions || (reportedActions > 0 && journal.operations === 0)
+        ? 'unverified' : 'consistent';
     const sumLatency = field => records.reduce((sum, record) => {
       const value = Number(record.latency?.[field]);
       return Number.isFinite(value) && value >= 0 ? sum + value : sum;
@@ -4381,7 +5626,12 @@ export class SessionStore {
       + sumLatency('recovery_reconciliation_ms');
     const photoshopDispatchMs = sumLatency('photoshop_dispatch_wall_ms');
     const visualEvaluationMs = sumLatency('visual_evaluation_verdict_gap_ms');
-    const measuredMs = guardBookkeepingMs + photoshopDispatchMs + visualEvaluationMs;
+    const recorderOverheadMs = sumLatency('recorder_prepare_ms') + sumLatency('recorder_finalize_ms');
+    const checkpointRecords = records.filter(record => typeof record.latency?.automatic_checkpoint_wall_ms === 'number');
+    const checkpointWallMs = checkpointRecords.reduce((sum, record) => sum + record.latency.automatic_checkpoint_wall_ms, 0);
+    const checkpointDispatchMs = checkpointRecords.reduce((sum, record) => sum + (record.latency.photoshop_dispatch_wall_ms ?? 0), 0);
+    const measuredMs = guardBookkeepingMs + photoshopDispatchMs + visualEvaluationMs
+      + recorderOverheadMs + Math.max(0, checkpointWallMs - checkpointDispatchMs);
     const regressions = records.filter(record => record.verdict?.verdict === 'regression').length;
     const recoveryRecords = records.filter(record =>
       record.phase !== 'completed'
@@ -4400,17 +5650,36 @@ export class SessionStore {
       recovery_only_round_trips: Number(stored.recovery_only_round_trips ?? 0),
       rejected_before_dispatch_round_trips: Number(stored.rejected_before_dispatch_round_trips ?? 0),
       semantic_artistic_actions_dispatched: Number(stored.semantic_artistic_actions_dispatched ?? 0),
+      accounting_integrity: {
+        status: accountingStatus,
+        reasons: [...reasons, ...(unmeasuredRecentActions ? ['recent_semantic_actions_unmeasured'] : [])],
+        journal_semantic_actions_dispatched: journal.actions,
+        journal_operations_with_dispatch_evidence: journal.operations,
+        journal_operations_without_exact_dispatch_count: journal.unknown,
+        unowned_recent_dispatch_events: unowned,
+        scope: 'current_document_incarnation',
+        round_trip_delivery_authority: 'stored_events_only_not_reconstructable_from_paint_receipts',
+      },
       auto_repair_count: Number(stored.auto_repair_count ?? 0),
       auto_split_count: Number(stored.auto_split_count ?? 0),
       model_semantic_ambiguity_count: Number(stored.model_semantic_ambiguity_count ?? 0),
       preflight_rejection_exposed_to_model_count: Number(stored.preflight_rejection_exposed_to_model_count ?? 0),
-      artistic_actions_per_model_visible_guard_round_trip: Number(stored.artistic_actions_per_model_visible_guard_round_trip ?? 0),
+      deterministic_violations_encountered_count: Number(stored.deterministic_violations_encountered_count ?? 0),
+      deterministic_violations_repaired_count: Number(stored.deterministic_violations_repaired_count ?? 0),
+      deterministic_violations_unresolved_count: Number(stored.deterministic_violations_unresolved_count ?? 0),
+      violation_accounting_by_class_code: stored.violation_accounting_by_class_code ?? {},
+      violation_accounting_by_scope_class_code: stored.violation_accounting_by_scope_class_code ?? {},
+      artistic_actions_per_model_visible_guard_round_trip: accountingStatus === 'stale' || unmeasuredRecentActions ? null
+        : reportedRounds > 0 ? Number((reportedActions / reportedRounds).toFixed(3)) : 0,
       timing: {
         guard_bookkeeping_ms_observed: guardBookkeepingMs,
         photoshop_dispatch_ms_observed: photoshopDispatchMs,
+        recorder_overhead_ms_observed: recorderOverheadMs,
+        automatic_checkpoint_wall_ms_observed: checkpointWallMs,
+        automatic_checkpoint_dispatch_ms_observed: checkpointDispatchMs,
         visual_evaluation_gap_ms_observed: visualEvaluationMs,
         guard_bookkeeping_share_of_measured_time: measuredMs > 0 ? Number((guardBookkeepingMs / measuredMs).toFixed(4)) : null,
-        note: 'Visual-evaluation gap remains externally unattributed host/model/user time; only measured components participate in this diagnostic share.',
+        note: 'Recorder phase timings are children of recorder overhead; checkpoint dispatch is already in Photoshop dispatch. Do not sum these overlaps. Visual-evaluation gap remains externally unattributed host/model/user time; only measured components participate in this diagnostic share.',
       },
       outcomes: {
         regression_passes: regressions,
@@ -4428,7 +5697,7 @@ export class SessionStore {
       const r = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
       assertCurrentRuntimeRecord(r, f);
       if (!r.id || !r.phase || !r.created_at) throw new Error(`Corrupt operation journal: ${f}`);
-      return r;
+      return this.applyReviewResponseTiming(r);
     }).sort((a, b) => (a.sequence && b.sequence ? a.sequence - b.sequence : a.created_at.localeCompare(b.created_at)) || a.id.localeCompare(b.id));
   }
   workflowMetrics(documentId, suppliedRecords, projectionContext) {
@@ -4593,12 +5862,19 @@ export class SessionStore {
       suppliedRecords ?? projectionContext?.records ?? this.records(),
       projectionContext
     );
+    // Invalidated pixels retain learning history, but cannot resolve a problem or
+    // supply retained useful work. Administrative acceptance alone is not progress.
+    const retainedImprovement = record => record.phase === 'completed'
+      && record.failed !== true
+      && record.rolled_back !== true
+      && record.current_frame_authority !== false
+      && record.verdict?.verdict === 'improvement'
+      && record.verdict?.disposition === 'accept';
     const lastResolvedSequence = records
       .filter(record => record.visual && record.verdict && problemIdentity(record) === problemId)
       .filter(record =>
         record.verdict?.target_resolved === 'yes'
-        && record.verdict?.verdict === 'improvement'
-        && record.verdict?.disposition === 'accept'
+        && retainedImprovement(record)
       )
       .map(record => Number(record.sequence ?? 0))
       .sort((a, b) => b - a)[0] ?? 0;
@@ -4609,14 +5885,16 @@ export class SessionStore {
         record.verdict?.target_resolved === 'no'
         || record.verdict?.verdict === 'regression'
         || record.verdict?.significance?.execution_effect === 'insufficient'
+        || record.rolled_back === true
+        || record.current_frame_authority === false
+        || record.verdict?.disposition === 'rollback'
       )
       ;
     const attempts = attemptRecords.map(record => ({
         strategy_id: textOrUndefined(record.causal_strategy_id) ?? visualStrategyFingerprint(record),
         method_class: textOrUndefined(record.args?.method_class),
         materially_corrected: significanceHasDetectedChange(record.verdict?.significance),
-        useful_partial_work: record.verdict?.verdict === 'improvement'
-          || record.verdict?.disposition === 'accept',
+        useful_partial_work: retainedImprovement(record),
         failed: true,
       }));
     if (!attempts.length) return null;
@@ -4631,20 +5909,33 @@ export class SessionStore {
       textOrUndefined(record.args?.method_class)
       ?? textOrUndefined(record.args?.steps?.find?.(step => step?.tool !== 'photoshop_get_preview')?.method_id)
     ).filter(Boolean))];
-    const strategyFamiliesTried = [...new Set(attemptRecords.map(record =>
+    const strategyFamily = record =>
       textOrUndefined(record.strategy_family)
       ?? textOrUndefined(record.causal_strategy_id)
       ?? textOrUndefined(record.args?.method_class)
-      ?? visualStrategyFingerprint(record)
-    ).filter(Boolean))];
+      ?? visualStrategyFingerprint(record);
+    const strategyFamiliesTried = [...new Set(attemptRecords.map(strategyFamily).filter(Boolean))];
+    // Model-facing labels are bounded; full identities above remain admission
+    // authority and the journal remains the complete history.
+    const familyProjection = outcomeRecords => {
+      const families = [...new Set(outcomeRecords.map(strategyFamily).filter(Boolean))] as string[];
+      return { families: families.slice(-3).map(family => {
+        let label = '';
+        for (const char of family) {
+          if (Buffer.byteLength(label + char, 'utf8') > 64) break;
+          label += char;
+        }
+        return label === family ? label : label + '…';
+      }), omitted: Math.max(0, families.length - 3) };
+    };
     const regressionCount = attemptRecords.filter(record => record.verdict?.verdict === 'regression').length;
-    const rollbackCount = attemptRecords.filter(record => record.verdict?.disposition === 'rollback').length;
+    const rollbackCount = attemptRecords.filter(record => record.rolled_back === true || record.verdict?.disposition === 'rollback').length;
     const strongestKnown = [...records].reverse().find(record =>
       record.visual
       && record.verdict
       && problemIdentity(record) === problemId
       && Number(record.sequence ?? 0) > lastResolvedSequence
-      && (record.verdict?.verdict === 'improvement' || record.verdict?.disposition === 'accept')
+      && retainedImprovement(record)
     );
     const currentEscalationLevel = Math.max(0, ...attemptRecords.map(record => {
       const explicit = Number(record.causal_escalation_level);
@@ -4675,6 +5966,15 @@ export class SessionStore {
       } : null,
       current_escalation_level: currentEscalationLevel,
       minimum_required_next_level: minimumRequiredNextLevel,
+      strategy_feedback: {
+        failed: familyProjection(attemptRecords.filter(record => !retainedImprovement(record) && record.verdict?.verdict !== 'regression')),
+        regressive: familyProjection(attemptRecords.filter(record => record.verdict?.verdict === 'regression')),
+        promising: familyProjection(attemptRecords.filter(retainedImprovement)),
+        required_change: resolution.decision === 'retry_same_strategy_once' ? 'one_bounded_retry'
+          : resolution.decision === 'require_distinct_strategy' ? 'distinct_executable_strategy'
+            : 'independent_work_or_replan',
+        minimum_required_next_level: minimumRequiredNextLevel,
+      },
     };
   }
 
@@ -4939,7 +6239,7 @@ export class SessionStore {
       || !!pendingVisual;
     const secondsSinceVisualChange = metrics.seconds_since_last_visual_operation;
     const nonvisualProgressStall = continuationActive
-      && unfinishedPlannerWork
+      && (unfinishedPlannerWork || documentArtisticDebt(documentState).length > 0)
       && !technicalClosurePending
       && Number.isFinite(secondsSinceVisualChange)
       && secondsSinceVisualChange >= SILENT_STALL_SECONDS;
@@ -4999,6 +6299,7 @@ export class SessionStore {
       return 'ready';
     }
     if (state.pending_rollback) {
+      if (state.pending_rollback.undo_operation_id) return `undo ${state.pending_rollback.undo_operation_id} already dispatched for ${state.pending_rollback.operation_id}; verify its existing final frame and close/reconcile it without another undo`;
       const remaining = positiveHistoryStepCount(state.pending_rollback.remaining_undo_steps)
         || positiveHistoryStepCount(state.pending_rollback.required_undo_steps)
         || 1;
@@ -5011,6 +6312,11 @@ export class SessionStore {
     const art = state.art_director;
     if (art?.status === 'interrupted' || art?.status === 'review_due' || art?.review_due) {
       return `Art Director review required for directive ${art.directive_id}: ${art.review_reason ?? art.status}`;
+    }
+    const generatedGeometryDebt = this.generatedGeometryRebuildDebt(documentId, all, projectionContext);
+    if (generatedGeometryDebt.length) {
+      const debt = generatedGeometryDebt[0];
+      return `rebuild generated geometry for owner ${debt.owner_id} against Scene Geometry revision ${debt.current_scene_geometry_revision}; changed dependencies=${debt.changed_dependency_ids.join(',') || debt.reason}`;
     }
     const lastClassifiedVisual = [...records].reverse().find(r => r.visual && r.verdict);
     if (!this.workflowContinuationActive(state, records, lastClassifiedVisual)) {
@@ -5030,14 +6336,15 @@ export class SessionStore {
         records,
         projectionContext
       );
+      const strategyFeedback = recovery ? `; strategy_history=${JSON.stringify(recovery.strategy_feedback)}` : '';
       if (recovery?.decision === 'retry_same_strategy_once') {
-        return `retry bounded recovery for ${activeProblemId}; one same-strategy retry remains before a structural change is required`;
+        return `retry bounded recovery for ${activeProblemId}; one same-strategy retry remains before a structural change is required${strategyFeedback}`;
       }
       if (recovery?.decision === 'require_distinct_strategy') {
-        return `make a causally distinct structural strategy change for ${activeProblemId}; parameter-only variants do not qualify`;
+        return `make a causally distinct structural strategy change for ${activeProblemId}; parameter-only variants do not qualify${strategyFeedback}`;
       }
       if (recovery?.decision === 'block_dependent_problem') {
-        return `dependent artistic problem ${activeProblemId} is blocked after bounded distinct-strategy recovery; continue only independent work or return to Art Director`;
+        return `dependent artistic problem ${activeProblemId} is blocked after bounded distinct-strategy recovery; continue only independent work or return to Art Director${strategyFeedback}`;
       }
     }
     const largestMustFix = this.largestOpenMustFix(state.visual_problems);
@@ -5087,9 +6394,13 @@ export class SessionStore {
       'affected_relations', 'affected_qualities', 'preservation_facts',
       'independent_region', 'addresses_primary_mismatch', 'addresses_problem_id',
       'preview_args', 'visual_review_profile', 'artistic_commentary', 'accepted_anchor_restore',
+      // Direct planning metadata; logical_layer is validated against current durable blur ownership below.
+      'material_response', 'logical_layer',
       'root_cause_classification', 'root_cause_reason', 'causal_level_change', 'correction_scope',
       'causal_strategy_id', 'strategy_family', 'causal_escalation_level',
       'scene_ownership_plan', 'scene_geometry_model', 'scene_lighting_color_model', 'scene_camera_imaging_model', 'color_gradient_preflight', 'imaging_preflight', 'geometry_preflight', 'cross_layer_correction',
+      'object_construction_model', 'construction_provenance',
+      'painterly_provenance',
     ]);
 
     if (!stateOnly) {
@@ -5112,6 +6423,41 @@ export class SessionStore {
       // execution authority. Admission is determined from observed failure
       // history and the executable candidate below, so even stale/legacy label
       // values must not veto an otherwise safe mutation.
+    }
+    if (request?.tool === 'photoshop_execute_visual_microplan' && request?.args?.method_class === 'filter') {
+      const steps = Array.isArray(request.args.steps) ? request.args.steps : [];
+      const filters = steps.filter(step => step.tool === 'photoshop_apply_gaussian_blur');
+      if (filters.length !== 1 || steps.some(step => step.tool === 'photoshop_create_layer')) add('prepared_filter_scope: exactly one existing-owner Gaussian filter is permitted');
+      else {
+        const nested = { ...request, tool: 'photoshop_apply_gaussian_blur',
+          args: { ...filters[0].args, document_id: request.args.document_id },
+          logical_layer: request.args.logical_layer };
+        for (const error of this.collectPreflightErrors(nested, { ...options, stateOnly: true })) add(error);
+      }
+    }
+    if (request?.logical_layer !== undefined && !/^photoshop_apply_(?:gaussian|motion|smart)_blur$/.test(request?.tool ?? '')) add('logical_layer is only supported at the root for guarded direct blur');
+    if (/^photoshop_apply_(?:gaussian|motion|smart)_blur$/.test(request?.tool ?? '')) {
+      const documentId = request?.args?.document_id;
+      const layerId = request?.args?.layer_id;
+      const owners = this.semanticLayerOwners(documentId, undefined, projectionContext).filter(owner => owner.temporary !== true && owner.layer_id === layerId);
+      const logical = request?.logical_layer;
+      if (logical && (owners.length !== 1 || logical.hypothesis_id !== owners[0].hypothesis_id || logical.layer_id !== layerId || logical.physical_role !== owners[0].physical_role)) add('semantic_mutation_target_owner_mismatch: direct blur owner must match the current physical binding');
+      const state = (projectionContext?.paintingState ?? this.paintingState()).documents?.[String(documentId)];
+      if (state?.painting_profile === 'nontrivial_painting' && !logical) add('semantic_layer_owner_missing: direct blur must preserve current owner authority');
+      capture(() => {
+        const camera = request.scene_camera_imaging_model ?? this.sceneCameraImagingModel(documentId, undefined, projectionContext);
+        if (!camera) throw new Error('imaging_preflight_camera_model_missing: direct blur requires the active camera model');
+        const model = normalizeSceneCameraImagingModel(camera);
+        const imaging = normalizeImagingPreflight(request.imaging_preflight, model);
+        if (request.tool === 'photoshop_apply_motion_blur' && imaging.effect_kind !== 'motion-blur') throw new Error('imaging_preflight_conflict: motion blur requires matching effect_kind');
+        if (owners.length === 1 && owners[0].camera_binding) {
+          const binding = normalizeCameraBinding(owners[0].camera_binding);
+          const expected = imaging.owner_expectations.find(row => row.owner_id === owners[0].hypothesis_id);
+          if (!expected || binding.sceneCameraModelId !== model.model_id || binding.sceneCameraRevision !== model.revision
+            || (!expected.local_exception && (expected.depth_role !== binding.depthRole || expected.expected_focus_role !== binding.expectedFocusRole))) throw new Error('imaging_preflight_conflict: stale or contradictory owner focus binding');
+        }
+        if (imaging.outcome === 'conflict' || !imaging.revalidate_edge_detail || (logical && !imaging.owner_expectations.some(row => row.owner_id === logical.hypothesis_id))) throw new Error('imaging_preflight_conflict: blur must preserve target-owner depth/focus and require edge-detail review');
+      });
     }
     const significanceMode = significanceModeOf(request ?? {});
     if (!stateOnly) {
@@ -5159,7 +6505,13 @@ export class SessionStore {
         add(`painting_stage_reset_not_applicable: stage_reset is valid only for a backward transition from the durable stage`);
       }
     }
+    if (documentState?.document_instance?.identity_pending && !isRead(request?.tool)) {
+      add('document_identity_unverified: recover through photoshop_guard_resume before mutation; preserved art state must not be reused or overwritten until identity is confirmed');
+    }
     if (documentState?.pending_rollback && request?.tool === 'photoshop_undo' && !request?.accepted_anchor_restore) {
+      if (documentState.pending_rollback.undo_operation_id && documentState.pending_rollback.undo_operation_id !== request.id) {
+        add(`rollback_already_dispatched: verify/close ${documentState.pending_rollback.undo_operation_id}; do not dispatch another undo`);
+      }
       const remaining = positiveHistoryStepCount(documentState.pending_rollback.remaining_undo_steps)
         || positiveHistoryStepCount(documentState.pending_rollback.required_undo_steps)
         || 1;
@@ -5221,6 +6573,15 @@ export class SessionStore {
     const plannedPreviousOperationId = textOrUndefined(options.plannedPreviousOperationId);
     const plannedPreviousVisualVerdict = options.plannedPreviousVisualVerdict === true;
     const recoveryRead = isRead(request?.tool);
+    // Internal closed-document recovery must obtain the absence evidence before
+    // disposing of pending report/review debt. This option is not a public request
+    // field and can authorize only a read-only document inventory, never mutation.
+    const closedDocumentEvidenceRead = request?.tool === 'photoshop_list_documents'
+      && typeof options.closedDocumentRecoveryFor === 'string'
+      && Number.isSafeInteger(this.read(options.closedDocumentRecoveryFor)?.args?.document_id);
+    const cachedValueEvidenceRead = request?.tool === 'photoshop_analyze_value_structure'
+      && options.cachedValueEvidenceFor === documentState?.current_frame?.sha256
+      && /^[a-f0-9]{64}$/.test(options.cachedValueEvidenceFor ?? '');
     const unreported = records.find(r => r.id !== plannedPreviousOperationId
       && !this.hasDurableNotExecutedProof(r)
       && !isTerminalBootstrapFailure(r)
@@ -5230,12 +6591,16 @@ export class SessionStore {
       // read-only evidence before report/ack/verdict closure is possible.
       // Blocking those reads on the very debt that reconciliation is meant to
       // resolve creates a recovery dead-end.
+      && !closedDocumentEvidenceRead
+      && !cachedValueEvidenceRead
       && !(recoveryRead && !r.resolved && r.phase !== 'completed')
       && (!r.report || (r.operation_receipt && !r.operation_ack)));
     if (unreported) {
-      const suffix = unreported.report && unreported.operation_receipt && !unreported.operation_ack
-        ? 'Guard operation acknowledgement is still required'
-        : 'emit real assistant prose, then record it with report';
+      const suffix = unreported.visual === false && !isVisual(unreported.tool) && unreported.dispatched === true
+        && !unreported.failed && !unreported.error && unreported.execution !== 'uncertain'
+        && deriveExecutionOutcome(unreported) === 'completed'
+        ? `close the confirmed technical operation through photoshop_guard_cycle_auto(previous_operation_id=${unreported.id}); no previous_observation or standalone prose/report call is required`
+        : 'Use the public compact review/recovery flow; completed visual work needs its exact delivered image and previous_observation';
       add(`Report required for ${unreported.id}: ${suffix}`);
     }
     const uncertain = records.find(r => !this.hasDurableNotExecutedProof(r) && !r.resolved && r.phase !== 'completed');
@@ -5246,7 +6611,8 @@ export class SessionStore {
       add('Visual mutations require a stable problem_id so progress is measured by resolved visual problems, not tool-call count');
     }
     if (!rollbackMutation) {
-      capture(() => this.plannerGate(documentId, request, projectionContext));
+      capture(() => this.plannerGate(documentId, request, projectionContext,
+        !!plannedPreviousOperationId && plannedPreviousVisualVerdict && options.plannedPhysicalStackReview === true));
       capture(() => this.priorityGate(documentId, request, projectionContext));
     }
     capture(() => {
@@ -5375,6 +6741,8 @@ export class SessionStore {
     const compilerDeferredFromOperationId = textOrUndefined(options.compilerDeferredFromOperationId);
     const preflightErrors = this.collectPreflightErrors(request, {
       projectionContext,
+      ...(options.closedDocumentRecoveryFor ? { closedDocumentRecoveryFor: options.closedDocumentRecoveryFor } : {}),
+      ...(options.cachedValueEvidenceFor ? { cachedValueEvidenceFor: options.cachedValueEvidenceFor } : {}),
       ...(compilerDeferredFromOperationId ? { compilerDeferredFromOperationId } : {}),
     });
     if (preflightErrors.length) throw new Error(preflightErrors[0]);
@@ -5396,6 +6764,7 @@ export class SessionStore {
     const sequence = Math.max(0, ...records.map(r => r.sequence ?? 0)) + 1;
     let baselinePreview;
     let baselinePreviewSourceOperationId;
+    let baselineSemanticState;
     if (isVisual(request.tool) && Number.isSafeInteger(documentId) && documentId > 0) {
       const state = (projectionContext ? projectionContext.paintingState : this.paintingState()).documents?.[String(documentId)];
       const frame = state?.current_frame ?? state?.accepted_frame;
@@ -5403,6 +6772,10 @@ export class SessionStore {
       baselinePreview = baselineRecord?.preview
         ?? (frame?.path ? { sha256: frame.sha256, materialized_path: frame.path } : undefined);
       baselinePreviewSourceOperationId = baselineRecord?.id ?? frame?.operation_id;
+      if (state && !isRollbackMutation(request) && baselinePreview?.sha256 === frame?.sha256 && frame?.operation_id) {
+        baselineSemanticState = frameSemanticSnapshot(state, documentId, frame.operation_id, frame.sha256);
+        if (!baselineSemanticState.document_incarnation) baselineSemanticState = undefined;
+      }
     }
     const record = {
       ...request,
@@ -5423,6 +6796,7 @@ export class SessionStore {
       } : {}),
       ...(baselinePreview ? { baseline_preview: baselinePreview } : {}),
       ...(baselinePreviewSourceOperationId ? { baseline_preview_source_operation_id: baselinePreviewSourceOperationId } : {}),
+      baseline_semantic_state: baselineSemanticState,
       pid: process.pid,
     };
     this.write(record); // Intent must reach disk BEFORE connecting or dispatching.
@@ -5497,8 +6871,23 @@ export class SessionStore {
       this.clearVisualBarrier(documentId);
       this.setWorkflowLifecycle(documentId, 'stopped', 'controlled_document_close', record.id);
     }
-    if (!failed && isRollbackMutation(record) && Number.isSafeInteger(documentId) && documentId > 0) {
+    if (!failed && isRollbackMutation(record) && !record.accepted_anchor_restore
+      && Number.isSafeInteger(documentId) && documentId > 0) {
       const pendingBeforeRollback = this.paintingState().documents?.[String(documentId)]?.pending_rollback;
+      const sourceBeforeRollback = pendingBeforeRollback?.operation_id ? this.read(pendingBeforeRollback.operation_id) : undefined;
+      const sourceHistoryOwnership = parseTexts(sourceBeforeRollback?.result).map(body => body?.pass_execution?.history_ownership)
+        .find(row => row?.protocol === 'photoshop.guard.semantic_pass_history_ownership.v1');
+      const needsSemanticClosure = record.tool === 'photoshop_undo' && !!sourceBeforeRollback?.baseline_semantic_state
+        && sourceHistoryOwnership?.status === 'exact'
+        && positiveHistoryStepCount(sourceHistoryOwnership.owned_history_steps)
+          === (positiveHistoryStepCount(pendingBeforeRollback.remaining_undo_steps) || positiveHistoryStepCount(pendingBeforeRollback.required_undo_steps) || 1);
+      if (needsSemanticClosure) {
+        updated.undo_source_operation_id = sourceBeforeRollback.id;
+        updated.undo_expected_history_steps = positiveHistoryStepCount(pendingBeforeRollback.remaining_undo_steps)
+          || positiveHistoryStepCount(pendingBeforeRollback.required_undo_steps) || 1;
+        this.write(updated);
+      }
+      let rollbackCompleted = false;
       this.updatePaintingState(documentId, current => {
         const pending = current.pending_rollback;
         if (!pending) return current;
@@ -5507,6 +6896,10 @@ export class SessionStore {
           const remainingBefore = positiveHistoryStepCount(pending.remaining_undo_steps) || required;
           const applied = positiveHistoryStepCount(record.args?.steps) || 1;
           if (applied !== remainingBefore) return current;
+          if (needsSemanticClosure) return { ...current, pending_rollback: {
+            ...pending, undo_operation_id: record.id, undo_execution_completed: confirmedUndoSteps(result) === remainingBefore,
+          } };
+          rollbackCompleted = true;
           return this.retireRolledBackTrendEvidence({
             ...current,
             pending_rollback: undefined,
@@ -5515,9 +6908,11 @@ export class SessionStore {
               completed_at: updated.completed_at,
               source_operation_id: pending.operation_id,
               required_undo_steps: required,
+              semantic_state_restored: false,
             },
           }, pending.operation_id, record.id, updated.completed_at);
         }
+        rollbackCompleted = true;
         return this.retireRolledBackTrendEvidence({
           ...current,
           pending_rollback: undefined,
@@ -5529,9 +6924,13 @@ export class SessionStore {
           },
         }, pending.operation_id, record.id, updated.completed_at);
       });
-      if (pendingBeforeRollback?.operation_id) {
+      if (rollbackCompleted && pendingBeforeRollback?.operation_id) {
         const sourceRecord = this.read(pendingBeforeRollback.operation_id);
         if (sourceRecord) {
+          if (record.tool === 'photoshop_undo') {
+            sourceRecord.rolled_back = true;
+            sourceRecord.current_frame_authority = false;
+          }
           sourceRecord.rollback = {
             completed: true,
             rollback_operation_id: record.id,
@@ -5917,7 +7316,9 @@ export class SessionStore {
     const incomingDelivered = Array.isArray(delivery?.delivered)
       ? delivery.delivered.filter(item => item && typeof item.role === 'string' && typeof item.sha256 === 'string')
       : [];
+    const contextId = currentToolExecutionContext()?.reviewContextId;
     const previous = record.visual_delivery?.bound_whole_sha256 === record.preview.sha256
+      && record.visual_delivery?.review_context_id === contextId
       ? record.visual_delivery
       : null;
     const expectedRoles = [...new Set([...(previous?.expected_roles ?? []), ...incomingExpectedRoles])];
@@ -5929,20 +7330,22 @@ export class SessionStore {
         role: item.role,
         sha256: item.sha256,
         image_delivered_for_review: item.image_delivered_for_review === true,
+        ...(item.reused_from ? { reused_from: structuredClone(item.reused_from) } : {}),
       });
     }
     const delivered = [...deliveredByRole.values()];
-    const deliveredRoles = new Set(delivered.map(item => item.role));
-    const complete = expectedRoles.length > 0 && expectedRoles.every(role => deliveredRoles.has(role));
+    const deliveryState = visualDeliveryState(record, { expected_roles: expectedRoles, delivered });
+    const complete = deliveryState.delivery_complete;
     record.visual_delivery = {
       protocol: 'photoshop.guard.visual_delivery.v1',
       operation_id: id,
       bound_whole_sha256: record.preview.sha256,
+      ...(contextId ? { review_context_id: contextId } : {}),
       transport: delivery?.transport ?? 'metadata_only',
       delivery_complete: complete,
-      expected_roles: expectedRoles,
-      delivered,
-      undelivered_roles: expectedRoles.filter(role => !deliveredRoles.has(role)),
+      expected_roles: deliveryState.expected_roles,
+      delivered: deliveryState.delivered,
+      undelivered_roles: deliveryState.undelivered_roles,
       omitted: complete ? [] : (Array.isArray(delivery?.omitted) ? delivery.omitted : previous?.omitted ?? []),
       recorded_at: new Date().toISOString(),
       guarantee: 'mcp_image_content_delivery_to_model_facing_tool_result',
@@ -5958,10 +7361,12 @@ export class SessionStore {
         ...(record.continuation_timing ?? {}),
         review_image_request_received_at: reviewRequestAt,
         review_image_result_ready_at: reviewReadyAt,
+        review_image_response_boundary_complete: deliveryTiming.response_boundary_complete !== false,
         review_image_delivery_complete: complete,
       };
       if (record.latency) Object.assign(record.latency, continuationLatencySegments(record));
     }
+    this.reviewResponseTimings.delete(id);
     this.write(record);
     return record.visual_delivery;
   }
@@ -6017,18 +7422,22 @@ export class SessionStore {
     if (!record?.visual || !record?.preview?.sha256) return null;
     const receipt = record.visual_delivery;
     if (!receipt) return null;
+    const contextId = currentToolExecutionContext()?.reviewContextId;
+    const sameContext = !contextId || receipt.review_context_id === contextId;
+    const deliveryState = visualDeliveryState(record, sameContext ? receipt : { ...receipt, delivered: [] });
     if (
       receipt?.protocol === 'photoshop.guard.visual_delivery.v1'
       && receipt.bound_whole_sha256 === record.preview.sha256
       && receipt.delivery_complete === true
+      && deliveryState.delivery_complete
     ) return null;
     return {
       protocol: 'photoshop.guard.visual_delivery_debt.v1',
       operation_id: record.id,
       bound_whole_sha256: record.preview.sha256,
       state: 'redelivery_required',
-      expected_roles: receipt.expected_roles ?? [],
-      undelivered_roles: receipt.undelivered_roles ?? [],
+      expected_roles: deliveryState.expected_roles,
+      undelivered_roles: deliveryState.undelivered_roles,
       omitted: receipt.omitted ?? [],
       mutation_replay_allowed: false,
     };
@@ -6225,7 +7634,7 @@ export class SessionStore {
       return {
         ...requirement,
         ...regions,
-        role: `${requirement.level}_after_${captureIndex + 1}`,
+        role: `${requirement.level}_after_${captureSequenceBase + captureIndex + 1}`,
         capture_sequence: captureSequenceBase + captureIndex + 1,
         capture_id: `capture-${String(captureSequenceBase + captureIndex + 1).padStart(4, '0')}-${requirement.requirement_id.slice(0, 16)}`,
         focus_max_dimension_px: requirement.level === 'micro' ? 1600 : 1200,
@@ -6370,23 +7779,84 @@ export class SessionStore {
     this.write(record);
     return evidence;
   }
-  compactClosureDefaults(id) {
+  compactPendingNonvisualClosureId(projectionContext = undefined) {
+    // The report/ack gate is global. Infer only its one exact outstanding record,
+    // never the latest document/operation or a choice among several obligations.
+    const pending = (projectionContext?.records ?? this.records()).filter(record =>
+      !this.hasDurableNotExecutedProof(record) && !isTerminalBootstrapFailure(record)
+      && !isAbandonedRecovery(record) && record.execution !== 'not-executed'
+      && (!record.report || (record.operation_receipt && !record.operation_ack)));
+    if (pending.length !== 1) return undefined;
+    const record = pending[0];
+    if (record.visual !== false || isVisual(record.tool) || record.dispatched !== true
+      || record.phase !== 'completed' || record.failed || record.error || record.execution === 'uncertain'
+      || deriveExecutionOutcome(record) !== 'completed') return undefined;
+    const receipt = record.operation_receipt;
+    if (receipt?.protocol !== OPERATION_RECEIPT_PROTOCOL || receipt.operation_id !== record.id
+      || receipt.phase !== 'completed' || receipt.execution !== 'completed'
+      || typeof receipt.token !== 'string' || !receipt.token.trim()) return undefined;
+    return record.id;
+  }
+
+  compactClosureDefaults(id, previousVerdict = undefined) {
     const record = this.read(id);
     if (!record) return {};
+    const documentId = Number(record?.args?.document_id);
+    const presentation = this.presentationContext(
+      Number.isSafeInteger(documentId) && documentId > 0 ? documentId : undefined
+    );
     const bodies = parseTexts(record.result);
     const bodySummary = bodies
       .map(body => typeof body?.summary === 'string' ? body.summary.trim() : '')
       .find(Boolean);
     const fallbackResult = JSON.stringify(bodies).slice(0, 700);
-    const result = bodySummary
-      || (fallbackResult.length >= 4 ? fallbackResult : 'Recorded execution completed.');
+    const observedResult = artisticObservedResult(previousVerdict ?? record.verdict);
+    // A visual tool's summary can repeat its goal; it is not image observation.
+    const rawResult = observedResult ?? (record.visual || isVisual(record.tool)
+      ? undefined
+      : bodySummary || (fallbackResult.length >= 4 ? fallbackResult : 'Recorded execution completed.'));
+    const language = sidecarLanguage(
+      presentation.language,
+      record.artistic_commentary,
+      record.summary,
+      rawResult
+    );
+    const mode = presentation.commentary_mode;
+    const region = textOrUndefined(record.region);
+    const executionConfirmed = deriveExecutionOutcome(record) === 'completed';
+    const artisticFallback = language === 'ru'
+      ? `${executionConfirmed ? 'Выполнен запланированный художественный проход' : 'Выполнение художественного прохода не подтверждено'}${region ? ` в области «${region}»` : ''}.`
+      : executionConfirmed
+        ? `Completed the planned artistic pass${region ? ` in “${region}”` : ''}.`
+        : `Execution of the artistic pass${region ? ` in “${region}”` : ''} is unconfirmed.`;
+    const resultFallback = observedResult
+      ? language === 'ru'
+        ? 'Визуальное наблюдение записано; оно относится только к этому проходу.'
+        : 'A visual observation was recorded for this pass only.'
+      : language === 'ru'
+        ? `${executionConfirmed ? 'Выполнение подтверждено' : 'Выполнение не подтверждено'}; визуальный результат ещё не оценён.`
+        : `${executionConfirmed ? 'Execution confirmed' : 'Execution unconfirmed'}; the visual result is not yet assessed.`;
+    const technicalDid = language === 'ru'
+      ? `Guard зафиксировал ${executionConfirmed ? 'завершение' : 'неподтверждённое выполнение'} операции ${record.tool}.`
+      : `Guard recorded ${executionConfirmed ? 'completion' : 'unconfirmed execution'} of ${record.tool}.`;
+    const technicalWhy = language === 'ru'
+      ? 'Закрыть технический цикл операции и сохранить подтверждённое состояние.'
+      : 'Close the technical operation cycle and persist the confirmed state.';
+    const artisticWhy = prePassCommentary(record, previousVerdict ?? record.verdict)
+      ?? (language === 'ru'
+        ? 'Художественный замысел прохода не записан.'
+        : 'The artistic intent of this pass was not recorded.');
+    const result = commentaryText(rawResult, resultFallback);
+    const previousReport = mode === 'technical'
+      ? { did: technicalDid, why: technicalWhy, result }
+      : {
+          did: executionConfirmed ? artisticToolDescription(record, language, presentation.commentary_detail) ?? artisticFallback : artisticFallback,
+          why: artisticWhy,
+          result,
+        };
     return {
       ...(!record.report ? {
-        previous_report: {
-          did: `Executed ${record.tool}: ${textOrUndefined(record.summary) ?? record.id}`,
-          why: textOrUndefined(record.purpose) ?? 'Complete the recorded guarded operation.',
-          result,
-        },
+        previous_report: previousReport,
       } : {}),
       ...(record.operation_receipt && !record.operation_ack ? {
         previous_operation_ack: {
@@ -6396,11 +7866,50 @@ export class SessionStore {
       } : {}),
     };
   }
+  applyArtisticEvaluation(id, input) {
+    // Retained for explicit developer experiments, not ordinary compilation/verdict closure.
+    const record = this.read(id);
+    if (!record?.artistic_evaluation_required) return input;
+    const evaluation = record.artistic_evaluation;
+    const state = this.artRunState(Number(record.args?.document_id));
+    const matching = evaluation?.independent === true
+      && evaluation.operation_id === record.id && evaluation.document_id === record.args?.document_id
+      && evaluation.frame_sha256 === record.preview?.sha256
+      && evaluation.stage === (record.stage ?? record.args?.stage ?? 'GLOBAL_BLOCK_IN')
+      && record.artistic_evaluation_brief === state?.original_brief
+      && record.artistic_evaluation_instance === JSON.stringify(state?.document_instance ?? null)
+      && record.artistic_evaluation_contract === JSON.stringify(state?.art_director?.artistic_evaluation_contract);
+    // Retaining useful unfinished pixels is allowed. Certifying success from the
+    // painter's prose when review is absent/contradictory is not.
+    const goal = matching && evaluation.status === 'completed' ? evaluation.assessment?.goal : 'uncertain';
+    const boundTask = state?.art_director?.tasks?.find(task => task.task_id === record.artistic_evaluation_task?.task_id);
+    const taskMet = matching && evaluation.status === 'completed' && evaluation.assessment?.task === 'met'
+      && boundTask?.summary === record.artistic_evaluation_task?.summary;
+    if (goal === 'met' && (input.planner_task_assessment?.status !== 'completed' || taskMet)) return input;
+    return {
+      ...input,
+      target_resolved: goal === 'met' || input.target_resolved === 'no'
+        ? input.target_resolved : goal === 'unmet' ? 'no' : 'uncertain',
+      ...(input.planner_task_assessment?.status === 'completed' && !taskMet
+        ? { planner_task_assessment: { ...input.planner_task_assessment, status: 'continue' } } : {}),
+    };
+  }
   compactPassContext(documentId, projectionContext = undefined) {
     if (!Number.isSafeInteger(documentId) || documentId <= 0) return {};
     const paintingState = projectionContext ? projectionContext.paintingState : this.paintingState();
     const records = projectionContext?.records ?? this.records();
     const state = paintingState.documents?.[String(documentId)] ?? {};
+    const painterlyFrameRecord = state.current_frame?.operation_id
+      ? this.currentDocumentRecords(documentId, records, projectionContext).find(r => r.id === state.current_frame.operation_id)
+      : undefined;
+    const painterlyFrame = painterlyFrameRecord?.phase === 'completed' && painterlyFrameRecord.dispatched === true && !painterlyFrameRecord.failed
+      && !painterlyFrameRecord.error && painterlyFrameRecord.execution !== 'uncertain'
+      && deriveExecutionOutcome(painterlyFrameRecord) === 'completed' && painterlyFrameRecord.resolved?.outcome !== 'abandoned'
+      && painterlyFrameRecord.rolled_back !== true
+      && painterlyFrameRecord.current_frame_authority !== false
+      && painterlyFrameRecord.preview?.sha256 === state.current_frame?.sha256
+      ? { ...state.current_frame, canvas_width: painterlyFrameRecord.preview.canvas_width,
+        canvas_height: painterlyFrameRecord.preview.canvas_height } : null;
     const brush = state.brush_preflight;
     const art = state.art_director;
     const logicalLayerOwners = this.semanticLayerOwners(documentId, records, projectionContext);
@@ -6446,7 +7955,10 @@ export class SessionStore {
       stage: textOrUndefined(state.current_stage),
       scale: textOrUndefined(state.active_scale),
       painting_profile: textOrUndefined(state.painting_profile),
+      construction_policy: state.construction_policy ?? 'legacy',
+      construction_bindings: this.constructionBindings(documentId, records, projectionContext),
       has_visual_frame: !!state.current_frame?.operation_id,
+      painterly_frame: painterlyFrame,
       active_problem_id: textOrUndefined(state.active_problem?.problem_id),
       active_problem_scale: textOrUndefined(state.active_problem?.scale),
       brush_roles: Array.isArray(brush?.roles)
@@ -6458,6 +7970,7 @@ export class SessionStore {
             alternative_presets: Array.isArray(role.alternative_presets) ? [...role.alternative_presets] : [],
             candidate_evidence: Array.isArray(role.candidate_evidence) ? structuredClone(role.candidate_evidence) : [],
             working_scale: role.working_scale,
+            ...(role.allowed_scales !== undefined ? { allowed_scales: structuredClone(role.allowed_scales) } : {}),
             pressure_policy: role.pressure_policy,
             probe_status: role.probe_status,
             profile_id: role.profile_id ?? null,
@@ -6466,6 +7979,11 @@ export class SessionStore {
       brush_inventory_scope: brush?.inventory_scope ?? null,
       recent_brush_problem_usage: [...recentBrushByProblem.values()].slice(-24),
       recent_brush_usage: recentBrushUsage.slice(-48),
+      recent_geometry_contract_attempts: (state.compiler_attempt_audit?.recent_attempts ?? []).slice(-1).map(attempt => ({
+        problem_id: attempt.problem_id,
+        outcome: attempt.outcome,
+        error_codes: attempt.error_codes ?? [],
+      })),
       logical_layer_owners: logicalLayerOwners,
       scene_ownership_plan: sceneOwnershipPlan,
       scene_geometry_model: sceneGeometryModel,
@@ -6474,6 +7992,7 @@ export class SessionStore {
       geometry_preflight: geometryPreflight,
       geometry_binding_states: this.geometryBindingStates(documentId, records, projectionContext),
       geometry_completion_debt: this.geometryCompletionDebt(documentId, records, projectionContext),
+      generated_geometry_rebuild_debt: this.generatedGeometryRebuildDebt(documentId, records, projectionContext),
       lighting_color_binding_states: this.lightingColorBindingStates(documentId, records, projectionContext),
       physical_effect_completion_debt: this.physicalEffectCompletionDebt(documentId, records, projectionContext),
       camera_binding_states: this.cameraBindingStates(documentId, records, projectionContext),
@@ -6509,9 +8028,11 @@ export class SessionStore {
       } : null,
     };
   }
-  artisticContinuationContext(documentId) {
+  artisticContinuationContext(documentId, projectionContext: GuardProjectionContext | undefined = undefined) {
     if (!Number.isSafeInteger(documentId) || documentId <= 0) return {};
-    const state = this.paintingState().documents?.[String(documentId)] ?? {};
+    const paintingState = projectionContext ? projectionContext.paintingState : this.paintingState();
+    const records = projectionContext?.records ?? this.records();
+    const state = paintingState.documents?.[String(documentId)] ?? {};
     const art = state.art_director;
     const tasks = Array.isArray(art?.tasks) ? art.tasks : [];
     const currentTaskId = textOrUndefined(art?.current_task_id);
@@ -6555,13 +8076,35 @@ export class SessionStore {
         ...(ownerIds.length ? { owner_ids: ownerIds } : {}),
       };
     };
-    const owners = this.semanticLayerOwners(documentId).map(owner => ({
-      owner_id: owner.hypothesis_id,
-      ...(textOrUndefined(owner.physical_role) ? { role: owner.physical_role } : {}),
-      ...(Number.isSafeInteger(owner.layer_id) && owner.layer_id > 0 ? { layer_id: owner.layer_id } : {}),
+    const relevantOwnerIds = new Set([
+      ...ownerIdsForTask(currentTask),
+      ...ownerIdsForTask(nextTask),
+    ]);
+    const ownerRepresentationState = state.owner_representation_state ?? {};
+    const owners = this.semanticLayerOwners(documentId, records, projectionContext)
+      .filter(owner => relevantOwnerIds.size === 0 || relevantOwnerIds.has(owner.hypothesis_id))
+      .map(owner => ({
+        owner_id: owner.hypothesis_id,
+        ...(textOrUndefined(owner.physical_role) ? { role: owner.physical_role } : {}),
+        ...(Number.isSafeInteger(owner.layer_id) && owner.layer_id > 0 ? { layer_id: owner.layer_id } : {}),
+        ...(ownerRepresentationState?.[owner.hypothesis_id]
+          ? { representation_state: structuredClone(ownerRepresentationState[owner.hypothesis_id]) }
+          : {}),
+        ...(owner.geometry_binding ? { geometry_binding: structuredClone(owner.geometry_binding) } : {}),
+        ...(owner.camera_binding ? { camera_binding: structuredClone(owner.camera_binding) } : {}),
+        ...(owner.attention_binding ? { attention_binding: structuredClone(owner.attention_binding) } : {}),
+      }));
+
+    const nextCandidates = ownerRepresentationDebt(state).map((debt, index) => ({
+      candidate_id: 'representation-' + index, kind: 'resolve-owner-representation',
+      target_owner_id: debt.owner_id, representation_state: debt.state,
+      source_operation_id: debt.source_operation_id, evidence_sha256: debt.evidence_sha256,
+      goal: debt.state === 'scaffold-debt'
+        ? 'Correct the observed object-form/primitive scaffold defect through construction before dependent texture.'
+        : 'Assess the owner on the delivered exact frame; if scaffold-dominant, record suspect and refine its construction.',
+      note: debt.note ?? null,
     }));
-    const nextCandidates = [];
-    const currentRecords = this.currentDocumentRecords(documentId, this.records())
+    const currentRecords = this.currentDocumentRecords(documentId, records, projectionContext)
       .filter(record => record?.phase === 'completed' && record?.current_frame_authority !== false && record?.rolled_back !== true)
       .sort((a, b) => Number(a?.sequence ?? 0) - Number(b?.sequence ?? 0));
     const deferredRecord = [...currentRecords].reverse().find(record => {
@@ -6618,12 +8161,23 @@ export class SessionStore {
     }
     return {
       document_id: documentId,
+      presentation_context: this.presentationContext(documentId, paintingState),
       current_stage: textOrUndefined(state.current_stage),
       active_scale: textOrUndefined(state.active_scale),
+      chat_critic: state.chat_critic_review ? { review: state.chat_critic_review,
+        remaining_findings: state.chat_critic_findings ?? [] } : null,
       current_problem: activeProblem && textOrUndefined(activeProblem.problem_id) ? {
         problem_id: activeProblem.problem_id,
         ...(textOrUndefined(activeProblem.scale) ? { scale: activeProblem.scale } : {}),
         ...(textOrUndefined(activeProblem.severity) ? { severity: activeProblem.severity } : {}),
+        ...(textOrUndefined(activeProblem.region) ? { region: activeProblem.region } : {}),
+        ...(textOrUndefined(activeProblem.hypothesis) ? { hypothesis: activeProblem.hypothesis } : {}),
+        ...(Array.isArray(activeProblem.depends_on_problem_ids) && activeProblem.depends_on_problem_ids.length
+          ? { depends_on_problem_ids: [...activeProblem.depends_on_problem_ids] }
+          : {}),
+        structural_or_global: activeProblem.structural_review === true
+          || textOrUndefined(activeProblem.scale) === 'global'
+          || textOrUndefined(activeProblem.region)?.toLowerCase() === 'whole-frame',
       } : null,
       owners,
       current_task: projectedCurrentTask,
@@ -6662,6 +8216,53 @@ export class SessionStore {
         }
         if (owner.layer_id === layerId) owner.layer_id = stack[stack.length - 1];
         owner.physical_layer_ids = stack;
+      }
+    };
+
+    const propagateConnectedOwnerTransform = (record, parentId, previousParentRevision, currentParentRevision) => {
+      if (!parentId || !previousParentRevision || !currentParentRevision || previousParentRevision === currentParentRevision) return;
+      const provenance = record?.geometry_preflight?.executable_geometry;
+      if (!provenance || provenance.mode !== 'validated-landmark-transform' || provenance.owner_id !== parentId) return;
+      const source = provenance.source_bounds;
+      const target = provenance.target_bounds;
+      // Persisted provenance is untrusted geometry evidence. Coercing null,
+      // booleans or numeric strings with Number() can silently move a child's
+      // anchors even though the live transform validator rejects those bounds.
+      const values = [source?.left, source?.top, source?.right, source?.bottom,
+        target?.left, target?.top, target?.right, target?.bottom];
+      if (!values.every(value => typeof value === 'number' && Number.isFinite(value))) return;
+      const sourceWidth = source.right - source.left;
+      const sourceHeight = source.bottom - source.top;
+      const targetWidth = target.right - target.left;
+      const targetHeight = target.bottom - target.top;
+      if (!(sourceWidth > 0) || !(sourceHeight > 0) || !(targetWidth > 0) || !(targetHeight > 0)) return;
+      const transform = {
+        scale_x: targetWidth / sourceWidth,
+        scale_y: targetHeight / sourceHeight,
+        origin: { x: source.left, y: source.top },
+        translate_x: target.left - source.left,
+        translate_y: target.top - source.top,
+      };
+      const queue = [parentId];
+      const visited = new Set();
+      while (queue.length) {
+        const ancestorId = queue.shift();
+        if (!ancestorId || visited.has(ancestorId)) continue;
+        visited.add(ancestorId);
+        for (const owner of byHypothesis.values()) {
+          if (textOrUndefined(owner.parent_hypothesis_id) !== ancestorId) continue;
+          queue.push(owner.hypothesis_id);
+          if (owner.geometry_binding && typeof owner.geometry_binding === 'object' && !Array.isArray(owner.geometry_binding)) {
+            try {
+              owner.geometry_binding = transformGeometryBinding(normalizeGeometryBinding(owner.geometry_binding), transform);
+            } catch {
+              continue;
+            }
+          }
+          if (ancestorId === parentId && textOrUndefined(owner.parent_construction_revision) === previousParentRevision) {
+            owner.parent_construction_revision = currentParentRevision;
+          }
+        }
       }
     };
 
@@ -6707,6 +8308,18 @@ export class SessionStore {
         continue;
       }
       if (record.execution === 'not-executed') continue;
+      if (record.phase === 'completed' && !record.failed) {
+        for (const { data, requested_layer_id } of guardedBlurReceipts(record)) {
+          const logical = record.tool === 'photoshop_execute_visual_microplan' ? record.args?.logical_layer : record.logical_layer;
+          const owner = byHypothesis.get(logical?.hypothesis_id);
+          if (!owner || data.original_preserved !== true || data.filter_mode !== 'smart-filter'
+            || data.source_layer_id !== requested_layer_id || owner.layer_id !== data.source_layer_id
+            || !Number.isSafeInteger(data.layer_id) || data.layer_id <= 0) continue;
+          owner.physical_layer_ids = [...new Set((owner.physical_layer_ids ?? [owner.layer_id]).map(id => id === data.source_layer_id ? data.layer_id : id))];
+          owner.layer_id = data.layer_id;
+          owner.source_operation_id = record.id;
+        }
+      }
       const crossLayerCorrection = record?.cross_layer_correction;
       if (record.phase === 'completed' && !record.failed
         && crossLayerCorrection?.mode === 'migration') {
@@ -6728,6 +8341,7 @@ export class SessionStore {
           const layerId = Number(row?.layer_id);
           if (!hypothesisId || !Number.isSafeInteger(layerId) || layerId <= 0) continue;
           const prior = byHypothesis.get(hypothesisId);
+          const previousConstructionRevision = textOrUndefined(prior?.construction_revision);
           const physicalLayerIds = [
             ...(Array.isArray(prior?.physical_layer_ids) ? prior.physical_layer_ids : []),
             ...(Number.isSafeInteger(prior?.layer_id) && prior.layer_id > 0 ? [prior.layer_id] : []),
@@ -6789,6 +8403,7 @@ export class SessionStore {
             ...(textOrUndefined(row?.decision) ? { decision: row.decision.trim() } : {}),
             source_operation_id: record.id,
           });
+          propagateConnectedOwnerTransform(record, hypothesisId, previousConstructionRevision, textOrUndefined(structuralRevision));
         }
       }
     }
@@ -6917,9 +8532,10 @@ export class SessionStore {
       priority_review_required: false,
     };
   }
-  currentDocumentIncarnationId(documentId, projectionContext = undefined) {
+  currentDocumentIncarnationId(documentId, projectionContext: GuardProjectionContext | undefined = undefined) {
     const state = projectionContext ? projectionContext.paintingState : this.paintingState();
     const instance = state.documents?.[String(documentId)]?.document_instance;
+    if (instance?.identity_pending) return null;
     const witness = normalizeDocumentInstanceWitness(instance?.host_witness);
     return textOrUndefined(witness?.token) ?? textOrUndefined(instance?.bootstrap_operation_id) ?? null;
   }
@@ -6933,6 +8549,7 @@ export class SessionStore {
     let current = null;
     for (const record of records) {
       if (!record?.scene_geometry_model) continue;
+      if (record.rolled_back === true || record.current_frame_authority === false) continue;
       try {
         const model = normalizeSceneGeometryModel(record.scene_geometry_model);
         const incarnation = this.currentDocumentIncarnationId(documentId, projectionContext);
@@ -6963,6 +8580,7 @@ export class SessionStore {
     let current = null;
     for (const record of records) {
       if (!record?.scene_lighting_color_model) continue;
+      if (record.rolled_back === true || record.current_frame_authority === false) continue;
       try {
         const model = normalizeSceneLightingColorModel(record.scene_lighting_color_model);
         if (model.source_frame.document_id !== documentId) continue;
@@ -6986,6 +8604,7 @@ export class SessionStore {
     let current = null;
     for (const record of records) {
       if (!record?.scene_camera_imaging_model) continue;
+      if (record.rolled_back === true || record.current_frame_authority === false) continue;
       try {
         const model = normalizeSceneCameraImagingModel(record.scene_camera_imaging_model);
         if (model.source_frame.document_id !== documentId) continue;
@@ -7408,15 +9027,113 @@ export class SessionStore {
     }
     return current;
   }
+  generatedGeometryRebuildDebt(documentId, suppliedRecords = undefined, projectionContext = undefined) {
+    if (!Number.isSafeInteger(documentId) || documentId <= 0) return [];
+    const scene = this.sceneGeometryModel(documentId, suppliedRecords, projectionContext);
+    if (!scene) return [];
+    const records = this.currentDocumentRecords(
+      documentId,
+      suppliedRecords ?? projectionContext?.records ?? this.records(),
+      projectionContext
+    ).sort((a, b) => Number(a.sequence ?? 0) - Number(b.sequence ?? 0));
+    const latestByOwner = new Map();
+    for (const record of records) {
+      const provenance = record?.geometry_preflight?.executable_geometry;
+      if (!provenance || typeof provenance !== 'object' || Array.isArray(provenance)) continue;
+      const ownerId = textOrUndefined(provenance.owner_id);
+      if (!ownerId || provenance.mode !== 'derived-boundary-sections') continue;
+      latestByOwner.set(ownerId, { provenance, record });
+    }
+    return [...latestByOwner.entries()].flatMap(([ownerId, entry]) => {
+      // Legacy durable provenance recorded line snapshots but not the global
+      // projection/canvas snapshot. Resolve its original scene from the same
+      // authoritative journal, rather than either silently trusting it or
+      // invalidating unrelated revisions that can still be proven safe.
+      const legacySource = (!entry.provenance.dependency_snapshots
+        || !Object.prototype.hasOwnProperty.call(entry.provenance.dependency_snapshots, '__projection__'))
+        ? this.sceneGeometryModelRevision(
+          documentId, entry.provenance.scene_geometry_model_id,
+          entry.provenance.scene_geometry_revision,
+          // The original camera must precede the geometry it authorized.
+          // A later record reusing the same revision cannot retroactively
+          // certify an older generated payload.
+          records.slice(0, records.indexOf(entry.record) + 1), projectionContext
+        ) : undefined;
+      const state = generatedGeometryProvenanceState(entry.provenance, scene, legacySource);
+      if (!state.stale) return [];
+      return [{
+        code: 'generated_geometry_rebuild_required',
+        owner_id: ownerId,
+        source_operation_id: entry.record.id,
+        source_scene_geometry_revision: entry.provenance.scene_geometry_revision,
+        current_scene_geometry_revision: scene.revision,
+        reason: state.reason,
+        changed_dependency_ids: state.changed_dependency_ids,
+        dependency_ids: Array.isArray(entry.provenance.dependency_ids) ? [...entry.provenance.dependency_ids] : [],
+        tools: Array.isArray(entry.provenance.tools) ? [...entry.provenance.tools] : [],
+      }];
+    });
+  }
+  constructionBindings(documentId, suppliedRecords = undefined, projectionContext = undefined) {
+    const records = this.currentDocumentRecords(documentId, suppliedRecords, projectionContext)
+      .filter(r => r.phase === 'completed' && r.dispatched && !r.failed && !r.error
+        && r.execution !== 'uncertain' && deriveExecutionOutcome(r) === 'completed'
+        && !r.rolled_back && r.current_frame_authority !== false && r.resolved?.outcome !== 'abandoned')
+      .sort((a,b) => Number(b.sequence ?? 0) - Number(a.sequence ?? 0));
+    const seen = new Set(), bindings = [];
+    for (const record of records) {
+      const model = record.object_construction_model;
+      if (!model || seen.has(model.model_id)) continue;
+      seen.add(model.model_id);
+      const solved = solveConstruction(model);
+      for (const part of solved.parts) {
+        const painted = records.find(r => r.construction_provenance?.model_id === model.model_id && r.construction_provenance?.part_id === part.id);
+        bindings.push({ owner_id: part.id, object_id: part.object_id, model_id: model.model_id, revision: model.revision,
+          bounds: painted?.construction_provenance?.bounds, target_bounds: part.bounds,
+          constructed: !!painted, needs_rebuild: !!painted && painted.construction_provenance.target_sha256 !== part.target_sha256 });
+      }
+    }
+    return bindings;
+  }
+  constructionModel(documentId, modelId, projectionContext = undefined) {
+    this.assertDocumentIdentityVerified(documentId);
+    const records = this.currentDocumentRecords(documentId, undefined, projectionContext)
+      .filter(r => r.phase === 'completed' && r.dispatched === true && !r.failed && !r.error
+        && r.execution !== 'uncertain' && deriveExecutionOutcome(r) === 'completed'
+        && r.rolled_back !== true && r.current_frame_authority !== false && r.resolved?.outcome !== 'abandoned')
+      .sort((a,b) => Number(b.sequence ?? 0)-Number(a.sequence ?? 0));
+    const record = records.find(r => r.object_construction_model?.model_id === modelId);
+    return record ? normalizeConstructionModel(record.object_construction_model) : null;
+  }
+  constructionReviewState(documentId, modelId, projectionContext = undefined) {
+    const model = this.constructionModel(documentId, modelId, projectionContext);
+    if (!model) return null;
+    const solved = solveConstruction(model);
+    const records = this.currentDocumentRecords(documentId, undefined, projectionContext)
+      .filter(r => r.phase === 'completed' && r.dispatched === true && !r.failed && !r.error
+        && r.execution !== 'uncertain' && deriveExecutionOutcome(r) === 'completed' && r.rolled_back !== true
+        && r.current_frame_authority !== false && r.construction_provenance?.model_id === modelId)
+      .sort((a,b) => Number(b.sequence ?? 0)-Number(a.sequence ?? 0));
+    const needsRebuild = solved.parts.flatMap(part => {
+      const record = records.find(r => r.construction_provenance.part_id === part.id);
+      return record && record.construction_provenance.target_sha256 !== part.target_sha256
+        ? [{ part_id: part.id, owner_id: part.id, source_operation_id: record.id,
+          source_revision: record.construction_provenance.revision, current_revision: model.revision }] : [];
+    });
+    return { model_id: modelId, revision: model.revision, parts_requiring_rebuild: needsRebuild,
+      unconstructed_parts: solved.parts.filter(part => !records.some(r => r.construction_provenance.part_id === part.id)).map(part => part.id),
+      pixel_geometry_verified: false, artistic_quality_verified: false };
+  }
   sceneOwnershipPlan(documentId, suppliedRecords = undefined, projectionContext = undefined) {
     if (!Number.isSafeInteger(documentId) || documentId <= 0) return null;
     const records = this.currentDocumentRecords(
       documentId,
       suppliedRecords ?? projectionContext?.records ?? this.records(),
       projectionContext
-    ).sort((a, b) => Number(a.sequence ?? 0) - Number(b.sequence ?? 0));
+    ).sort((a, b) => Number(b.sequence ?? 0) - Number(a.sequence ?? 0));
     for (const record of records) {
       if (!record?.scene_ownership_plan) continue;
+      if (record.rolled_back === true || record.current_frame_authority === false) continue;
       try {
         return {
           ...normalizeSceneOwnershipPlan(record.scene_ownership_plan),
@@ -7533,16 +9250,14 @@ export class SessionStore {
     const suppliedScenePlan = input?.scene_ownership_plan === undefined
       ? undefined
       : normalizeSceneOwnershipPlan(input.scene_ownership_plan);
-    if (durableScenePlan && suppliedScenePlan) {
-      const durableCanonical = normalizeSceneOwnershipPlan(durableScenePlan);
-      if (JSON.stringify(durableCanonical) !== JSON.stringify(suppliedScenePlan)) {
-        throw new Error(
-          `scene_ownership_plan_conflict: document already owns durable plan ${durableCanonical.plan_id}; do not replace it while keeping ${hypothesisId}`
-        );
-      }
-    }
-    const scenePlan = durableScenePlan
-      ? normalizeSceneOwnershipPlan(durableScenePlan)
+    const normalizedDurable = durableScenePlan ? normalizeSceneOwnershipPlan(durableScenePlan) : undefined;
+    const promoting = normalizedDurable && suppliedScenePlan
+      && normalizedDurable.units.some(unit => unit.owner_id === hypothesisId && unit.editability === 'temporary')
+      && suppliedScenePlan.units.some(unit => unit.owner_id === hypothesisId && unit.editability === 'independent');
+    const scenePlan = normalizedDurable
+      ? promoting
+        ? promoteTemporarySceneOwnershipUnit(normalizedDurable, suppliedScenePlan, hypothesisId)
+        : extendSceneOwnershipPlan(normalizedDurable, suppliedScenePlan)
       : suppliedScenePlan;
     if (!scenePlan) {
       throw new Error(
@@ -7554,6 +9269,9 @@ export class SessionStore {
         `scene_ownership_owner_unplanned: temporary owner ${hypothesisId} is not predeclared by scene_ownership_plan=${scenePlan.plan_id}`
       );
     }
+
+    const componentIssue = sceneComponentScopeIssue(scenePlan, hypothesisId);
+    if (componentIssue) throw new Error(`${componentIssue.code}: ${componentIssue.message}`);
 
     const existingRequest = this.read(requestKey);
     if (existingRequest) {
@@ -7615,7 +9333,7 @@ export class SessionStore {
       },
       summary: `Keep semantic layer owner ${hypothesisId} on layer ${layerId}`,
       purpose: 'Resolve one temporary logical-layer hypothesis without a Photoshop pixel mutation.',
-      ...(!durableScenePlan && suppliedScenePlan ? { scene_ownership_plan: suppliedScenePlan } : {}),
+      ...(suppliedScenePlan ? { scene_ownership_plan: scenePlan } : {}),
     };
     const record = {
       ...request,
@@ -7660,6 +9378,9 @@ export class SessionStore {
         throw new Error('anchor restore snapshot must be captured while the exact anchor frame is still current');
       }
       const nextSnapshot = structuredClone(snapshot);
+      // Capture mutable scene facts in the existing anchor snapshot, never caller
+      // claims or another rollback store. Preferences, run counters and plans stay current.
+      nextSnapshot.semantic_state = frameSemanticSnapshot(current, documentId, anchorOperationId, target.sha256);
       const updateAnchor = anchor => anchor?.operation_id === anchorOperationId
         ? { ...anchor, restore_snapshot: nextSnapshot }
         : anchor;
@@ -7795,6 +9516,34 @@ export class SessionStore {
     if (verification.document_id !== documentId || verification.matches !== true) {
       throw new Error('accepted_anchor_restore_state_mismatch: layered/active-layer/selection parity was not proven');
     }
+    const semanticSnapshot = this.acceptedAnchorRestoreSnapshot(documentId, contract.anchor_operation_id)?.semantic_state;
+    if (semanticSnapshot) validateFrameSemanticSnapshot(semanticSnapshot, documentId, contract.anchor_operation_id,
+      contract.anchor_sha256, 'accepted_anchor_restore_semantic_snapshot_mismatch');
+
+    // Retire only the suffix owned by the verified restore contract. The journal
+    // keeps its original verdicts for learning; current projections ignore it.
+    const anchorRecord = this.read(contract.anchor_operation_id);
+    const historyRecords = Array.isArray(contract.history_operation_ids)
+      ? contract.history_operation_ids.map(id => this.read(id)) : [];
+    if (!anchorRecord || anchorRecord.args?.document_id !== documentId
+      || !Number.isSafeInteger(anchorRecord.sequence) || !Number.isSafeInteger(record.sequence)
+      || !historyRecords.length || historyRecords.some(source =>
+      !source || source.args?.document_id !== documentId
+      || !Number.isSafeInteger(source.sequence)
+      || Number(source.sequence) <= Number(anchorRecord.sequence)
+      || Number(source.sequence) >= Number(record.sequence)
+    )) {
+      throw new Error('accepted_anchor_restore_history_mismatch: proven same-document history suffix is missing or out of bounds');
+    }
+    for (const source of historyRecords) {
+      source.rolled_back = true;
+      source.current_frame_authority = false;
+      source.rollback = {
+        completed: true, rollback_operation_id: operationId, completed_at: record.completed_at,
+        mode: 'accepted_anchor_restore', anchor_operation_id: contract.anchor_operation_id,
+      };
+      this.write(source);
+    }
 
     this.recordTechnicalReport(operationId, {
       did: `Restored accepted artistic anchor ${contract.anchor_operation_id}.`,
@@ -7805,6 +9554,35 @@ export class SessionStore {
     if (afterReport?.operation_receipt && !afterReport.operation_ack) {
       this.ackOperation({ id: operationId, protocol: OPERATION_ACK_PROTOCOL, token: afterReport.operation_receipt.token });
     }
+    // Persist restored mutable state before publishing closure or releasing the
+    // review barrier. An interrupted write can retry finalization without undo.
+    const restoredState = this.updatePaintingState(documentId, current => {
+      const { restored, directorScope } = semanticSnapshot
+        ? restoreFrameSemantics(current, semanticSnapshot, { operation_id: operationId, sha256: record.preview.sha256 })
+        : { restored: { ...current }, directorScope: 'unavailable' };
+      return {
+        ...restored,
+        current_frame: {
+          operation_id: operationId, sha256: record.preview.sha256,
+          path: record.preview.project_path ?? record.preview.materialized_path,
+          at: new Date().toISOString(), accepted: true, acceptance_scope: 'exact_registered_anchor_restore',
+        },
+        accepted_frame: {
+          operation_id: operationId, sha256: record.preview.sha256,
+          path: record.preview.project_path ?? record.preview.materialized_path,
+          at: new Date().toISOString(), accepted: true, acceptance_scope: 'exact_registered_anchor_restore',
+        },
+        pending_rollback: undefined,
+        last_anchor_restore: {
+          restore_operation_id: operationId, anchor_operation_id: contract.anchor_operation_id,
+          anchor_sha256: contract.anchor_sha256, completed_at: new Date().toISOString(),
+          verification: structuredClone(verification),
+          semantic_state_restored: !!semanticSnapshot,
+          semantic_restore_scope: semanticSnapshot ? [...ANCHOR_SEMANTIC_FIELDS] : [],
+          director_restore_scope: directorScope,
+        },
+      };
+    });
     const closed = this.read(operationId);
     closed.verdict = {
       verdict: 'neutral',
@@ -7821,39 +9599,15 @@ export class SessionStore {
         anchor_operation_id: contract.anchor_operation_id,
         anchor_sha256: contract.anchor_sha256,
         state_verification: structuredClone(verification),
+        semantic_state_restored: restoredState.last_anchor_restore.semantic_state_restored,
+        semantic_restore_scope: restoredState.last_anchor_restore.semantic_restore_scope,
+        director_restore_scope: restoredState.last_anchor_restore.director_restore_scope,
       },
       at: new Date().toISOString(),
     };
     delete closed.pending_review;
     this.write(closed);
     this.clearVisualBarrier(documentId);
-    this.updatePaintingState(documentId, current => ({
-      ...current,
-      current_frame: {
-        operation_id: operationId,
-        sha256: record.preview.sha256,
-        path: record.preview.project_path ?? record.preview.materialized_path,
-        at: new Date().toISOString(),
-        accepted: true,
-        acceptance_scope: 'exact_registered_anchor_restore',
-      },
-      accepted_frame: {
-        operation_id: operationId,
-        sha256: record.preview.sha256,
-        path: record.preview.project_path ?? record.preview.materialized_path,
-        at: new Date().toISOString(),
-        accepted: true,
-        acceptance_scope: 'exact_registered_anchor_restore',
-      },
-      pending_rollback: undefined,
-      last_anchor_restore: {
-        restore_operation_id: operationId,
-        anchor_operation_id: contract.anchor_operation_id,
-        anchor_sha256: contract.anchor_sha256,
-        completed_at: new Date().toISOString(),
-        verification: structuredClone(verification),
-      },
-    }));
     return this.read(operationId);
   }
   recordTechnicalReport(id, report) {
@@ -7864,19 +9618,66 @@ export class SessionStore {
         throw new Error(`Concrete technical report.${key} is required`);
       }
     }
+    const documentId = Number(record?.args?.document_id);
+    const presentation = this.presentationContext(
+      Number.isSafeInteger(documentId) && documentId > 0 ? documentId : undefined
+    );
     record.report = {
       id,
       did: report.did,
       why: report.why,
       result: report.result,
-      source: 'guard_execution',
+      source: 'guard_compact_closure',
       recorded_at: new Date().toISOString(),
-      delivery: 'technical_execution_record',
+      delivery: presentation.commentary_mode === 'technical'
+        ? 'technical_execution_record'
+        : presentation.commentary_mode === 'mixed'
+          ? 'mixed_presentation_record'
+          : 'artistic_presentation_record',
+      presentation_context: presentation,
     };
     const commentaryPath = this.writeCommentarySidecar(record);
     if (commentaryPath) record.report.commentary_path = commentaryPath;
     this.write(record);
     return record.report;
+  }
+  chatCriticRequest(operationId, projectionContext: GuardProjectionContext | undefined = undefined, final = false) {
+    const record = this.read(operationId);
+    if (!record) return undefined;
+    const documentId = record.args?.document_id;
+    const paintingState = projectionContext?.paintingState ?? this.paintingState();
+    const state = paintingState.documents?.[String(documentId)] ?? {};
+    if ((state.painting_profile ?? (state.process_dir ? 'nontrivial_painting' : undefined)) !== 'nontrivial_painting'
+      || !state.original_brief || !record.visual || record.failed || !record.preview?.sha256 || record.phase !== 'completed') return undefined;
+    const records = this.currentDocumentRecords(documentId, projectionContext?.records ?? this.records(), projectionContext);
+    return chatCriticRequest(record, { ...state,
+      document_incarnation_id: this.currentDocumentIncarnationId(documentId, projectionContext) }, records, final);
+  }
+  validateChatCritic(record, input, final = false) {
+    const state = this.paintingState().documents?.[String(record.args?.document_id)] ?? {};
+    const request = this.chatCriticRequest(record.id, undefined, final || input.painting_completion !== undefined);
+    return validateChatCritic(input.critic_review, request, record, state, input.painting_completion);
+  }
+  finalWholeBriefReview(input, record, persist = false) {
+    const value = input.previous_visual_verdict?.painting_completion;
+    if (value === undefined || (record.visual && !record.verdict)) return undefined;
+    const documentId = record.args?.document_id;
+    this.assertDocumentIdentityVerified(documentId);
+    const state = this.paintingState().documents?.[documentId];
+    const frame = state?.current_frame;
+    const source = frame?.operation_id ? this.read(frame.operation_id) : undefined;
+    if (!frame?.accepted || !source?.visual || source.verdict?.disposition !== 'accept'
+      || source.args?.document_id !== documentId || source.preview?.sha256 !== frame.sha256
+      || this.visualDeliveryDebt(source) || fingerprintFile(source.preview.materialized_path) !== frame.sha256)
+      throw new Error('painting_completion needs the exact retained, delivered current whole frame; review the current image through public Guard, never invent pixels');
+    const critic = this.validateChatCritic(source, input.previous_visual_verdict, true);
+    const completion = bindPaintingCompletion(value, state, frame.sha256);
+    if (persist) this.updatePaintingState(documentId, current => {
+      if (current.current_frame?.sha256 !== frame.sha256 || current.original_brief !== state.original_brief)
+        throw new Error('painting_completion frame/brief changed during final review');
+      return { ...current, ...persistChatCritic(current, critic), painting_completion: completion };
+    });
+    return completion;
   }
   collectClosePreviousErrors(input = {}) {
     const errors = [];
@@ -7890,6 +9691,8 @@ export class SessionStore {
     }
     if (this.hasDurableNotExecutedProof(record)) return errors;
     if (isTerminalBootstrapFailure(record)) return errors;
+    try { this.finalWholeBriefReview(input, record); }
+    catch (error) { errors.push(String(error?.message ?? error)); }
 
     if (!record.report) {
       const report = input.previous_report;
@@ -8031,6 +9834,7 @@ export class SessionStore {
     }
 
     const closed = this.read(id);
+    if (!record.visual || record.verdict) this.finalWholeBriefReview(input, closed, true);
     return {
       closed: true,
       operation_id: id,
@@ -8038,6 +9842,14 @@ export class SessionStore {
       report_delivery: closed?.report?.delivery,
       host_delivery_evidence: closed?.report?.host_ack ?? null,
       verdict_recorded: !!closed?.verdict,
+      ...(closed?.verdict?.execution_claim_correction ? {
+        execution_claim_correction: {
+          code: closed.verdict.execution_claim_correction.code,
+          reason: closed.verdict.execution_claim_correction.reason,
+          target_resolved: closed.verdict.target_resolved,
+          ...(closed.verdict.planner_task_assessment ? { planner_task_status: closed.verdict.planner_task_assessment.status } : {}),
+        },
+      } : {}),
     };
   }
   fail(record, error) {
@@ -8075,8 +9887,27 @@ export class SessionStore {
     const commentaryPath = this.writeCommentarySidecar(record);
     if (commentaryPath) record.report.commentary_path = commentaryPath;
     this.write(record);
+    const documentId = Number(record?.args?.document_id);
+    const presentation = this.presentationContext(
+      Number.isSafeInteger(documentId) && documentId > 0 ? documentId : undefined
+    );
+    const language = sidecarLanguage(presentation.language, input.did, input.why, input.result);
+    const artisticReport = presentation.commentary_mode === 'artistic'
+      ? [
+          completedArtisticSentence(input.did, language),
+          artisticToolDescription(record, language, presentation.commentary_detail),
+          language === 'ru'
+            ? `Для того чтобы ${lowerInitial(sentenceWithoutTerminalPunctuation(input.why))}.`
+            : `This is to ${lowerInitial(sentenceWithoutTerminalPunctuation(input.why))}.`,
+          language === 'ru'
+            ? `В результате ${lowerInitial(sentenceWithoutTerminalPunctuation(input.result))}.`
+            : `As a result, ${lowerInitial(sentenceWithoutTerminalPunctuation(input.result))}.`,
+        ].filter(Boolean).join('\n')
+      : undefined;
     return {
-      report: `Что сделал: ${input.did}\nЗачем: ${input.why}\nРезультат: ${input.result}`,
+      report: artisticReport ?? (language === 'ru'
+        ? `Что сделал: ${input.did}\nЗачем: ${input.why}\nРезультат: ${input.result}`
+        : `Did: ${input.did}\nWhy: ${input.why}\nResult: ${input.result}`),
       delivery: record.report.delivery,
       ...(commentaryPath ? { commentary_path: commentaryPath } : {}),
     };
@@ -8122,6 +9953,35 @@ export class SessionStore {
     this.write(record);
     return { id: record.id, operation_ack: record.operation_ack };
   }
+  boundedUndoSemanticRecovery(record, preview, documentState) {
+    if (!record.undo_source_operation_id) return undefined;
+    const source = this.read(record.undo_source_operation_id);
+    const snapshot = source?.baseline_semantic_state;
+    const before = source?.baseline_preview;
+    const expectedSteps = positiveHistoryStepCount(record.undo_expected_history_steps);
+    const fail = reason => { throw new Error(`bounded_undo_restore_unverified: ${reason}; reconcile the existing undo or restore an exact accepted anchor, never repeat undo`); };
+    if (record.tool !== 'photoshop_undo' || record.accepted_anchor_restore || deriveExecutionOutcome(record) !== 'completed'
+      || !source || source.args?.document_id !== record.args.document_id || source.sequence >= record.sequence
+      || !expectedSteps || positiveHistoryStepCount(record.args.steps) !== expectedSteps
+      || confirmedUndoSteps(record.result) !== expectedSteps) fail('completed execution/history depth is not confirmed');
+    validateFrameSemanticSnapshot(snapshot, record.args.document_id, source.baseline_preview_source_operation_id,
+      before?.sha256, 'bounded_undo_restore_snapshot_mismatch');
+    const incarnation = normalizeDocumentInstanceWitness(documentState.document_instance?.host_witness)?.token
+      ?? documentState.document_instance?.bootstrap_operation_id ?? null;
+    if (!snapshot.document_incarnation || snapshot.document_incarnation !== incarnation) fail('document incarnation changed or is unavailable');
+    const ownership = parseTexts(source.result).map(body => body?.pass_execution?.history_ownership)
+      .find(row => row?.protocol === 'photoshop.guard.semantic_pass_history_ownership.v1');
+    if (!ownership || ownership.status !== 'exact' || positiveHistoryStepCount(ownership.owned_history_steps) !== expectedSteps) {
+      fail('source pass history ownership is not exact');
+    }
+    if (!before || before.document_id !== record.args.document_id || preview.document_id !== record.args.document_id
+      || before.region || before.crop || preview.region || preview.crop
+      || (before.frame_kind ?? 'whole-frame') !== 'whole-frame' || (preview.frame_kind ?? 'whole-frame') !== 'whole-frame'
+      || !materializedEvidenceMatches(before) || !materializedEvidenceMatches(preview)) fail('intact whole-frame evidence is unavailable');
+    const comparison = assessVisualSignificance({ before, after: preview, mode: 'normal' });
+    if (comparison.global?.decoded_pixels_equal !== true) fail('restored pixels do not match the pre-pass frame');
+    return { source, snapshot, expectedSteps };
+  }
   validateVerdictInput(input) {
     const record = this.read(input.id);
     const previewRecord = this.read(input.preview_id);
@@ -8133,7 +9993,9 @@ export class SessionStore {
     if (previewRecord.preview.document_id !== record.args?.document_id) throw new Error('Attached preview provenance does not match the visual operation pinned document');
     if (record.id !== previewRecord.id && record.sequence && previewRecord.sequence <= record.sequence) throw new Error('Preview must follow the mutation');
     const preview = previewRecord.preview;
+    bindPaintingCompletion(input.painting_completion, this.paintingState().documents[record.args.document_id], preview.sha256);
     if (input.sha256 !== preview.sha256 || fingerprintFile(preview.materialized_path) !== input.sha256) throw new Error('Preview SHA mismatch');
+    const chatCritic = input.disposition === 'rollback' ? undefined : this.validateChatCritic(record, input);
     if (!['improvement', 'neutral', 'regression'].includes(input.verdict)) throw new Error('Visual verdict required');
     if (!['accept', 'correct', 'rollback'].includes(input.disposition)) throw new Error('Visual disposition accept|correct|rollback required');
     if (input.disposition === 'rollback') {
@@ -8158,7 +10020,7 @@ export class SessionStore {
     if (!Array.isArray(input.trend_signals) || input.trend_signals.some(x => !normalizeTrendSignal(x))) {
       throw new Error('trend_signals must be an array of non-empty stable signal strings');
     }
-    this.normalizeReviewFindings(input.review_findings ?? []);
+    const reviewFindings = this.normalizeReviewFindings(input.review_findings ?? []);
     if (input.planner_interrupt_reason !== undefined) {
       const reason = textOrUndefined(input.planner_interrupt_reason)?.toLowerCase();
       if (!ART_DIRECTOR_INTERRUPT_REASONS.has(reason)) {
@@ -8181,15 +10043,36 @@ export class SessionStore {
       : [];
     const context = visualContext(record);
     const documentState = this.paintingState().documents?.[String(record.args?.document_id)] ?? {};
+    const boundedUndoRestore = this.boundedUndoSemanticRecovery(record, preview, documentState);
+    if (boundedUndoRestore && input.disposition !== 'accept') {
+      throw new Error('bounded_undo_restore_unverified: a completed exact restore cannot authorize another undo; retain review/reconciliation debt');
+    }
+    const physicalStackCheck = input.physical_stack_check === undefined
+      ? undefined
+      : this.preparePhysicalStackCheck(record.args.document_id, {
+          ...input.physical_stack_check,
+          preview_sha256: input.physical_stack_check?.preview_sha256 ?? preview.sha256,
+          evidence_operation_id: input.physical_stack_check?.evidence_operation_id ?? record.id,
+        });
+    if (physicalStackCheck && physicalStackCheck.status !== 'pending' && !hasWholeFrameObservation(observations)) {
+      throw new Error('physical_stack_check requires an ordinary whole-frame observation');
+    }
+    if (physicalStackCheck?.status === 'fail' && (input.target_resolved === 'yes'
+      || input.planner_task_assessment?.status === 'completed')) {
+      throw new Error('physical_stack_debt_unresolved: observed physical debt cannot complete the target or Planner task');
+    }
     const softnessRisk = softDominanceRiskForOperation(record);
     const softnessContext = softDominanceContextForOperation(record);
     const softnessReviewRequired = documentState.painting_profile === 'nontrivial_painting'
       && softnessRisk.required;
-    if (softnessReviewRequired && input.softness_review === undefined) {
+    if (softnessReviewRequired && !hasWholeFrameObservation(observations)) {
       throw new Error(
-        `soft_dominance_review_required: broad soft-dominant ${softnessRisk.scale} work in a nontrivial painting requires previous_observation.softness_review before visual closure (${softnessRisk.reason})`
+        'whole_frame_review_required: broad soft-dominant work requires an ordinary exact-frame whole-frame observation before visual closure'
       );
     }
+    // Ordinary findings carry observed debt; an omitted certificate is not a pass.
+    const observedSoftDebt = reviewFindings.some(finding =>
+      finding.kind === 'soft_dominance' && finding.severity === 'must-fix');
     const softnessReview = input.softness_review === undefined
       ? undefined
       : normalizeSoftDominanceReview(input.softness_review, {
@@ -8198,13 +10081,18 @@ export class SessionStore {
           physicalRole: softnessContext.physicalRole,
           styleContract: documentState.art_director?.style_contract ?? null,
         });
-    if (softnessReview?.status === 'fail') {
+    if (softnessReview?.status === 'fail' || observedSoftDebt) {
       if (input.disposition === 'accept') {
-        throw new Error('soft_dominance_detected: a failed softness review cannot be accepted; correct or rollback the pass');
+        throw new Error('soft_dominance_detected: observed softness debt cannot be accepted; correct or rollback the pass');
       }
       if (input.target_resolved === 'yes') {
-        throw new Error('soft_dominance_detected: target_resolved=yes conflicts with failed softness review');
+        throw new Error('soft_dominance_detected: target_resolved=yes conflicts with observed softness debt');
       }
+      if (observedSoftDebt && input.global_readability === 'improved') {
+        throw new Error('soft_dominance_review structural debt conflicts with global_readability=improved');
+      }
+    }
+    if (softnessReview?.status === 'fail') {
       if (
         softnessReview.criteria.primitive_footprint.status === 'debt'
         && input.primitive_footprint !== 'suspect'
@@ -8229,6 +10117,13 @@ export class SessionStore {
       input.recognition,
       isRecognitionBlockInStage(context.stage)
     );
+    const representationOwner = representationOwnerContext(record);
+    const representationStyleExemption = representationOwner
+      ? exactRepresentationStyleExemption(record, documentState)
+      : null;
+    const priorOwnerRepresentation = representationOwner
+      ? documentState.owner_representation_state?.[representationOwner.owner_id]
+      : undefined;
     if (input.verdict === 'regression' && input.disposition === 'accept') throw new Error('A regression cannot be accepted');
     const significance = assessVisualSignificance({
       before: record.before_preview ?? record.baseline_preview,
@@ -8236,9 +10131,16 @@ export class SessionStore {
       mode: significanceModeOf(record),
     });
     const executionChanged = significanceHasDetectedChange(significance);
-    if (significance.execution_effect === 'meaningful' && !hasWholeFrameObservation(observations)) {
+    const wholeFrameSensitiveAcceptedChange = input.disposition === 'accept'
+      && executionChanged
+      && (
+        (context.affected_relations?.length ?? 0) > 0
+        || (context.change_domains ?? []).some(domain => GLOBAL_CHANGE_DOMAINS.has(domain))
+      );
+    if ((significance.execution_effect === 'meaningful' || wholeFrameSensitiveAcceptedChange)
+      && !hasWholeFrameObservation(observations)) {
       throw new Error(
-        'whole_frame_review_required: every meaningful visual pass must include an observation with region="whole frame" before verdict closure'
+        'whole_frame_review_required: every meaningful visual pass and every accepted pixel-changing structural/global-sensitive pass must include an observation with region="whole frame" before verdict closure'
       );
     }
     const comparisonBefore = record.before_preview ?? record.baseline_preview;
@@ -8260,6 +10162,64 @@ export class SessionStore {
         'an unavailable machine metric may coexist with a directional visual judgment only when BEFORE and AFTER image evidence both exist with matching document provenance'
       );
     }
+    const wholeFramePair = !comparisonBefore?.region && !comparisonBefore?.crop
+      && !preview?.region && !preview?.crop
+      && (comparisonBefore?.frame_kind ?? 'whole-frame') === 'whole-frame'
+      && (preview?.frame_kind ?? 'whole-frame') === 'whole-frame';
+    const unchangedPixels = comparisonMetric.status === 'available'
+      && wholeFramePair && significance.global?.decoded_pixels_equal === true;
+    const unsupportedGain = unchangedPixels && input.disposition === 'accept'
+      && (input.verdict === 'improvement' || input.target_resolved === 'yes'
+        || input.planner_task_assessment?.status === 'completed');
+    if (unsupportedGain) {
+      const language = this.presentationContext(record.args?.document_id)?.language;
+      const reason = language === 'ru'
+        ? 'Декодированные кадры до и после совпадают. Этот проход не дал видимого изменения; заявленное улучшение не подтверждено.'
+        : 'Decoded BEFORE/AFTER frames are identical. This pass produced no visible change; the claimed improvement is unconfirmed.';
+      input = {
+        ...input,
+        verdict: 'neutral',
+        target_resolved: 'no',
+        global_readability: 'maintained',
+        observed_change: reason,
+        primary_mismatch: reason,
+        execution_claim_correction: {
+          code: 'unchanged_rendered_frame', reason,
+          original_claim: {
+            verdict: input.verdict, target_resolved: input.target_resolved,
+            observed_change: input.observed_change,
+            ...(input.planner_task_assessment ? { planner_task_assessment: input.planner_task_assessment } : {}),
+          },
+        },
+        ...(input.planner_task_assessment?.status === 'completed' ? {
+          planner_task_assessment: { ...input.planner_task_assessment, status: 'continue', evidence: [reason] },
+        } : {}),
+      };
+    }
+    // Evaluate owner quality against the corrected execution claim. A proven
+    // no-op remains unresolved without a wording-repair loop; real scaffold
+    // debt and exact style authority keep their existing semantics.
+    if (
+      representationOwner
+      && !representationStyleExemption
+      && input.primitive_footprint === 'suspect'
+      && input.target_resolved === 'yes'
+    ) {
+      throw new Error(
+        `representation_fidelity_unresolved: owner ${representationOwner.owner_id} remains primitive/scaffold-dominant; recognizability or low detail does not permit target_resolved=yes until the owner is represented without a suspect primitive footprint or an exact style-contract exemption is declared`
+      );
+    }
+    if (
+      representationOwner
+      && !representationStyleExemption
+      && priorOwnerRepresentation?.state === 'scaffold-debt'
+      && input.target_resolved === 'yes'
+      && !['none', 'acceptable'].includes(input.primitive_footprint)
+    ) {
+      throw new Error(
+        `representation_fidelity_unresolved: owner ${representationOwner.owner_id} has durable primitive-scaffold debt; closing it requires primitive_footprint=none|acceptable on the resolving pass or an exact style-contract exemption is declared`
+      );
+    }
     if (comparisonMetric.status === 'available' && input.verdict === 'improvement' && input.disposition === 'accept' && !executionChanged) {
       throw new Error(`visual_execution_gate: improvement cannot be accepted because no comparable decoded pixel change was detected. execution_effect=${significance.execution_effect}. ${significance.reason}`);
     }
@@ -8274,8 +10234,10 @@ export class SessionStore {
       record,
       previewRecord,
       preview,
-      observations,
-      primaryMismatch,
+      effectiveInput: input,
+      chatCritic,
+      observations: unsupportedGain ? [{ region: 'whole frame', visible: input.observed_change }] : observations,
+      primaryMismatch: unsupportedGain ? input.primary_mismatch : primaryMismatch,
       edgeObservations,
       recognition,
       context,
@@ -8288,6 +10250,8 @@ export class SessionStore {
       taskAssessment,
       softnessReview,
       softnessRisk,
+      physicalStackCheck,
+      boundedUndoRestore,
     };
   }
   cacheValidatedVerdict(input, validated) {
@@ -8295,22 +10259,62 @@ export class SessionStore {
     this._validatedVerdictCache.set(fingerprint(input), {
       validated,
       evidence_signature: visualEvidenceSignature(validated.record, validated.preview),
+      ...(validated.boundedUndoRestore ? { source_signature: fingerprint(validated.boundedUndoRestore.source) } : {}),
     });
   }
-  consumeValidatedVerdict(input) {
+  peekValidatedVerdict(input) {
     const key = fingerprint(input);
     const cached = this._validatedVerdictCache?.get(key);
     if (!cached) return undefined;
-    this._validatedVerdictCache.delete(key);
     const current = this.read(input.id);
     if (!current?.preview) return undefined;
     if (cached.evidence_signature !== visualEvidenceSignature(current, current.preview)) return undefined;
+    // Lint caches must not authorize a Critic response after its brief/incarnation binding changes.
+    let currentChatCritic;
+    try { currentChatCritic = input.disposition === 'rollback' ? undefined : this.validateChatCritic(current, input); }
+    catch { return undefined; }
+    if (cached.validated.boundedUndoRestore) {
+      const source = this.read(current.undo_source_operation_id);
+      if (!source || cached.source_signature !== fingerprint(source) || !materializedEvidenceMatches(source.baseline_preview)) return undefined;
+    }
     return {
       ...cached.validated,
+      chatCritic: currentChatCritic,
       record: current,
       previewRecord: current,
       preview: current.preview,
     };
+  }
+  consumeValidatedVerdict(input) {
+    const validated = this.peekValidatedVerdict(input);
+    this._validatedVerdictCache?.delete(fingerprint(input));
+    if (validated?.boundedUndoRestore) {
+      const current = this.paintingState().documents?.[String(validated.record.args.document_id)] ?? {};
+      const incarnation = normalizeDocumentInstanceWitness(current.document_instance?.host_witness)?.token
+        ?? current.document_instance?.bootstrap_operation_id ?? null;
+      if (incarnation !== validated.boundedUndoRestore.snapshot.document_incarnation) return undefined;
+    }
+    return validated;
+  }
+  projectBoundedUndoClosure(input, projectionContext) {
+    const id = input.previous_operation_id;
+    const record = projectionContext?.records.find(row => row.id === id);
+    if (!record?.undo_source_operation_id || record.verdict || !input.previous_visual_verdict) return projectionContext;
+    const review = { id, preview_id: id, sha256: record.preview.sha256, ...input.previous_visual_verdict };
+    const validated = this.peekValidatedVerdict(review);
+    if (!validated?.boundedUndoRestore) return projectionContext;
+    const documentId = String(record.args.document_id);
+    const frame = { operation_id: id, sha256: record.preview.sha256,
+      path: record.preview.project_path ?? record.preview.materialized_path, at: new Date().toISOString(),
+      accepted: true, acceptance_scope: 'pixels_retained_not_goal_confirmation', goal_confirmation: validated.assessment.status };
+    const { state } = restoredBoundedUndoState(projectionContext.paintingState.documents?.[documentId] ?? {},
+      validated.boundedUndoRestore, record, frame, { ...validated.effectiveInput, ...review, observations: validated.observations,
+        primary_mismatch: validated.primaryMismatch, review_findings: this.normalizeReviewFindings(review.review_findings ?? []) });
+    return { ...projectionContext,
+      records: projectionContext.records.map(row => row.id === validated.boundedUndoRestore.source.id
+        ? { ...row, rolled_back: true, current_frame_authority: false } : row),
+      paintingState: { ...projectionContext.paintingState,
+        documents: { ...projectionContext.paintingState.documents, [documentId]: state } } };
   }
   verdict(input) {
     const {
@@ -8331,16 +10335,26 @@ export class SessionStore {
       taskAssessment,
       softnessReview,
       softnessRisk,
+      effectiveInput,
+      physicalStackCheck,
+      boundedUndoRestore,
+      chatCritic,
     } = this.consumeValidatedVerdict(input) ?? this.validateVerdictInput(input);
-    const softnessTrendSignals = softnessReview?.trend_signals ?? [];
-    const mergedTrendSignals = [...new Set([
-      ...input.trend_signals.map(normalizeTrendSignal).filter(Boolean),
-      ...softnessTrendSignals.map(normalizeTrendSignal).filter(Boolean),
-    ])];
+    input = effectiveInput ?? input;
     const submittedReviewFindings = Array.isArray(input.review_findings)
       ? input.review_findings
       : [];
     const normalizedReviewFindings = this.normalizeReviewFindings(submittedReviewFindings);
+    const softnessTrendSignals = [...new Set([
+      ...(softnessReview?.trend_signals ?? []),
+      ...normalizedReviewFindings
+        .filter(finding => finding.kind === 'soft_dominance' && finding.severity === 'must-fix')
+        .flatMap(finding => ['soft-dominance', ...(finding.trend_signals ?? [])]),
+    ])];
+    const mergedTrendSignals = [...new Set([
+      ...input.trend_signals.map(normalizeTrendSignal).filter(Boolean),
+      ...softnessTrendSignals.map(normalizeTrendSignal).filter(Boolean),
+    ])];
     const syntheticSoftFinding = softnessReview?.status === 'fail'
       ? [{
           kind: 'soft_dominance',
@@ -8359,6 +10373,7 @@ export class SessionStore {
       })) } : {}),
       ...(recognition ? { recognition } : {}),
       ...(softnessReview ? { softness_review: softnessReview } : {}),
+      ...(physicalStackCheck ? { physical_stack_check: physicalStackCheck } : {}),
       ...(submittedReviewFindings.length || syntheticSoftFinding.length
         ? { review_findings: [...submittedReviewFindings, ...syntheticSoftFinding] }
         : {}),
@@ -8376,10 +10391,18 @@ export class SessionStore {
       },
       at: new Date().toISOString(),
     };
+    if (input.execution_claim_correction && record.report) {
+      record.verdict.execution_claim_correction.original_claim.report_result = record.report.result;
+      record.report.result = input.observed_change;
+    }
+    if (record.report?.source === 'guard_compact_closure') {
+      record.report.result = artisticObservedResult(record.verdict) ?? record.report.result;
+    }
     delete record.pending_review;
-    this.write(record);
+    if (!boundedUndoRestore) this.write(record);
+    this.writeCommentarySidecar(record);
     const documentId = record.args?.document_id;
-    if (Number.isSafeInteger(documentId) && documentId > 0) {
+    if (!boundedUndoRestore && Number.isSafeInteger(documentId) && documentId > 0) {
       // This is the canonical release point for controller-driven workflows.
       // The operation journal keeps history; the shared per-document barrier is
       // the one durable gate consulted by both controller and VisualMicroPlan.
@@ -8389,6 +10412,13 @@ export class SessionStore {
     const workflowMetrics = this.workflowMetrics(documentId);
     const recognitionMetrics = this.recognitionMetrics(documentId);
     const trendState = this.cumulativeTrendState(documentId);
+    if (boundedUndoRestore) {
+      const source = boundedUndoRestore.source;
+      source.rolled_back = true;
+      source.current_frame_authority = false;
+      source.rollback = { completed: true, rollback_operation_id: record.id, completed_at: record.completed_at };
+      this.write(source);
+    }
     this.updatePaintingState(documentId, current => {
       const classifiedFrame = {
         operation_id: previewRecord.id,
@@ -8400,7 +10430,90 @@ export class SessionStore {
         acceptance_scope: input.disposition === 'accept' ? 'pixels_retained_not_goal_confirmation' : 'not_retained',
         goal_confirmation: assessment.status,
       };
+      if (boundedUndoRestore) {
+        const { state: restored, directorScope } = restoredBoundedUndoState(current, boundedUndoRestore, record, classifiedFrame,
+          { ...input, observations, primary_mismatch: primaryMismatch, review_findings: normalizedReviewFindings });
+        record.verdict.recovery = {
+          source_operation_id: boundedUndoRestore.source.id, baseline_operation_id: boundedUndoRestore.snapshot.anchor_operation_id,
+          semantic_state_restored: true, semantic_restore_scope: [...ANCHOR_SEMANTIC_FIELDS], director_restore_scope: directorScope,
+          restored_pixels_equal: true, history_steps: boundedUndoRestore.expectedSteps,
+        };
+        return restored;
+      }
       const problems = { ...(current.visual_problems ?? {}) };
+      const ownerRepresentationState = { ...(current.owner_representation_state ?? {}) };
+      const representationOwner = representationOwnerContext(record);
+      const representationStyleExemption = representationOwner
+        ? exactRepresentationStyleExemption(record, current)
+        : null;
+      if (representationOwner && input.disposition !== 'rollback') {
+        const prior = ownerRepresentationState[representationOwner.owner_id];
+        if (representationStyleExemption && input.target_resolved === 'yes') {
+          ownerRepresentationState[representationOwner.owner_id] = {
+            ...(prior ?? {}),
+            owner_id: representationOwner.owner_id,
+            physical_role: representationOwner.physical_role,
+            ...(representationOwner.layer_id ? { layer_id: representationOwner.layer_id } : {}),
+            state: 'style-exempt',
+            primitive_footprint: input.primitive_footprint,
+            representation_change: 'not-assessed',
+            residual_block_in: 'not-applicable',
+            style_contract_basis: {
+              field: representationStyleExemption.field,
+              criterion: representationStyleExemption.criterion,
+            },
+            source_operation_id: record.id,
+            ...(context.problem_id ? { problem_id: context.problem_id } : {}),
+            evidence_sha256: preview.sha256,
+            at: record.verdict.at,
+          };
+
+        } else if (input.primitive_footprint === 'unknown' && prior?.state !== 'scaffold-debt') {
+          ownerRepresentationState[representationOwner.owner_id] = {
+            ...(prior ?? {}), owner_id: representationOwner.owner_id, physical_role: representationOwner.physical_role,
+            ...(representationOwner.layer_id ? { layer_id: representationOwner.layer_id } : {}),
+            state: 'assessment-pending', primitive_footprint: 'unknown', representation_change: 'not-assessed',
+            residual_block_in: 'uncertain', source_operation_id: record.id,
+            ...(context.problem_id ? { problem_id: context.problem_id } : {}),
+            evidence_sha256: preview.sha256, at: record.verdict.at,
+            note: 'The local operation may be resolved, but owner form/primitive fidelity has not been assessed on this exact frame.',
+          };
+        } else if (input.primitive_footprint === 'suspect') {
+          ownerRepresentationState[representationOwner.owner_id] = {
+            ...(prior ?? {}),
+            owner_id: representationOwner.owner_id,
+            physical_role: representationOwner.physical_role,
+            ...(representationOwner.layer_id ? { layer_id: representationOwner.layer_id } : {}),
+            state: 'scaffold-debt',
+            primitive_footprint: 'suspect',
+            representation_change: 'insufficient',
+            residual_block_in: 'debt',
+            source_operation_id: record.id,
+            ...(context.problem_id ? { problem_id: context.problem_id } : {}),
+            evidence_sha256: preview.sha256,
+            note: primaryMismatch,
+            at: record.verdict.at,
+          };
+        } else if (
+          input.target_resolved === 'yes'
+          && ['none', 'acceptable'].includes(input.primitive_footprint)
+        ) {
+          ownerRepresentationState[representationOwner.owner_id] = {
+            ...(prior ?? {}),
+            owner_id: representationOwner.owner_id,
+            physical_role: representationOwner.physical_role,
+            ...(representationOwner.layer_id ? { layer_id: representationOwner.layer_id } : {}),
+            state: 'structurally-faithful',
+            primitive_footprint: input.primitive_footprint,
+            representation_change: 'meaningful',
+            residual_block_in: 'resolved',
+            source_operation_id: record.id,
+            ...(context.problem_id ? { problem_id: context.problem_id } : {}),
+            evidence_sha256: preview.sha256,
+            at: record.verdict.at,
+          };
+        }
+      }
       const briefDebtOverrides = { ...(current.brief_debt_overrides ?? {}) };
       const activeBriefItems = Array.isArray(current.art_director?.artistic_evaluation_contract?.brief_items)
         ? current.art_director.artistic_evaluation_contract.brief_items
@@ -8529,6 +10642,12 @@ export class SessionStore {
           },
         } : {}),
         current_frame: classifiedFrame,
+        ...(input.disposition !== 'rollback' ? persistChatCritic(current, chatCritic) : {}),
+        ...(input.painting_completion !== undefined && input.disposition === 'accept'
+          ? { painting_completion: bindPaintingCompletion(input.painting_completion, current, preview.sha256) } : {}),
+        ...(physicalStackCheck && input.disposition !== 'rollback'
+          ? { physical_stack_check: physicalStackCheck }
+          : {}),
         ...(input.disposition === 'accept' ? { accepted_frame: classifiedFrame } : {}),
         ...(assessment.status === 'confirmed_by_visual_verdict' ? { confirmed_goal_frame: classifiedFrame } : {}),
         ...(context.stage ? { current_stage: context.stage } : {}),
@@ -8545,6 +10664,7 @@ export class SessionStore {
             at: record.verdict.at,
           },
         } : {}),
+        owner_representation_state: ownerRepresentationState,
         visual_problems: problems,
         brief_debt_overrides: briefDebtOverrides,
         active_problem: primaryBlocker ?? undefined,
@@ -8572,6 +10692,7 @@ export class SessionStore {
           ...(taskAssessment ? { planner_task_assessment: taskAssessment } : {}),
           trend_signals: record.verdict.trend_signals,
           ...(softnessReview ? { softness_review: softnessReview } : {}),
+          ...(physicalStackCheck ? { physical_stack_check: physicalStackCheck } : {}),
           ...(recognition ? { recognition } : {}),
           significance,
         },
@@ -8583,6 +10704,11 @@ export class SessionStore {
       const withPlanner = this.advanceArtDirectorAfterVerdict(next, context, input, record);
       return this.promoteCumulativeTrendProblem(documentId, withPlanner, trendState);
     });
+    if (boundedUndoRestore) {
+      this.write(record);
+      const barrier = this.visualBarrier(documentId);
+      if (this.barrierOwnedByRecord(barrier, record)) this.clearVisualBarrier(documentId);
+    }
     return { verdict: record.verdict, warning: 'Hash proves frame identity, not that a person/model actually viewed it.' };
   }
   reconcile(input) {
@@ -8608,12 +10734,12 @@ export class SessionStore {
       && !!record.resolved
       && (record.execution === 'completed' || record.execution === 'partial')
       && input.outcome === record.execution;
-    if (record.phase === 'completed' && !completedPreviewRecoveryUpgrade) {
+    const closedDocumentRecovery = input.documents_id !== undefined || input.document_closed_confirmed !== undefined || input.outcome === 'abandoned';
+    if (record.phase === 'completed' && !completedPreviewRecoveryUpgrade && !closedDocumentRecovery) {
       throw new Error('Expected an interrupted or uncertain operation');
     }
     if (typeof input.reason !== 'string' || input.reason.trim().length < 10) throw new Error('Explicit recovery outcome and evidence-based reason required');
 
-    const closedDocumentRecovery = input.documents_id !== undefined || input.document_closed_confirmed !== undefined || input.outcome === 'abandoned';
     if (closedDocumentRecovery) {
       if (input.state_id !== undefined || input.preview_id !== undefined) throw new Error('Use either same-document state/preview evidence or closed-document evidence, not both');
       if (input.outcome !== 'abandoned') throw new Error('Closed-document recovery requires outcome=abandoned');
@@ -8762,7 +10888,8 @@ export class SessionStore {
       pending_report_delivery_acks: [],
       operation_ack_gate: 'guard_receipt_required',
       report_delivery_gate: 'host_render_receipt_optional',
-      uncertain: all.filter(r => r.phase !== 'completed' && !r.resolved).map(r => r.id),
+      uncertain: all.filter(r => this.isIdentityRecoveryPending(r)).map(r => r.id),
+      identity_recovery_blockers: this.identityRecoveryBlockers(all, projectionContext.activeJobs),
       pending_visual_verdicts: all.filter(r => !isAbandonedRecovery(r) && r.visual && !r.verdict).map(r => r.id),
       visual_barriers: visualBarriers,
       last_checkpoint: all.filter(r => r.checkpoint).at(-1)?.checkpoint ?? null,
@@ -8804,7 +10931,7 @@ export class SessionStore {
         receipt_token: r.operation_receipt.token,
         issued_at: r.operation_receipt.issued_at,
       }));
-    const uncertain = all.filter(r => r.phase !== 'completed' && !r.resolved).map(r => r.id);
+    const uncertain = all.filter(r => this.isIdentityRecoveryPending(r)).map(r => r.id);
     const pendingVerdicts = all.filter(r => !isAbandonedRecovery(r) && r.visual && !r.verdict).map(r => r.id);
     const pendingVisualVerdictDetails = all
       .filter(r => !isAbandonedRecovery(r) && r.visual && !r.verdict && r.preview)
@@ -8843,8 +10970,15 @@ export class SessionStore {
       const recognition = this.recognitionMetrics(id, all, projectionContext);
       const cadence = this.visualCadenceState(id, all, projectionContext);
       const continuationWatch = this.continuationWatchState(id, all, projectionContext);
+      const geometry = this.sceneGeometryModel(id, all, projectionContext);
       return [String(id), {
         document_id: id,
+        document_identity: doc.document_instance?.identity_pending ? {
+          status: 'unverified', state_preserved: true, mutation_allowed: false,
+          next_public_call: { tool: 'photoshop_guard_resume', args: { document_id: id, same_document_confirmed: true } },
+        } : { status: 'verified' },
+        presentation_context: this.presentationContext(id, state),
+        physical_stack_check: doc.physical_stack_check ?? doc.art_director?.physical_stack_check ?? null,
         current_frame: doc.current_frame ? {
           operation_id: doc.current_frame.operation_id,
           sha256: doc.current_frame.sha256,
@@ -8896,12 +11030,22 @@ export class SessionStore {
         last_stage_reset: doc.last_stage_reset ?? null,
         logical_layer_owners: this.semanticLayerOwners(id, all, projectionContext),
         scene_ownership_plan: this.sceneOwnershipPlan(id, all, projectionContext),
-        scene_geometry_model: this.sceneGeometryModel(id, all, projectionContext),
+        scene_geometry_model: geometry ? {
+          model_id: geometry.model_id,
+          revision: geometry.revision,
+          applicability: geometry.applicability,
+          source_frame: geometry.source_frame,
+          projection: { kind: geometry.projection.kind },
+          source_operation_id: geometry.source_operation_id,
+          source_sequence: geometry.source_sequence,
+          source_operation_path: this.file(geometry.source_operation_id),
+        } : null,
         scene_lighting_color_model: this.sceneLightingColorModel(id, all, projectionContext),
         scene_camera_imaging_model: this.sceneCameraImagingModel(id, all, projectionContext),
         geometry_preflight: this.geometryPreflight(id, all, projectionContext),
         geometry_binding_states: this.geometryBindingStates(id, all, projectionContext),
         geometry_completion_debt: this.geometryCompletionDebt(id, all, projectionContext),
+        generated_geometry_rebuild_debt: this.generatedGeometryRebuildDebt(id, all, projectionContext),
         lighting_color_binding_states: this.lightingColorBindingStates(id, all, projectionContext),
         physical_effect_completion_debt: this.physicalEffectCompletionDebt(id, all, projectionContext),
         camera_binding_states: this.cameraBindingStates(id, all, projectionContext),
@@ -8914,6 +11058,8 @@ export class SessionStore {
         painting_profile: doc.painting_profile ?? (doc.process_dir ? 'nontrivial_painting' : null),
         process_dir: doc.process_dir ?? null,
         profile_transition: doc.profile_transition ?? null,
+        chat_critic: doc.chat_critic_review ? { review: doc.chat_critic_review,
+          remaining_findings: doc.chat_critic_findings ?? [] } : null,
         global_brief_outcome: doc.global_brief_outcome ?? doc.global_brief_assessment?.outcome ?? 'not-evaluated',
         global_brief_assessment: doc.global_brief_assessment ?? {
           outcome: 'not-evaluated',
@@ -8942,6 +11088,11 @@ export class SessionStore {
           revision: doc.art_director.revision,
           status: doc.art_director.status,
           goal: doc.art_director.goal,
+          style_contract: doc.art_director.style_contract ?? null,
+          prompt_conflict_preflight: doc.art_director.prompt_conflict_preflight ?? null,
+          strategy_validation_after_microplans: doc.art_director.strategy_validation_after_microplans ?? null,
+          strategy_validation: doc.art_director.strategy_validation ?? null,
+          assessment: doc.art_director.assessment ?? null,
           artistic_evaluation_contract: doc.art_director.artistic_evaluation_contract ?? null,
           global_brief_assessment: doc.art_director.global_brief_assessment ?? null,
           global_brief_completion_allowed: !!doc.art_director.global_brief_completion_allowed,
@@ -8967,7 +11118,7 @@ export class SessionStore {
           review_due: !!doc.art_director.review_due,
           review_reason: doc.art_director.review_reason ?? null,
           interrupt: doc.art_director.interrupt ?? null,
-          physical_stack_check: doc.art_director.physical_stack_check ?? null,
+          physical_stack_check: doc.physical_stack_check ?? doc.art_director.physical_stack_check ?? null,
           value_check: doc.art_director.value_check ?? null,
           refinement_check: doc.art_director.refinement_check ?? null,
           last_stage_reset: doc.art_director.last_stage_reset ?? null,
@@ -9095,6 +11246,7 @@ export class SessionStore {
       pending_visual_verdicts: pendingVerdicts,
       pending_visual_verdict_details: pendingVisualVerdictDetails,
       active_jobs: activeJobs,
+      identity_recovery_blockers: this.identityRecoveryBlockers(all, activeJobs),
       last_checkpoint: all.filter(r => r.checkpoint).at(-1)?.checkpoint ?? null,
       silent_stalls: silentStalls,
       latency_summary: this.latencySummary(undefined, all, projectionContext),
@@ -9107,7 +11259,8 @@ export class SessionStore {
   activeJobs(
     documentId: number | undefined,
     suppliedJobs: GuardActiveJobProjection[] | undefined = undefined,
-    capturedAt = Date.now()
+    capturedAt = Date.now(),
+    suppliedPaintingState: GuardProjectionContext['paintingState'] | undefined = undefined
   ): GuardActiveJobProjection[] {
     if (Array.isArray(suppliedJobs)) {
       return activeJobsForDocument(suppliedJobs, documentId);
@@ -9115,6 +11268,7 @@ export class SessionStore {
     const root = jobsDirectory(this.directory);
     if (!fs.existsSync(root)) return [];
     const jobs = [];
+    let presentationState = suppliedPaintingState;
     for (const name of fs.readdirSync(root)) {
       if (!name.startsWith('job-')) continue;
       try {
@@ -9125,6 +11279,7 @@ export class SessionStore {
         if (Number.isSafeInteger(documentId) && documentId > 0 && operation?.args?.document_id !== documentId) continue;
         const operationRecord = typeof operation?.id === 'string' ? this.read(operation.id) : undefined;
         if (isAbandonedRecovery(operationRecord)) continue;
+        presentationState ??= this.paintingState();
         jobs.push({
           job_id: name,
           state: job.state,
@@ -9140,7 +11295,8 @@ export class SessionStore {
             operation,
             job.state === 'uncertain' || job.state === 'stalled'
               ? 'uncertain'
-              : job.state === 'starting' ? 'starting' : 'running'
+               : job.state === 'starting' ? 'starting' : 'running',
+             this.presentationContext(operation?.args?.document_id, presentationState)
           ),
           poll_command: `photoshop_guard_job_poll(job_id="${name}")`,
         });
@@ -9153,10 +11309,19 @@ export class SessionStore {
   }
   resume(documentId) {
     const baseProjection = this.captureProjectionContext();
-    const all = baseProjection.records.map(r => this.hasDurableNotExecutedProof(r)
-      ? this.finalizeDurableNotExecuted(r, 'resume_not_executed_cleanup')
-      : r);
-    const projectionContext = { ...baseProjection, records: all };
+    // Explicit recovery is document-scoped, including cleanup of technical journal debt.
+    const scoped = Number.isSafeInteger(documentId) && documentId > 0;
+    const all = (scoped ? baseProjection.records.filter(r => r.args?.document_id === documentId) : baseProjection.records)
+      .map(r => this.hasDurableNotExecutedProof(r)
+        ? this.finalizeDurableNotExecuted(r, 'resume_not_executed_cleanup') : r);
+    const projectionContext = { ...baseProjection,
+      records: all,
+      activeJobs: scoped ? activeJobsForDocument(baseProjection.activeJobs, documentId) : baseProjection.activeJobs,
+      paintingState: scoped ? { ...baseProjection.paintingState, documents: {
+        ...(baseProjection.paintingState.documents?.[String(documentId)]
+          ? { [String(documentId)]: baseProjection.paintingState.documents[String(documentId)] } : {}),
+      } } : baseProjection.paintingState,
+    };
     const compact = this.statusCompact(projectionContext);
     const ids = Object.keys(compact.documents).map(Number);
     const selectedId = Number.isSafeInteger(documentId) && documentId > 0
@@ -9179,31 +11344,27 @@ export class SessionStore {
       ? activeJob.state
       : latest?.phase !== 'completed' ? 'uncertain'
         : 'completed';
-    const nextRequiredAction = compact.next_required_action !== 'ready'
-      ? compact.next_required_action
-      : document?.next_required_action ?? 'ready';
-    const baseResumeSummary = activeJob?.narrative ?? (latest ? operationNarrative(latest, latestNarrativeState) : {
+    const nextRequiredAction = scoped
+      ? document?.next_required_action ?? compact.next_required_action ?? 'ready'
+      : compact.next_required_action !== 'ready' ? compact.next_required_action : document?.next_required_action ?? 'ready';
+    const presentation = this.presentationContext(selectedId, projectionContext.paintingState);
+    const ru = presentation.language !== 'en';
+    const baseResumeSummary = activeJob?.narrative ?? (latest ? operationNarrative(latest, latestNarrativeState, presentation) : {
         progress_id: 'photoshop-resume:idle',
         operation_id: null,
         state: 'idle',
-        now: 'рабочая сессия восстановлена',
-        why: 'продолжить с последнего подтверждённого состояния без повторного выполнения действий',
-        photoshop: 'активной операции нет',
+        now: ru ? 'рабочая сессия восстановлена' : 'working session restored',
+        why: ru ? 'продолжить с последнего подтверждённого состояния без повторного выполнения действий' : 'continue from the last confirmed state without replaying actions',
+        photoshop: ru ? 'активной операции нет' : 'no active operation',
         next: nextRequiredAction,
       });
     const resumeSummary = {
       ...baseResumeSummary,
       next: nextRequiredAction,
-      text: [
-        `Сейчас: ${baseResumeSummary.now}`,
-        `Почему: ${baseResumeSummary.why}`,
-        `Photoshop: ${baseResumeSummary.photoshop}`,
-        ...(document?.unresolved_visual_basis?.primary_mismatch
-          ? [`Нерешённое визуальное основание: ${document.unresolved_visual_basis.primary_mismatch}`]
-          : []),
-        `Следом: ${nextRequiredAction}`,
-      ].join('\n'),
+      language: presentation.language === 'auto' ? baseResumeSummary.language ?? 'en' : presentation.language,
+      ...(document?.unresolved_visual_basis?.primary_mismatch ? { unresolved_basis: document.unresolved_visual_basis.primary_mismatch } : {}),
     };
+    resumeSummary.text = formatOperationNarrative(resumeSummary);
     return {
       route: ROUTE,
       mode: 'photoshop-mcp-resume',
@@ -9221,6 +11382,7 @@ export class SessionStore {
       } : null,
       pending_report_delivery_acks: compact.pending_report_delivery_acks,
       uncertain: compact.uncertain,
+      identity_recovery_blockers: compact.identity_recovery_blockers,
       pending_visual_verdicts: compact.pending_visual_verdicts,
       pending_visual_verdict: pendingVisualVerdict ? {
         operation_id: pendingVisualVerdict.id,

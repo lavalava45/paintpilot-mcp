@@ -1,0 +1,390 @@
+{
+  "model_id": "violin-gnome-study",
+  "revision": 1,
+  "basis": "Artist-selected illustrative proportions; these examples do not certify biological or manufactured dimensions.",
+  "objects": [
+    {
+      "id": "violin",
+      "subject_kind": "custom-compound",
+      "origin": [
+        -2,
+        0,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        -15
+      ]
+    },
+    {
+      "id": "gnome",
+      "subject_kind": "person",
+      "origin": [
+        1.5,
+        0,
+        2
+      ]
+    }
+  ],
+  "points": [
+    {
+      "id": "v-base",
+      "object_id": "violin",
+      "position": [
+        0,
+        2,
+        0
+      ],
+      "fixed": true
+    },
+    {
+      "id": "v-neck",
+      "object_id": "violin",
+      "position": [
+        0,
+        -1,
+        0
+      ],
+      "fixed": true
+    },
+    {
+      "id": "v-top",
+      "object_id": "violin",
+      "position": [
+        0,
+        -3,
+        0
+      ],
+      "fixed": false
+    },
+    {
+      "id": "v-0",
+      "object_id": "violin",
+      "position": [
+        -0.8,
+        2,
+        0
+      ],
+      "fixed": true
+    },
+    {
+      "id": "v-1",
+      "object_id": "violin",
+      "position": [
+        -1,
+        1,
+        0
+      ],
+      "fixed": true
+    },
+    {
+      "id": "v-2",
+      "object_id": "violin",
+      "position": [
+        -0.5,
+        0.3,
+        0
+      ],
+      "fixed": true
+    },
+    {
+      "id": "v-3",
+      "object_id": "violin",
+      "position": [
+        -0.75,
+        -0.5,
+        0
+      ],
+      "fixed": true
+    },
+    {
+      "id": "v-4",
+      "object_id": "violin",
+      "position": [
+        -0.5,
+        -1,
+        0
+      ],
+      "fixed": true
+    },
+    {
+      "id": "v-5",
+      "object_id": "violin",
+      "position": [
+        0.5,
+        -1,
+        0
+      ],
+      "fixed": true
+    },
+    {
+      "id": "v-6",
+      "object_id": "violin",
+      "position": [
+        0.75,
+        -0.5,
+        0
+      ],
+      "fixed": true
+    },
+    {
+      "id": "v-7",
+      "object_id": "violin",
+      "position": [
+        0.5,
+        0.3,
+        0
+      ],
+      "fixed": true
+    },
+    {
+      "id": "v-8",
+      "object_id": "violin",
+      "position": [
+        1,
+        1,
+        0
+      ],
+      "fixed": true
+    },
+    {
+      "id": "v-9",
+      "object_id": "violin",
+      "position": [
+        0.8,
+        2,
+        0
+      ],
+      "fixed": true
+    },
+    {
+      "id": "neck-l",
+      "object_id": "violin",
+      "position": [
+        0,
+        -0.12,
+        0
+      ],
+      "fixed": true,
+      "relative_to": "v-neck",
+      "axis_to": "v-top"
+    },
+    {
+      "id": "neck-r",
+      "object_id": "violin",
+      "position": [
+        0,
+        0.12,
+        0
+      ],
+      "fixed": true,
+      "relative_to": "v-neck",
+      "axis_to": "v-top"
+    },
+    {
+      "id": "top-l",
+      "object_id": "violin",
+      "position": [
+        0,
+        0.12,
+        0
+      ],
+      "fixed": true,
+      "relative_to": "v-top",
+      "axis_to": "v-neck"
+    },
+    {
+      "id": "top-r",
+      "object_id": "violin",
+      "position": [
+        0,
+        -0.12,
+        0
+      ],
+      "fixed": true,
+      "relative_to": "v-top",
+      "axis_to": "v-neck"
+    },
+    {
+      "id": "g-head-0",
+      "object_id": "gnome",
+      "position": [
+        -0.5,
+        -1,
+        0
+      ],
+      "fixed": true
+    },
+    {
+      "id": "g-head-1",
+      "object_id": "gnome",
+      "position": [
+        -0.7,
+        -0.5,
+        0
+      ],
+      "fixed": true
+    },
+    {
+      "id": "g-head-2",
+      "object_id": "gnome",
+      "position": [
+        0,
+        0,
+        0
+      ],
+      "fixed": true
+    },
+    {
+      "id": "g-head-3",
+      "object_id": "gnome",
+      "position": [
+        0.7,
+        -0.5,
+        0
+      ],
+      "fixed": true
+    },
+    {
+      "id": "g-head-4",
+      "object_id": "gnome",
+      "position": [
+        0.5,
+        -1,
+        0
+      ],
+      "fixed": true
+    },
+    {
+      "id": "g-body-0",
+      "object_id": "gnome",
+      "position": [
+        -0.7,
+        0,
+        0
+      ],
+      "fixed": true
+    },
+    {
+      "id": "g-body-1",
+      "object_id": "gnome",
+      "position": [
+        0.7,
+        0,
+        0
+      ],
+      "fixed": true
+    },
+    {
+      "id": "g-body-2",
+      "object_id": "gnome",
+      "position": [
+        1,
+        2,
+        0
+      ],
+      "fixed": true
+    },
+    {
+      "id": "g-body-3",
+      "object_id": "gnome",
+      "position": [
+        -1,
+        2,
+        0
+      ],
+      "fixed": true
+    }
+  ],
+  "parts": [
+    {
+      "id": "violin-body",
+      "object_id": "violin",
+      "role": "Editable violin body",
+      "outline": [
+        "v-0",
+        "v-1",
+        "v-2",
+        "v-3",
+        "v-4",
+        "v-5",
+        "v-6",
+        "v-7",
+        "v-8",
+        "v-9"
+      ],
+      "curve": "smooth"
+    },
+    {
+      "id": "violin-neck",
+      "object_id": "violin",
+      "role": "Editable violin neck",
+      "outline": [
+        "neck-l",
+        "top-l",
+        "top-r",
+        "neck-r"
+      ],
+      "curve": "linear"
+    },
+    {
+      "id": "gnome-head",
+      "object_id": "gnome",
+      "role": "Editable gnome head",
+      "outline": [
+        "g-head-0",
+        "g-head-1",
+        "g-head-2",
+        "g-head-3",
+        "g-head-4"
+      ],
+      "curve": "smooth"
+    },
+    {
+      "id": "gnome-body",
+      "object_id": "gnome",
+      "role": "Editable gnome body",
+      "outline": [
+        "g-body-0",
+        "g-body-1",
+        "g-body-2",
+        "g-body-3"
+      ],
+      "curve": "smooth"
+    }
+  ],
+  "constraints": [
+    {
+      "id": "neck-body-ratio",
+      "kind": "ratio",
+      "points": [
+        "v-neck",
+        "v-top",
+        "v-neck",
+        "v-base"
+      ],
+      "value": 0.75
+    },
+    {
+      "id": "neck-axis",
+      "kind": "parallel",
+      "points": [
+        "v-neck",
+        "v-top",
+        "v-base",
+        "v-neck"
+      ]
+    }
+  ],
+  "camera": {
+    "kind": "perspective",
+    "origin": [
+      550,
+      500
+    ],
+    "scale": 90,
+    "distance": 10,
+    "focal_length": 10
+  }
+}

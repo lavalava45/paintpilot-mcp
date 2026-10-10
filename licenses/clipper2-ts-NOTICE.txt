@@ -1,0 +1,11 @@
+TypeScript port: Jeremy Tribby. Original Clipper2: Angus Johnson.
+Retained upstream header from clipper2-ts 2.0.1-18, src/Offset.ts:
+
+/*******************************************************************************
+* Author    :  Angus Johnson                                                   *
+* Date      :  11 October 2025                                                 *
+* Website   :  https://www.angusj.com                                          *
+* Copyright :  Angus Johnson 2010-2025                                         *
+* Purpose   :  Path Offset (Inflate/Shrink)                                    *
+* License   :  https://www.boost.org/LICENSE_1_0.txt                           *
+*******************************************************************************/

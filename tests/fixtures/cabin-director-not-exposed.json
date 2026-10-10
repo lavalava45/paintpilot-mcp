@@ -1,0 +1,209 @@
+{
+  "document_id": 2942,
+  "action": "review",
+  "directive": {
+    "directive_id": "cabin-window-top-and-dawn-sky-20261009",
+    "goal": "По просьбе пользователя убрать случайные верхние обрубки зелени над шалфейными шторами и построить мягкое неоднородное утреннее небо за французским окном, сохранив озеро, лес, раму и комнату.",
+    "style_contract": {
+      "realism_level": "soft painterly cottagecore illustration",
+      "shape_language": "rounded organic edges, no extraneous disconnected green shards",
+      "edge_policy": "architectural window frames crisp, sky/air soft, foliage irregular",
+      "contour_role": "only meaningful branching at the curtain top",
+      "value_policy": "soft luminous warm horizon and gentle cooler morning sky",
+      "color_policy": "warm cream peach to muted blue green morning air above lake",
+      "spatial_treatment": "window landscape atmospheric depth",
+      "material_treatment": "continuous sky field not flat vector polygon",
+      "texture_policy": "low-frequency atmospheric change, no fake sharp clouds",
+      "primitive_footprint_tolerance": "remove geometric leaf shards disconnected from stems",
+      "layer_or_mask_bias": "reversible Photoshop layer masks and separate sky layer",
+      "finish_criteria": "both top corners clean; sky visibly graded without painting over white mullions or curtains"
+    },
+    "prompt_conflict_preflight": {
+      "dominant_objective": "clean curtain tops and luminous varying morning sky",
+      "secondary_traits": [
+        "keep French window mullions",
+        "preserve lake and forest and established foreground"
+      ],
+      "conflicts": [
+        {
+          "requirement_a": "remove stray greenery",
+          "requirement_b": "preserve actual potted/trailing plants",
+          "pipeline_consequence": "mask only disconnected upper shards, preserve curtain and intact pots",
+          "severity": "tension",
+          "requires_user_choice": false
+        }
+      ],
+      "resolution_mode": "declared-interpretation",
+      "chosen_rendering_strategy": "small non-destructive selective mask on top plant owner followed by independently masked Photoshop gradient field in existing sky opening",
+      "resolution_rationale": "The photo preview reveals two disconnected angular green shards at x280-430 and x1150-1270; sky shows hard cream/green boundary rather than atmosphere."
+    },
+    "artistic_evaluation_contract": {
+      "contract_id": "cabin-window-sky-v1",
+      "revision": 1,
+      "positive_criteria": [
+        "curtain tops free of stray green angular shapes",
+        "soft non-uniform natural morning sky",
+        "white frames and distant forest preserved"
+      ],
+      "failure_signals": [
+        "plants suddenly disappear",
+        "window frame overpainted",
+        "sky replaces green shore",
+        "new gradient causes sharp band"
+      ],
+      "protected_qualities": [
+        "sleeping white cat",
+        "bed and sage curtains",
+        "lake and forest"
+      ],
+      "stage_transition_expectations": [
+        "repair stray shapes and sky field before unrelated details"
+      ],
+      "final_evidence_requirements": [
+        "whole-frame before/after and focused window crop",
+        "separate PSD and PNG variant"
+      ],
+      "provenance": [
+        {
+          "source": "latest user instruction",
+          "detail": "Remove extra plant fragments at curtain tops, avoid single-color sky, do so through COS Photoshop MCP."
+        },
+        {
+          "source": "observed active Photoshop preview",
+          "detail": "At both upper corners hard angular green projections; sky consists of solid cream and mint bands."
+        }
+      ]
+    },
+    "composition_freedom": "fixed",
+    "composition_exploration": {},
+    "perceptual_hierarchy": {
+      "revision": 2,
+      "mode": "ranked",
+      "zones": [
+        {
+          "id": "window-air",
+          "owner_ids": [
+            "base-scene-blockin",
+            "window-owner"
+          ],
+          "priority": "primary",
+          "contrast_budget": "medium",
+          "detail_budget": "low",
+          "edge_certainty": "low",
+          "chroma_accent": "restricted"
+        },
+        {
+          "id": "curtain-top",
+          "owner_ids": [
+            "plants-owner",
+            "window-owner"
+          ],
+          "priority": "secondary",
+          "contrast_budget": "low",
+          "detail_budget": "medium",
+          "edge_certainty": "medium",
+          "chroma_accent": "restricted"
+        },
+        {
+          "id": "room-foreground",
+          "owner_ids": [
+            "bed-owner",
+            "cat-owner"
+          ],
+          "priority": "support",
+          "contrast_budget": "medium",
+          "detail_budget": "medium",
+          "edge_certainty": "high",
+          "chroma_accent": "restricted"
+        }
+      ],
+      "ordering": [
+        "window-air",
+        "curtain-top",
+        "room-foreground"
+      ]
+    },
+    "assessment": {
+      "composition": "keep room/window/cat placement",
+      "focal_hierarchy": "central sky and lake first, cat second",
+      "large_value_masses": "flat sky needs continuous field",
+      "lighting": "warm-to-cool soft sunrise gradation missing",
+      "silhouette": "two disconnected large green shards obscure top curtains",
+      "depth": "hard color bands flatten lake air",
+      "likeness_main_shape": "unchanged cat and bed",
+      "overall_detail_level": "no new clutter in sky",
+      "mood": "soft tranquil morning",
+      "color_relationships": "subtle cream, blue-sage, grey/green atmospheric haze",
+      "shape_language": "plant fragments broken, sky too planar",
+      "edge_hierarchy": "window hard; air soft",
+      "intentional_omission": "avoid obvious sharp cloud shapes",
+      "next_priority": "erase stray shards and introduce gradient"
+    },
+    "value_check": {
+      "status": "pending",
+      "observed": false
+    },
+    "refinement_check": {
+      "status": "pending",
+      "observed": false
+    },
+    "physical_stack_check": {
+      "status": "pending",
+      "observed": false
+    },
+    "priorities": [
+      "Remove only stray plant fragments from upper corners",
+      "Make sky a genuinely continuous gentle atmospheric color field",
+      "Check white frames and lake visibility, rollback defects",
+      "Save new revision without overwriting v2"
+    ],
+    "review_after_microplans": 2,
+    "tasks": [
+      {
+        "task_id": "top-curtain-vegetation-cleanup",
+        "summary": "Mask disconnected blocky leaf fragments at both curtain tops and retain coherent side plants",
+        "region": "upper window corners",
+        "allowed_scales": [
+          "medium",
+          "small"
+        ],
+        "perceptual_zone_ids": [
+          "curtain-top"
+        ],
+        "construction_plan": {
+          "representation_strategy": "selective non-destructive mask of only clearly disconnected geometric shards, no broad eraser",
+          "structural_features": [
+            "continuous window trim",
+            "clean ruffled curtain tops"
+          ],
+          "negative_spaces": [
+            "space above curtains"
+          ],
+          "stage_exit_condition": "corners clean while actual side foliage remains"
+        }
+      },
+      {
+        "task_id": "sky-gradation-window",
+        "summary": "Create soft continuous dawn atmosphere through window without changing frames or landscape",
+        "region": "upper sky inside window",
+        "allowed_scales": [
+          "medium"
+        ],
+        "perceptual_zone_ids": [
+          "window-air"
+        ],
+        "construction_plan": {
+          "representation_strategy": "separate masked native Photoshop continuous color gradient with subtle restrained temperature shift",
+          "structural_features": [
+            "subtle high sky hue",
+            "warmer horizon glow"
+          ],
+          "negative_spaces": [
+            "window aperture"
+          ],
+          "stage_exit_condition": "no uniform sky fill and white window mullions intact"
+        }
+      }
+    ]
+  }
+}

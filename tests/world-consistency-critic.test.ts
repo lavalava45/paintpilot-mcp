@@ -11,7 +11,7 @@ import {
 
 interface Fixture {
   name: string;
-  domain: 'people' | 'props' | 'architecture' | 'arbitrary';
+  domain: 'connectedForms' | 'props' | 'architecture' | 'arbitrary';
   intent: WorldConsistencyIntent;
   observations: Array<Record<string, unknown>>;
   flaggedIds: string[];
@@ -20,11 +20,11 @@ interface Fixture {
 
 const fixtures: Fixture[] = [
   {
-    name: 'person connectivity failure',
-    domain: 'people',
+    name: 'connectedForm connectivity failure',
+    domain: 'connectedForms',
     intent: { prompt: 'Naturalistic standing figure.' },
     observations: [
-      { id: 'limb-gap', relation: 'connectivity', subject: 'forearm', counterpart: 'hand', observed: 'The hand silhouette is separated from the forearm by a visible background gap.' },
+      { id: 'limb-gap', relation: 'connectivity', subject: 'segmentA', counterpart: 'segmentB', observed: 'The segmentB silhouette is separated from the segmentA by a visible background gap.' },
     ],
     flaggedIds: ['limb-gap'],
     expectedConflicts: 1,
@@ -32,30 +32,30 @@ const fixtures: Fixture[] = [
   {
     name: 'prop floating above support',
     domain: 'props',
-    intent: { prompt: 'A ceramic cup resting on a wooden table.' },
+    intent: { prompt: 'A ceramic supportedForm resting on a wooden supportPlane.' },
     observations: [
-      { id: 'cup-support', relation: 'support', subject: 'cup', counterpart: 'table', observed: 'A narrow strip of background is visible between the cup base and tabletop.' },
-      { id: 'cup-contact', relation: 'contact', subject: 'cup', counterpart: 'table', observed: 'No contact point is visible where the cup is described as resting.' },
+      { id: 'supportedForm-support', relation: 'support', subject: 'supportedForm', counterpart: 'supportPlane', observed: 'A narrow strip of background is visible between the supportedForm base and tabletop.' },
+      { id: 'supportedForm-contact', relation: 'contact', subject: 'supportedForm', counterpart: 'supportPlane', observed: 'No contact point is visible where the supportedForm is described as resting.' },
     ],
-    flaggedIds: ['cup-support', 'cup-contact'],
+    flaggedIds: ['supportedForm-support', 'supportedForm-contact'],
     expectedConflicts: 2,
   },
   {
     name: 'architecture unsupported overhang',
     domain: 'architecture',
-    intent: { prompt: 'A realistic stone house built at the edge of a cliff.' },
+    intent: { prompt: 'A realistic floatingForm supportedStructure built at the edge of a supportForm.' },
     observations: [
-      { id: 'house-gravity', relation: 'gravity', subject: 'house', counterpart: 'cliff', observed: 'Most of the building mass projects beyond the cliff edge and no support structure is visible.' },
+      { id: 'supportedStructure-gravity', relation: 'gravity', subject: 'supportedStructure', counterpart: 'supportForm', observed: 'Most of the primaryStructure mass projects beyond the supportForm edge and no support structure is visible.' },
     ],
-    flaggedIds: ['house-gravity'],
+    flaggedIds: ['supportedStructure-gravity'],
     expectedConflicts: 1,
   },
   {
     name: 'arbitrary solid intersection',
     domain: 'arbitrary',
-    intent: { prompt: 'Two rigid opaque geometric sculptures standing next to each other.' },
+    intent: { prompt: 'Two rigid opaque geometric rigidForms standing next to each other.' },
     observations: [
-      { id: 'solid-crossing', relation: 'intersection', subject: 'blue sculpture', counterpart: 'red sculpture', observed: 'The two opaque silhouettes cross through the same central volume without a cutout or transparency cue.' },
+      { id: 'solid-crossing', relation: 'intersection', subject: 'blue rigidForm', counterpart: 'red rigidForm', observed: 'The two opaque silhouettes cross through the same central volume without a cutout or transparency cue.' },
     ],
     flaggedIds: ['solid-crossing'],
     expectedConflicts: 1,
@@ -63,9 +63,9 @@ const fixtures: Fixture[] = [
   {
     name: 'normal supported counterexample',
     domain: 'props',
-    intent: { prompt: 'A bowl resting on a shelf.' },
+    intent: { prompt: 'A supportedForm resting on a supportPlane.' },
     observations: [
-      { id: 'bowl-ok', relation: 'support', subject: 'bowl', counterpart: 'shelf', observed: 'The bowl base meets the shelf along a continuous visible contact edge.' },
+      { id: 'supportedForm-ok', relation: 'support', subject: 'supportedForm', counterpart: 'supportPlane', observed: 'The supportedForm base meets the supportPlane along a continuous visible contact edge.' },
     ],
     flaggedIds: [],
     expectedConflicts: 0,
@@ -73,9 +73,9 @@ const fixtures: Fixture[] = [
   {
     name: 'normal occlusion counterexample',
     domain: 'architecture',
-    intent: { prompt: 'A realistic street with one parked car partially behind a pillar.' },
+    intent: { prompt: 'A realistic sceneRegion with one parked secondaryForm partially behind a occluderForm.' },
     observations: [
-      { id: 'occlusion-ok', relation: 'occlusion', subject: 'pillar', counterpart: 'car', observed: 'The pillar continuously occludes the same portion of the car across the overlap.' },
+      { id: 'occlusion-ok', relation: 'occlusion', subject: 'occluderForm', counterpart: 'secondaryForm', observed: 'The occluderForm continuously occludes the same portion of the secondaryForm across the overlap.' },
     ],
     flaggedIds: [],
     expectedConflicts: 0,
@@ -83,11 +83,11 @@ const fixtures: Fixture[] = [
   {
     name: 'explicit anti-gravity counterexample',
     domain: 'arbitrary',
-    intent: { prompt: 'An explicit anti-gravity installation with stones levitating above the floor.', styleIntent: 'surreal anti-gravity' },
+    intent: { prompt: 'An explicit anti-gravity installation with floatingForms levitating above the supportPlane.', styleIntent: 'surreal anti-gravity' },
     observations: [
-      { id: 'levitating-stone', relation: 'support', subject: 'stone', counterpart: 'floor', observed: 'The stone is visibly separated from the floor with no support.' },
+      { id: 'levitating-floatingForm', relation: 'support', subject: 'floatingForm', counterpart: 'supportPlane', observed: 'The floatingForm is visibly separated from the supportPlane with no support.' },
     ],
-    flaggedIds: ['levitating-stone'],
+    flaggedIds: ['levitating-floatingForm'],
     expectedConflicts: 0,
   },
   {
@@ -138,13 +138,13 @@ function criticResponse(fixture: Fixture) {
 }
 
 describe('world consistency critic contract', () => {
-  it('uses one category-agnostic vocabulary for people, props, architecture and arbitrary objects', () => {
+  it('uses one category-agnostic vocabulary for connectedForms, props, architecture and arbitrary objects', () => {
     expect(WORLD_RELATIONS).toEqual([
       'support', 'contact', 'attachment', 'containment', 'connectivity', 'articulation',
       'count_topology', 'gravity', 'occlusion', 'depth_order', 'scale', 'intersection',
     ]);
     const domains = new Set(fixtures.map(fixture => fixture.domain));
-    expect(domains).toEqual(new Set(['people', 'props', 'architecture', 'arbitrary']));
+    expect(domains).toEqual(new Set(['connectedForms', 'props', 'architecture', 'arbitrary']));
   });
 
   it.each(fixtures)('$name', fixture => {
@@ -193,7 +193,7 @@ describe('world consistency critic contract', () => {
 
   it('fails closed on invented relation names and conflict ids', () => {
     expect(() => observeWorldRelations([
-      { id: 'bad', relation: 'hand_anatomy', subject: 'hand', observed: 'Something looks wrong.' },
+      { id: 'bad', relation: 'hand_anatomy', subject: 'segmentB', observed: 'Something looks wrong.' },
     ])).toThrow(/must be one of/);
     const observed = observeWorldRelations([
       { id: 'known', relation: 'support', subject: 'object', observed: 'No support is visible.' },
@@ -205,13 +205,13 @@ describe('world consistency critic contract', () => {
       criticResultId: 'bad-relation',
       evidenceSha256: request.evidence.sha256,
       observations: [
-        { id: 'bad', relation: 'hand_anatomy', subject: 'hand', observed: 'Something looks wrong.', judgment: 'conflict' },
+        { id: 'bad', relation: 'hand_anatomy', subject: 'segmentB', observed: 'Something looks wrong.', judgment: 'conflict' },
       ],
     })).toThrow(/must be one of/);
   });
 
   it('binds the isolated critic result to the exact registered preview SHA', () => {
-    const request = registeredRequest({ prompt: 'A cup rests on a table.' });
+    const request = registeredRequest({ prompt: 'A supportedForm rests on a supportPlane.' });
     expect(() => evaluateRegisteredWorldConsistency(request, {
       protocol: WORLD_CONSISTENCY_CRITIC_PROTOCOL,
       criticResultId: 'stale-frame-result',

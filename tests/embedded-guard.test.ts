@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
@@ -25,6 +25,7 @@ import { createVisualMicroPlanTools } from '../src/tools/visual-microplan-tools.
 import { withToolExecutionContext } from '../src/core/execution-context.js';
 import { UXP_BRIDGE_REVISION } from '../src/core/guard/protocol-version.js';
 import { compactToolForPublishedCatalog } from '../src/core/server-protocol.js';
+import { comparePreviewFiles } from '../src/core/guard/visual-significance.js';
 
 const dirs: string[] = [];
 
@@ -56,10 +57,35 @@ function jpegMeta(dir: string, name: string, value: number) {
   };
 }
 
-function fakeRegistry(dir: string) {
+function jpegMetaSinglePixelDelta(dir: string, name: string, baseValue: number) {
+  const width = 48;
+  const height = 48;
+  const data = Buffer.alloc(width * height * 4);
+  for (let offset = 0; offset < data.length; offset += 4) {
+    data[offset] = baseValue;
+    data[offset + 1] = baseValue;
+    data[offset + 2] = baseValue;
+    data[offset + 3] = 255;
+  }
+  data[0] = baseValue + 10;
+  const bytes = jpeg.encode({ data, width, height }, 100).data;
+  const file = path.join(dir, name);
+  writeFileSync(file, bytes);
+  return {
+    sha256: createHash('sha256').update(bytes).digest('hex'),
+    materialized_path: file,
+    width,
+    height,
+    mime_type: 'image/jpeg',
+  };
+}
+
+function fakeRegistry(dir: string, options: { afterValue?: number; singlePixelDelta?: boolean } = {}) {
   const registry = new ToolRegistry();
   const before = jpegMeta(dir, 'before.jpg', 40);
-  const after = jpegMeta(dir, 'after.jpg', 190);
+  const after = options.singlePixelDelta
+    ? jpegMetaSinglePixelDelta(dir, 'after.jpg', 40)
+    : jpegMeta(dir, 'after.jpg', options.afterValue ?? 190);
   let previews = 0;
 
   registry.register('photoshop_get_preview', {
@@ -166,6 +192,7 @@ function runtimeFor(registry: ToolRegistry, dir: string) {
       transport: 'uxp',
       bridge_transport: 'long-poll',
       bridge_revision: UXP_BRIDGE_REVISION,
+      runtime_instance_witness: 'runtime-snapshot-a',
       expected_bridge_revision: UXP_BRIDGE_REVISION,
       revision_match: true,
       photoshop_version: '27.8',
@@ -900,6 +927,36 @@ describe('embedded Photoshop Guard', () => {
       workspaceRoot: dir,
       uxpCommandReceiptProbe: async () => ({ status: 'receipt', receipt: completedReceipt }),
       uxpQueuedCommandCancel: async () => null,
+      uxpReadinessProbe: async () => ({
+        ready: true,
+        transport: 'uxp',
+        bridge_transport: 'long-poll',
+        bridge_revision: UXP_BRIDGE_REVISION,
+        runtime_instance_witness: 'bootstrap-recovery-runtime',
+        expected_bridge_revision: UXP_BRIDGE_REVISION,
+        revision_match: true,
+        photoshop_version: '27.8',
+        document_count: 1,
+        active_document: { id: 731, name: 'Untitled-1' },
+        plugin_connected: true,
+        reason: null,
+        checked_at: '2026-09-26T00:00:00.000Z',
+        cache: { hit: false, age_ms: 0, ttl_ms: 2000 },
+      }),
+      uxpStateProbe: async () => ({
+        ok: true,
+        data: {
+          document: {
+            id: 731,
+            instanceWitness: {
+              protocol: 'photoshop.uxp.document_instance_witness.v1',
+              session_id: 'bootstrap-recovery-fixture',
+              token: 'bootstrap-recovery-fixture:731',
+            },
+          },
+          activeLayer: { id: 7, name: 'Paint' },
+        },
+      }),
     });
     const record = runtime.store.begin({
       id: 'bootstrap-recover-completed',
@@ -1169,7 +1226,7 @@ describe('embedded Photoshop Guard', () => {
     }
   });
 
-  it('publishes a compact-only public cycle schema with no legacy cycle_start provider', () => {
+  it('publishes one compact public cycle without duplicate or legacy providers', () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'embedded-guard-schema-'));
     dirs.push(dir);
     const { registry } = fakeRegistry(dir);
@@ -1177,17 +1234,21 @@ describe('embedded Photoshop Guard', () => {
     const tools = createGuardTools(runtime);
     const schema = (name: string) => tools.find(definition => definition.tool.name === name)?.tool.inputSchema as any;
 
-    for (const name of ['photoshop_guard_cycle', 'photoshop_guard_cycle_auto']) {
-      expect(Object.keys(schema(name).properties)).toEqual([
+    expect(Object.keys(schema('photoshop_guard_cycle_auto').properties)).toEqual([
         'protocol_version',
         'previous_operation_id',
         'previous_observation',
         'painting_intent',
         'next_pass',
-      ]);
-    }
+    ]);
+    expect(schema('photoshop_guard_cycle')).toBeUndefined();
+    expect(tools).toHaveLength(15);
     expect(tools.some(definition => definition.tool.name === 'photoshop_guard_cycle_start')).toBe(false);
     expect(schema('photoshop_guard_cycle_auto').properties.next_pass.properties).toMatchObject({
+      scene_camera_imaging_model: expect.any(Object),
+      imaging_preflight: expect.any(Object),
+      change_domains: expect.any(Object),
+      distribution_intent: expect.any(Object),
       scene_lighting_color_model: expect.any(Object),
       color_gradient_preflight: expect.any(Object),
       affected_relations: expect.any(Object),
@@ -1200,6 +1261,30 @@ describe('embedded Photoshop Guard', () => {
       strategy_family: expect.any(Object),
       causal_escalation_level: expect.any(Object),
     });
+    expect(
+      schema('photoshop_guard_cycle_auto').properties.next_pass.properties.scene_camera_imaging_model.required
+    ).toEqual(expect.arrayContaining([
+      'model_id', 'revision', 'source_frame', 'geometry_model_id', 'geometry_model_revision',
+      'camera', 'focus', 'motion', 'optical_response', 'capture_finish',
+    ]));
+    expect(
+      schema('photoshop_guard_cycle_auto').properties.next_pass.properties.imaging_preflight.required
+    ).toEqual([
+      'scene_camera_model_id', 'scene_camera_revision', 'effect_kind', 'motivation',
+      'scope', 'owner_expectations', 'revalidate_edge_detail',
+    ]);
+    expect(schema('photoshop_guard_cycle_auto').properties.next_pass.properties.change_domains.items.enum)
+      .toContain('lighting-structure');
+    expect(schema('photoshop_guard_cycle_auto').properties.next_pass.properties.distribution_intent.enum)
+      .toEqual(schema('photoshop_guard_cycle_auto').properties.previous_observation.properties.distribution_intent.enum);
+    expect(schema('photoshop_guard_cycle_auto').properties.painting_intent.properties.deferred_from_operation_id)
+      .toMatchObject({ type: 'string' });
+    expect(schema('photoshop_guard_cycle_auto').properties.next_pass.properties.deferred_from_operation_id)
+      .toBeUndefined();
+    expect(schema('photoshop_guard_lint_next_pass').properties.next_pass.properties.scene_camera_imaging_model)
+      .toEqual(schema('photoshop_guard_cycle_auto').properties.next_pass.properties.scene_camera_imaging_model);
+    expect(schema('photoshop_guard_lint_next_pass').properties.next_pass.properties.imaging_preflight)
+      .toEqual(schema('photoshop_guard_cycle_auto').properties.next_pass.properties.imaging_preflight);
     expect(
       schema('photoshop_guard_cycle_auto').properties.next_pass.properties.scene_lighting_color_model
         .required
@@ -1251,6 +1336,15 @@ describe('embedded Photoshop Guard', () => {
     const artSchema = schema('photoshop_guard_art_director');
     expect(artSchema.properties.directive.properties.composition_freedom.enum).toEqual(['fixed', 'constrained', 'free']);
     expect(artSchema.properties.directive.properties.composition_exploration.properties.mode).toBeUndefined();
+    expect(artSchema.properties.directive.properties.composition_exploration.properties.hypotheses.maxItems).toBeUndefined();
+    expect(artSchema.properties.directive.properties.refinement_check.properties.material_response)
+      .toEqual(artSchema.properties.directive.properties.physical_stack_check.properties.material_response);
+    expect(schema('photoshop_guard_set_priorities').properties.problems.items.properties.depends_on_problem_ids)
+      .toMatchObject({ type: 'array', uniqueItems: true, items: { type: 'string' } });
+    expect(schema('photoshop_guard_cycle_auto').properties.next_pass.properties.edges.items.properties.class.enum)
+      .toEqual(['hard', 'soft', 'lost', 'firm', 'broken']);
+    expect(schema('photoshop_guard_cycle_auto').properties.previous_observation.properties.edge_observations.items.properties.target_met.enum)
+      .toEqual(['yes', 'no', 'uncertain']);
     expect(artSchema.properties.directive.properties.artistic_evaluation_contract).toBeTruthy();
     expect(artSchema.properties.global_brief_assessment).toBeTruthy();
     expect(artSchema.properties.pre_final_hostile_review).toBeTruthy();
@@ -1274,6 +1368,90 @@ describe('embedded Photoshop Guard', () => {
     expect(tools.some(definition => definition.tool.name === 'photoshop_guard_report')).toBe(false);
     expect(tools.some(definition => definition.tool.name === 'photoshop_guard_ack_operation')).toBe(false);
     expect(tools.some(definition => definition.tool.name === 'photoshop_guard_verdict')).toBe(false);
+  });
+
+  it('accepts a refinement PASS with the full material response review through the public Art Director handler', async () => {
+    const runtime = {
+      collectArtDirectorReviewErrors: () => [],
+      artDirector: async () => ({ ok: true }),
+    } as unknown as EmbeddedGuardRuntime;
+    const tool = createGuardTools(runtime).find(definition => definition.tool.name === 'photoshop_guard_art_director')!;
+    const resolvedComponent = (name: string) => ({
+      status: 'resolved',
+      note: `${name} is visibly coherent with the form and material response.`,
+    });
+    const materialResponse = {
+      response_role: 'base-material',
+      components: {
+        base_response: resolvedComponent('base response'),
+        form_light_response: resolvedComponent('form light response'),
+        specular_reflection: resolvedComponent('specular reflection'),
+        transmission: { status: 'not-applicable', note: 'The reviewed material is opaque with no visible transmission.' },
+        surface_condition: { status: 'not-applicable', note: 'No distinct surface-condition treatment is required here.' },
+        variation_scale: resolvedComponent('variation scale'),
+        edge_contact: resolvedComponent('edge contact'),
+      },
+      microtexture: {
+        status: 'deferred',
+        note: 'Microtexture remains subordinate to the established larger material response.',
+      },
+      texture_only_treatment: false,
+    };
+    const refinementCriteria = Object.fromEntries([
+      'major_form_modelling', 'secondary_forms', 'edge_hierarchy', 'material_light_response', 'selective_detail', 'residual_block_in',
+    ].map(key => [key, { status: key === 'selective_detail' ? 'not-applicable' : 'resolved', note: `${key} is resolved in the reviewed frame.` }]));
+    const assessment = Object.fromEntries([
+      'composition', 'focal_hierarchy', 'large_value_masses', 'lighting', 'silhouette', 'depth', 'likeness_main_shape',
+      'overall_detail_level', 'mood', 'color_relationships', 'shape_language', 'edge_hierarchy', 'intentional_omission', 'next_priority',
+    ].map(key => [key, `${key} reviewed`]));
+    const result = await tool.handler({
+      document_id: 42,
+      action: 'review',
+      directive: {
+        directive_id: 'material-review-pass',
+        goal: 'Verify the public refinement PASS contract accepts complete material-response evidence.',
+        style_contract: {},
+        prompt_conflict_preflight: {
+          dominant_objective: 'Preserve coherent form and material response.',
+          conflicts: [],
+          resolution_mode: 'none',
+          chosen_rendering_strategy: 'Review the exact current frame without further mutation.',
+        },
+        artistic_evaluation_contract: {
+          contract_id: 'material-review-contract', revision: 1,
+          positive_criteria: ['Material response remains coherent.'],
+          failure_signals: ['Material response collapses into texture-only treatment.'],
+          stage_transition_expectations: ['Advance only after resolved refinement evidence.'],
+          final_evidence_requirements: ['Use the exact current frame.'],
+          provenance: [{ source: 'test', detail: 'Public schema regression fixture.' }],
+        },
+        composition_freedom: 'fixed',
+        composition_exploration: { hypotheses: [] },
+        assessment,
+        perceptual_hierarchy: {
+          revision: 1, mode: 'ranked',
+          zones: [{ id: 'subject', owner_ids: ['subject-owner'], priority: 'primary', contrast_budget: 'high', detail_budget: 'high', edge_certainty: 'high', chroma_accent: 'allowed' }],
+          ordering: ['subject'],
+        },
+        refinement_check: {
+          status: 'pass', observed: true,
+          preview_sha256: 'a'.repeat(64), evidence_operation_id: 'current-frame',
+          representation_change: 'meaningful',
+          low_frequency_evidence: {
+            status: 'resolved', observed: true, source_preview_sha256: 'a'.repeat(64),
+            evidence_operation_id: 'current-frame-low-frequency',
+            note: 'Major form survives low-frequency suppression of small texture.',
+          },
+          criteria: refinementCriteria,
+          material_response: materialResponse,
+        },
+        priorities: ['material response'],
+        review_after_microplans: 3,
+        tasks: [{ task_id: 'material-review-task', summary: 'Review material response.' }],
+      },
+    });
+    expect(result.isError).not.toBe(true);
+    expect(JSON.parse((result.content[0] as { type: 'text'; text: string }).text)).toMatchObject({ ok: true });
   });
 
   it('publishes compact Guard, runtime-state and UXP revisions without requiring version ceremony', async () => {
@@ -1390,7 +1568,12 @@ describe('embedded Photoshop Guard', () => {
       painting_profile: 'simple_graphic',
     }) as any;
     expect(configured.art_run.process_dir).toBe(projectRel);
-    expect(existsSync(path.join(projectDir, 'frames'))).toBe(true);
+    expect(configured.art_run.export_directory).toBe(path.join(projectDir, 'export'));
+    expect(configured.art_run.frames_directory).toBe(path.join(projectDir, 'export', 'frames'));
+    expect(configured.art_run.videos_directory).toBe(path.join(projectDir, 'export', 'videos'));
+    expect(existsSync(path.join(projectDir, 'export', 'frames'))).toBe(true);
+    expect(existsSync(path.join(projectDir, 'export', 'videos'))).toBe(true);
+    expect(existsSync(path.join(projectDir, 'frames'))).toBe(false);
     expect(existsSync(path.join(projectDir, 'checkpoints'))).toBe(true);
     expect(existsSync(path.join(projectDir, 'final'))).toBe(true);
     expect(existsSync(path.join(projectDir, 'painting-state.json'))).toBe(true);
@@ -1413,11 +1596,13 @@ describe('embedded Photoshop Guard', () => {
       },
     }) as any;
 
-    expect(first.preview.project_path).toMatch(/frames[\\/]frame_0001_art-frame-one\.jpg$/);
-    expect(first.preview.commentary_path).toMatch(/frames[\\/]frame_0001_art-frame-one\.txt$/);
+    expect(first.preview.project_path).toMatch(/export[\\/]frames[\\/]0001_art-frame-one\.jpg$/);
+    expect(first.preview.commentary_path).toMatch(/export[\\/]frames[\\/]0001_art-frame-one\.txt$/);
     expect(existsSync(first.preview.project_path)).toBe(true);
     expect(existsSync(first.preview.commentary_path)).toBe(true);
-    expect(readFileSync(first.preview.commentary_path, 'utf8')).toContain(preComment);
+    expect(readFileSync(first.preview.commentary_path, 'utf8')).toContain(
+      'Сейчас отделяю крупную светлую плоскость, чтобы форма читалась яснее, не разрушая соседний силуэт.'
+    );
 
     await runtime.cycle({
       previous_operation_id: 'art-frame-one',
@@ -1428,16 +1613,141 @@ describe('embedded Photoshop Guard', () => {
     });
 
     const sidecar = readFileSync(first.preview.commentary_path, 'utf8');
-    expect(sidecar).toContain('Перед проходом:');
-    expect(sidecar).toContain(preComment);
-    expect(sidecar).toContain('После прохода:');
-    expect(sidecar).toContain('Executed photoshop_execute_visual_microplan');
+    expect(sidecar).toContain('Сейчас отделяю крупную светлую плоскость');
+    expect(sidecar).toContain('В Photoshop я использую кисть.');
+    expect(sidecar).toContain('Уточнил светлую плоскость формы и сохранил её связь с общим силуэтом.');
+    expect(runtime.store.read('art-frame-one')?.report?.why).toBe(preComment);
+    expect(sidecar).not.toContain('Продвинуть текущую художественную задачу');
+    expect(sidecar).not.toContain('Кадр:');
+    expect(sidecar).not.toContain('Операция:');
+    expect(sidecar).not.toContain('Этап:');
+    expect(sidecar).not.toContain('Область:');
+    expect(sidecar).not.toContain('Перед проходом:');
+    expect(sidecar).not.toContain('После прохода:');
+    expect(sidecar).not.toContain('Что сделал:');
+    expect(sidecar).not.toContain('Зачем:');
+    expect(sidecar).not.toContain('Результат:');
+    expect(sidecar).toContain('Светлая плоскость стала яснее');
+  });
+
+  it('preserves source commentary under Russian scaffolding and excludes read-only recovery previews from export', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'embedded-guard-export-language-'));
+    dirs.push(dir);
+    const { registry } = fakeRegistry(dir);
+    const runtime = runtimeFor(registry, dir);
+    const projectRel = 'processes/export-language-process/run-01';
+    const projectDir = path.join(dir, 'processes', 'export-language-process', 'run-01');
+    runtime.artRun({
+      document_id: 42,
+      process_dir: projectRel,
+      commentary_mode: 'artistic',
+      commentary_detail: 'normal',
+      painting_profile: 'simple_graphic',
+    });
+    runtime.store.setUserConfig({ language: 'ru' }, 42);
+
+    const sidecarPath = path.join(projectDir, 'export', 'frames', '0001-language-test.txt');
+    runtime.store.writeCommentarySidecar({
+      id: 'language-test',
+      args: { document_id: 42 },
+      artistic_commentary: 'Paint the visible architecture with broad warm masses.',
+      region: 'central architecture band',
+      preview: {
+        project_path: path.join(projectDir, 'export', 'frames', '0001-language-test.jpg'),
+        commentary_path: sidecarPath,
+      },
+    });
+    const sidecar = readFileSync(sidecarPath, 'utf8');
+    expect(sidecar).toContain('Paint the visible architecture with broad warm masses.');
+    expect(sidecar).not.toContain('художественный проход');
+
+    const recoveryPreview = jpegMeta(dir, 'recovery-preview.jpg', 90);
+    const archived = runtime.store.archiveProjectPreview({
+      id: 'read-only-recovery',
+      args: { document_id: 42 },
+      visual: false,
+    }, recoveryPreview) as any;
+    expect(archived.project_path).toBeUndefined();
+    expect(readdirSync(path.join(projectDir, 'export', 'frames'))).toEqual(['0001-language-test.txt']);
+  });
+
+  it('writes artistic sidecars as human process narration with observable Photoshop tools and brush settings', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'embedded-guard-artistic-narration-'));
+    dirs.push(dir);
+    const { registry } = fakeRegistry(dir);
+    const runtime = runtimeFor(registry, dir);
+    const projectRel = 'processes/artistic-narration-process/run-01';
+    const projectDir = path.join(dir, 'processes', 'artistic-narration-process', 'run-01');
+    runtime.artRun({
+      document_id: 42,
+      process_dir: projectRel,
+      commentary_mode: 'artistic',
+      commentary_detail: 'detailed',
+      painting_profile: 'simple_graphic',
+    });
+    runtime.store.setUserConfig({ language: 'ru' }, 42);
+
+    const sidecarPath = path.join(projectDir, 'export', 'frames', '0001-watercolor.txt');
+    runtime.store.writeCommentarySidecar({
+      id: 'watercolor-human-text',
+      args: {
+        document_id: 42,
+        steps: [
+          {
+            tool: 'photoshop_set_brush',
+            args: { size: 150, hardness: 18, opacity: 48, flow: 24 },
+          },
+          {
+            tool: 'photoshop_paint_strokes',
+            args: { strokes: [{ tool: 'BRUSH', points: [{ x: 10, y: 10 }, { x: 40, y: 40 }] }] },
+          },
+        ],
+      },
+      artistic_commentary: 'Усилить акварель более насыщенными тёплыми проходами.',
+      report: {
+        did: 'Усилить акварель более насыщенными проходами.',
+        why: 'Сделать композицию выразительнее, сохранив прозрачность и свет бумаги.',
+        result: 'Акварель стала насыщеннее, а светлые промежутки сохранились.',
+      },
+      preview: {
+        project_path: path.join(projectDir, 'export', 'frames', '0001-watercolor.jpg'),
+        commentary_path: sidecarPath,
+      },
+    });
+
+    const sidecar = readFileSync(sidecarPath, 'utf8');
+    expect(sidecar).toContain('Усилить акварель более насыщенными тёплыми проходами.');
+    expect(sidecar).toContain('В Photoshop я использую кисть.');
+    expect(sidecar).toContain('размер 150 px');
+    expect(sidecar).toContain('жёсткость 18%');
+    expect(sidecar).toContain('непрозрачность 48%');
+    expect(sidecar).toContain('поток 24%');
+    expect(sidecar).toContain('Я усилил акварель');
+    expect(sidecar).toContain('Для того чтобы сделать композицию выразительнее');
+    expect(sidecar).toContain('В результате акварель стала насыщеннее');
+    expect(sidecar).not.toMatch(/Кадр:|Операция:|Этап:|Область:|Перед проходом:|После прохода:|Что сделал:|Зачем:|Результат:/);
   });
 
   it('generates and reuses a revision-bound capability snapshot across a healthy visual pass', async () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'embedded-guard-capability-snapshot-reuse-'));
     dirs.push(dir);
     const { registry } = fakeRegistry(dir);
+    let brushInventoryReads = 0;
+    let brushSettingsReads = 0;
+    registry.register('photoshop_list_brush_presets', {
+      tool: { name: 'photoshop_list_brush_presets', description: 'brush inventory counter fixture', inputSchema: { type: 'object', properties: {} } },
+      handler: async () => {
+        brushInventoryReads += 1;
+        return { content: [{ type: 'text', text: JSON.stringify({ ok: true, presets: [] }) }] };
+      },
+    });
+    registry.register('photoshop_get_brush_settings', {
+      tool: { name: 'photoshop_get_brush_settings', description: 'brush settings counter fixture', inputSchema: { type: 'object', properties: {} } },
+      handler: async () => {
+        brushSettingsReads += 1;
+        return { content: [{ type: 'text', text: JSON.stringify({ ok: true, settings: {} }) }] };
+      },
+    });
     registry.register('photoshop_paint_regions', {
       tool: {
         name: 'photoshop_paint_regions',
@@ -1464,6 +1774,7 @@ describe('embedded Photoshop Guard', () => {
       plugin_connected: true,
       reason: null,
       checked_at: '2026-09-22T00:00:00.000Z',
+      runtime_instance_witness: 'runtime-snapshot-a',
       cache: { hit: false, age_ms: 0, ttl_ms: 2000 },
     };
     const runtime = new EmbeddedGuardRuntime(registry, {
@@ -1532,6 +1843,17 @@ describe('embedded Photoshop Guard', () => {
       can_submit_brush_dependent_visual_pass: true,
       next_required_action: 'photoshop_guard_cycle_auto',
     });
+    expect(runtime.store.artRunState(42)?.brush_preflight).toMatchObject({
+      runtime_instance_witness: 'runtime-snapshot-a',
+    });
+    expect({ brushInventoryReads, brushSettingsReads }).toEqual({ brushInventoryReads: 0, brushSettingsReads: 0 });
+    await setArtRunTool.handler({
+      document_id: 42,
+      process_dir: 'processes/capability-snapshot-process/run-01',
+      painting_profile: 'nontrivial_painting',
+      brush_preflight: brushPreflight,
+    });
+    expect({ brushInventoryReads, brushSettingsReads }).toEqual({ brushInventoryReads: 0, brushSettingsReads: 0 });
     const first = configured.capability_snapshot;
     expect(first).toMatchObject({
       protocol: 'photoshop.guard.capability_snapshot.v1',
@@ -1587,21 +1909,30 @@ describe('embedded Photoshop Guard', () => {
       },
     }) as any;
     expect(pass.execution.phase).toBe('completed');
+    expect({ brushInventoryReads, brushSettingsReads }).toEqual({ brushInventoryReads: 0, brushSettingsReads: 0 });
 
     const status = JSON.parse(((await statusTool.handler({})).content[0] as any).text) as any;
     const reused = status.capability_snapshots['42'];
     expect(reused.snapshot_revision).toBe(first.snapshot_revision);
     expect(reused.generated_at).toBe(first.generated_at);
     expect(reused.cache).toMatchObject({ reused: true, dependency_key: first.cache.dependency_key });
-    expect(status.documents['42'].method_usage.available_method_ids).toEqual(
-      reused.supported_semantic_methods.map((row: any) => row.id)
-    );
-    expect(status.documents['42'].method_usage.unused_available_method_ids).toEqual(
-      reused.supported_semantic_methods.map((row: any) => row.id)
-    );
-    expect(status.documents['42'].method_usage.distinct_unused_available_methods).toBe(
-      reused.supported_semantic_methods.length
-    );
+    const fullStatus = await runtime.statusWithCapabilitySnapshots() as any;
+    const fullUsage = fullStatus.documents['42'].method_usage;
+    const available = fullStatus.capability_snapshots['42'].supported_semantic_methods.map((row: any) => row.id);
+    expect(fullUsage.available_method_ids).toEqual(available);
+    expect(fullUsage.unused_available_method_ids).toEqual(available);
+    expect(fullUsage.distinct_unused_available_methods).toBe(available.length);
+    if (status.response_budget?.truncated) {
+      // Public status may omit diagnostic inventories only with an explicit
+      // reference to the full disk-backed projection.
+      expect(status.response_budget.omitted.method_usage).toBeGreaterThanOrEqual(1);
+      expect(status.response_budget.full_projection_path).toBeTruthy();
+      expect(status.documents['42'].method_usage).toBeUndefined();
+      expect(JSON.parse(readFileSync(status.response_budget.full_projection_path, 'utf8'))
+        .documents['42'].method_usage).toEqual(fullUsage);
+    } else {
+      expect(status.documents['42'].method_usage).toEqual(fullUsage);
+    }
   });
 
   it('invalidates the capability snapshot when the UXP bridge revision/readiness dependency changes', async () => {
@@ -1663,6 +1994,110 @@ describe('embedded Photoshop Guard', () => {
     });
     expect(invalidated.supported_semantic_methods).toEqual([]);
     expect(invalidated.unavailable_methods.length).toBeGreaterThan(0);
+  });
+
+  it('captures one request-local projection for compact status instead of rescanning journals inside statusCompact', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'embedded-guard-status-projection-reuse-'));
+    dirs.push(dir);
+    const { registry } = fakeRegistry(dir);
+    const runtime = runtimeFor(registry, dir);
+    const originalCapture = runtime.store.captureProjectionContext.bind(runtime.store);
+    const originalStatusCompact = runtime.store.statusCompact.bind(runtime.store);
+    let captures = 0;
+    let projectionSeen = false;
+    runtime.store.captureProjectionContext = ((options?: any) => {
+      captures += 1;
+      return originalCapture(options);
+    }) as any;
+    runtime.store.statusCompact = ((projection?: any) => {
+      projectionSeen = !!projection;
+      if (!projection) throw new Error('statusCompact must receive the request-local projection');
+      return originalStatusCompact(projection);
+    }) as any;
+
+    await runtime.statusWithCapabilitySnapshots();
+
+    expect(captures).toBe(1);
+    expect(projectionSeen).toBe(true);
+  });
+
+  it('keeps ordinary status journal scans bounded to one even with a large operation history', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'embedded-guard-status-large-history-'));
+    dirs.push(dir);
+    const { registry } = fakeRegistry(dir);
+    const runtime = runtimeFor(registry, dir);
+    for (let index = 0; index < 300; index += 1) {
+      runtime.store.write({
+        id: `large-history-read-${index}`,
+        tool: 'photoshop_get_state',
+        args: { document_id: 42 },
+        summary: 'Large-history read fixture',
+        purpose: 'Prove request-local projection scan bounds',
+        phase: 'completed',
+        failed: false,
+        execution: 'completed',
+        sequence: index + 1,
+        created_at: new Date(1_700_000_000_000 + index).toISOString(),
+        report: { delivered: true },
+      } as any);
+    }
+    const recordsSpy = vi.spyOn(runtime.store, 'records');
+
+    await runtime.statusWithCapabilitySnapshots();
+
+    expect(recordsSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('reuses the cycle projection for missing-document recovery before async selection', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'embedded-guard-cycle-projection-reuse-'));
+    dirs.push(dir);
+    const { registry } = fakeRegistry(dir);
+    const runtime = runtimeFor(registry, dir);
+    for (let index = 0; index < 300; index += 1) {
+      runtime.store.write({
+        id: `cycle-projection-history-${index}`,
+        tool: 'photoshop_get_state',
+        args: { document_id: 42 },
+        summary: 'Large-history cycle projection fixture',
+        purpose: 'Prove compiler/recovery journal scans stay request-bounded',
+        phase: 'completed',
+        failed: false,
+        execution: 'completed',
+        sequence: index + 1,
+        created_at: new Date(1_700_000_000_000 + index).toISOString(),
+        report: { delivered: true },
+      } as any);
+    }
+    const recordsSpy = vi.spyOn(runtime.store, 'records');
+    const originalAutoAbandon = (runtime as any).autoAbandonMissingDocuments.bind(runtime);
+    let projectionSeen = false;
+    (runtime as any).autoAbandonMissingDocuments = async (source: string, projection?: any) => {
+      projectionSeen = !!projection;
+      if (!projection) throw new Error('cycle missing-document recovery must receive the request-local projection');
+      return originalAutoAbandon(source, projection);
+    };
+
+    const rejected = await runtime.cycle({
+      next_pass: {
+        request_key: 'projection-reuse-preflight-rejection',
+        document_id: 42,
+        goal: 'Exercise the ordinary cycle preflight without configuring an art run.',
+        region: 'whole-canvas',
+        stage: 'GLOBAL_BLOCK_IN',
+        scale: 'global',
+        actions: [{
+          id: 'projection-reuse-fill',
+          tool: 'photoshop_fill_layer',
+          args: { color: { red: 20, green: 30, blue: 40 } },
+        }],
+      },
+    }) as any;
+
+    expect(rejected.preflight_rejection).toBeTruthy();
+    expect(projectionSeen).toBe(true);
+    // The compiler's artistic-recovery check consumes the same request-local
+    // projection as missing-document recovery instead of rescanning journals.
+    expect(recordsSpy).toHaveBeenCalledTimes(1);
   });
 
   it('requires art-run configuration before paint entry operations and keeps process_dir immutable', async () => {
@@ -1781,10 +2216,69 @@ describe('embedded Photoshop Guard', () => {
     expect(runtime.store.read('save-two-formats-one-pass')).toBeUndefined();
   });
 
+  it('admits an ordered scale then move as one compact VisualMicroPlan instead of rejecting multiple direct operations', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'embedded-guard-ordered-transform-'));
+    dirs.push(dir);
+    const { registry } = fakeRegistry(dir);
+    const calls: string[] = [];
+    for (const [name, properties] of [
+      ['photoshop_scale_layer', { scalePercent: { type: 'number' }, centerAnchor: { type: 'boolean' } }],
+      ['photoshop_move_layer', { deltaX: { type: 'number' }, deltaY: { type: 'number' } }],
+      ['photoshop_rotate_layer', { degrees: { type: 'number' } }],
+    ] as const) {
+      registry.register(name, {
+        tool: {
+          name,
+          description: 'test transform mutation',
+          inputSchema: {
+            type: 'object',
+            properties: { document_id: { type: 'number' }, ...properties },
+          },
+        },
+        handler: async () => {
+          calls.push(name);
+          return { content: [{ type: 'text', text: JSON.stringify({ ok: true, summary: `${name} applied` }) }] };
+        },
+      });
+    }
+    const runtime = runtimeFor(registry, dir);
+    runtime.artRun({ document_id: 42, process_dir: 'processes/test-scene-process/run-01' });
+
+    const result = await runtime.cycle({
+      next_pass: {
+        request_key: 'ordered-transform-one-pass',
+        problem_id: 'ordered-transform',
+        document_id: 42,
+        goal: 'Scale from top-left, then preserve the required translated placement.',
+        visual_intent: 'move-scale-rotate',
+        impact_class: 'transform',
+        actions: [
+          { id: 'scale', tool: 'photoshop_scale_layer', args: { scalePercent: 50, centerAnchor: false } },
+          { id: 'move', tool: 'photoshop_move_layer', args: { deltaX: 80, deltaY: 30 } },
+          { id: 'preview', tool: 'photoshop_get_preview', args: { max_dimension_px: 800 } },
+        ],
+      },
+    }) as any;
+
+    expect(result.preflight_rejection?.error_codes ?? []).not.toContain('compact_pass_multiple_direct_operations');
+    expect(result.preflight_rejection).toBeUndefined();
+    expect(result.job_id ?? result.execution?.operation_id).toBeTruthy();
+  });
+
   it('automatically persists and verifies due checkpoint debt before the next visual mutation', async () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'embedded-guard-auto-checkpoint-'));
     dirs.push(dir);
     const { registry } = fakeRegistry(dir);
+    let clock = Date.now();
+    vi.spyOn(Date, 'now').mockImplementation(() => clock);
+    const saveDefinition = registry.get('photoshop_save_document')!;
+    const originalSave = saveDefinition.handler;
+    const saveCalls = vi.spyOn(saveDefinition, 'handler').mockImplementation(async args => {
+      const result = await originalSave(args);
+      clock += 30;
+      result.content = [{ type: 'text', text: JSON.stringify({ ok: true, execution_duration_ms: 7 }) }];
+      return result;
+    });
     const runtime = runtimeFor(registry, dir);
     runtime.artRun({ document_id: 42, process_dir: 'processes/auto-checkpoint-process/run-01' });
     for (let sequence = 1; sequence <= 8; sequence++) {
@@ -1818,6 +2312,13 @@ describe('embedded Photoshop Guard', () => {
       verified: true,
     });
     expect(existsSync(receipt.path)).toBe(true);
+    expect(saveCalls).toHaveBeenCalledTimes(1);
+    expect(receipt.timing).toMatchObject({ wall_ms: 30, photoshop_dispatch_wall_ms: 30,
+      photoshop_reported_execution_ms: 7, measurement_boundary: 'before_latency_persistence' });
+    expect(runtime.store.read(receipt.operation_id).latency).toMatchObject({
+      automatic_checkpoint_wall_ms: 30, photoshop_dispatch_wall_ms: 30, photoshop_reported_execution_ms: 7,
+    });
+    expect(runtime.store.latencySummary(42).components.automatic_checkpoint_wall_ms).toMatchObject({ samples: 1, median_ms: 30 });
     expect(runtime.store.read(receipt.operation_id)).toMatchObject({
       phase: 'completed',
       checkpoint: receipt.path,
@@ -1825,6 +2326,37 @@ describe('embedded Photoshop Guard', () => {
       operation_ack: expect.any(Object),
     });
     expect(runtime.store.checkpointState(42, undefined, undefined).due).toBe(false);
+  });
+
+  it('reuses a request-local projection when checking automatic checkpoint debt', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'embedded-guard-checkpoint-projection-'));
+    dirs.push(dir);
+    const { registry } = fakeRegistry(dir);
+    const runtime = runtimeFor(registry, dir);
+    const projection = runtime.store.captureProjectionContext();
+    const recordsSpy = vi.spyOn(runtime.store, 'records');
+
+    const receipt = await (runtime as any).ensureAutomaticCheckpointBeforeVisualMutation({
+      id: 'projection-checkpoint-probe',
+      tool: 'photoshop_set_layer_opacity',
+      args: { document_id: 42, opacity: 50 },
+    }, projection);
+
+    expect(receipt).toBeNull();
+    expect(recordsSpy).not.toHaveBeenCalled();
+    runtime.artRun({ document_id: 42, process_dir: 'processes/prepared-checkpoint-process/run-01' });
+    const snapshots = vi.spyOn(runtime.store, 'captureProjectionContext');
+    const operation = { id: 'prepared-save', tool: 'photoshop_save_document',
+      args: { document_id: 42, path: path.join(dir, 'processes', 'prepared-checkpoint-process', 'run-01', 'checkpoints', 'prepared.psd'), format: 'PSD' },
+      summary: 'Save fixture', purpose: 'Verify prepared checkpoint reference' };
+    const carried = { operation_id: 'already-saved-checkpoint', verified: true };
+    const result = await runtime.cycle({ next_operation: operation }, undefined, { prepared: {
+      operation, guardPreflightMs: 0, cycleReceivedAt: new Date().toISOString(), cycleStartedAt: Date.now(),
+      requestJsonBytes: 1, automaticCheckpoint: carried,
+    } });
+    expect(result.automatic_checkpoint).toEqual(carried);
+    expect(runtime.store.read('prepared-save').latency.automatic_checkpoint_operation_id).toBe(carried.operation_id);
+    expect(snapshots).toHaveBeenCalledTimes(1);
   });
 
   it('fails closed and preserves recovery state when an automatic checkpoint cannot be verified', async () => {
@@ -2173,7 +2705,7 @@ describe('embedded Photoshop Guard', () => {
     });
   });
 
-  it('accepts the compact model path with one root goal, stable request_key, and no copied report or receipt token', async () => {
+  it.each(['technical', 'artistic', 'mixed'] as const)('accepts the compact model path with one root goal in %s mode', async (commentaryMode) => {
     const dir = mkdtempSync(path.join(tmpdir(), 'embedded-guard-model-compact-'));
     dirs.push(dir);
     const { registry, after } = fakeRegistry(dir);
@@ -2195,9 +2727,10 @@ describe('embedded Photoshop Guard', () => {
     runtime.artRun({
       document_id: 42,
       process_dir: 'processes/compact-model-process/run-01',
-      commentary_mode: 'technical',
+      commentary_mode: commentaryMode,
       painting_profile: 'simple_graphic',
     });
+    const reportDelivery = commentaryMode === 'technical' ? 'technical_execution_record' : `${commentaryMode}_presentation_record`;
     const executeSpy = vi.spyOn(registry, 'execute');
 
     const request = {
@@ -2225,6 +2758,14 @@ describe('embedded Photoshop Guard', () => {
     expect(stored.problem_id).toBe('compact-model-pass-1');
     expect((stored as any).request_key).toBeUndefined();
     expect((stored as any).goal).toBeUndefined();
+    const unobservedReport = runtime.store.compactClosureDefaults(stored.id).previous_report!;
+    expect(unobservedReport.result).toContain('visual result is not yet assessed');
+    expect(unobservedReport.result).not.toContain(request.next_pass.goal);
+    expect(unobservedReport.did).not.toContain(request.next_pass.goal);
+    const readSpy = vi.spyOn(runtime.store, 'read').mockReturnValue({ ...stored, phase: 'uncertain' });
+    const uncertainReport = runtime.store.compactClosureDefaults(stored.id).previous_report!;
+    expect(uncertainReport.did).toContain('unconfirmed');
+    readSpy.mockRestore();
 
     const visualCallsAfterFirst = executeSpy.mock.calls.filter(call => call[0] === 'photoshop_execute_visual_microplan').length;
     const replay = await runtime.cycleAuto(request) as any;
@@ -2260,12 +2801,13 @@ describe('embedded Photoshop Guard', () => {
       operation_id: 'compact-model-pass-1',
       operation_acknowledged: true,
       verdict_recorded: true,
-      report_delivery: 'technical_execution_record',
+      report_delivery: reportDelivery,
     });
     const closed = runtime.store.read('compact-model-pass-1')!;
     expect(closed.report).toMatchObject({
-      source: 'guard_execution',
-      delivery: 'technical_execution_record',
+      source: 'guard_compact_closure',
+      delivery: reportDelivery,
+      result: 'The bounded test mark is visible in the delivered frame.',
     });
     expect(closed.operation_ack?.receipt_token).toBe(first.operation_receipt.token);
     expect(closed.verdict?.observations).toEqual([{
@@ -2465,6 +3007,15 @@ describe('embedded Photoshop Guard', () => {
       painting_profile: 'simple_graphic',
     });
 
+    vi.spyOn(runtime.store, 'sceneCameraImagingModel').mockReturnValue({
+      model_id: 'direct-camera', revision: 1, source_frame: { document_id: 42, document_incarnation: 'fixture:42' },
+      geometry_model_id: 'direct-geometry', geometry_model_revision: 1,
+      camera: { framing: 'fixture frame', view_character: 'normal', lens_character: 'normal' },
+      focus: { focal_depth_or_plane: 'road', depth_of_field_behavior: 'deep focus', foreground_softness: 'none', background_softness: 'slight' },
+      motion: { camera_motion: 'locked', subject_motion: 'none', shutter_character: 'still' },
+      optical_response: { base_softness: 'none', bloom: 'none', halation: 'none' },
+      capture_finish: { grain: 'none', vignette: 'none', film_or_sensor_character: 'neutral' }, intentional_exceptions: [],
+    });
     const result = await runtime.cycleAuto({
       next_pass: {
         request_key: 'direct-artistic-gaussian',
@@ -2476,10 +3027,13 @@ describe('embedded Photoshop Guard', () => {
         visual_intent: 'smooth',
         impact_class: 'transition',
         preferred_method_id: 'gaussian-blur',
+        imaging_preflight: { scene_camera_model_id: 'direct-camera', scene_camera_revision: 1,
+          effect_kind: 'global-softness', motivation: 'Bounded optical softness preserving target edges', scope: 'global',
+          revalidate_edge_detail: true, owner_expectations: [{ owner_id: 'road', depth_role: 'near', expected_focus_role: 'sharp' }] },
         actions: [{
           id: 'blur',
           tool: 'photoshop_apply_gaussian_blur',
-          args: { radius: 12, document_id: 42 },
+          args: { radius: 12, layer_id: 7, document_id: 42 },
         }],
       },
     }) as any;
@@ -2490,8 +3044,8 @@ describe('embedded Photoshop Guard', () => {
     expect(runtime.store.read('direct-artistic-gaussian')?.artistic_operation).toBeUndefined();
   });
 
-  it('continues rainy-street block-in after a locally resolved background pass without completing the planner task', async () => {
-    const dir = mkdtempSync(path.join(tmpdir(), 'embedded-guard-rainy-street-'));
+  it('continues a multi-region block-in after a locally resolved background pass without completing the planner task', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'embedded-guard-multi-region-'));
     dirs.push(dir);
     const { registry } = fakeRegistry(dir);
     let visualDispatches = 0;
@@ -2557,19 +3111,19 @@ describe('embedded Photoshop Guard', () => {
     const runtime = runtimeFor(registry, dir);
     runtime.artRun({
       document_id: 42,
-      process_dir: 'processes/rainy-street-process/run-01',
+      process_dir: 'processes/multi-region-process/run-01',
       commentary_mode: 'technical',
       painting_profile: 'simple_graphic',
     });
     runtime.store.updatePaintingState(42, current => ({
       ...current,
       art_director: {
-        directive_id: 'rainy-street-directive',
+        directive_id: 'multi-region-directive',
         status: 'active',
         current_task_id: 'blockin-01',
         tasks: [{
           task_id: 'blockin-01',
-          summary: 'Build a recognizable rainy night street composition.',
+          summary: 'Build a recognizable multi-region composition.',
           status: 'active',
           region: 'whole-canvas',
           allowed_scales: ['medium'],
@@ -2597,7 +3151,7 @@ describe('embedded Photoshop Guard', () => {
 
     const passA = await finishAutoCycle(await runtime.cycleAuto({
       next_pass: {
-        request_key: 'rainy-street-fill-night-01',
+        request_key: 'multi-region-background-01',
         document_id: 42,
         goal: 'Replace the white canvas with a uniform dark-blue night foundation.',
         region: 'whole-canvas',
@@ -2611,7 +3165,7 @@ describe('embedded Photoshop Guard', () => {
       },
     }) as any);
 
-    expect(passA.execution.operation_id).toBe('rainy-street-fill-night-01');
+    expect(passA.execution.operation_id).toBe('multi-region-background-01');
     expect(runtime.store.paintingState().documents['42'].art_director.tasks[0].status).toBe('active');
 
     const regions = Array.from({ length: 14 }, (_, index) => {
@@ -2633,15 +3187,15 @@ describe('embedded Photoshop Guard', () => {
       };
     });
     const passB = await finishAutoCycle(await runtime.cycleAuto({
-      previous_operation_id: 'rainy-street-fill-night-01',
+      previous_operation_id: 'multi-region-background-01',
       previous_observation: {
         observed: 'The white canvas is replaced by a uniform dark-blue night foundation.',
         target: 'resolved',
       },
       next_pass: {
-        request_key: 'rainy-street-masses-01',
+        request_key: 'multi-region-masses-01',
         document_id: 42,
-        goal: 'Establish the recognizable street composition with buildings, road, lamp, bench and reflections.',
+        goal: 'Establish the recognizable composition with primary structures, support region, focal accent, secondary support and reflected-value relation.',
         region: 'whole-canvas',
         stage: 'GLOBAL_BLOCK_IN',
         scale: 'medium',
@@ -2655,29 +3209,29 @@ describe('embedded Photoshop Guard', () => {
 
     expect(passB.closed_previous).toMatchObject({
       closed: true,
-      operation_id: 'rainy-street-fill-night-01',
+      operation_id: 'multi-region-background-01',
       operation_acknowledged: true,
       verdict_recorded: true,
       report_delivery: 'technical_execution_record',
     });
     expect(passB.execution).toMatchObject({
-      operation_id: 'rainy-street-masses-01',
+      operation_id: 'multi-region-masses-01',
       tool: 'photoshop_execute_visual_microplan',
       phase: 'completed',
       failed: false,
     });
     expect(passB.preview).toBeTruthy();
-    expect(runtime.store.read('rainy-street-fill-night-01')?.verdict?.goal_assessment).toMatchObject({
+    expect(runtime.store.read('multi-region-background-01')?.verdict?.goal_assessment).toMatchObject({
       scope: 'operation_goal',
       status: 'confirmed_by_visual_verdict',
     });
-    expect(runtime.store.read('rainy-street-fill-night-01')?.verdict?.planner_task_assessment).toBeUndefined();
+    expect(runtime.store.read('multi-region-background-01')?.verdict?.planner_task_assessment).toBeUndefined();
     expect(runtime.store.paintingState().documents['42'].art_director.tasks[0].status).toBe('active');
     expect(runtime.store.paintingState().documents['42'].art_director.current_task_id).toBe('blockin-01');
     expect(visualDispatches).toBe(2);
     expect(fillDispatches).toBe(1);
     expect(regionDispatches).toBe(1);
-    expect(runtime.store.records().filter(record => record.id.startsWith('rainy-street-'))).toHaveLength(2);
+    expect(runtime.store.records().filter(record => record.id.startsWith('multi-region-'))).toHaveLength(2);
   });
 
   it('keeps close-only workflow active after a locally resolved pass when Art Director work remains unfinished', async () => {
@@ -2735,6 +3289,10 @@ describe('embedded Photoshop Guard', () => {
       reason: 'close_only_artistic_debt_remains',
       operation_id: 'resolved-local-with-unfinished-directive',
     });
+    expect(finalized.next_state).toBe('continue_required');
+    expect(finalized.next_required_action).toBe(
+      'Painter: execute bounded task remaining-task under directive unfinished-directive'
+    );
   });
 
   it('derives a preflighted brush role and inserts preset selection for compact paint passes', async () => {
@@ -2810,7 +3368,7 @@ describe('embedded Photoshop Guard', () => {
         document_id: 42,
         goal: 'Model one medium-scale form without asking the model to name a Photoshop preset',
         region: 'form',
-        stage: 'FORM',
+        stage: 'GLOBAL_BLOCK_IN',
         scale: 'medium',
         material_role: 'generic-form',
         visual_intent: 'directional-mass',
@@ -2887,7 +3445,7 @@ describe('embedded Photoshop Guard', () => {
     registry.register('photoshop_paint_regions', {
       tool: {
         name: 'photoshop_paint_regions',
-        description: 'single visual water-pass fixture',
+        description: 'single visual receiverSurface-pass fixture',
         inputSchema: {
           type: 'object',
           properties: { document_id: { type: 'number' }, regions: { type: 'array' } },
@@ -2897,7 +3455,7 @@ describe('embedded Photoshop Guard', () => {
       },
       handler: async () => {
         visualMutations += 1;
-        return { content: [{ type: 'text', text: JSON.stringify({ ok: true, summary: 'water region painted' }) }] };
+        return { content: [{ type: 'text', text: JSON.stringify({ ok: true, summary: 'receiverSurface region painted' }) }] };
       },
     });
     registry.register('photoshop_list_documents', {
@@ -2943,11 +3501,11 @@ describe('embedded Photoshop Guard', () => {
       inventory_observed: true,
       inventory_total: 8,
       roles: [{
-        role_id: 'water-form',
-        purpose: 'Broad water structure',
-        material_roles: ['water'],
+        role_id: 'receiverSurface-form',
+        purpose: 'Broad receiverSurface structure',
+        material_roles: ['receiverSurface'],
         visual_intents: ['painted-mass'],
-        preferred_preset: 'Compatible Water Brush',
+        preferred_preset: 'Compatible ReceiverSurface Brush',
         alternative_presets: [],
         effective_settings: {
           size: 120, hardness: 100, roundness: 100, opacity: 82, flow: 60, spacing: 10,
@@ -2964,7 +3522,7 @@ describe('embedded Photoshop Guard', () => {
       process_dir: 'processes/13a1b-sequence-process/run-01',
       commentary_mode: 'technical',
       painting_profile: 'nontrivial_painting',
-      profile_transition_reason: 'The water pass now requires the stronger nontrivial painting obligations.',
+      profile_transition_reason: 'The receiverSurface pass now requires the stronger nontrivial painting obligations.',
       brush_preflight: brushPreflight,
     }) as any;
     expect(upgraded.art_run).toMatchObject({
@@ -2979,10 +3537,10 @@ describe('embedded Photoshop Guard', () => {
 
     const painted = await runtime.cycleAuto({
       next_pass: {
-        request_key: '13a1b-water-pass',
+        request_key: '13a1b-receiverSurface-pass',
         document_id: 42,
-        goal: 'Add the one bounded water mutation after recovering the nonvisual setter outcome.',
-        region: 'water',
+        goal: 'Add the one bounded receiverSurface mutation after recovering the nonvisual setter outcome.',
+        region: 'receiverSurface',
         stage: 'SHAPE',
         scale: 'medium',
         scene_geometry_model: {
@@ -2998,15 +3556,15 @@ describe('embedded Photoshop Guard', () => {
           projection: { kind: 'custom', vanishing_points: [] },
         },
         construction_role: 'structured-mass',
-        material_role: 'bounded water structural mass',
+        material_role: 'bounded receiverSurface structural mass',
         visual_intent: 'mass',
         impact_class: 'construct',
         actions: [{
-          id: 'water-region',
+          id: 'receiverSurface-region',
           tool: 'photoshop_paint_regions',
           args: {
             regions: [{
-              id: 'water-band',
+              id: 'receiverSurface-band',
               color: { red: 30, green: 70, blue: 120 },
               contours: [{
                 points: [{ x: 80, y: 300 }, { x: 1120, y: 300 }, { x: 1120, y: 520 }, { x: 80, y: 520 }],
@@ -3016,7 +3574,7 @@ describe('embedded Photoshop Guard', () => {
         }],
       },
     }) as any;
-    expect(painted.execution?.operation_id).toBe('13a1b-water-pass');
+    expect(painted.execution?.operation_id).toBe('13a1b-receiverSurface-pass');
     expect(painted.execution?.phase).toBe('completed');
     expect(painted.execution?.failed, JSON.stringify(painted, null, 2)).toBe(false);
     expect(visualMutations).toBe(1);
@@ -3024,20 +3582,20 @@ describe('embedded Photoshop Guard', () => {
     expect(reconcileSpy).not.toHaveBeenCalled();
 
     const finalized = await runtime.cycleAuto({
-      previous_operation_id: '13a1b-water-pass',
+      previous_operation_id: '13a1b-receiverSurface-pass',
       previous_observation: {
-        observed: 'The bounded water region is visible in the delivered frame.',
+        observed: 'The bounded receiverSurface region is visible in the delivered frame.',
         target: 'resolved',
         observations: [
-          { region: 'whole frame', visible: 'The bounded water region integrates into the delivered frame without a new global regression.' },
-          { region: 'water', visible: 'The bounded water region is visible in the delivered frame.' },
+          { region: 'whole frame', visible: 'The bounded receiverSurface region integrates into the delivered frame without a new global regression.' },
+          { region: 'receiverSurface', visible: 'The bounded receiverSurface region is visible in the delivered frame.' },
         ],
       },
     }) as any;
     expect(finalized.mode).toBe('photoshop-mcp-cycle-finalization');
     expect(finalized.closed_previous).toMatchObject({
       closed: true,
-      operation_id: '13a1b-water-pass',
+      operation_id: '13a1b-receiverSurface-pass',
       operation_acknowledged: true,
       verdict_recorded: true,
     });
@@ -3082,6 +3640,84 @@ describe('embedded Photoshop Guard', () => {
     expect(unchanged.operation_ack).toBeUndefined();
     expect(unchanged.verdict).toBeUndefined();
     expect(runtime.store.visualBarrier(42)?.sha256).toBe(after.sha256);
+  });
+
+  it('returns actionable review delivery recovery on compiler rejection without dispatch or premature closure', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'embedded-guard-review-debt-recovery-'));
+    dirs.push(dir);
+    const { registry, after } = fakeRegistry(dir);
+    const mutation = vi.spyOn(registry.get('photoshop_set_layer_opacity')!, 'handler');
+    const runtime = runtimeFor(registry, dir);
+    const operationId = 'review-debt-prior';
+    const separateEvaluation = vi.spyOn(runtime, 'evaluateArtisticOperation');
+    const oldEvaluationOverride = vi.spyOn(runtime.store, 'applyArtisticEvaluation');
+    await runtime.cycleAuto({ next_pass: compactPassFromOperation({
+      id: operationId,
+      tool: 'photoshop_set_layer_opacity',
+      args: { document_id: 42, opacity: 51 },
+      goal: 'Create a visible fixture for exact review delivery recovery',
+      scale: 'global',
+    }) });
+    runtime.store.recordVisualDeliveryReceipt(operationId, {
+      expected_roles: ['after'], delivered: [], undelivered_roles: ['after'], delivery_complete: false,
+    });
+    // Persisted failures from the retired local reviewer must not override a new pixel observation.
+    runtime.store.write({ ...runtime.store.read(operationId), artistic_evaluation_required: true,
+      artistic_evaluation: { status: 'unavailable', reason: 'old evaluator timeout' } });
+    const guardTools = createGuardTools(runtime);
+    const cycleTool = guardTools.find(def => def.tool.name === 'photoshop_guard_cycle_auto')!;
+    const nextPass = compactPassFromOperation({
+      id: 'review-debt-next',
+      tool: 'photoshop_set_layer_opacity',
+      args: { document_id: 42, opacity: 62 },
+      goal: 'Continue only after the prior exact frame has been delivered and assessed',
+      scale: 'global',
+    });
+    const closure = {
+      previous_operation_id: operationId,
+      previous_observation: compactObservationFromVerdict(critic()),
+    };
+    for (const next_pass of [undefined, nextPass, { ...nextPass, goal: '' }]) {
+      const result = await cycleTool.handler({ ...closure, ...(next_pass ? { next_pass } : {}) });
+      const body = JSON.parse((result.content[0] as any).text);
+      expect(body.delivery_recovery).toMatchObject({
+        action: 'call_photoshop_guard_review_image',
+        review_tool: 'photoshop_guard_review_image',
+        review_operation_id: operationId,
+        review_arguments: { operation_id: operationId },
+        read_only: true, mutation_replayed: false, next_mutation_dispatched: false,
+        bound_whole_sha256: after.sha256, undelivered_roles: ['after'],
+      });
+      expect(body.next_required_action).toContain('photoshop_guard_review_image');
+      expect(body.next_required_action).toContain(operationId);
+      expect(body.finalization_rejection.errors.join('\n')).toMatch(/image delivery debt/);
+      if (next_pass?.goal === '') expect(body.preflight_rejection.errors.join('\n')).toMatch(/goal/);
+      expect(result.content.filter(item => item.type === 'image')).toHaveLength(0);
+      expect(mutation).toHaveBeenCalledTimes(1);
+      const pending = runtime.store.read(operationId)!;
+      expect(pending.report).toBeUndefined();
+      expect(pending.operation_ack).toBeUndefined();
+      expect(pending.verdict).toBeUndefined();
+      expect(runtime.store.read('review-debt-next')).toBeUndefined();
+    }
+    const reviewTool = guardTools.find(def => def.tool.name === 'photoshop_guard_review_image')!;
+    const review = await reviewTool.handler({ operation_id: operationId });
+    expect(review.isError).not.toBe(true);
+    expect(review.content.filter(item => item.type === 'image')).toHaveLength(2);
+    expect(JSON.parse((review.content[0] as any).text).delivery.delivered)
+      .toContainEqual(expect.objectContaining({ role: 'after', sha256: after.sha256 }));
+    expect(runtime.store.visualDeliveryDebt(runtime.store.read(operationId))).toBeNull();
+    expect(runtime.store.read(operationId)?.verdict).toBeUndefined();
+    const continuedResult = await cycleTool.handler({ ...closure, next_pass: nextPass });
+    const continued = JSON.parse((continuedResult.content[0] as any).text);
+    expect(continued.closed_previous.closed).toBe(true);
+    expect(continued.execution).toMatchObject({ operation_id: 'review-debt-next', phase: 'completed', failed: false });
+    expect(mutation).toHaveBeenCalledTimes(2);
+    expect(continued.artistic_review).toMatchObject({ mode: 'same_chat', status: 'awaiting_host_observation' });
+    expect(continuedResult.content.some(item => item.type === 'image')).toBe(true);
+    expect(runtime.store.read(operationId)?.verdict.target_resolved).toBe('yes');
+    expect(separateEvaluation).not.toHaveBeenCalled();
+    expect(oldEvaluationOverride).not.toHaveBeenCalled();
   });
 
   it('fully prevalidates a close-only visual verdict before writing report or acknowledgement', async () => {
@@ -3194,11 +3830,7 @@ describe('embedded Photoshop Guard', () => {
 
     const closed = await runtime.cycleAuto({
       previous_operation_id: 'mid-run-state-read',
-      previous_observation: {
-        observed: 'The pinned document state was read successfully and no pixels were changed.',
-        target: 'resolved',
-        regression: null,
-      },
+
     }) as any;
 
     expect(closed.closed_previous.closed).toBe(true);
@@ -3207,6 +3839,37 @@ describe('embedded Photoshop Guard', () => {
       reason: 'operation_dispatched',
       operation_id: 'prior-paint-pass',
     });
+  });
+
+  it('returns missing compact metadata and all supplied nested action errors in one rejection', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'embedded-guard-envelope-errors-'));
+    dirs.push(dir);
+    const { registry } = fakeRegistry(dir);
+    const runtime = runtimeFor(registry, dir);
+    const result = await runtime.cycleAuto({ next_pass: {
+      document_id: 42,
+      actions: [
+        { id: 'bad-opacity', tool: 'photoshop_set_layer_opacity', args: { opacity: 'wrong' } },
+        { id: 'bad-dabs', tool: 'photoshop_paint_dabs', args: { dabs: 'wrong' } },
+      ],
+    } }) as any;
+    const errors = result.preflight_rejection.violations.map((row: any) => row.message).join('\n');
+    expect(errors).toMatch(/request_key/);
+    expect(errors).toMatch(/goal/);
+    expect(errors).toMatch(/opacity.*number/);
+    expect(errors).toMatch(/dabs.*array/);
+    const intentResult = await runtime.cycleAuto({ painting_intent: {
+      request_key: '', problem_id: 'shape', document_id: 42, goal: '', action: 'wrong',
+      visual_intent: 'wrong', scale: 'wrong', actions: [
+        { id: 'bad-opacity', tool: 'photoshop_set_layer_opacity', args: { opacity: 'wrong' } },
+        { id: 'bad-dabs', tool: 'photoshop_paint_dabs', args: { dabs: 'wrong' } },
+      ],
+    } }) as any;
+    const intentErrors = intentResult.preflight_rejection.errors.join('\n');
+    for (const field of ['request_key', 'goal', 'action', 'visual_intent', 'scale', 'opacity', 'dabs']) {
+      expect(intentErrors).toContain(field);
+    }
+    expect(runtime.store.records()).toEqual([]);
   });
 
   it('rolls back the whole close-only transaction when latency finalization fails after closure writes', async () => {
@@ -3589,14 +4252,14 @@ describe('embedded Photoshop Guard', () => {
     expect(runtime.store.read('deadline-before-dispatch')?.dispatched).not.toBe(true);
   });
 
-  it('keeps compact preview targeting and artistic commentary Guard-owned', async () => {
+  it('keeps compact preview targeting Guard-owned while accepting exact pre-pass artistic commentary', async () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'embedded-guard-preview-retarget-'));
     dirs.push(dir);
     const { registry } = fakeRegistry(dir);
     const runtime = runtimeFor(registry, dir);
     runtime.artRun({
       document_id: 42,
-      process_dir: 'processes/smoke-test-process/run-01',
+      process_dir: 'processes/soft-volume-test-process/run-01',
       commentary_mode: 'mixed',
       painting_profile: 'simple_graphic',
     });
@@ -3605,7 +4268,8 @@ describe('embedded Photoshop Guard', () => {
       .find(def => def.tool.name === 'photoshop_guard_cycle_auto')!
       .tool.inputSchema as any;
     expect(schema.properties.next_pass.properties.preview_args).toBeUndefined();
-    expect(schema.properties.next_pass.properties.artistic_commentary).toBeUndefined();
+    expect(schema.properties.next_pass.properties.artistic_commentary).toMatchObject({ type: 'string' });
+    expect(schema.properties.next_pass.required ?? []).not.toContain('artistic_commentary');
 
     const corrected = await runtime.cycle({
       next_pass: compactPassFromOperation({
@@ -3716,11 +4380,18 @@ describe('embedded Photoshop Guard', () => {
     }) as any;
 
     const errors = rejected.preflight_rejection.errors.join('\n');
-    expect(errors).toMatch(/visual_intent and impact_class must be supplied together/);
+    expect(errors).toMatch(/Supplied method hints or exclusions conflict with executable tools/);
     expect(errors).toMatch(/args\.opacity is required/);
     expect(rejected.execution.execution).toBe('not-executed');
     expect(runtime.store.read('schema-aggregate-reject')).toBeUndefined();
     expect(runtime.store.visualBarrier(42)).toBeUndefined();
+    await runtime.cycleAuto({ next_pass: {
+      request_key: 'schema-defaults-pass', document_id: 42, goal: 'Adjust opacity without duplicated stage or scale',
+      actions: [{ tool: 'photoshop_set_layer_opacity', args: { opacity: 80 } }],
+    } });
+    expect(runtime.store.read('schema-defaults-pass')).toMatchObject({
+      phase: 'completed', stage: 'GLOBAL_BLOCK_IN', scale: 'global',
+    });
   });
 
   it('rejects attached preview provenance from a different document', async () => {
@@ -3821,6 +4492,37 @@ describe('embedded Photoshop Guard', () => {
     expect(tool.inputSchema.properties.next_pass.description).toBe(
       'Primary public meaning. Additional detail kept internally.'
     );
+    const dir = mkdtempSync(path.join(tmpdir(), 'embedded-guard-description-contract-'));
+    dirs.push(dir);
+    const { registry } = fakeRegistry(dir);
+    const tools = createGuardTools(runtimeFor(registry, dir));
+    const cycleOriginal = tools.find(def => def.tool.name === 'photoshop_guard_cycle_auto')!.tool;
+    const cycleCompact = compactToolForPublishedCatalog(cycleOriginal);
+    const next = (cycleCompact.inputSchema as any).properties.next_pass.properties;
+    expect(next.restore_anchor_operation_id.description).toContain('instead of actions');
+    expect(next.replace_protected_layer_ids.description).toContain('action_class=REPLACE or ERASE');
+    expect(next.stage.description).toContain('stage_reset');
+    expect(next.scene_geometry_model.description).toContain('keep model_id and increase revision');
+    expect(next.scale.description).toContain('small/local plus region_bounds');
+    const withoutDescriptions = (value: any): any => Array.isArray(value)
+      ? value.map(withoutDescriptions)
+      : value && typeof value === 'object'
+        ? Object.fromEntries(Object.entries(value).filter(([key]) => key !== 'description')
+          .map(([key, nested]) => [key, withoutDescriptions(nested)]))
+        : value;
+    expect(withoutDescriptions(cycleCompact.inputSchema)).toEqual(withoutDescriptions(cycleOriginal.inputSchema));
+
+    for (const name of ['photoshop_guard_status', 'photoshop_guard_lint_next_pass']) {
+      const original = tools.find(def => def.tool.name === name)!.tool;
+      const compact = compactToolForPublishedCatalog(original);
+      expect((compact.inputSchema as any).properties.next_pass).toEqual({
+        type: 'object',
+        description: 'Use the exact next_pass schema published by photoshop_guard_cycle_auto; validation returns all field corrections without mutation.',
+      });
+    }
+    const autoDescription = tools.find(def => def.tool.name === 'photoshop_guard_cycle_auto')!.tool.description;
+    expect(autoDescription).toContain('photoshop_guard_review_image');
+    expect(autoDescription).toContain('photoshop_guard_job_poll');
   });
 
   it('rejects generative-class next operations before any Guard dispatch or journaling', async () => {
@@ -4025,6 +4727,55 @@ describe('embedded Photoshop Guard', () => {
     }
     expect(polled.state).toBe('completed');
     expect((polled.result as any)?.execution?.operation_id).toBe('job-read-one');
+  });
+
+  it.each([0, 300])('keeps async reservation, execution, and polling to one full journal scan with %i historical records', async (historySize) => {
+    const dir = mkdtempSync(path.join(tmpdir(), `embedded-guard-job-history-${historySize}-`));
+    dirs.push(dir);
+    const { registry } = fakeRegistry(dir);
+    const runtime = runtimeFor(registry, dir);
+
+    for (let index = 0; index < historySize; index += 1) {
+      runtime.store.write({
+        id: `async-history-${index}`,
+        tool: 'photoshop_get_state',
+        args: { document_id: 42 },
+        summary: 'Historical async scan fixture',
+        purpose: 'Prove async helper scans stay bounded as journal history grows',
+        hash: `async-history-hash-${index}`,
+        sequence: index + 1,
+        created_at: new Date().toISOString(),
+        completed_at: new Date().toISOString(),
+        phase: 'completed',
+        execution: 'completed',
+        visual: false,
+        failed: false,
+        report: { delivered: true },
+      });
+    }
+
+    const recordsSpy = vi.spyOn(runtime.store, 'records');
+    const operationId = `job-history-${historySize}-read`;
+    const started = runtime.startJob({
+      next_operation: {
+        id: operationId,
+        tool: 'photoshop_get_state',
+        args: { document_id: 42 },
+        summary: 'Read current state through the durable async worker',
+        purpose: 'Prove reservation, worker execution, and polling do not multiply full journal scans',
+      },
+    });
+    const jobId = String(started.job_id);
+    let polled: Record<string, unknown> = {};
+    for (let i = 0; i < 100; i++) {
+      polled = runtime.pollJob(jobId);
+      if (polled.state === 'completed' || polled.state === 'failed' || polled.state === 'uncertain') break;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    expect(polled.state, JSON.stringify(polled, null, 2)).toBe('completed');
+    expect((polled.result as any)?.execution?.operation_id).toBe(operationId);
+    expect(recordsSpy).toHaveBeenCalledTimes(1);
   });
 
   it('atomically reserves the async-job slot before checking/creating jobs', () => {
@@ -4330,6 +5081,29 @@ describe('embedded Photoshop Guard', () => {
     expect(redirected.pending_visual_verdict?.operation_id).toBe('stale-handoff-source');
     expect(redirected.next_required_action).toMatch(/previous_operation_id \+ previous_observation/);
     expect(runtime.store.read('stale-handoff-next')).toBeUndefined();
+    // A redirect still consumes a model-visible call, but the old visual
+    // operation must not inherit the new request's run attribution.
+    const [redirectEvent] = runtime.store.artisticThroughputMetrics(42).recent_events;
+    expect(redirectEvent).toMatchObject({ kind: 'rejected', model_visible: true, semantic_actions: 0 });
+    expect(redirectEvent).not.toHaveProperty('operation_id');
+    expect(runtime.store.artisticThroughputMetrics(42).rejected_before_dispatch_round_trips).toBe(1);
+    const failedTelemetry = vi.spyOn(runtime.store, 'recordArtisticThroughputEvent')
+      .mockImplementationOnce(() => { throw new Error('telemetry disk unavailable'); });
+    const stillRedirected = await runtime.cycleAuto({
+      next_pass: compactPassFromOperation({
+        id: 'stale-handoff-telemetry-failure',
+        tool: 'photoshop_set_layer_opacity',
+        args: { document_id: 42, opacity: 72 },
+        summary: 'Retry stale handoff with diagnostic storage unavailable',
+        purpose: 'A telemetry failure must not bypass pending visual closure',
+        problem_id: 'stale-handoff',
+        scale: 'global',
+      }),
+    }) as any;
+    expect(failedTelemetry).toHaveBeenCalledOnce();
+    expect(stillRedirected.mode).toBe('photoshop-guard-continuation-required');
+    expect(stillRedirected.next_mutation_dispatched).toBe(false);
+    expect(runtime.store.read('stale-handoff-telemetry-failure')).toBeUndefined();
   });
 
   it('keeps successful pixel execution separate from goal confirmation when an accepted pass is unresolved', async () => {
@@ -4416,7 +5190,7 @@ describe('embedded Photoshop Guard', () => {
       status: 'unresolved',
       primary_mismatch: 'The requested visual goal is still not established by the observed frame.',
     });
-    expect(resumed.resume_summary.text).toContain('Нерешённое визуальное основание');
+    expect(resumed.resume_summary.text).toContain('Unresolved visual basis');
     expect(resumed.next_required_action).not.toBe('ready');
   });
 
@@ -4452,6 +5226,123 @@ describe('embedded Photoshop Guard', () => {
     expect(runtime.store.read('whole-frame-review-source')?.verdict).toBeUndefined();
   });
 
+  it('closes a decoded-identical false improvement without a repair turn or task completion', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'embedded-guard-rendering-noop-'));
+    dirs.push(dir);
+    const { registry } = fakeRegistry(dir, { afterValue: 40 });
+    const runtime = runtimeFor(registry, dir);
+    runtime.artRun({ document_id: 42, process_dir: 'processes/rendering-noop-process/run-01',
+      painting_profile: 'simple_graphic', commentary_mode: 'mixed' });
+    const first = await runtime.cycle({ next_pass: compactPassFromOperation({
+      id: 'form-noop', tool: 'photoshop_set_layer_opacity', args: { document_id: 42, opacity: 100 },
+      summary: 'Develop vehicle form', purpose: 'Model volume rather than claim polish',
+      problem_id: 'vehicle-volume', scale: 'medium',
+    }) }) as any;
+    expect(first.significance.global.decoded_pixels_equal).toBe(true);
+    const closed = await runtime.cycleAuto({ previous_operation_id: 'form-noop', previous_observation: {
+      observed: 'The vehicle has become fully modelled; only surface texture remains.', target: 'resolved',
+      planner_task_assessment: { status: 'completed', evidence_scope: 'task', evidence: ['Vehicle body is complete.'] },
+    } }) as any;
+    expect(closed.finalization_rejection).toBeUndefined();
+    expect(closed.preflight_rejection).toBeUndefined();
+    expect(closed.closed_previous).toMatchObject({ closed: true, verdict_recorded: true,
+      execution_claim_correction: { code: 'unchanged_rendered_frame', target_resolved: 'no', planner_task_status: 'continue' },
+    });
+    const verdict = runtime.store.read('form-noop')?.verdict;
+    expect(verdict).toMatchObject({
+      verdict: 'neutral', disposition: 'accept', target_resolved: 'no',
+      goal_assessment: { status: 'unresolved' }, planner_task_assessment: { status: 'continue' },
+      artistic_value: { accepted_improvement: false, execution_changed: false },
+      execution_claim_correction: { original_claim: { target_resolved: 'yes', observed_change: expect.stringContaining('fully modelled') } },
+    });
+    expect(verdict.observed_change).not.toContain('only surface texture remains');
+    const record = runtime.store.read('form-noop')!;
+    expect(record.report.result).toBe(verdict.observed_change);
+    expect(readFileSync(record.preview.commentary_path, 'utf8')).not.toContain('only surface texture remains');
+    expect(runtime.store.paintingState().documents['42'].active_problem?.status).not.toBe('resolved');
+  });
+
+  it.each([false, true])('preserves real changed-frame assessments, including intentional flat/simple work (small=%s)', async small => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'embedded-guard-real-rendering-change-'));
+    dirs.push(dir);
+    const { registry } = fakeRegistry(dir, { singlePixelDelta: small });
+    const runtime = runtimeFor(registry, dir);
+    await runtime.cycle({ next_pass: compactPassFromOperation({
+      id: 'actual-change', tool: 'photoshop_set_layer_opacity', args: { document_id: 42, opacity: 75 },
+      summary: 'Change the requested flat tonal area', purpose: 'Preserve the explicitly simple finish', scale: 'medium',
+    }) });
+    const closed = await runtime.cycleAuto({ previous_operation_id: 'actual-change', previous_observation: {
+      observed: 'The requested flat tonal adjustment is visible.', target: 'resolved',
+    } }) as any;
+    expect(closed.finalization_rejection).toBeUndefined();
+    expect(runtime.store.read('actual-change')?.verdict).toMatchObject({
+      verdict: 'improvement', target_resolved: 'yes', artistic_value: { execution_changed: true },
+    });
+    expect(closed.closed_previous.execution_claim_correction).toBeUndefined();
+  });
+
+  it('uses decoded equality rather than JPEG bytes or sparse zero-delta samples', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'embedded-guard-full-pixel-identity-'));
+    dirs.push(dir);
+    const before = jpegMeta(dir, 'before.jpg', 40);
+    const bytes = readFileSync(before.materialized_path);
+    const tagged = path.join(dir, 'tagged.jpg');
+    writeFileSync(tagged, Buffer.concat([bytes.subarray(0, 2), Buffer.from([0xff, 0xfe, 0, 4, 65, 66]), bytes.subarray(2)]));
+    expect(comparePreviewFiles(before.materialized_path, tagged)?.decoded_pixels_equal).toBe(true);
+    const width = 48, height = 48;
+    const data = Buffer.alloc(width * height * 4);
+    for (let offset = 0; offset < data.length; offset += 4) data.set([40, 40, 40, 255], offset);
+    data[(40 * width + 40) * 4] = 240;
+    const changed = path.join(dir, 'unsampled-change.jpg');
+    writeFileSync(changed, jpeg.encode({ data, width, height }, 100).data);
+    expect(comparePreviewFiles(before.materialized_path, changed, 1)).toMatchObject({
+      mean_abs_rgb_delta: 0, decoded_pixels_equal: false,
+    });
+  });
+
+  it('requires whole-frame review for an accepted low-delta structural change', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'embedded-guard-low-delta-structural-review-'));
+    dirs.push(dir);
+    const { registry } = fakeRegistry(dir, { singlePixelDelta: true });
+    const runtime = runtimeFor(registry, dir);
+
+    const first = await runtime.cycle({
+      next_pass: compactPassFromOperation({
+        id: 'low-delta-structural-source',
+        tool: 'photoshop_set_layer_opacity',
+        args: { document_id: 42, opacity: 99 },
+        summary: 'Create a deliberately sub-threshold structural pixel change',
+        purpose: 'Verify structural review authority does not depend on the meaningful threshold',
+        problem_id: 'figure-contact',
+        scale: 'global',
+      }),
+    }) as any;
+    expect(first.significance.execution_effect).toBe('insufficient');
+    const structuralRecord = runtime.store.read('low-delta-structural-source')!;
+    structuralRecord.affected_relations = ['figure support/contact'];
+    runtime.store.write(structuralRecord);
+
+    const rejected = await runtime.cycleAuto({
+      previous_operation_id: 'low-delta-structural-source',
+      previous_observation: compactObservationFromVerdict({
+        verdict: 'neutral',
+        disposition: 'accept',
+        observations: [{ region: 'contact crop', visible: 'The contact edge changed slightly as intended.' }],
+        primary_mismatch: 'The structural relation is acceptable locally but has not been checked in the whole frame.',
+        observed_change: 'The support contact changed by a small but visible pixel delta.',
+        target_resolved: 'no',
+        regressions: [],
+        uncertainty: 'Whole-frame structural effect has not yet been inspected.',
+        global_readability: 'unknown',
+        primitive_footprint: 'none',
+        trend_signals: [],
+      }),
+    }) as any;
+    expect(rejected.finalization_rejection?.errors.join('\n') ?? rejected.preflight_rejection?.errors.join('\n'))
+      .toMatch(/whole_frame_review_required/);
+    expect(runtime.store.read('low-delta-structural-source')?.verdict).toBeUndefined();
+  });
+
   it('promotes a must-fix perspective review into structural debt and blocks cosmetic continuation immediately', async () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'embedded-guard-structural-review-debt-'));
     dirs.push(dir);
@@ -4478,9 +5369,9 @@ describe('embedded Photoshop Guard', () => {
     await runtime.cycleAuto({
       previous_operation_id: 'perspective-structural-source',
       previous_observation: {
-        observed: 'The whole frame changed, but the facade perspective still visibly diverges from the street projection.',
+        observed: 'The whole frame changed, but the facade perspective still visibly diverges from the sceneRegion projection.',
         target: 'unresolved',
-        observations: [{ region: 'whole frame', visible: 'Facade floor/window lines do not converge consistently with the street.' }],
+        observations: [{ region: 'whole frame', visible: 'Facade supportPlane/openingForm lines do not converge consistently with the sceneRegion.' }],
         primary_mismatch: 'Perspective geometry remains structurally inconsistent across the facades.',
         review_findings: [{
           kind: 'perspective_geometry',
@@ -4640,7 +5531,7 @@ describe('embedded Photoshop Guard', () => {
     expect(first.preview.sha256).toBe(after.sha256);
   });
 
-  it('keeps Guard-cycle visual review reference-only and explicitly delivers exact after/crop/before bytes without a preview recapture', async () => {
+  it('inlines a fitting Guard-cycle visual review and preserves explicit exact redelivery without a preview recapture', async () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'embedded-guard-review-package-'));
     dirs.push(dir);
     const { registry } = fakeRegistry(dir);
@@ -4722,7 +5613,7 @@ describe('embedded Photoshop Guard', () => {
 
     expect(previewCalls).toBe(2);
     expect(mutationCalls).toBe(1);
-    expect(publicResult.content.filter((item: any) => item.type === 'image')).toHaveLength(0);
+    expect(publicResult.content.filter((item: any) => item.type === 'image')).toHaveLength(4);
     const body = JSON.parse((publicResult.content[0] as any).text);
     expect(body.visual_review).toMatchObject({
       operation_id: 'review-package-operation',
@@ -4753,10 +5644,9 @@ describe('embedded Photoshop Guard', () => {
         document_id: 42,
       },
       delivery: {
-        transport: 'materialized_reference',
-        delivered: [],
-        delivery_complete: false,
-        references: [
+        transport: 'mcp_image_content_explicit_review',
+        delivery_complete: true,
+        delivered: [
           expect.objectContaining({ role: 'after', sha256: after.sha256 }),
           expect.objectContaining({ role: 'after_crop', sha256: afterFocus.sha256 }),
           expect.objectContaining({ role: 'before_crop', sha256: beforeFocus.sha256 }),
@@ -4765,7 +5655,11 @@ describe('embedded Photoshop Guard', () => {
       },
     });
     const reviewTool = createGuardTools(runtime).find(def => def.tool.name === 'photoshop_guard_review_image')!;
+    const projectionSpy = vi.spyOn(runtime.store, 'captureProjectionContext');
+    const paintingStateSpy = vi.spyOn(runtime.store, 'paintingState');
     const reviewResult = await reviewTool.handler({ operation_id: 'review-package-operation' });
+    expect(projectionSpy).toHaveBeenCalledTimes(1);
+    expect(paintingStateSpy).toHaveBeenCalledTimes(1);
     expect(reviewResult.content.filter((item: any) => item.type === 'image')).toHaveLength(4);
     const reviewBody = JSON.parse((reviewResult.content[0] as any).text);
     expect(reviewBody.delivery).toMatchObject({
@@ -4812,13 +5706,13 @@ describe('embedded Photoshop Guard', () => {
 
     expect(previewCalls).toBe(3); // first pass: before+after; normal continuation: after only
     expect(mutationCalls).toBe(2);
-    expect(secondPublicResult.content.filter((item: any) => item.type === 'image')).toHaveLength(0);
+    expect(secondPublicResult.content.filter((item: any) => item.type === 'image')).toHaveLength(2);
     const secondBody = JSON.parse((secondPublicResult.content[0] as any).text);
     expect(secondBody.visual_review.before.source_operation_id).toBe('review-package-operation');
     expect(secondBody.visual_review.after.source_operation_id).toBe('review-package-operation-2');
     expect(secondBody.visual_review.delivery_policy.before_delivery).toBe('metadata_only_prior_frame_already_available');
-    expect(secondBody.visual_review.delivery.references.map((item: any) => item.role)).toEqual(['after', 'after_crop']);
-    expect(secondBody.visual_review.delivery.delivered).toEqual([]);
+    expect(secondBody.visual_review.delivery.delivered.map((item: any) => item.role)).toEqual(['after', 'after_crop']);
+    expect(secondBody.visual_review.delivery.delivery_complete).toBe(true);
   });
 
   it('escalates a structured local finding with read-only crop evidence for the same operation before allowing the next mutation', async () => {
@@ -4963,11 +5857,10 @@ describe('embedded Photoshop Guard', () => {
     expect(escalatedBody.visual_review.delivery.delivered).toEqual(expect.arrayContaining([
       expect.objectContaining({ role: 'after', sha256: after.sha256, image_delivered_for_review: true }),
     ]));
-    expect(escalatedBody.visual_review.delivery.references).toEqual(expect.arrayContaining([
-      expect.objectContaining({ role: 'after', sha256: after.sha256 }),
-      expect.objectContaining({ role: 'micro_after_1', sha256: micro.sha256 }),
+    expect(escalatedBody.visual_review.delivery.delivered).toEqual(expect.arrayContaining([
+      expect.objectContaining({ role: 'micro_after_1', sha256: micro.sha256, image_delivered_for_review: true }),
     ]));
-    expect(escalatedBody.visual_review.delivery.undelivered_roles).toContain('micro_after_1');
+    expect(escalatedBody.visual_review.delivery.undelivered_roles).not.toContain('micro_after_1');
     expect(runtime.store.read('multiscale-source-operation')?.verdict).toBeUndefined();
 
     const microReview = await reviewTool.handler({
@@ -5150,7 +6043,7 @@ describe('embedded Photoshop Guard', () => {
     expect(microBody.review_escalation).toMatchObject({
       operation_id: 'uncertainty-source-operation',
       mutation_replayed: false,
-      captured_roles: ['micro_after_1'],
+      captured_roles: ['micro_after_2'],
     });
     expect(microBody.visual_review.review_state).toMatchObject({
       trigger: 'runtime_uncertainty',

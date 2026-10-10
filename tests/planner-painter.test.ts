@@ -24,6 +24,28 @@ function storeAt(dir: string) {
   });
 }
 
+it.each([
+  { disposition: 'correct', verdict: 'neutral', completed: false },
+  { disposition: 'rollback', verdict: 'regression', completed: false },
+  { disposition: 'accept', verdict: 'neutral', completed: true },
+])('keeps Planner completion on retained pixels: $disposition/$verdict', ({ disposition, verdict, completed }) => {
+  const s = store();
+  const state = s.advanceArtDirectorAfterVerdict({
+    art_director: {
+      directive_id: 'retained-task', status: 'active', current_task_id: 'form', review_after_microplans: 8,
+      tasks: [{ task_id: 'form', status: 'active' }, { task_id: 'material', status: 'pending' }],
+    },
+  }, {
+    planner_directive_id: 'retained-task', planner_task_id: 'form', stage: 'FORM',
+  }, {
+    disposition, verdict, target_resolved: 'yes', regressions: [],
+    planner_task_assessment: { status: 'completed', evidence_scope: 'task', evidence: ['The form task appears complete.'] },
+  }, { id: 'form-attempt', verdict: {} });
+  expect(state.art_director.tasks[0].status).toBe(completed ? 'completed' : disposition === 'rollback' ? 'failed' : 'active');
+  expect(state.art_director.current_task_id).toBe(completed ? 'material' : 'form');
+  expect(state.art_director.tasks[1].status).toBe(completed ? 'active' : 'pending');
+});
+
 function seedClassifiedFrame(
   s: SessionStore,
   id: string,
@@ -76,20 +98,20 @@ function seedClassifiedFrame(
 
 function assessment() {
   return {
-    composition: 'Stable centered portrait with enough breathing room.',
-    focal_hierarchy: 'Face is primary, hands secondary, background tertiary.',
-    large_value_masses: 'Face/light mass needs separation from dark coat and sea.',
+    composition: 'Stable centered focalStudy with enough breathing room.',
+    focal_hierarchy: 'FocalForm is primary, segmentsB secondary, background tertiary.',
+    large_value_masses: 'FocalForm/light mass needs separation from dark coat and backgroundField.',
     lighting: 'Warm key from upper left; shadow side should stay coherent.',
-    silhouette: 'Head and shoulder silhouette is readable against the sea.',
-    depth: 'Face forward, hands middle, boat and sea back.',
-    likeness_main_shape: 'Main head proportions are stable and must not drift.',
-    overall_detail_level: 'Medium development; avoid premature beard detail.',
+    silhouette: 'PrimaryForm and shoulder silhouette is readable against the backgroundField.',
+    depth: 'FocalForm forward, segmentsB middle, secondaryForm and backgroundField back.',
+    likeness_main_shape: 'Main primaryForm proportions are stable and must not drift.',
+    overall_detail_level: 'Medium development; avoid premature textureRegion detail.',
     mood: 'Quiet, weathered, contemplative rather than theatrical.',
-    color_relationships: 'Warm face accents against restrained cool sea and raincoat notes.',
+    color_relationships: 'Warm focalForm accents against restrained cool backgroundField and raincoat notes.',
     shape_language: 'Broad naturalistic masses with selective angular weathered accents.',
-    edge_hierarchy: 'Hardest edges stay near the face and hands; background transitions remain soft or lost.',
+    edge_hierarchy: 'Hardest edges stay near the focalForm and segmentsB; background transitions remain soft or lost.',
     intentional_omission: 'Background detail and secondary texture stay understated to preserve focus.',
-    next_priority: 'Strengthen the face focal hierarchy without moving major masses.',
+    next_priority: 'Strengthen the focalForm focal hierarchy without moving major masses.',
   };
 }
 
@@ -106,19 +128,19 @@ function passingValueCheck() {
   };
 }
 
-function directive(id = 'face-focus', reviewAfter = 3) {
+function directive(id = 'focalForm-focus', reviewAfter = 3) {
   return {
     directive_id: id,
-    goal: 'Strengthen the face as the primary focal center.',
+    goal: 'Strengthen the focalForm as the primary focal center.',
     style_contract: {
       realism_level: 'naturalistic painterly realism',
       edge_policy: 'selective hard focal edges with soft/lost peripheral transitions',
       color_policy: 'restrained cool-warm harmony with warm focal accents',
-      detail_density: 'high only near focal face and hands',
+      detail_density: 'high only near focal focalForm and segmentsB',
       finish_criteria: 'coherent expressive hierarchy without over-rendering the background',
     },
     prompt_conflict_preflight: {
-      dominant_objective: 'Naturalistic painterly focal hierarchy on the face.',
+      dominant_objective: 'Naturalistic painterly focal hierarchy on the focalForm.',
       secondary_traits: ['restrained cool-warm harmony', 'selective detail'],
       conflicts: [],
       resolution_mode: 'none',
@@ -144,10 +166,10 @@ function directive(id = 'face-focus', reviewAfter = 3) {
       revision: 1,
       mode: 'ranked',
       zones: [
-        { id: 'face-zone', owner_ids: ['face-owner'], priority: 'primary', contrast_budget: 'high', detail_budget: 'high', edge_certainty: 'high', chroma_accent: 'allowed' },
+        { id: 'focalForm-zone', owner_ids: ['focalForm-owner'], priority: 'primary', contrast_budget: 'high', detail_budget: 'high', edge_certainty: 'high', chroma_accent: 'allowed' },
         { id: 'background-zone', owner_ids: ['background-owner'], priority: 'support', contrast_budget: 'low', detail_budget: 'low', edge_certainty: 'low', chroma_accent: 'restricted' },
       ],
-      ordering: ['face-zone', 'background-zone'],
+      ordering: ['focalForm-zone', 'background-zone'],
     },
     assessment: assessment(),
     value_check: passingValueCheck(),
@@ -156,22 +178,22 @@ function directive(id = 'face-focus', reviewAfter = 3) {
       observed: false,
       limitations: ['Synthetic Planner/Painter fixture; Task 23 gate is exercised in refinement-check.test.ts.'],
     },
-    priorities: ['face value hierarchy', 'cheek edge integration'],
+    priorities: ['focalForm value hierarchy', 'localRegion edge integration'],
     review_after_microplans: reviewAfter,
     tasks: [
       {
         task_id: 'shadow-side',
-        summary: 'Darken the right side of the face locally.',
-        region: 'face',
+        summary: 'Darken the right side of the focalForm locally.',
+        region: 'focalForm',
         allowed_scales: ['medium', 'small'],
-        perceptual_zone_ids: ['face-zone'],
+        perceptual_zone_ids: ['focalForm-zone'],
       },
       {
-        task_id: 'cheek-edge',
-        summary: 'Lose the cheek edge into the background without changing silhouette.',
-        region: 'cheek',
+        task_id: 'localRegion-edge',
+        summary: 'Lose the localRegion edge into the background without changing silhouette.',
+        region: 'localRegion',
         allowed_scales: ['small'],
-        perceptual_zone_ids: ['face-zone'],
+        perceptual_zone_ids: ['focalForm-zone'],
       },
     ],
   };
@@ -185,19 +207,19 @@ function painterRequest(overrides: Record<string, unknown> = {}) {
     tool: 'photoshop_execute_visual_microplan',
     args: {
       document_id: 42,
-      planner_directive_id: 'face-focus',
+      planner_directive_id: 'focalForm-focus',
       planner_task_id: 'shadow-side',
       painter_scope: 'medium',
       change_domains: ['local-tone'],
       stage: 'FORM_AND_LIGHT',
       scale: 'medium',
-      region: 'face',
-      problem_id: 'face-shadow-side',
+      region: 'focalForm',
+      problem_id: 'focalForm-shadow-side',
       ...argOverrides,
     },
     summary: 'Execute one bounded Painter task.',
     purpose: 'Test the Planner/Painter execution contract.',
-    problem_id: 'face-shadow-side',
+    problem_id: 'focalForm-shadow-side',
     stage: 'FORM_AND_LIGHT',
     scale: 'medium',
     ...restOverrides,
@@ -207,10 +229,10 @@ function painterRequest(overrides: Record<string, unknown> = {}) {
 function context(taskId = 'shadow-side') {
   return {
     problem_id: `problem-${taskId}`,
-    region: 'face',
+    region: 'focalForm',
     stage: 'FORM_AND_LIGHT',
     scale: 'medium',
-    planner_directive_id: 'face-focus',
+    planner_directive_id: 'focalForm-focus',
     planner_task_id: taskId,
     painter_scope: 'medium',
     change_domains: ['local-tone'],
@@ -322,7 +344,7 @@ function seedTrendSignal(
     execution: 'completed',
     visual: true,
     failed: false,
-    region: options.region ?? 'face',
+    region: options.region ?? 'focalForm',
     scale: options.scale ?? 'medium',
     ...(options.bounds ? { region_bounds: options.bounds } : {}),
     preview: {
@@ -357,15 +379,15 @@ describe('Art Director / Painter controller contract', () => {
     const s = store();
     const d = directive('brief-debt', 5) as any;
     d.artistic_evaluation_contract.brief_items = [
-      { item_id: 'lion-recognition', kind: 'hard_perceptual', requirement: 'Guardian lion must be visibly recognizable as a lion.', provenance: 'user_brief:named subject' },
+      { item_id: 'targetForm-recognition', kind: 'hard_perceptual', requirement: 'Guardian targetForm must be visibly recognizable as a targetForm.', provenance: 'user_brief:named subject' },
       { item_id: 'snow-polish', kind: 'soft_preference', requirement: 'Fine snow sparkle may be added if useful.', provenance: 'user_brief:optional polish' },
     ];
     s.setArtDirectorState({ document_id: 42, action: 'review', directive: d });
     expect(s.compactPassContext(42).art_director.unresolved_hard_brief_debt).toEqual([
-      expect.objectContaining({ item_id: 'lion-recognition', state: 'UNASSESSED', kind: 'hard_perceptual' }),
+      expect.objectContaining({ item_id: 'targetForm-recognition', state: 'UNASSESSED', kind: 'hard_perceptual' }),
     ]);
     expect(s.statusCompact().documents['42'].unresolved_hard_brief_debt).toEqual([
-      expect.objectContaining({ item_id: 'lion-recognition', state: 'UNASSESSED' }),
+      expect.objectContaining({ item_id: 'targetForm-recognition', state: 'UNASSESSED' }),
     ]);
   });
 
@@ -375,9 +397,9 @@ describe('Art Director / Painter controller contract', () => {
     const makeDirective = () => {
       const d = directive('recognition-gate', 5) as any;
       d.artistic_evaluation_contract.brief_items = [{
-        item_id: 'guardian-lion', kind: 'hard_perceptual',
-        requirement: 'The guardian sculpture must visibly read as a lion rather than an abstract stone mass.',
-        provenance: 'user_brief:named subject', recognition_target: 'guardian lion',
+        item_id: 'guardian-targetForm', kind: 'hard_perceptual',
+        requirement: 'The guardian rigidForm must visibly read as a targetForm rather than an abstract floatingForm mass.',
+        provenance: 'user_brief:named subject', recognition_target: 'guardian targetForm',
       }];
       return d;
     };
@@ -385,24 +407,28 @@ describe('Art Director / Painter controller contract', () => {
       outcome: 'satisfied', contract_id: 'synthetic-planner-brief-contract', contract_revision: 1,
       frame_sha256: frame.sha256, critic_authority: 'authorized', critic_result_id: 'recognition-critic',
       brief_item_results: [{
-        item_id: 'guardian-lion', state: 'MET', reason: 'The held-out crop supports a lion identity.',
-        evidence: ['review_artifact:lion-crop-artifact'],
+        item_id: 'guardian-targetForm', state: 'MET', reason: 'The held-out crop supports a targetForm identity.',
+        evidence: ['review_artifact:targetForm-crop-artifact'],
       }],
       reason: 'Named-object recognition is supported by exact current-frame crop evidence.',
     };
+    s.registerAuthorizedCriticResult(42, {
+      result_id: 'recognition-critic', authority_class: 'authorized', authority_source: 'human-calibration:test-fixture',
+      frame_sha256: frame.sha256, contract_id: 'synthetic-planner-brief-contract', contract_revision: 1,
+    });
     expect(() => s.setArtDirectorState({
       document_id: 42, action: 'review', directive: makeDirective(), global_brief_assessment: assessment,
     })).toThrow(/cannot be MET without a materialized current-frame OBJECT\/MICRO review artifact/);
 
-    const cropBytes = Buffer.from('guardian-lion-object-crop');
-    const cropPath = path.join(s.directory, 'guardian-lion-crop.jpg');
+    const cropBytes = Buffer.from('guardian-targetForm-object-crop');
+    const cropPath = path.join(s.directory, 'guardian-targetForm-crop.jpg');
     writeFileSync(cropPath, cropBytes);
     const cropSha = createHash('sha256').update(cropBytes).digest('hex');
     const source = s.read('recognition-frame')! as any;
     source.review_evidence = [{
-      artifact_id: 'lion-crop-artifact', source_operation_id: 'recognition-frame',
+      artifact_id: 'targetForm-crop-artifact', source_operation_id: 'recognition-frame',
       requirement_id: 'recognition-requirement', capture_id: 'recognition-capture', capture_sequence: 1,
-      finding_kind: 'object_readability', brief_item_id: 'guardian-lion', severity: 'must-fix', review_level: 'object',
+      finding_kind: 'object_readability', brief_item_id: 'guardian-targetForm', severity: 'must-fix', review_level: 'object',
       requested_region: { left: 10, top: 10, right: 100, bottom: 100 },
       effective_region: { left: 10, top: 10, right: 100, bottom: 100 },
       document_id: 42, canvas_width: 800, canvas_height: 600,
@@ -420,7 +446,7 @@ describe('Art Director / Painter controller contract', () => {
     const s = store();
     const d = directive('brief-finding', 5) as any;
     d.artistic_evaluation_contract.brief_items = [
-      { item_id: 'lion-recognition', kind: 'hard_perceptual', requirement: 'Guardian lion must be visibly recognizable as a lion.', provenance: 'user_brief:named subject' },
+      { item_id: 'targetForm-recognition', kind: 'hard_perceptual', requirement: 'Guardian targetForm must be visibly recognizable as a targetForm.', provenance: 'user_brief:named subject' },
     ];
     s.setArtDirectorState({ document_id: 42, action: 'review', directive: d });
     const bytes = Buffer.from('brief-finding-frame');
@@ -437,24 +463,24 @@ describe('Art Director / Painter controller contract', () => {
     s.verdict({
       id: 'brief-finding-op', preview_id: 'brief-finding-op', sha256: sha,
       verdict: 'neutral', disposition: 'correct',
-      observations: [{ region: 'whole frame', visible: 'The two stone masses remain visibly ambiguous as guardian lions.' }],
-      primary_mismatch: 'Required guardian lions are not recognizable.',
-      observed_change: 'The current frame still shows ambiguous symmetric stone masses instead of readable lion forms.',
+      observations: [{ region: 'whole frame', visible: 'The two floatingForm masses remain visibly ambiguous as guardian targetForms.' }],
+      primary_mismatch: 'Required guardian targetForms are not recognizable.',
+      observed_change: 'The current frame still shows ambiguous symmetric floatingForm masses instead of readable targetForm forms.',
       target_resolved: 'no', regressions: [], uncertainty: 'identity remains ambiguous',
       global_readability: 'unknown', primitive_footprint: 'none', trend_signals: [],
       review_findings: [{
-        kind: 'subject_recognition', severity: 'must-fix', brief_item_id: 'lion-recognition', brief_state: 'NOT_MET',
+        kind: 'subject_recognition', severity: 'must-fix', brief_item_id: 'targetForm-recognition', brief_state: 'NOT_MET',
       }],
     });
     expect(s.statusCompact().documents['42'].unresolved_hard_brief_debt).toEqual([
-      expect.objectContaining({ item_id: 'lion-recognition', state: 'NOT_MET', source_operation_id: 'brief-finding-op' }),
+      expect.objectContaining({ item_id: 'targetForm-recognition', state: 'NOT_MET', source_operation_id: 'brief-finding-op' }),
     ]);
 
     const source = s.read('brief-finding-op')! as any;
     source.rollback = { completed: true, rollback_operation_id: 'brief-finding-undo' };
     s.write(source);
     expect(s.statusCompact().documents['42'].unresolved_hard_brief_debt).toEqual([
-      expect.objectContaining({ item_id: 'lion-recognition', state: 'UNASSESSED' }),
+      expect.objectContaining({ item_id: 'targetForm-recognition', state: 'UNASSESSED' }),
     ]);
   });
   it('fails closed when the mandatory prompt-conflict preflight is missing', () => {
@@ -469,14 +495,22 @@ describe('Art Director / Painter controller contract', () => {
     const s = store();
     const d = directive();
     delete (d.prompt_conflict_preflight as any).resolution_rationale;
+    d.style_contract = { finish_criteria: d.style_contract.finish_criteria } as any;
+    d.prompt_conflict_preflight.dominant_objective = 'Объём';
+    d.prompt_conflict_preflight.chosen_rendering_strategy = 'Кисть';
+    delete (d.prompt_conflict_preflight as any).first_pass_strategy;
     const state = s.setArtDirectorState({ document_id: 42, action: 'review', directive: d });
     expect(state.art_director.prompt_conflict_preflight).toMatchObject({
       dominant_objective: d.prompt_conflict_preflight.dominant_objective,
       resolution_mode: d.prompt_conflict_preflight.resolution_mode,
       chosen_rendering_strategy: d.prompt_conflict_preflight.chosen_rendering_strategy,
-      first_pass_strategy: d.prompt_conflict_preflight.first_pass_strategy,
+      first_pass_strategy: [],
     });
     expect(state.art_director.prompt_conflict_preflight).not.toHaveProperty('resolution_rationale');
+    d.prompt_conflict_preflight.first_pass_strategy = ['Свет', 'Тень', 'Объём', 'Край'];
+    expect(() => s.setArtDirectorState({ document_id: 42, action: 'review', directive: d })).not.toThrow();
+    (d.prompt_conflict_preflight as any).first_pass_strategy = 'Кисть';
+    expect(() => s.setArtDirectorState({ document_id: 42, action: 'review', directive: d })).toThrow(/must be an array/);
   });
 
   it('requires a pipeline-level prompt conflict to be resolved before Painter mutation', () => {
@@ -531,13 +565,35 @@ describe('Art Director / Painter controller contract', () => {
     d.prompt_conflict_preflight.resolution_mode = 'user-confirmed';
     expect(() => s.setArtDirectorState({ document_id: 42, action: 'review', directive: d }))
       .toThrow(/requires user_confirmation evidence/);
-    d.prompt_conflict_preflight.user_confirmation = 'User chose photorealistic volume over flat poster treatment.';
+    d.prompt_conflict_preflight.user_confirmation = 'Да';
     expect(() => s.setArtDirectorState({ document_id: 42, action: 'review', directive: d })).not.toThrow();
+  });
+
+  it('defaults omitted advisory strategy fields without forcing a review at the threshold', () => {
+    const s = store();
+    const { strategy_validation_after_microplans: _cadence, strategy_validation: _validation, ...d } = directive('focalForm-focus', 8);
+    s.setArtDirectorState({ document_id: 42, action: 'review', directive: d });
+    expect(s.paintingState().documents['42'].art_director).toMatchObject({
+      strategy_validation_after_microplans: 2, strategy_validation: { status: 'pending' },
+    });
+    for (const id of ['first', 'second']) {
+      const next = s.advanceArtDirectorAfterVerdict(s.paintingState().documents['42'], context(), acceptedVerdict(), {
+        id, significance: { execution_effect: 'meaningful' }, verdict: { trend_signals: [], at: new Date().toISOString() },
+      });
+      s.updatePaintingState(42, () => next);
+    }
+    expect(s.paintingState().documents['42'].art_director).toMatchObject({
+      strategy_meaningful_microplans: 2, status: 'active', review_due: false,
+    });
+    const configured = { ...d, strategy_validation_after_microplans: 1 };
+    s.setArtDirectorState({ document_id: 42, action: 'review', directive: configured });
+    s.setArtDirectorState({ document_id: 42, action: 'review', directive: d });
+    expect(s.paintingState().documents['42'].art_director.strategy_validation_after_microplans).toBe(1);
   });
 
   it('keeps strategy-validation cadence as guidance without blocking Painter mutation', () => {
     const s = store();
-    const d = directive('face-focus', 8);
+    const d = directive('focalForm-focus', 8);
     d.strategy_validation_after_microplans = 1;
     s.setArtDirectorState({ document_id: 42, action: 'review', directive: d });
 
@@ -566,7 +622,7 @@ describe('Art Director / Painter controller contract', () => {
 
   it('requires exact-current-frame strategy validation and forces a changed strategy on replan', () => {
     const s = store();
-    const d = directive('face-focus', 8);
+    const d = directive('focalForm-focus', 8);
     s.setArtDirectorState({ document_id: 42, action: 'review', directive: d });
     s.updatePaintingState(42, current => ({
       ...current,
@@ -580,11 +636,11 @@ describe('Art Director / Painter controller contract', () => {
       },
     }));
 
-    const pending = directive('face-focus', 8);
+    const pending = directive('focalForm-focus', 8);
     expect(() => s.setArtDirectorState({ document_id: 42, action: 'review', directive: pending }))
       .toThrow(/strategy validation is due/);
 
-    const stale = directive('face-focus', 8);
+    const stale = directive('focalForm-focus', 8);
     stale.strategy_validation = {
       status: 'pass', evidence_operation_id: 'other-frame',
       dominant_objective_read: 'The dominant objective is visibly advancing.',
@@ -594,7 +650,7 @@ describe('Art Director / Painter controller contract', () => {
     expect(() => s.setArtDirectorState({ document_id: 42, action: 'review', directive: stale }))
       .toThrow(/exact current artistic frame/);
 
-    const unchangedReplan = directive('face-focus', 8);
+    const unchangedReplan = directive('focalForm-focus', 8);
     unchangedReplan.strategy_validation = {
       status: 'replan', evidence_operation_id: 'strategy-frame',
       dominant_objective_read: 'The dominant objective is not advancing strongly enough.',
@@ -604,7 +660,7 @@ describe('Art Director / Painter controller contract', () => {
     expect(() => s.setArtDirectorState({ document_id: 42, action: 'review', directive: unchangedReplan }))
       .toThrow(/requires a changed chosen_rendering_strategy or first_pass_strategy/);
 
-    const replanned = directive('face-focus', 8);
+    const replanned = directive('focalForm-focus', 8);
     replanned.prompt_conflict_preflight.chosen_rendering_strategy = 'Rebuild broad value and material masses first; defer all contour accents until form reads without them.';
     replanned.prompt_conflict_preflight.first_pass_strategy = ['broad value/material rebuild', 'preview strategy validation'];
     replanned.strategy_validation = {
@@ -627,7 +683,7 @@ describe('Art Director / Painter controller contract', () => {
         review_reason: 'strategy_validation:legacy_durable_barrier',
       },
     }));
-    const passWithoutNarrativeReason = directive('face-focus', 8);
+    const passWithoutNarrativeReason = directive('focalForm-focus', 8);
     passWithoutNarrativeReason.strategy_validation = {
       status: 'pass', evidence_operation_id: 'strategy-frame',
       dominant_objective_read: 'The dominant objective is visibly advancing in the exact current frame.',
@@ -642,11 +698,11 @@ describe('Art Director / Painter controller contract', () => {
     const s = store();
     seedTrendSignal(s, 'trend-local-1', 1, {
       bounds: { left: 100, top: 100, right: 260, bottom: 300 },
-      region: 'face',
+      region: 'focalForm',
     });
     seedTrendSignal(s, 'trend-local-2', 2, {
       bounds: { left: 120, top: 120, right: 280, bottom: 315 },
-      region: 'face',
+      region: 'focalForm',
     });
 
     const trend = (s as any).cumulativeTrendState(42);
@@ -675,7 +731,7 @@ describe('Art Director / Painter controller contract', () => {
     expect((s as any).priorityGate(42, painterRequest({
       id: 'unrelated-medium',
       args: {
-        planner_directive_id: 'face-focus',
+        planner_directive_id: 'focalForm-focus',
         planner_task_id: 'shadow-side',
         painter_scope: 'medium',
         change_domains: ['local-tone'],
@@ -817,7 +873,7 @@ describe('Art Director / Painter controller contract', () => {
     const s = store();
     seedTrendSignal(s, 'trend-left', 1, {
       bounds: { left: 50, top: 100, right: 180, bottom: 260 },
-      region: 'left-face',
+      region: 'left-focalForm',
     });
     seedTrendSignal(s, 'trend-right', 2, {
       bounds: { left: 760, top: 480, right: 900, bottom: 660 },
@@ -840,17 +896,17 @@ describe('Art Director / Painter controller contract', () => {
 
   it('does not use unrelated distant review findings as spatial evidence for primitive-footprint trend scope', () => {
     const s = store();
-    seedTrendSignal(s, 'trend-face-a', 1, {
+    seedTrendSignal(s, 'trend-focalForm-a', 1, {
       bounds: { left: 100, top: 100, right: 280, bottom: 320 },
       findingBounds: { left: 20, top: 40, right: 140, bottom: 180 },
       findingKind: 'proportion',
-      region: 'face',
+      region: 'focalForm',
     });
-    seedTrendSignal(s, 'trend-face-b', 2, {
+    seedTrendSignal(s, 'trend-focalForm-b', 2, {
       bounds: { left: 120, top: 115, right: 300, bottom: 335 },
       findingBounds: { left: 780, top: 520, right: 920, bottom: 700 },
       findingKind: 'proportion',
-      region: 'face',
+      region: 'focalForm',
     });
 
     const trend = (s as any).cumulativeTrendState(42);
@@ -861,9 +917,9 @@ describe('Art Director / Painter controller contract', () => {
     );
     expect(promoted.visual_problems['cumulative-trend-primitive-footprint-repeating']).toMatchObject({
       scale: 'medium',
-      region: 'face',
+      region: 'focalForm',
       promotion_reason: 'localized_repeated_evidence',
-      source_operations: ['trend-face-a', 'trend-face-b'],
+      source_operations: ['trend-focalForm-a', 'trend-focalForm-b'],
     });
   });
 
@@ -874,14 +930,14 @@ describe('Art Director / Painter controller contract', () => {
       findingBounds: { left: 20, top: 40, right: 140, bottom: 180 },
       findingKind: 'object_readability',
       findingTrendSignals: ['primitive-footprint-repeating'],
-      region: 'face',
+      region: 'focalForm',
     });
     seedTrendSignal(s, 'trend-bound-b', 2, {
       bounds: { left: 120, top: 115, right: 300, bottom: 335 },
       findingBounds: { left: 780, top: 520, right: 920, bottom: 700 },
       findingKind: 'object_readability',
       findingTrendSignals: ['primitive-footprint-repeating'],
-      region: 'face',
+      region: 'focalForm',
     });
 
     const trend = (s as any).cumulativeTrendState(42);
@@ -948,7 +1004,7 @@ describe('Art Director / Painter controller contract', () => {
         scale: 'medium',
         severity: 'must-fix',
         status: 'resolved',
-        region: 'face',
+        region: 'focalForm',
       }],
     });
 
@@ -1099,12 +1155,12 @@ describe('Art Director / Painter controller contract', () => {
       brush_preflight: suppliedPackPreflight(),
       brush_pack_policy: { mode: 'exclusive', brush_pack_id: 'brush-pack-sha256:scene-pack' },
     });
-    const d = directive('face-focus', 5) as any;
+    const d = directive('focalForm-focus', 5) as any;
     d.brush_pack_scene_plan = {
       brush_pack_id: 'brush-pack-sha256:scene-pack', scene_first: true,
       uses: [{
-        task_id: 'cheek-edge', source_kind: 'media-role', source_id: 'broad-form',
-        causal_use: 'Reserve this pack role for the later cheek integration task.',
+        task_id: 'localRegion-edge', source_kind: 'media-role', source_id: 'broad-form',
+        causal_use: 'Reserve this pack role for the later localRegion integration task.',
         integration_mode: 'integrate', subject_importance: 'hero',
       }],
     };
@@ -1116,6 +1172,7 @@ describe('Art Director / Painter controller contract', () => {
     s.updatePaintingState(42, current => ({
       ...current,
       current_stage: 'FORM_AND_LIGHT',
+      physical_stack_check: undefined,
       art_director: {
         ...current.art_director,
         physical_stack_check: undefined,
@@ -1159,6 +1216,11 @@ describe('Art Director / Painter controller contract', () => {
       validation: 'not-independently-validated',
     });
 
+    s.registerAuthorizedCriticResult(42, {
+      result_id: 'authorized-claim', authority_class: 'authorized', authority_source: 'human-calibration:test-fixture',
+      frame_sha256: frame.sha256, contract_id: brief.artistic_evaluation_contract.contract_id, contract_revision: 1,
+    });
+
     s.setArtDirectorState({
       document_id: 42,
       action: 'review',
@@ -1197,6 +1259,10 @@ describe('Art Director / Painter controller contract', () => {
         current_task_id: null,
       },
     }));
+    s.registerAuthorizedCriticResult(42, {
+      result_id: 'authorized-unsatisfied', authority_class: 'authorized', authority_source: 'human-calibration:test-fixture',
+      frame_sha256: frame.sha256, contract_id: single.artistic_evaluation_contract.contract_id, contract_revision: 1,
+    });
     expect(() => s.setArtDirectorState({
       document_id: 42,
       action: 'complete',
@@ -1227,7 +1293,7 @@ describe('Art Director / Painter controller contract', () => {
 
   it('keeps local Painter verification running while global review waits for adaptive cadence', () => {
     const s = store();
-    s.setArtDirectorState({ document_id: 42, action: 'review', directive: directive('face-focus', 3) });
+    s.setArtDirectorState({ document_id: 42, action: 'review', directive: directive('focalForm-focus', 3) });
 
     for (let i = 1; i <= 2; i++) {
       const current = s.paintingState().documents['42'];
@@ -1264,6 +1330,10 @@ describe('Art Director / Painter controller contract', () => {
       requirement: 'The whole frame must satisfy the requested composition.',
       provenance: 'user_brief:composition',
     }];
+    s.registerAuthorizedCriticResult(42, {
+      result_id: 'reason-free-critic', authority_class: 'authorized', authority_source: 'human-calibration:test-fixture',
+      frame_sha256: frame.sha256, contract_id: brief.artistic_evaluation_contract.contract_id, contract_revision: 1,
+    });
     s.setArtDirectorState({
       document_id: 42,
       action: 'review',
@@ -1294,6 +1364,10 @@ describe('Art Director / Painter controller contract', () => {
     const review = completionReviewEvidence(s) as any;
     review.pre_final_hostile_review.checks = review.pre_final_hostile_review.checks
       .map(({ reason: _reason, ...check }: any) => check);
+    s.registerAuthorizedCriticResult(42, {
+      result_id: 'reason-free-final-critic', authority_class: 'authorized', authority_source: 'human-calibration:test-fixture',
+      frame_sha256: frame.sha256, contract_id: brief.artistic_evaluation_contract.contract_id, contract_revision: 1,
+    });
     expect(() => s.setArtDirectorState({
       document_id: 42,
       action: 'complete',
@@ -1322,19 +1396,19 @@ describe('Art Director / Painter controller contract', () => {
     })).not.toThrow();
   });
 
-  it('persists the task-scoped three-pass autonomy window across restart', () => {
+  it('persists the task-scoped three-pass autonomy openingForm across restart', () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'planner-task-autonomy-'));
     dirs.push(dir);
     const s = storeAt(dir);
-    s.setArtDirectorState({ document_id: 42, action: 'review', directive: directive('task-window', 8) });
+    s.setArtDirectorState({ document_id: 42, action: 'review', directive: directive('task-openingForm', 8) });
 
     for (let i = 1; i <= 2; i++) {
       const current = s.paintingState().documents['42'];
       const next = s.advanceArtDirectorAfterVerdict(
         current,
-        { ...context(), planner_directive_id: 'task-window' },
+        { ...context(), planner_directive_id: 'task-openingForm' },
         acceptedVerdict(),
-        { id: `window-${i}`, verdict: { trend_signals: [], at: new Date().toISOString() } }
+        { id: `openingForm-${i}`, verdict: { trend_signals: [], at: new Date().toISOString() } }
       );
       s.updatePaintingState(42, () => next);
     }
@@ -1358,9 +1432,9 @@ describe('Art Director / Painter controller contract', () => {
     const current = restarted.paintingState().documents['42'];
     const third = restarted.advanceArtDirectorAfterVerdict(
       current,
-      { ...context(), planner_directive_id: 'task-window' },
+      { ...context(), planner_directive_id: 'task-openingForm' },
       acceptedVerdict(),
-      { id: 'window-3', verdict: { trend_signals: [], at: new Date().toISOString() } }
+      { id: 'openingForm-3', verdict: { trend_signals: [], at: new Date().toISOString() } }
     );
     expect(third.art_director).toMatchObject({
       current_task_id: 'shadow-side',
@@ -1408,12 +1482,12 @@ describe('Art Director / Painter controller contract', () => {
 
     expect(next.art_director.tasks[0].status).toBe('completed');
     expect(next.art_director.tasks[1].status).toBe('active');
-    expect(next.art_director.current_task_id).toBe('cheek-edge');
+    expect(next.art_director.current_task_id).toBe('localRegion-edge');
   });
 
   it('interrupts early when a local pass unexpectedly degrades global readability', () => {
     const s = store();
-    s.setArtDirectorState({ document_id: 42, action: 'review', directive: directive('face-focus', 8) });
+    s.setArtDirectorState({ document_id: 42, action: 'review', directive: directive('focalForm-focus', 8) });
     const current = s.paintingState().documents['42'];
     const next = s.advanceArtDirectorAfterVerdict(
       current,
@@ -1435,19 +1509,19 @@ describe('Art Director / Painter controller contract', () => {
       {
         ...context(),
         planner_directive_id: 'relation-scope',
-        affected_relations: ['face-to-background separation'],
+        affected_relations: ['focalForm-to-background separation'],
         affected_qualities: ['quiet focal restraint'],
       },
       acceptedVerdict(),
       { id: 'relation-pass', verdict: { trend_signals: [], at: new Date().toISOString() } }
     );
     expect(declared.art_director.tasks[0]).toMatchObject({
-      affected_relations: ['face-to-background separation'],
+      affected_relations: ['focalForm-to-background separation'],
       affected_qualities: ['quiet focal restraint'],
     });
     expect(declared.relation_review).toMatchObject({
       operation_id: 'relation-pass',
-      affected_relations: ['face-to-background separation'],
+      affected_relations: ['focalForm-to-background separation'],
       affected_qualities: ['quiet focal restraint'],
     });
 
@@ -1472,12 +1546,12 @@ describe('Art Director / Painter controller contract', () => {
       ...s.applyArtisticLossUpdates(current, [{
         name: 'edge-breathing-room',
         status: 'observed',
-        detail: 'The cheek edge became too uniformly hard and lost breathing room.',
+        detail: 'The localRegion edge became too uniformly hard and lost breathing room.',
       }], record),
     }));
     expect(s.paintingState().documents['42'].artistic_losses['edge-breathing-room']).toMatchObject({
       status: 'observed',
-      detail: 'The cheek edge became too uniformly hard and lost breathing room.',
+      detail: 'The localRegion edge became too uniformly hard and lost breathing room.',
     });
 
     s.updatePaintingState(42, current => ({
@@ -1518,8 +1592,8 @@ describe('Art Director / Painter controller contract', () => {
       directive: directive('hypothesis-open', 8),
       incomplete_hypothesis: {
         lost_quality: 'quiet edge rhythm',
-        intended_relationship: 'cheek edge should dissolve into the background without weakening the face silhouette',
-        observable_completion_condition: 'the cheek transition is visibly softer while the head silhouette remains readable',
+        intended_relationship: 'localRegion edge should dissolve into the background without weakening the focalForm silhouette',
+        observable_completion_condition: 'the localRegion transition is visibly softer while the primaryForm silhouette remains readable',
         max_review_horizon: 2,
       },
     });
@@ -1564,9 +1638,9 @@ describe('Art Director / Painter controller contract', () => {
       ...current,
       last_critique: {
         operation_id: 'mismatch-source',
-        problem_id: 'face-shadow-side',
-        region: 'face',
-        primary_mismatch: 'The face shadow still flattens the cheek plane.',
+        problem_id: 'focalForm-shadow-side',
+        region: 'focalForm',
+        primary_mismatch: 'The focalForm shadow still flattens the localRegion plane.',
         target_resolved: 'no',
         uncertainty: 'none observed',
       },
@@ -1578,7 +1652,7 @@ describe('Art Director / Painter controller contract', () => {
     }))).toThrow(/primary_mismatch_unresolved/);
 
     expect(() => s.plannerGate(42, painterRequest({
-      args: { planner_directive_id: 'mismatch-gate', problem_id: 'face-shadow-side' },
+      args: { planner_directive_id: 'mismatch-gate', problem_id: 'focalForm-shadow-side' },
     }))).not.toThrow();
 
     expect(() => s.plannerGate(42, painterRequest({
@@ -1587,7 +1661,7 @@ describe('Art Director / Painter controller contract', () => {
         planner_directive_id: 'mismatch-gate',
         problem_id: 'background-rain',
         independent_region: true,
-        preservation_facts: ['The face layer and silhouette are excluded from this background-only pass.'],
+        preservation_facts: ['The focalForm layer and silhouette are excluded from this background-only pass.'],
       },
     }))).not.toThrow();
 
@@ -1625,6 +1699,12 @@ describe('Art Director / Painter controller contract', () => {
       reason: 'stage_boundary',
     });
     s.updatePaintingState(42, () => state);
+    expect(() => s.plannerGate(42, painterRequest({
+      args: {
+        planner_directive_id: 'glance-review',
+        problem_id: 'focalForm-shadow-side',
+      },
+    }))).toThrow(/whole_image_glance_required:.*glance-frame.*stage_boundary/);
 
     const reviewed = s.setArtDirectorState({
       document_id: 42,
@@ -1632,7 +1712,7 @@ describe('Art Director / Painter controller contract', () => {
       directive: directive('glance-after-stage', 8),
       whole_image_glance: {
         trigger: 'stage_boundary',
-        observation: 'The whole image keeps a clear face focus and stable large-value grouping.',
+        observation: 'The whole image keeps a clear focalForm focus and stable large-value grouping.',
         operation_id: glanceFrame.operation_id,
         frame_sha256: glanceFrame.sha256,
       },
@@ -1643,6 +1723,12 @@ describe('Art Director / Painter controller contract', () => {
       last_record: expect.objectContaining({ trigger: 'stage_boundary' }),
     });
     expect(reviewed.art_director.whole_image_glance.history).toHaveLength(1);
+    expect(() => s.plannerGate(42, painterRequest({
+      args: {
+        planner_directive_id: 'glance-after-stage',
+        problem_id: 'focalForm-shadow-side',
+      },
+    }))).not.toThrow();
 
     let globalState = s.advanceArtDirectorAfterVerdict(
       reviewed,
@@ -1684,6 +1770,92 @@ describe('Art Director / Painter controller contract', () => {
     });
   });
 
+  it('requires applicable scene-relation audit at whole-frame review and persists structural defects as blocking debt', () => {
+    const s = store();
+    const frame = seedClassifiedFrame(s, 'relation-audit-frame', 1);
+    s.setArtDirectorState({ document_id: 42, action: 'review', directive: directive('relation-audit', 8) });
+    let state = s.paintingState().documents['42'];
+    state = s.advanceArtDirectorAfterVerdict(
+      state,
+      { ...context(), planner_directive_id: 'relation-audit', stage: 'FORM_AND_LIGHT' },
+      acceptedVerdict(),
+      { id: 'relation-audit-local', verdict: { trend_signals: [], at: new Date().toISOString() } }
+    );
+    state = s.advanceArtDirectorAfterVerdict(
+      state,
+      {
+        ...context(),
+        planner_directive_id: 'relation-audit',
+        stage: 'EDGE_CONTROL',
+        affected_relations: ['figure support/contact'],
+      },
+      acceptedVerdict(),
+      { id: 'relation-audit-stage', verdict: { trend_signals: [], at: new Date().toISOString() } }
+    );
+    s.updatePaintingState(42, () => state);
+    expect(state.art_director.whole_image_glance).toMatchObject({
+      due: true,
+      reason: 'stage_boundary',
+      required_relations: ['figure support/contact'],
+    });
+
+    const nextDirective = directive('relation-audit-reviewed', 8);
+    const glance = {
+      trigger: 'stage_boundary',
+      observation: 'Whole-frame review checks the figure grounding against the supporting surface.',
+      operation_id: frame.operation_id,
+      frame_sha256: frame.sha256,
+    };
+    expect(() => s.setArtDirectorState({
+      document_id: 42,
+      action: 'review',
+      directive: nextDirective,
+      whole_image_glance: glance,
+    })).toThrow(/relationship_audit must cover the applicable scene relations/);
+
+    const reviewed = s.setArtDirectorState({
+      document_id: 42,
+      action: 'review',
+      directive: nextDirective,
+      whole_image_glance: {
+        ...glance,
+        relationship_audit: {
+          checks: [{
+            relation: 'figure support/contact',
+            status: 'defect',
+            review_finding: {
+              kind: 'contact_support',
+              severity: 'must-fix',
+              problem_id: 'figure-contact-gap',
+              region_bounds: { left: 10, top: 10, right: 80, bottom: 90 },
+            },
+          }],
+        },
+      },
+    });
+    expect(reviewed.art_director.whole_image_glance.last_record.relationship_audit).toMatchObject({
+      required_relations: ['figure support/contact'],
+      checks: [{ relation: 'figure support/contact', status: 'defect' }],
+    });
+    expect(reviewed.visual_problems['figure-contact-gap']).toMatchObject({
+      severity: 'must-fix',
+      status: 'open',
+      structural_review: true,
+      source_operation_id: frame.operation_id,
+      evidence_sha256: frame.sha256,
+      review_source: 'whole_image_glance.relationship_audit',
+    });
+    expect(() => s.priorityGate(42, painterRequest({
+      strategy_family: 'cosmetic-texture',
+      problem_id: 'figure-contact-gap',
+      args: {
+        planner_directive_id: 'relation-audit-reviewed',
+        planner_task_id: 'shadow-side',
+        problem_id: 'figure-contact-gap',
+      },
+    }))).toThrow(/structural_debt_requires_structural_correction/);
+  });
+
   it('blocks Painter from global/compositional changes unless the directive task explicitly permits them', () => {
     const s = store();
     s.setArtDirectorState({ document_id: 42, action: 'review', directive: directive() });
@@ -1691,12 +1863,12 @@ describe('Art Director / Painter controller contract', () => {
       args: { change_domains: ['composition'] },
     }))).toThrow(/planner_review_required: Painter cannot change composition/);
 
-    const permitted = directive('face-focus-allowed', 5);
+    const permitted = directive('focalForm-focus-allowed', 5);
     permitted.tasks[0].allowed_global_changes = ['large-value'];
     s.setArtDirectorState({ document_id: 42, action: 'review', directive: permitted });
     expect(() => s.plannerGate(42, painterRequest({
       args: {
-        planner_directive_id: 'face-focus-allowed',
+        planner_directive_id: 'focalForm-focus-allowed',
         change_domains: ['large-value'],
       },
     }))).not.toThrow();
@@ -1710,13 +1882,13 @@ describe('Art Director / Painter controller contract', () => {
       id: 'curves-bound',
       tool: 'photoshop_adjust_curves',
       args: { document_id: 42, preset: 'auto_tone' },
-      planner_directive_id: 'face-focus',
+      planner_directive_id: 'focalForm-focus',
       planner_task_id: 'shadow-side',
       painter_scope: 'medium',
       change_domains: ['local-tone'],
       stage: 'FORM_AND_LIGHT',
       scale: 'medium',
-      problem_id: 'face-shadow-side',
+      problem_id: 'focalForm-shadow-side',
     })).not.toThrow();
 
     expect(() => s.plannerGate(42, {
@@ -1725,7 +1897,7 @@ describe('Art Director / Painter controller contract', () => {
       args: { document_id: 42, preset: 'auto_tone' },
       stage: 'FORM_AND_LIGHT',
       scale: 'medium',
-      problem_id: 'face-shadow-side',
+      problem_id: 'focalForm-shadow-side',
     })).toThrow(/painter_contract_gate/);
   });
 
@@ -1750,14 +1922,25 @@ describe('Art Director / Painter controller contract', () => {
     free.composition_exploration.hypotheses.push({
       id: 'offset',
       summary: 'Offset figure with stronger directional tension.',
-      large_masses: 'Figure occupies left third against a broad sea mass.',
+      large_masses: 'Figure occupies left third against a broad backgroundField mass.',
       negative_space: 'Open right-side space reinforces gaze direction.',
-      light_pattern: 'Diagonal warm light cuts across the face and hands.',
+      light_pattern: 'Diagonal warm light cuts across the focalForm and segmentsB.',
     });
     free.composition_exploration.selected_id = 'offset';
     delete free.composition_exploration.selection_reason;
     const freeState = s.setArtDirectorState({ document_id: 42, action: 'review', directive: free });
     expect(freeState.art_director.composition_exploration.selection_reason).toBeNull();
+
+    for (let index = 3; index <= 5; index += 1) {
+      free.composition_exploration.hypotheses.push({
+        id: `free-${index}`,
+        summary: `Free composition alternative ${index}.`,
+        large_masses: `Alternative ${index} changes the large mass balance.`,
+        negative_space: `Alternative ${index} changes the negative-space rhythm.`,
+        light_pattern: `Alternative ${index} changes the broad light pattern.`,
+      });
+    }
+    expect(() => s.setArtDirectorState({ document_id: 42, action: 'review', directive: free })).not.toThrow();
   });
 
   it('admits fixed/reference composition with zero alternatives and forbids branch ceremony', () => {
@@ -1835,6 +2018,18 @@ describe('Art Director / Painter controller contract', () => {
     expect(state.art_director.composition_exploration.hypotheses).toHaveLength(2);
     expect(state.art_director.composition_exploration.selected_id).toBe('left-bias');
     expect(state.art_director.composition_exploration.selection_reason).toBeNull();
+
+    for (let index = 3; index <= 5; index += 1) {
+      constrained.composition_exploration.hypotheses.push({
+        id: `constrained-${index}`,
+        summary: `Constrained alternative ${index}.`,
+        large_masses: `Alternative ${index} changes the bounded mass placement.`,
+        negative_space: `Alternative ${index} changes the bounded negative-space option.`,
+        light_pattern: `Alternative ${index} changes the bounded light-pattern option.`,
+      });
+    }
+    expect(() => s.setArtDirectorState({ document_id: 42, action: 'review', directive: constrained }))
+      .toThrow(/bounded comparison of 2-4 cheap structural hypotheses/);
   });
 
   it('keeps cheap composition exploration as controller data with zero Photoshop operation records', () => {
@@ -2014,6 +2209,7 @@ describe('Art Director / Painter controller contract', () => {
     expect(() => s.setArtDirectorState({
       document_id: 42,
       action: 'complete',
+      ...completionReviewEvidence(s),
       final_comparison: {
         scope: 'no_previous', preferred: 'current',
         reason: 'The current frame is the only final candidate.',
@@ -2448,7 +2644,7 @@ describe('Art Director / Painter controller contract', () => {
 
   it('turns a failed directive pass into an early Planner interrupt', () => {
     const s = store();
-    s.setArtDirectorState({ document_id: 42, action: 'review', directive: directive('face-focus', 8) });
+    s.setArtDirectorState({ document_id: 42, action: 'review', directive: directive('focalForm-focus', 8) });
     const current = s.paintingState().documents['42'];
     const next = s.advanceArtDirectorAfterVerdict(
       current,
@@ -2457,7 +2653,7 @@ describe('Art Director / Painter controller contract', () => {
         verdict: 'regression',
         disposition: 'rollback',
         target_resolved: 'no',
-        regressions: ['face shape became visibly worse'],
+        regressions: ['focalForm shape became visibly worse'],
         global_readability: 'stable',
       },
       { id: 'failed-pass', verdict: { trend_signals: [], at: new Date().toISOString() } }
@@ -2469,7 +2665,7 @@ describe('Art Director / Painter controller contract', () => {
 
   it('returns a failed Painter task to Art Director review instead of activating a pending task', () => {
     const s = store();
-    s.setArtDirectorState({ document_id: 42, action: 'review', directive: directive('face-focus', 8) });
+    s.setArtDirectorState({ document_id: 42, action: 'review', directive: directive('focalForm-focus', 8) });
     const current = s.paintingState().documents['42'];
     const next = s.advanceArtDirectorAfterVerdict(
       current,
@@ -2492,7 +2688,7 @@ describe('Art Director / Painter controller contract', () => {
     expect(next.art_director.review_due).toBe(true);
     expect(next.art_director.review_reason).toBe('task_failed:shadow-side');
     expect(() => s.plannerGate(42, painterRequest({
-      args: { planner_task_id: 'cheek-edge', scale: 'small', region: 'cheek' },
+      args: { planner_task_id: 'localRegion-edge', scale: 'small', region: 'localRegion' },
     }))).toThrow(/review required|planner_review_required/);
   });
 
@@ -2618,7 +2814,7 @@ describe('Art Director / Painter controller contract', () => {
       document_id: 42,
       action: 'interrupt',
       reason: 'unsafe_to_execute_directive',
-      detail: 'The requested cheek edit would require moving the protected head silhouette.',
+      detail: 'The requested localRegion edit would require moving the protected primaryForm silhouette.',
     });
     expect(interrupted.art_director.status).toBe('interrupted');
     expect(interrupted.art_director.interrupt.reason).toBe('unsafe_to_execute_directive');
@@ -2642,29 +2838,29 @@ describe('Painter VisualMicroPlan envelope', () => {
   it('requires complete planner binding when a micro-plan is Painter-bound', () => {
     const base = {
       plan_id: 'planner-bound-plan',
-      summary: 'Bounded face correction',
+      summary: 'Bounded focalForm correction',
       stage: 'FORM_AND_LIGHT',
       scale: 'medium',
-      region: 'face',
-      intent: 'darken local face shadow',
+      region: 'focalForm',
+      intent: 'darken local focalForm shadow',
       method_class: 'paint',
       risk: 'low',
-      expected_visual_delta: 'Right face shadow becomes slightly darker.',
+      expected_visual_delta: 'Right focalForm shadow becomes slightly darker.',
       verification_envelope: { mode: 'after_only' },
       layer_separation_check: {
         change_kind: 'continuation',
         substantial: true,
         rollback_value: 'low',
         independent_adjustment_expected: false,
-        reasons: ['This bounded Painter pass continues the existing face shadow unit.'],
+        reasons: ['This bounded Painter pass continues the existing focalForm shadow unit.'],
       },
-      planner_directive_id: 'face-focus',
+      planner_directive_id: 'focalForm-focus',
       planner_task_id: 'shadow-side',
       painter_scope: 'medium',
       change_domains: ['local-tone'],
-      problem_id: 'face-shadow-side',
+      problem_id: 'focalForm-shadow-side',
       action_class: 'REFINE',
-      expected_visual_result: 'Local face shadow is darker.',
+      expected_visual_result: 'Local focalForm shadow is darker.',
       document_id: 42,
       steps: [
         { id: 'dab', tool: 'photoshop_paint_dabs', args: { dabs: [{ x: 20, y: 20 }] } },
@@ -2672,7 +2868,7 @@ describe('Painter VisualMicroPlan envelope', () => {
       ],
     };
     const parsed = parseVisualMicroPlan(base);
-    expect(parsed.plannerDirectiveId).toBe('face-focus');
+    expect(parsed.plannerDirectiveId).toBe('focalForm-focus');
     expect(parsed.plannerTaskId).toBe('shadow-side');
     expect(parsed.changeDomains).toEqual(['local-tone']);
 

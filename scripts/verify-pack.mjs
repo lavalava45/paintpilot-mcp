@@ -16,6 +16,10 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const REQUIRED_FILES = [
   'dist/index.js',
   'scripts/prepare.mjs',
+  'THIRD_PARTY_NOTICES.md',
+  'third-party-components.json',
+  ...JSON.parse(readFileSync(join(ROOT, 'third-party-components.json'), 'utf8'))
+    .components.flatMap(component => component.notice_files.map(file => file.path)),
 ];
 
 const FORBIDDEN_PREFIXES = ['dist/analytics/', 'dist/ui/'];

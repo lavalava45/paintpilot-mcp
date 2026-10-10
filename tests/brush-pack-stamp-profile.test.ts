@@ -26,7 +26,7 @@ const settings = {
   smoothing_enabled: false,
 };
 
-function seed(dir: string, preset = 'Definitely A Bird By Filename'): string {
+function seed(dir: string, preset = 'Definitely An Organic Motif By Filename'): string {
   const file = path.join(dir, 'probe.jpg');
   const bytes = Buffer.from(`stamp-probe:${preset}`);
   writeFileSync(file, bytes);
@@ -63,8 +63,8 @@ describe('P0-E.3 stamp/motif profiles', () => {
       profile: {
         probe_operation_id: 'probe-stamp-1',
         classification_status: 'classified',
-        motif_category: 'flying-bird-silhouette',
-        semantic_description: 'Single side-view flying bird with swept wings',
+        motif_category: 'organic-motif',
+        semantic_description: 'Single asymmetric organic motif with directional extensions',
         canonical_footprint_bounds: { left: 42, top: 55, right: 168, bottom: 146 },
         canonical_orientation_degrees: 0,
         useful_scale_range: { min_px: 24, max_px: 180 },
@@ -80,9 +80,9 @@ describe('P0-E.3 stamp/motif profiles', () => {
     expect(listStampMotifProfiles(packId, { recordDirectory: dir })).toHaveLength(1);
   });
 
-  it('keeps an ambiguous visual probe explicitly unclassified even when the preset filename suggests a bird', () => {
+  it('keeps an ambiguous visual probe explicitly unclassified even when the preset filename suggests a semantic class', () => {
     const dir = root();
-    seed(dir, 'Definitely A Bird By Filename');
+    seed(dir, 'Definitely An Organic Motif By Filename');
     const result = executeBrushPackProfileAction({
       action: 'record_stamp',
       profile: {
@@ -108,7 +108,7 @@ describe('P0-E.3 stamp/motif profiles', () => {
       action: 'record_stamp',
       profile: {
         probe_operation_id: 'probe-stamp-1', classification_status: 'unclassified',
-        motif_category: 'bird', semantic_description: 'guessed from name',
+        motif_category: 'organic-motif', semantic_description: 'guessed from name',
         canonical_footprint_bounds: { left: 1, top: 1, right: 10, bottom: 10 },
         canonical_orientation_degrees: 0, useful_scale_range: { min_px: 10, max_px: 20 },
         mirror_x: 'unknown', mirror_y: 'unknown', rotation_policy: 'unknown',
@@ -123,7 +123,7 @@ describe('P0-E.3 stamp/motif profiles', () => {
     expect(() => executeBrushPackProfileAction({
       action: 'record_stamp',
       profile: {
-        classification_status: 'classified', motif_category: 'bird', semantic_description: 'filename says bird',
+        classification_status: 'classified', motif_category: 'organic-motif', semantic_description: 'filename claims a semantic class',
       },
     }, { recordDirectory: dir })).toThrow(/requires probe_operation_id/);
   });

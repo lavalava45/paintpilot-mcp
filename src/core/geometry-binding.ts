@@ -46,6 +46,14 @@ export interface GeometryBindingStaleness {
   changed_dependency_ids: string[];
 }
 
+export interface GeometryBindingAffineTransform {
+  scale_x?: number;
+  scale_y?: number;
+  translate_x?: number;
+  translate_y?: number;
+  origin?: GeometryPoint;
+}
+
 const STABLE_ID = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,79}$/;
 function asRecord(value: unknown, path: string): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${path} must be an object`);
@@ -163,6 +171,55 @@ export function geometryBindingDependencyIds(binding: GeometryBinding): string[]
     if (constraint.target_ref && constraint.target_ref !== binding.owner_id) ids.add(constraint.target_ref);
   }
   return [...ids].sort();
+}
+
+/**
+ * Reprojects owner-local numeric construction when its semantic parent is moved
+ * or scaled. This deliberately touches only executable document-space geometry:
+ * semantic dependency ids, constraints and exact-evidence provenance remain
+ * unchanged and must still pass the ordinary staleness checks.
+ */
+export function transformGeometryBinding(
+  binding: GeometryBinding,
+  transform: GeometryBindingAffineTransform,
+): GeometryBinding {
+  const scaleX = transform.scale_x ?? 1;
+  const scaleY = transform.scale_y ?? scaleX;
+  const translateX = transform.translate_x ?? 0;
+  const translateY = transform.translate_y ?? 0;
+  const origin = transform.origin ?? { x: 0, y: 0 };
+  if (![scaleX, scaleY, translateX, translateY, origin.x, origin.y].every(Number.isFinite)
+      || scaleX <= 0 || scaleY <= 0) {
+    throw new Error('geometry_binding affine transform requires finite positive scales and finite origin/translation');
+  }
+  const projectPoint = (point: GeometryPoint): GeometryPoint => ({
+    x: origin.x + (point.x - origin.x) * scaleX + translateX,
+    y: origin.y + (point.y - origin.y) * scaleY + translateY,
+  });
+  const projectBounds = (value: GeometryBounds): GeometryBounds => ({
+    left: origin.x + (value.left - origin.x) * scaleX + translateX,
+    top: origin.y + (value.top - origin.y) * scaleY + translateY,
+    right: origin.x + (value.right - origin.x) * scaleX + translateX,
+    bottom: origin.y + (value.bottom - origin.y) * scaleY + translateY,
+  });
+  return {
+    ...structuredClone(binding),
+    anchors: {
+      ...(binding.anchors.near_contact ? { near_contact: projectPoint(binding.anchors.near_contact) } : {}),
+      ...(binding.anchors.far_extent ? { far_extent: projectPoint(binding.anchors.far_extent) } : {}),
+      ...(binding.anchors.centerline ? { centerline: {
+        line: [
+          projectPoint(binding.anchors.centerline.line[0]),
+          projectPoint(binding.anchors.centerline.line[1]),
+        ],
+      } } : {}),
+    },
+    control_sections: binding.control_sections.map(section => ({
+      ...section,
+      at: projectPoint(section.at),
+      ...(section.expected_bounds ? { expected_bounds: projectBounds(section.expected_bounds) } : {}),
+    })),
+  };
 }
 
 export function geometryBindingStaleness(
