@@ -62,6 +62,10 @@ The dedicated Chat On Steroids entry point is `dist/cos-plugin.js`. It starts th
 
 ## Geometry, kinematics and painterly algorithms
 
+![Authored geometry, numerical solving and separately editable paint components](assets/engineering/geometry-and-editable-components.png)
+
+*Conceptual diagram: authored constraints support construction; actual rendered pixels still need visual review.*
+
 - **[IK.ts](https://github.com/goldst/IK.ts) / FABRIK** — articulated joints, fixed limb lengths and contact targets.
 - **[Clipper2](https://github.com/AngusJohnson/Clipper2)** (via the [TypeScript port](https://github.com/countertype/clipper2-ts)) — contour clipping, exclusions and brush-safe offsets.
 - **[Bezier.js](https://github.com/Pomax/bezierjs)** — smooth, adaptively subdivided construction contours.
@@ -87,6 +91,10 @@ one opaque one-shot render. Three research ideas currently shape the painting ar
 
 ### Adaptive Multiscale Visual Verification
 
+![Whole-frame composition, object focus and micro-detail evidence from the same registered frame](assets/engineering/adaptive-multiscale-verification.png)
+
+*Conceptual diagram: additional crops provide evidence without executing the paint operation again.*
+
 A single screenshot is not equally useful for every visual decision. Composition, object structure,
 and micro-detail require different observational scales, so the Guard selects a minimum review level:
 
@@ -105,6 +113,10 @@ documented in [`docs/visual-evaluation.md`](docs/visual-evaluation.md).
 
 ### Bounded Artistic Autonomy
 
+![Same-chat Director, Painter and Critic roles with the Guard to UXP to Photoshop execution lane](assets/engineering/bounded-artistic-autonomy.png)
+
+*Conceptual diagram: same-conversation artistic roles use one guarded execution lane; tool completion does not certify artistic success.*
+
 Useful painting requires more than safe atomic tool calls, but unconstrained multi-step autonomy can
 drift, compound errors, or hide regressions. The project therefore explores a middle regime:
 **semantic-pass autonomy inside an explicit artistic task**.
@@ -122,6 +134,10 @@ acceptance status is recorded in `docs/roadmap-final-acceptance-matrix.md` rathe
 the forward-looking roadmap.
 
 ### Evidence-Bound Recovery
+
+![Lost-reply recovery through durable journal, fresh state and preview, and original-operation reconciliation](assets/engineering/evidence-bound-recovery.png)
+
+*Conceptual diagram: reconcile the original operation before a new action; partial or uncertain execution stays on the recovery path.*
 
 In a stateful editor, repeating an uncertain mutation is not a harmless retry: a brush stroke,
 transform, erase, fill, or composite may be applied twice and permanently diverge from the state that
