@@ -25,11 +25,16 @@ mutations fail closed with `guard_required` and must run through
 
 ## Agent workflow
 
-```
-get_capabilities → get_state → semantic tool chain → get_preview to verify
-```
+In required-Guard mode, obtain public capabilities/status and the exact necessary
+tool schemas; submit bounded visual mutations through `photoshop_guard_cycle_auto`.
+Inspect its exact inline BEFORE/AFTER, or request missing evidence roles through
+`photoshop_guard_review_image`; combine the actual previous observation with the
+next pass. Reconcile uncertain operations before any new mutation. Raw semantic
+mutators are not a fallback for required Guard.
 
-Compose supported semantic `photoshop_*` tools directly. Use the five `ps.*` guide prompts for reusable multi-step planning. On failure, read structured error envelopes (`code`, `suggested_next_tool`) and call `get_state` before retrying.
+Other MCP clients may expose read-only semantic tools directly; refer to their
+reported access mode and current tool schema. The five `ps.*` prompts provide
+planning guidance, not independent evidence or a bypass of mutation safety.
 
 ## MCP client configuration
 
@@ -62,6 +67,9 @@ Compose supported semantic `photoshop_*` tools directly. Use the five `ps.*` gui
 ## Documentation
 
 - [README](https://github.com/lavalava45/paintpilot-mcp/blob/digital-painting/README.md)
+- [Русский README](https://github.com/lavalava45/paintpilot-mcp/blob/digital-painting/README.ru.md)
+- [Illustrated English documentation](https://github.com/lavalava45/paintpilot-mcp/blob/digital-painting/docs/en/README.md)
+- [Иллюстрированная документация на русском](https://github.com/lavalava45/paintpilot-mcp/blob/digital-painting/docs/ru/README.md)
 - [Install](https://github.com/lavalava45/paintpilot-mcp/blob/digital-painting/INSTALL.md)
 - [Architecture](https://github.com/lavalava45/paintpilot-mcp/blob/digital-painting/docs/architecture.md)
 - [Available tools](https://github.com/lavalava45/paintpilot-mcp/blob/digital-painting/docs/available-tools.md)

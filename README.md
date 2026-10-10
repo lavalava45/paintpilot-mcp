@@ -1,6 +1,11 @@
 # Photoshop MCP — Digital Painting Edition
 
-[Русский](README.ru.md)
+[Русский](README.ru.md) · **English**
+
+**Illustrated documentation:** [English chapters](docs/en/README.md) ·
+[Русские главы](docs/ru/README.md) ·
+[Technical architecture](docs/architecture.md) ·
+[Current roadmap](docs/PAINTING-ROADMAP.md).
 
 Independently maintained MCP system for AI-driven digital painting and evidence-bound Photoshop automation on Windows.
 
@@ -63,6 +68,12 @@ The dedicated Chat On Steroids entry point is `dist/cos-plugin.js`. It starts th
 - **[Aaron Hertzmann's painterly rendering research](https://mrl.cs.nyu.edu/publications/painterly98/)** — inspiration for our own bounded brush-stroke algorithm; no upstream implementation code was copied.
 
 These techniques support construction and rendering; they do **not** independently guarantee anatomical correctness or artistic quality. Authors, versions, licenses and usage details: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+The [illustrated English](docs/en/README.md) and [Russian](docs/ru/README.md)
+chapters cover the complete conceptual workflow and historical case studies.
+Their example images predate some current runtime contracts; they are
+preserved as historical evidence, **not** advertised as present-day artistic
+acceptance.
 
 Implementation and workflow details: [object construction and articulated pose](docs/object-construction.md),
 [reference-guided painterly strokes](docs/painterly-strokes.md), and

@@ -1,6 +1,10 @@
 # Digital Painting Implementation Index
 
-Independent vision review is integrated at existing pass boundaries; [evaluator context, authority and live limits](artistic-evaluator.md). Director plans are separate from pixel judgment. Code checks do not close artistic quality acceptance.
+Same-chat visual review and whole-scene Critic checkpoints run at existing pass boundaries;
+[review authority and live limits](artistic-evaluator.md). This is not an independent vision model.
+Director plans are separate from pixel judgment. Code checks do not close artistic quality
+acceptance. Conceptual illustrated documentation:
+[English](en/README.md) · [Русский](ru/README.md).
 
 This document maps the painting system to its implementation. It is **not an allowlist of tools**
 and is not loaded as the agent's runtime painting prompt.

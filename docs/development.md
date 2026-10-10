@@ -2,6 +2,10 @@
 
 Current build, validation and troubleshooting guide for **Photoshop MCP — Digital Painting Edition**.
 
+Illustrated conceptual documentation is published in [English](en/README.md) and
+[Russian](ru/README.md). Both language trees share historical image evidence,
+while executable contracts remain in these technical docs and source schemas.
+
 ← Back to [README](../README.md)
 
 For end-user installation and MCP host configuration, see [`INSTALL.md`](../INSTALL.md). Architecture and Guard/UXP contracts live in [`architecture.md`](architecture.md).
@@ -67,7 +71,14 @@ npm run verify:tool-counts
 npm run verify:compact-v2-contract
 npm run verify:acceptance-matrix
 npm run verify:live-evidence-ledger
+npm run verify:docs
 ```
+
+`verify:docs` checks reciprocal RU/EN article navigation, relative links,
+the nine paired pages and all ten preserved historical illustrations.
+It is part of `verify:canonical` and does not invoke Photoshop or any
+machine-translation model. Source code and acceptance artifacts remain
+the authority for factual claims in the illustrated chapters.
 
 Photoshop-dependent or targeted integration helpers still exposed by `package.json` include:
 

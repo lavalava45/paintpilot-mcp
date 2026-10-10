@@ -11,6 +11,8 @@ can remain. A technically delivered image or populated form is not a passed arti
 
 This document is the canonical visual-evaluation reference for the digital-painting project. It
 combines the adaptive multiscale verification model with the practical painting evaluation suite.
+Illustrated explanations and preserved historical evidence:
+[English](en/visual-verification.md) · [Русский](ru/visual-verification.md).
 
 It serves two purposes:
 

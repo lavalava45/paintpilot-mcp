@@ -57,8 +57,9 @@
     "verify:product-identity": "node scripts/verify-product-identity.mjs",
     "verify:provenance": "node scripts/verify-provenance.mjs",
     "verify:external-intake": "node scripts/verify-external-intake.mjs",
-    "verify:canonical": "npm run build:server && npm run verify:guard-public-contract && npm run verify:third-party-notices && npm run verify:pack && npm run lint && npm run test:acceptance && npm run verify:compact-v2-contract && npm run verify:painting-policy && npm run verify:photoshop-prompts && npm run verify:source-independence && npm run verify:product-identity && npm run verify:provenance && npm run verify:external-intake && npm run verify:tool-counts && npm run verify:live-evidence-ledger",
-    "verify:third-party-notices": "node scripts/verify-third-party-notices.mjs"
+    "verify:canonical": "npm run build:server && npm run verify:guard-public-contract && npm run verify:third-party-notices && npm run verify:pack && npm run lint && npm run test:acceptance && npm run verify:compact-v2-contract && npm run verify:painting-policy && npm run verify:photoshop-prompts && npm run verify:source-independence && npm run verify:product-identity && npm run verify:provenance && npm run verify:external-intake && npm run verify:tool-counts && npm run verify:live-evidence-ledger && npm run verify:docs",
+    "verify:third-party-notices": "node scripts/verify-third-party-notices.mjs",
+    "verify:docs": "node scripts/verify-bilingual-docs.mjs"
   },
   "keywords": [
     "mcp",

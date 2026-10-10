@@ -1,14 +1,34 @@
 # Architecture
 
-## Same-chat pixel review — 2026-10-05 source update
+## Same-chat pixel review — current 2026-10-10 contract
 
 The existing inline/exact-image review asks the Painter in the same chat to inspect actual BEFORE/AFTER
 against the original brief/style, identify the largest visible defect and choose a construction change.
 Existing previous_observation fields store the critique; the next pass acts on it. Pass gain, task/stage
 readiness and whole-image finish remain distinct. This self-review is not independent artistic acceptance.
-Production no longer creates, loads, calls or waits for a local vision evaluator. Stored historical local
-assessments do not override current observations. Exact image delivery and no-replay rules remain intact.
+Production no longer creates, loads, calls or waits for a local vision evaluator. The same-chat Critic
+role additionally checks five whole-scene criteria at bounded checkpoints; saved/accepted pixels do
+not waive outstanding whole-brief failures. Stored historical local assessments do not override
+current observations. Exact image delivery and no-replay rules remain intact.
 See [workflow and experimental history](artistic-evaluator.md); activation/live quality acceptance is pending.
+
+## Scene construction and evidence — 2026-10-10
+
+Durable, document-bound `scene_geometry_model` and applicable quantitative Geometry Preflight
+govern authored spatial relationships. The revisioned `scene_lighting_color_model` records
+lighting sources, sampled/artist-selected palette anchors, value hierarchy and their provenance.
+Object construction uses independently owned/layered components, authored landmarks, relative
+contours, optional rigid poses and IK contact targets; `painterly` planning uses an aligned
+JPEG and bounded, same-owner BRUSH strokes. These are executable contracts, not synthetic
+anatomy, physical illumination, independent art review or comprehensive live pixel acceptance.
+For implementation rules and limitations see
+[object construction](object-construction.md),
+[reference-guided strokes](painterly-strokes.md), and
+[artistic review](artistic-evaluator.md).
+
+**Conceptual examples and provenance:** [English illustrated series](en/README.md)
+and [Russian illustrated series](ru/README.md). Both intentionally reuse the original
+historical JPEG evidence instead of presenting retouched imagery as fresh tests.
 
 
 Engineering source of truth for **Photoshop MCP — Digital Painting Edition**: host integration,
