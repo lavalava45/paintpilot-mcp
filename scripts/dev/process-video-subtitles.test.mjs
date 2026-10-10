@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { subtitleBlocks, distributeSubtitleBlocks } from './process-video-subtitles.mjs';
+import { subtitleBlocks, distributeSubtitleBlocks, missingSidecarCommentary } from './process-video-subtitles.mjs';
 
 test('existing sidecar keeps intent, craft/settings and observed result as three blocks', () => {
   const text = '\uFEFFЯ планирую уточнить руку.\r\nХочу сохранить её изгиб.\r\n'
@@ -45,4 +45,14 @@ test('very short segments preserve text without zero-length cues; invalid timing
   assert.ok(cues.every((cue) => cue.end > cue.start));
   assert.equal(cues.at(-1).end, 0.002);
   assert.throws(() => distributeSubtitleBlocks(['a'], 1, 1));
+});
+
+test('missing sidecars use recorded manifest intent/outcome without inventing success', () => {
+  const fallback = missingSidecarCommentary({ artistic_intent: 'Я хочу уточнить гриф.' });
+  assert.deepEqual(subtitleBlocks(fallback), ['Я хочу уточнить гриф.',
+    'Комментарий к результату этого фрагмента не сохранён; успешное выполнение не подтверждается.']);
+  assert.equal(missingSidecarCommentary({ artistic_intent: 'Attempt a correction.', outcome_note: 'Not executed.' }),
+    'Attempt a correction.\n\nNot executed.');
+  assert.match(missingSidecarCommentary({ artistic_intent: 'Attempt a correction.' }), /not confirmed/);
+  assert.throws(() => missingSidecarCommentary({ artistic_intent: ' ' }), /Missing subtitle/);
 });

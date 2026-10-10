@@ -44,10 +44,43 @@ do not block the main painting path.
 
 ## P0-E.26 — Autonomous painting continuation across the host turn boundary
 
-**OPEN; implementation and acceptance not yet started.** Fix premature termination of an
+**OFFLINE IMPLEMENTATION DONE IN ACTIVE COS SOURCE CHECKOUT; HOST ACTIVATION AND LIVE ACCEPTANCE STILL OPEN (2026-10-10).** Fix premature termination of an
 unattended Painter activation without conflating it with the separate engineering agents'
 work. This is a **host/session lifecycle and artistic-completion** issue, not permission
 to remove the per-pass visual barrier or to add a new arbitrary pass/time quota.
+
+**Source-level stop boundary established:** Windows process inspection identified the running
+Chat On Steroids executable at `experiments/chat-on-steroids-OUR-RELEASE-2.1.32/release/win-unpacked/`
+and the actual child invocation of this repo's `dist/cos-plugin.js` (not a sibling checkout).
+The host Goal driver in `src/main/goal.ts` supplied its decision helper the conversation
+and only the **number** of MCP calls per turn; trusted Guard result state was absent.
+Consequently a helper STOP on an optimistic Painter final could become `no-reply` / "goal met"
+even when Guard had returned `continue_required`. This is a reproduced **source/host
+boundary**, not a forensic attribution of all seven overnight activations.
+
+**Applied in that COS 2.1.32 source checkout, without restarting the running app:** a
+small source-turn-scoped Guard receipt reader now exposes only sanitized
+`unresolved|blocked|null` evidence to the existing Goal/Loop decision, including the
+finish-follow-up path. Only successful, complete, exactly attributed MCP tool results
+for this turn/chat may establish unfinished work; a verified rejection/uncertain receipt
+produces a safe blocker. Technical close/save and optimistic final prose never erase
+already verified unfinished artwork. An unsupported Goal STOP gets **at most one**
+revised decision; a second STOP becomes a visible **non-retryable**
+`painting_guard_unresolved_no_action` blocker, not an endless identical attempt or
+fabricated continuation. Existing user STOP/Off, page final/settle, exact source ownership,
+outbox priority and no-replay control retain authority. No new scheduler, callback daemon,
+local model or additional Photoshop tool was introduced.
+
+**Offline verification:** focused COS Goal/Loop / Goal races / session-finish / new receipt
+tests **256/256 PASS**, TypeScript typecheck PASS. This proves deterministic host-boundary
+behaviour under mocked helper decisions, not actual continuation in the already running
+packaged COS binary. **Next activation:** rebuild/activate the modified COS source through
+the authorized host release path, confirm which version actually loaded, and accept one
+real Goal-enabled Painter final with exact Guard `continue_required` → new concrete
+correction in the **same COS goal activation**; also accept explicit user STOP, unresolved
+no-gain/blocker and genuine confirmed whole-brief finish. Do not run that live test or
+restart during this offline implementation step. E.26 remains P0 until this activation
+and artistic throughput check pass. See CHANGELOG.
 
 **Reported overnight audit (investigation inputs, not independently revalidated here):**
 seven Painter activations without a configured time limit produced four visual passes;

@@ -3,7 +3,7 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, dirname, extname, isAbsolute, join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { subtitleBlocks, distributeSubtitleBlocks } from './process-video-subtitles.mjs';
+import { subtitleBlocks, distributeSubtitleBlocks, missingSidecarCommentary } from './process-video-subtitles.mjs';
 
 function fail(message) {
   console.error(`[build-process-video] ${message}`);
@@ -204,7 +204,7 @@ for (const entry of entries) {
 
   const stem = basename(clipPath, extname(clipPath));
   const textPath = join(framesDir, `${stem}.txt`);
-  if (!existsSync(textPath)) fail(`Missing matching subtitle text: ${textPath}`);
+  const sidecarExists = existsSync(textPath);
 
   const info = probe(clipPath);
   const signature = streamSignature(info);
@@ -216,7 +216,14 @@ for (const entry of entries) {
     );
   }
 
-  const rawText = readFileSync(textPath, 'utf8');
+  let rawText;
+  if (sidecarExists) {
+    rawText = readFileSync(textPath, 'utf8');
+  } else {
+    try { rawText = missingSidecarCommentary(entry); }
+    catch (error) { fail(`${error.message}: ${textPath}`); }
+    console.warn(`[build-process-video] Missing subtitle sidecar; using manifest commentary for ${entry.operation_id ?? stem}: ${textPath}`);
+  }
   const text = subtitleText(rawText);
   const blocks = subtitleBlocks(rawText);
   if (!text) fail(`Subtitle text is empty: ${textPath}`);
@@ -231,7 +238,9 @@ for (const entry of entries) {
     operationId: entry.operation_id ?? stem,
     kind: entry.kind ?? null,
     clipPath,
-    textPath,
+    textPath: sidecarExists ? textPath : null,
+    expectedTextPath: textPath,
+    textSource: sidecarExists ? 'sidecar' : 'manifest',
     text,
     blocks,
     info,
@@ -370,6 +379,8 @@ const timeline = {
     kind: clip.kind,
     clip_path: clip.clipPath,
     text_path: clip.textPath,
+    expected_text_path: clip.expectedTextPath,
+    text_source: clip.textSource,
     source_duration_seconds: clip.sourceDuration,
     slowed_duration_seconds: clip.slowedDuration,
     hold_last_frame_seconds: clip.holdDuration,

@@ -42,3 +42,14 @@ export function distributeSubtitleBlocks(blocks, start, end, firstIndex = 1) {
     text: part.join('\n'),
   }));
 }
+
+// A recorded attempt can have a clip but no AFTER-frame commentary sidecar.
+export function missingSidecarCommentary(entry) {
+  const intent = typeof entry?.artistic_intent === 'string' ? entry.artistic_intent.trim() : '';
+  if (!intent) throw new Error('Missing subtitle sidecar and nonempty manifest artistic_intent');
+  const outcome = typeof entry.outcome_note === 'string' ? entry.outcome_note.trim() : '';
+  const unavailable = /[А-Яа-яЁё]/u.test(intent)
+    ? 'Комментарий к результату этого фрагмента не сохранён; успешное выполнение не подтверждается.'
+    : 'No outcome commentary was saved for this clip; successful execution is not confirmed.';
+  return `${intent}\n\n${outcome || unavailable}`;
+}
