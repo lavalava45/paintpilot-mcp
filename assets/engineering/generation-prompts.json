@@ -1,7 +1,7 @@
 {
   "date": "2026-10-11",
-  "generator": "OpenAI built-in imagegen",
-  "purpose": "Conceptual documentation illustrations, not Photoshop output or live validation evidence",
+  "generator": "OpenAI built-in imagegen (conceptual diagrams); Pillow (real-frame crop diagram)",
+  "purpose": "Engineering documentation: conceptual diagrams and one real saved process-frame crop example; not live acceptance evidence",
   "assets": [
     {
       "file": "geometry-and-editable-components.png",
@@ -18,13 +18,19 @@
     },
     {
       "file": "adaptive-multiscale-verification.png",
-      "sha256": "dd13e13a6c5bf58d81e565d148614cb04a730c6a3bd6b693c3c03f4276f5f3b4",
+      "sha256": "aab28ed18e05ae71239a657445d3b103c8bed839fe401c9077b45ccdbac01fa3",
       "dimensions": [
         1536,
         1024
       ],
-      "prompt": "Use case: infographic-diagram. Asset type: English engineering illustration for the PaintPilot GitHub README. Create one polished, accurate landscape technical infographic, wide 3:2 canvas, white/off-white opaque background, dark navy large sans-serif typography, restrained teal and amber highlights, generous white space, crisp thin connectors with unmistakable arrowheads, vector-like linework and a few simple illustrative miniatures. Legible when embedded at 1000px width. An explanatory engineering plate, not a dashboard mockup. Use ONLY the English text specified below, with exact spelling; no filler text, no fake benchmark numbers, no promotional guarantees, no Adobe logo, no watermark. All content must stay inside canvas with comfortable margins. Prefer clear reading order and few large labels. Add the small footer 'Conceptual engineering diagram' at bottom right.\nTitle: 'REVIEW AT THE SCALE OF THE QUESTION'\nSubtitle: 'Whole-frame context stays visible. Local evidence is added when needed.'\nLayout: three large panels across one row, labelled 'COMPOSITION', 'OBJECT', 'MICRO'. Use a simple cozy street-and-window schematic repeated accurately as three different views of ONE unchanged illustration: first a whole scene with building, sidewalk and a small figure for scale; second a closer window with sill and wall recess; third a very tight crop showing one window edge/contact gap. In first panel outline the source rectangle that corresponds to the second view; in second panel outline source rectangle that corresponds to third. Thin teal connectors connect crop rectangles to enlarged views and are labelled only 'read-only crop'. Beneath each panel: 'Masses & focal hierarchy', 'Form, proportion & contact', 'Edges, seams & artifacts', respectively. Beneath panels place a slim horizontal evidence capsule labelled 'Same document • Exact frame identity'. A final short note says 'Request more evidence; do not replay the paint operation.' Use obvious optical magnification/crop connectors; avoid a pipeline suggesting the image is repainted between views. All three panels depict exactly the same composition and nested source regions. The example is conceptual, not a Photoshop test result.",
-      "edit_prompt": null
+      "edit_prompt": null,
+      "original_generation_prompt": "Use case: infographic-diagram. Asset type: English engineering illustration for the PaintPilot GitHub README. Create one polished, accurate landscape technical infographic, wide 3:2 canvas, white/off-white opaque background, dark navy large sans-serif typography, restrained teal and amber highlights, generous white space, crisp thin connectors with unmistakable arrowheads, vector-like linework and a few simple illustrative miniatures. Legible when embedded at 1000px width. An explanatory engineering plate, not a dashboard mockup. Use ONLY the English text specified below, with exact spelling; no filler text, no fake benchmark numbers, no promotional guarantees, no Adobe logo, no watermark. All content must stay inside canvas with comfortable margins. Prefer clear reading order and few large labels. Add the small footer 'Conceptual engineering diagram' at bottom right.\nTitle: 'REVIEW AT THE SCALE OF THE QUESTION'\nSubtitle: 'Whole-frame context stays visible. Local evidence is added when needed.'\nLayout: three large panels across one row, labelled 'COMPOSITION', 'OBJECT', 'MICRO'. Use a simple cozy street-and-window schematic repeated accurately as three different views of ONE unchanged illustration: first a whole scene with building, sidewalk and a small figure for scale; second a closer window with sill and wall recess; third a very tight crop showing one window edge/contact gap. In first panel outline the source rectangle that corresponds to the second view; in second panel outline source rectangle that corresponds to third. Thin teal connectors connect crop rectangles to enlarged views and are labelled only 'read-only crop'. Beneath each panel: 'Masses & focal hierarchy', 'Form, proportion & contact', 'Edges, seams & artifacts', respectively. Beneath panels place a slim horizontal evidence capsule labelled 'Same document • Exact frame identity'. A final short note says 'Request more evidence; do not replay the paint operation.' Use obvious optical magnification/crop connectors; avoid a pipeline suggesting the image is repainted between views. All three panels depict exactly the same composition and nested source regions. The example is conceptual, not a Photoshop test result.",
+      "original_generation_status": "Superseded: generated scenes did not preserve one source window",
+      "generator": "Pillow: exact pixel crops and deterministic layout",
+      "updated": "2026-10-11",
+      "source_asset": "multiscale-source-ontime-stage-05.png",
+      "provenance": "multiscale-provenance.json",
+      "builder": "build-multiscale-diagram.py"
     },
     {
       "file": "bounded-artistic-autonomy.png",

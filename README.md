@@ -91,9 +91,9 @@ one opaque one-shot render. Three research ideas currently shape the painting ar
 
 ### Adaptive Multiscale Visual Verification
 
-![Whole-frame composition, object focus and micro-detail evidence from the same registered frame](assets/engineering/adaptive-multiscale-verification.png)
+![Whole frame and exact nested window crops from one real saved Ontime process image](assets/engineering/adaptive-multiscale-verification.png)
 
-*Conceptual diagram: additional crops provide evidence without executing the paint operation again.*
+*Real saved Ontime process frame with two exact nested crops. Source pixels, coordinates and hashes are [retained with the illustration](assets/engineering/multiscale-provenance.json); no scene content was regenerated.*
 
 A single screenshot is not equally useful for every visual decision. Composition, object structure,
 and micro-detail require different observational scales, so the Guard selects a minimum review level:

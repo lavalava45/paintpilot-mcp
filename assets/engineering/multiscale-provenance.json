@@ -1,0 +1,61 @@
+{
+  "date": "2026-10-11",
+  "method": "Deterministic Pillow crop and layout; no image generation",
+  "source_project_path": "processes/ontime-blue-hour-patisserie-process/run-01/final/ontime-blue-hour-stage-05.png",
+  "source_asset": "multiscale-source-ontime-stage-05.png",
+  "source_dimensions": [
+    1536,
+    1024
+  ],
+  "source_file_sha256": "6fc559ef7ff287751c8b8570a34fcd4ea7d21e6cc8fa2fa3460a4fdf63238615",
+  "source_decoded_rgb_sha256": "71181e7ae1c3316b99faac693f281775b0c233588f2e53fae87429fdd3578625",
+  "coordinates": "[left, top, right, bottom], source pixels; right/bottom exclusive",
+  "object": {
+    "box": [
+      1350,
+      370,
+      1510,
+      550
+    ],
+    "asset": "multiscale-object-crop.png",
+    "dimensions": [
+      160,
+      180
+    ],
+    "decoded_rgb_sha256": "d3b88a412c248339002826488af20140f8aca0a626b2479eb6d715be55234ee5",
+    "presentation_scale": 2.5
+  },
+  "micro": {
+    "box": [
+      1370,
+      390,
+      1434,
+      454
+    ],
+    "box_in_object": [
+      20,
+      20,
+      84,
+      84
+    ],
+    "asset": "multiscale-micro-crop.png",
+    "dimensions": [
+      64,
+      64
+    ],
+    "decoded_rgb_sha256": "f0b6ca719e5cb450ae93bfee551b45a1cc09bd7f959a1a201342d238c20bf311",
+    "presentation_scale": 6
+  },
+  "presentation": {
+    "overview_resize": "Lanczos",
+    "crop_enlargement": "nearest neighbour",
+    "rectangles": "presentation overlays only"
+  },
+  "limits": "A saved process frame, not a fabricated Guard receipt or proof of artistic acceptance.",
+  "files": {
+    "adaptive-multiscale-verification.png": "aab28ed18e05ae71239a657445d3b103c8bed839fe401c9077b45ccdbac01fa3",
+    "multiscale-source-ontime-stage-05.png": "6fc559ef7ff287751c8b8570a34fcd4ea7d21e6cc8fa2fa3460a4fdf63238615",
+    "multiscale-object-crop.png": "1fae937f23f7a3de099fc2be33d8c6c4273ea561ebb8dd032eea3984593a5e21",
+    "multiscale-micro-crop.png": "09ca72f4b27ab61d3ae40dae9cf010afeb9a9f0ca89a3958908c3d5297e18beb"
+  }
+}
