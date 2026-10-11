@@ -21,5 +21,11 @@ completed, not-executed, partial and still-uncertain work; no branch authorizes 
 Generation prompts, final-file hashes and dimensions are retained in
 [generation-prompts.json](generation-prompts.json). Two targeted imagegen edits corrected
 the Guard execution connector and the recovery sequence before publication.
+On 2026-10-11, an imagegen edit replaced the mechanical-arm example with a cat
+reaching a windowsill, to make the subject being painted unambiguous. IK.ts,
+Bezier.js and Clipper2 are shown as methods chosen when needed, not a mandatory
+serial pipeline. The layer thumbnails illustrate selected editable parts; they
+are not an exhaustive decomposition or a Photoshop screenshot.
+
 Existing library/algorithm attribution remains in
 [THIRD_PARTY_NOTICES.md](../../THIRD_PARTY_NOTICES.md).
