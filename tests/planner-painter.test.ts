@@ -3142,6 +3142,45 @@ describe('bounded correction of a global priority defect', () => {
     return { s, plan, req };
   }
 
+  it('accepts a durable multi-region cumulative global defect in Director and admits only its planned medium repair', () => {
+    const { s, plan, req } = fixture();
+    const trendId = 'cumulative-trend-primitive-footprint-repeating';
+    seedTrendSignal(s, 'trend-region-a', 3, {
+      bounds: { left: 25, top: 40, right: 150, bottom: 220 }, region: 'first scene component',
+    });
+    seedTrendSignal(s, 'trend-region-b', 4, {
+      bounds: { left: 700, top: 420, right: 900, bottom: 640 }, region: 'separate scene component',
+    });
+    const cumulative = (s as any).cumulativeTrendState(42);
+    const promoted = (s as any).promoteCumulativeTrendProblem(
+      42, s.paintingState().documents['42'], cumulative
+    );
+    expect(promoted.visual_problems[trendId]).toMatchObject({
+      scale: 'global', status: 'open', severity: 'must-fix',
+      promotion_reason: 'materially_separate_regions',
+    });
+    s.updatePaintingState(42, () => ({
+      ...promoted,
+      visual_problems: { [trendId]: promoted.visual_problems[trendId] },
+      art_director: undefined,
+    }));
+    plan.tasks[0].correction_target = { problem_id: trendId, region_bounds: roi };
+    // No fabricated Critic global rectangle: the original multi-region
+    // evidence stays separate, while this bounded plan declares its own scope.
+    expect(s.paintingState().documents['42'].visual_problems[trendId].review_region_bounds).toBeUndefined();
+    expect(() => s.setArtDirectorState({ document_id: 42, action: 'review', directive: plan })).not.toThrow();
+    const painter = structuredClone(req);
+    painter.args.addresses_problem_id = trendId;
+    painter.args.addresses_problem_ids = [trendId];
+    expect(() => s.plannerGate(42, painter)).not.toThrow();
+    expect(() => s.priorityGate(42, painter)).not.toThrow();
+    expect(s.paintingState().documents['42'].visual_problems[trendId])
+      .toMatchObject({ status: 'open', scale: 'global' });
+    const unplanned = structuredClone(painter);
+    unplanned.args.planner_task_id = 'unplanned-task';
+    expect(() => s.priorityGate(42, unplanned)).toThrow(/stage_priority_gate/);
+  });
+
   it('admits a planned medium reconstruction through both gates without closing global debt', () => {
     const { s, req } = fixture();
     expect(() => s.plannerGate(42, req)).not.toThrow();

@@ -69,6 +69,32 @@ After two semantic repair attempts, no further mutation was dispatched; the tors
 
 ## Next engineering and artistic steps (NOT YET DONE)
 
+**Source fix recorded after this incident:** The repeatable conflict is a
+close+next *transactional durability* fault, not proof that the Art Director
+needs weaker spatial admission. On a new cumulative global must-fix promoted
+by a valid previous exact-image verdict, post-closure Painter priority
+revalidation used to restore the entire closure snapshot on rejection, so the
+following Director request could not find the problem it had been told to
+repair. The guarded runtime now **retains that validated visual closure and
+its promoted global debt** when only the new next pass is rejected by the
+newly durable global priority. No rejected Photoshop mutation is dispatched.
+Rollback/uncertain closure still restores the snapshot, and Director medium
+task/geometry/ownership requirements remain intact.
+
+Owning regressions:
+- `tests/embedded-guard.test.ts`: real two-pass cumulative promotion inside
+  a combined close+next cycle, retained valid verdict and newly durable
+  global must-fix, no execution of the rejected continuation; existing
+  rollback snapshot test remains required.
+- `tests/planner-painter.test.ts`: durable multi-region cumulative defect
+  admitted by Director as a bounded medium correction, while the global
+  parent remains open and an unplanned pass is rejected.
+
+**Engineering tests do not prove artistic recovery.** Rebuild/activate this
+source change, run the corrected Director/Painter path in a fresh Photoshop
+S01 document, and inspect the actual tiger anatomy before closing this
+incident. The original failed PSD remains untouched.
+
 1. **Do not patch around the tiger/theme.** Construct a subject-agnostic owning regression test using an open *cumulative global* must-fix promoted from multiple materially separated Critic-reviewed regions, followed by a real medium construction correction that directly addresses it. Test both public Guard rejection instructions and Art Director's region-admission rule against the same durable state. Preserve exact Critic/owner/rollback authority; do not weaken safety.
 2. Determine the general viable mapping from multi-region cumulative evidence to a bounded medium correction, or provide a clear executable alternative (such as a legitimate global construction pass). No ungrounded region union and no fabricated Critic assessment. The user should not have to hand-author technical metadata already saved in Guard.
 3. Validate the appropriate **supported** art profile and available oil/texture brushes before the next realistic painting run; `simple_graphic` is confirmed and may be inappropriate, but must not be silently replaced with an invented profile.

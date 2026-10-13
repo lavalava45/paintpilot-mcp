@@ -2418,6 +2418,14 @@ export class EmbeddedGuardRuntime {
         const closureSnapshot = transactionOperationId
           ? this.store.snapshotClosureState(transactionOperationId)
           : undefined;
+        // Retain the authoritative state from before the provisional closure.
+        // A truthful visual verdict may promote a new global problem only in
+        // the projected state of this combined close+next operation. If that
+        // next pass then needs an Art Director plan, rolling the closure back
+        // means the Director cannot yet see the newly promoted problem.
+        const beforeClosureDocument = previousRecordBeforeClosure?.args?.document_id
+          ? this.store.paintingState().documents?.[String(previousRecordBeforeClosure.args.document_id)]
+          : undefined;
         const closureStartedAt = Date.now();
         try {
           closedPrevious = this.store.closePreviousCycle(cycleInput);
@@ -2470,16 +2478,74 @@ export class EmbeddedGuardRuntime {
           );
           guardPreflightMs += Date.now() - postClosureStartedAt;
           if (postClosureCheck.rejection) {
-            this.store.restoreClosureState(closureSnapshot);
+            // A truthful, already validated visual verdict can promote a new
+            // global problem at closure. If its existence blocks the paired
+            // next visual pass, retain the completed verdict (as we do for an
+            // initially rejected next operation), but never dispatch that next
+            // mutation. The Director can then read the durable global problem.
+            // Other post-closure failures, notably rollback-required, retain
+            // the atomic snapshot-restore behavior.
+            const projectedDocument = previousRecordBeforeClosure?.args?.document_id
+              ? this.store.paintingState().documents?.[String(previousRecordBeforeClosure.args.document_id)]
+              : undefined;
+            const unsafeClosureDebt = postClosureCheck.violations.some((issue: any) =>
+              /rollback_required|pending_rollback|visual_barrier|identity_unverified|uncertain_execution/
+                .test(String(issue.code ?? '') + ' ' + String(issue.message ?? ''))
+            );
+            const newlyPromotedGlobal = closedPrevious.closed && previousOperationId && !unsafeClosureDebt
+              ? Object.values(projectedDocument?.visual_problems ?? {}).find((problem: any) =>
+                problem?.status === 'open' && problem.scale === 'global'
+                && problem.severity === 'must-fix'
+                && beforeClosureDocument?.visual_problems?.[problem.problem_id]?.status !== 'open'
+                && postClosureCheck.violations.some((issue: any) =>
+                  String(issue.message ?? '').startsWith('stage_priority_gate:')
+                  && String(issue.message ?? '').includes(problem.problem_id)
+                  && String(issue.message ?? '').includes('photoshop_guard_art_director')
+                )
+              ) as { problem_id: string } | undefined
+              : undefined;
+            if (!newlyPromotedGlobal) this.store.restoreClosureState(closureSnapshot);
             const envelope = buildPreflightRejectionEnvelope(
               postClosureCheck.nextOperation ?? nextOperation,
               postClosureCheck.rejection,
-              { closed_previous: { closed: false } }
+              { closed_previous: newlyPromotedGlobal ? closedPrevious : { closed: false } }
             );
             const body = envelope.preflight_rejection;
             envelope.preflight_rejection = body && typeof body === 'object'
               ? { ...body as Record<string, unknown>, post_closure_semantic_revalidation: true }
               : body;
+            if (newlyPromotedGlobal) {
+              const guidance =
+                `The previous exact-image visual verdict was durably finalized; new global must-fix "${newlyPromotedGlobal.problem_id}" now exists in Guard state. `
+                + 'Do NOT repeat previous_operation_id or previous_observation. '
+                + 'Call photoshop_guard_art_director action=review with an evidence-backed bounded medium construction task, correction_target and allowed_global_changes, '
+                + 'then submit the new causally linked Painter pass. The rejected next operation was not dispatched and no Photoshop pixels were changed by it.';
+              const rejection = envelope.preflight_rejection as Record<string, any>;
+              envelope.preflight_rejection = {
+                ...rejection,
+                durable_visual_finalization: {
+                  problem_id: newlyPromotedGlobal.problem_id,
+                  previous_operation_id: previousOperationId,
+                  previous_operation_closed: true,
+                  next_tool: 'photoshop_guard_art_director',
+                  execution: 'not-executed',
+                },
+                canonical_next_operation: {
+                  action: 'review-director-for-durable-global-problem',
+                  tool: 'photoshop_guard_art_director',
+                  requirement: guidance,
+                },
+                compact_correction_recipe: {
+                  ...(rejection.compact_correction_recipe ?? {}),
+                  repeat_same_semantic_cycle: false,
+                  previous_operation_closed: true,
+                  first_response: 'review the durable global defect with Art Director; do not repeat the valid previous visual verdict',
+                },
+                next_required_action: guidance,
+              };
+              (envelope.preflight_rejection as Record<string, unknown>).previous_operation_closed = true;
+              envelope.next_required_action = guidance;
+            }
             envelope.cycle_latency = {
               protocol: 'photoshop.guard.cycle_latency.v1',
               inter_call_unattributed_gap_ms: null,

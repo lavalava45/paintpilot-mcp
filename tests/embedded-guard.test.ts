@@ -2731,6 +2731,86 @@ describe('embedded Photoshop Guard', () => {
     expect(runtime.store.read('post-closure-gate-next')).toBeUndefined();
   });
 
+  it('routes a newly promoted global visual defect through durable closure before Director review', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'embedded-guard-director-transition-'));
+    dirs.push(dir);
+    const { registry } = fakeRegistry(dir);
+    const priorPreview = jpegMeta(dir, 'trend-before.jpg', 40);
+    const firstPreview = jpegMeta(dir, 'trend-first.jpg', 160);
+    const secondPreview = jpegMeta(dir, 'trend-second.jpg', 195);
+    let captureCount = 0;
+    const previewTool = registry.get('photoshop_get_preview')!;
+    previewTool.handler = async () => ({
+      content: [{ type: 'text', text: JSON.stringify(
+        [priorPreview, firstPreview, secondPreview][Math.min(captureCount++, 2)]
+      ) }],
+    });
+    const runtime = runtimeFor(registry, dir);
+    runtime.artRun({ document_id: 42, process_dir: 'processes/director-transition-process/run-01',
+      painting_profile: 'simple_graphic' });
+    const left = { left: 0, top: 0, right: 18, bottom: 20 };
+    const right = { left: 28, top: 25, right: 46, bottom: 47 };
+    const first = await runtime.cycle({ next_pass: {
+      request_key: 'director-transition-first', document_id: 42,
+      goal: 'Make the first visibly provisional shape.', region: 'left structure',
+      region_bounds: left, stage: 'GLOBAL_BLOCK_IN', scale: 'medium',
+      actions: [{ id: 'left-opacity', tool: 'photoshop_set_layer_opacity', args: { opacity: 50 } }],
+    } }) as any;
+    expect(first.preflight_rejection).toBeUndefined();
+    // The direct-mutation fake has no mark footprint; attach the exact
+    // region metadata that a real compiled visual microplan persists.
+    const firstRecord = runtime.store.read('director-transition-first')!;
+    runtime.store.write({ ...firstRecord, region_bounds: left });
+    const second = await runtime.cycle({
+      previous_operation_id: 'director-transition-first',
+      previous_observation: {
+        observed: 'The exact provisional left mark is primitive, but its first bounded mark has been placed.',
+        target: 'resolved', primitive_footprint: 'suspect',
+      },
+      next_pass: {
+        request_key: 'director-transition-second', document_id: 42,
+        goal: 'Add a separate provisional mass far from the first mark.', region: 'right structure',
+        region_bounds: right, stage: 'GLOBAL_BLOCK_IN', scale: 'medium',
+        actions: [{ id: 'right-opacity', tool: 'photoshop_set_layer_opacity', args: { opacity: 60 } }],
+      },
+    }) as any;
+    expect(second.preflight_rejection).toBeUndefined();
+    const secondRecord = runtime.store.read('director-transition-second')!;
+    runtime.store.write({ ...secondRecord, region_bounds: right });
+    expect(runtime.store.paintingState().documents['42']?.visual_problems?.['cumulative-trend-primitive-footprint-repeating'])
+      .toBeUndefined();
+    const attempted = await runtime.cycle({
+      previous_operation_id: 'director-transition-second',
+      previous_observation: {
+        observed: 'The exact frame now has two separate primitive areas and needs structural reconstruction.',
+        target: 'unresolved', primitive_footprint: 'suspect',
+        primary_mismatch: 'Repeated primitive shapes occupy two distant areas; repaint structural forms.',
+      },
+      next_pass: {
+        request_key: 'director-transition-head', document_id: 42,
+        goal: 'Build the anatomically convincing component instead of painting decorative texture.',
+        region: 'upper structure', region_bounds: { left: 18, top: 0, right: 40, bottom: 25 },
+        stage: 'GLOBAL_BLOCK_IN', scale: 'medium',
+        actions: [{ id: 'blocked-structural-opacity', tool: 'photoshop_set_layer_opacity', args: { opacity: 75 } }],
+      },
+    }) as any;
+    expect(attempted.preflight_rejection).toBeDefined();
+    expect(attempted.preflight_rejection?.errors.join('\n')).toMatch(/stage_priority_gate.*cumulative-trend-primitive-footprint-repeating/);
+    expect(attempted.preflight_rejection?.post_closure_semantic_revalidation).toBe(true);
+    expect(attempted.preflight_rejection?.durable_visual_finalization).toMatchObject({
+      problem_id: 'cumulative-trend-primitive-footprint-repeating',
+      previous_operation_id: 'director-transition-second',
+      previous_operation_closed: true,
+    });
+    expect(attempted.next_required_action).toMatch(/Do NOT repeat previous_operation_id.*photoshop_guard_art_director/);
+    expect(attempted.closed_previous.closed).toBe(true);
+    expect(runtime.store.read('director-transition-head')).toBeUndefined();
+    expect(runtime.store.read('director-transition-second')?.verdict?.target_resolved).toBe('no');
+    expect(runtime.store.read('director-transition-second')?.operation_ack).toBeDefined();
+    expect(runtime.store.paintingState().documents['42']?.visual_problems?.['cumulative-trend-primitive-footprint-repeating'])
+      .toMatchObject({ scale: 'global', status: 'open', severity: 'must-fix' });
+  });
+
   it('compactly finalizes the last visual pass in one cycle_auto call and records latency components', async () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'embedded-guard-finalize-'));
     dirs.push(dir);
