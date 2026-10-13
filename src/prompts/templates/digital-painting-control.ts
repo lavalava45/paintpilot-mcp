@@ -101,7 +101,8 @@ export const digitalPaintingControlTemplate: PhotoshopPromptTemplate = {
       `GUARD / CONTROLLER:`,
       `- OPEN BRIEF: compare 4–6 candidates (at least four) from four problem families; reject duplicates/atmosphere-only premises. Choose subject+setting+action+spatial problem; ease never decides alone. Never browse or consult prior runs/lists or cross-run artistic memory. This is a one-time choice: no Guard gate and no subject-selection repeat inside the paint loop.`,
       `- Hierarchy: COMPOSITION → SHAPE → VALUE → FORM → EDGE → MATERIAL → DETAIL. Do not advance while a lower-frequency must-fix remains.`,
-      `- RECOGNITION BLOCK-IN: derive 3–7 discriminative cues (importance is not proportional to size) + style cue; rough the whole subject across sequential passes. The stage is NOT one pass. Until overview reads unaided, fix the largest barrier.`,
+      `- RECOGNITION BLOCK-IN: derive 3–7 discriminative cues (importance is not proportional to size) + style cue; rough the whole subject across sequential passes. The stage is NOT one pass. Until overview reads unaided, fix the largest barrier. A construction fill MAY include same-owner tonal_regions when suitable for the brief; preserve brush-only and painterly requirements.`,
+
       `- Choose REFERENCE REPRODUCTION, FREE COMPOSITION, or STYLIZED PAINTING; free composition establishes composition/light/depth/palette before detail.`,
       `- Derive a minimal STYLE CONTRACT; judge USER BRIEF + STRUCTURAL READABILITY + STYLE CONTRACT. Style never excuses broken tangencies/occlusion.`,
       `- ART RUN: bind one immutable processes/<subject>-process/<run>/ before paint; keep painting-state.json, frames/, checkpoints/, final/ there. accepted_frame != current_frame.`,

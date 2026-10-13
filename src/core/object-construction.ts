@@ -978,9 +978,78 @@ export const CONSTRUCTION_PASS_SCHEMA = object(
       },
       ['red', 'green', 'blue']
     ),
+    tonal_regions: {
+      type: 'array', maxItems: 31,
+      description: 'Optional cat-style colored subregions for THIS construction part only, in the same Photoshop layer and one History rollback unit. Each complete polygon must lie inside the constructed part; no other semantic owner may be painted.',
+      items: object({
+        id: { type: 'string' },
+        color: object({
+          red: { type: 'number', minimum: 0, maximum: 255 },
+          green: { type: 'number', minimum: 0, maximum: 255 },
+          blue: { type: 'number', minimum: 0, maximum: 255 },
+        }, ['red', 'green', 'blue']),
+        opacity: { type: 'number', exclusiveMinimum: 0, maximum: 100 },
+        points: { type: 'array', minItems: 3, maxItems: 256,
+          items: object({ x: { type: 'number', minimum: 0 }, y: { type: 'number', minimum: 0 } }, ['x', 'y']) },
+      }, ['color', 'points']),
+    },
   },
   ['part_id', 'color']
 );
+
+function insideConstructedContour(point: { x: number; y: number }, polygon: Array<{ x: number; y: number }>): boolean {
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const a = polygon[j]!, b = polygon[i]!;
+    const cross = (point.x - a.x) * (b.y - a.y) - (point.y - a.y) * (b.x - a.x);
+    if (Math.abs(cross) <= 1e-7 && point.x >= Math.min(a.x, b.x) - 1e-7
+      && point.x <= Math.max(a.x, b.x) + 1e-7 && point.y >= Math.min(a.y, b.y) - 1e-7
+      && point.y <= Math.max(a.y, b.y) + 1e-7) return true;
+    if ((a.y > point.y) !== (b.y > point.y)
+      && point.x < ((b.x - a.x) * (point.y - a.y)) / (b.y - a.y) + a.x) inside = !inside;
+  }
+  return inside;
+}
+
+function boundedConstructionTonalRegions(
+  value: unknown, part: { id: string; contour: Array<{ x: number; y: number }> },
+  fail: (code: string, path: string, message: string) => never,
+): Array<Record<string, unknown>> {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > 31) fail('construction_tonal_regions_invalid', 'next_pass.construction.tonal_regions', 'Supply no more than 31 authored regions');
+  return (value as unknown[]).map((entry, index) => {
+    const path = `next_pass.construction.tonal_regions[${index}]`;
+    const region = entry as Record<string, unknown> | null;
+    const color = region?.color as Record<string, unknown> | undefined;
+    const points = region?.points;
+    const opacity = region?.opacity ?? 100;
+    if (!color || !['red','green','blue'].every(k => typeof color[k] === 'number'
+      && Number.isFinite(color[k]) && Number(color[k]) >= 0 && Number(color[k]) <= 255)
+      || typeof opacity !== 'number' || !Number.isFinite(opacity) || opacity <= 0 || opacity > 100
+      || !Array.isArray(points) || points.length < 3 || points.length > 256)
+      fail('construction_tonal_region_invalid', path, 'Supply a valid RGB color, opacity and 3–256 polygon points');
+    const contour = (points as unknown[]).map((p, k) => {
+      const xy = p as { x?: unknown; y?: unknown } | null;
+      if (!xy || typeof xy.x !== 'number' || typeof xy.y !== 'number'
+        || !Number.isFinite(xy.x) || !Number.isFinite(xy.y) || xy.x < 0 || xy.y < 0)
+        fail('construction_tonal_region_invalid', `${path}.points[${k}]`, 'Polygon points need finite nonnegative canvas coordinates');
+      return { x: xy!.x as number, y: xy!.y as number };
+    });
+    // Check the entire straight boundary (not only vertices) for concave parts.
+    for (let i = 0; i < contour.length; i++) {
+      const a = contour[i]!, b = contour[(i + 1) % contour.length]!;
+      for (let t = 0; t <= 16; t++) {
+        const f = t / 16;
+        if (!insideConstructedContour({ x: a.x + f * (b.x - a.x), y: a.y + f * (b.y - a.y) }, part.contour))
+          fail('construction_tonal_region_outside_part', `${path}.points`, `Colored region must remain inside the independent ${part.id} component`);
+      }
+    }
+    return {
+      id: typeof region?.id === 'string' && region.id.trim() ? region.id : `${part.id}-tone-${index + 1}`,
+      color, opacity, contours: [{ points: contour }],
+    };
+  });
+}
 
 export function validateRigidRevision(previous: ConstructionModel, current: ConstructionModel, reshape: unknown = []) {
   if (!Array.isArray(reshape) || reshape.length > 16 || reshape.some(id => typeof id !== 'string' || !previous.objects.some(o => o.id === id)))
@@ -1106,6 +1175,9 @@ export function expandConstructionPass(
   if (raw.visual_intent === 'line' && renderMode === 'fill')
     error('construction_rendering_intent_conflict', 'next_pass.construction.rendering.mode', 'A line intention cannot execute a fill; choose outline and its width.');
   const outline = renderMode === 'outline';
+  if (outline && request.tonal_regions !== undefined)
+    error('construction_tonal_regions_require_fill', 'next_pass.construction.tonal_regions', 'Colored fill regions cannot be appended to an outline-only construction');
+  const tonalRegions = boundedConstructionTonalRegions(request.tonal_regions, part!, error);
   const preset = rendering?.preset_name;
   if (preset !== undefined && (typeof preset !== 'string' || !preset.trim()))
     error('construction_preset_invalid', 'next_pass.construction.rendering.preset_name', 'Choose a nonempty installed preset name.');
@@ -1243,6 +1315,7 @@ export function expandConstructionPass(
           contours: [{ points: part!.contour, closed: true,
             ...(part!.intersection_policy ? { intersection_policy: part!.intersection_policy } : {}) }],
         },
+        ...tonalRegions.map(region => ({ ...region, layer_id: target })),
       ],
     },
   });

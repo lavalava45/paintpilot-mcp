@@ -374,6 +374,43 @@ it('rejects authored actions mixed with generated geometry and refuses an owner/
     )
   ).toThrow(ConstructionError);
 });
+it('compiles cat-style tonal regions into the SAME constrained part and Photoshop rollback unit', async () => {
+  const square = { model_id: 'generic-color-panel', revision: 1, basis: 'Artist-drawn planar component',
+    objects: [{ id: 'panel', subject_kind: 'single-component', origin: [0, 0] }],
+    points: [
+      { id: 'a', object_id: 'panel', position: [10, 10], fixed: true },
+      { id: 'b', object_id: 'panel', position: [110, 10], fixed: true },
+      { id: 'c', object_id: 'panel', position: [110, 110], fixed: true },
+      { id: 'd', object_id: 'panel', position: [10, 110], fixed: true },
+    ], parts: [{ id: 'panel-part', object_id: 'panel', role: 'Editable colored panel',
+      outline: ['a', 'b', 'c', 'd'], curve: 'linear' }],
+    camera: { kind: 'orthographic', origin: [0, 0], scale: 1 } };
+  const tone = { id: 'cool-shadow', color: { red: 130, green: 160, blue: 180 }, opacity: 45,
+    points: [{ x: 20, y: 20 }, { x: 90, y: 20 }, { x: 65, y: 70 }] };
+  const request = { ...pass(square as any), construction: { model: square, part_id: 'panel-part',
+    color: { red: 225, green: 220, blue: 215 }, tonal_regions: [tone] } };
+  const expanded = expandConstructionPass(request, {}, () => null);
+  const paint = (expanded.pass.actions as any[]).find(s => s.tool === 'photoshop_paint_regions');
+  expect(paint.args.regions).toHaveLength(2);
+  expect(paint.args.regions[1]).toMatchObject({ id: 'cool-shadow', opacity: 45,
+    layer_id: '$steps.construction_layer.details.layerId' });
+  expect(paint.args.regions[0].layer_id).toBe(paint.args.regions[1].layer_id);
+  const owner = expandConstructionPass(request,
+    { logical_layer_owners: [{ hypothesis_id: 'panel-part', layer_id: 17 }] }, () => null);
+  const ownedPaint = (owner.pass.actions as any[])[0];
+  expect(ownedPaint.args).toMatchObject({ replace_contents: true,
+    regions: [{ layer_id: 17 }, { layer_id: 17 }] });
+  const f = compilerFixture();
+  const compiled = await compileGuardCycle({ next_pass: request }, f.store, f.registry);
+  expect(compiled.violations, JSON.stringify(compiled.violations)).toEqual([]);
+  expect(f.dispatch).not.toHaveBeenCalled();
+  expect(() => expandConstructionPass({ ...request, construction: { ...request.construction,
+    tonal_regions: [{ ...tone, points: [{ x: 20, y: 20 }, { x: 150, y: 20 }, { x: 65, y: 70 }] }] } },
+  {}, () => null)).toThrow('inside the independent');
+  expect(() => expandConstructionPass({ ...request, construction: { ...request.construction,
+    rendering: { mode: 'outline', size: 3 }, tonal_regions: [tone] } }, {}, () => null))
+    .toThrow('cannot be appended');
+});
 it('reuses the durable model and exact physical component layer, refusing stale/conflicting revisions', () => {
   const normalized = normalizeConstructionModel(model('crocodile')),
     p = pass();

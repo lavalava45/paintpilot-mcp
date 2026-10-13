@@ -378,6 +378,23 @@ Multi-step etiquette
 - For a new subject, use Recognition Block-In before ordinary refinement: derive 3–7
   discriminative recognition features (small features may be high-priority), include one large
   style cue when style is requested, and rough in the whole subject before polishing one contour.
+  When a compound component requires \`next_pass.construction\`, give its FIRST
+  fill pass several authored \`construction.tonal_regions\` inside the solved part
+  where justified by color/value design; they compile into ONE owned
+  \`photoshop_paint_regions\` action and one rollback unit. When suitable for the intended visual result, do not wait for a
+  separate cosmetic pass to give the component a readable form. Regions are
+  not permission to paint a second independent component or escape its contour.
+  For early structured-mass recognition work, an available executable method is
+  \`region-block-in\` / \`photoshop_paint_regions\`: author several purposeful, differently
+  colored closed regions within the SAME independently editable semantic component
+  when they clarify characteristic silhouette, internal value grouping and anatomy.
+  This is the demonstrated multi-region cat approach, not a requirement to draw
+  a monochrome primitive before its recognition cues. A complex subject may need
+  successive owner-specific passes; never flatten independently editable parts
+  into one layer or ignore the single-owner/rollback boundary. Preserve a user-
+  requested brush medium or stronger evidence for visible painterly marks, soft
+  volumes or atmospheric fields instead of substituting polygon art for them.
+
   \`photoshop_paint_regions\` is broad closed-mass scaffolding during
   RECOGNITION_BLOCK_IN / COMPOSITION / SHAPE / GLOBAL_BLOCK_IN. Exit broad ADD block-in only when
   the whole preview reads without relying on the prompt. At later stages region painting is legal

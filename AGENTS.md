@@ -119,6 +119,17 @@ Establish the setting/path/large masses in the following bounded passes before r
 do not begin with an independent atmosphere-only/gradient task. Preserve editable owner layers
 and the bounded pass contract. Director is optional; its first task should cover whole-scene
 recognition/composition with global/medium scope and the relevant subject/context zones.
+For early structured-mass recognition, consider the tested multi-color
+`photoshop_paint_regions` approach: several intentional closed color/value regions
+inside one independently editable component/layer, rather than one monochrome
+primitive awaiting decoration. This preference does not bypass compound-part
+ownership, one-owner Guard passes, or user/style-required brush/soft media.
+When a first pass must use `construction`, its optional `tonal_regions` allow
+several authored, contained colored masses inside the solved selected part in
+the same Guard rollback unit. Prefer meaningful form/value turns to a flat
+one-color construction followed by decorative cleanup; never use tonal regions
+to flatten independently editable parts.
+
 
 Component ownership applies to every rendering profile, including simple_graphic and initial
 block-in. Do not put an entire person/animal/furniture/window on one persistent layer and promise
