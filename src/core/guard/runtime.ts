@@ -2504,11 +2504,28 @@ export class EmbeddedGuardRuntime {
                 )
               ) as { problem_id: string } | undefined
               : undefined;
-            if (!newlyPromotedGlobal) this.store.restoreClosureState(closureSnapshot);
+            // A global-change/stage-boundary glance is also generated only
+            // *after* the exact previous visual verdict is classified.
+            // Rolling that valid closure back makes an already reviewed
+            // Director appear to require the same frame indefinitely.
+            // Persist the verdict and return a read-only Director review
+            // instruction; never dispatch the requested next mutation.
+            const pendingGlance = projectedDocument?.art_director?.whole_image_glance;
+            const newlyDueGlance = closedPrevious.closed && previousOperationId && !unsafeClosureDebt
+              && beforeClosureDocument?.art_director?.whole_image_glance?.due !== true
+              && pendingGlance?.due === true
+              && pendingGlance.required_operation_id === previousOperationId
+              && typeof pendingGlance.required_frame_sha256 === 'string'
+              && postClosureCheck.violations.length > 0
+              && postClosureCheck.violations.every((issue: any) =>
+                String(issue.message ?? '').includes('whole_image_glance_required:')
+              )
+              ? pendingGlance : undefined;
+            if (!newlyPromotedGlobal && !newlyDueGlance) this.store.restoreClosureState(closureSnapshot);
             const envelope = buildPreflightRejectionEnvelope(
               postClosureCheck.nextOperation ?? nextOperation,
               postClosureCheck.rejection,
-              { closed_previous: newlyPromotedGlobal ? closedPrevious : { closed: false } }
+              { closed_previous: newlyPromotedGlobal || newlyDueGlance ? closedPrevious : { closed: false } }
             );
             const body = envelope.preflight_rejection;
             envelope.preflight_rejection = body && typeof body === 'object'
@@ -2544,6 +2561,32 @@ export class EmbeddedGuardRuntime {
                 next_required_action: guidance,
               };
               (envelope.preflight_rejection as Record<string, unknown>).previous_operation_closed = true;
+              envelope.next_required_action = guidance;
+            } else if (newlyDueGlance) {
+              const guidance = `The previous exact visual verdict was finalized and created a whole-image review boundary for operation_id=${previousOperationId}, frame_sha256=${newlyDueGlance.required_frame_sha256}, trigger=${newlyDueGlance.reason}. `
+                + 'Do NOT close or replay that operation again. Review the exact frame with photoshop_guard_art_director action=review and whole_image_glance matching the required operation_id, frame_sha256 and trigger; '
+                + 'include a truthful relationship_audit for any required_relations. Only then retry the rejected next pass as a fresh cycle. No next Photoshop mutation was dispatched.';
+              const rejection = envelope.preflight_rejection as Record<string, any>;
+              envelope.preflight_rejection = {
+                ...rejection,
+                durable_visual_finalization: {
+                  previous_operation_id: previousOperationId,
+                  previous_operation_closed: true,
+                  review_kind: 'whole_image_glance',
+                  operation_id: previousOperationId,
+                  frame_sha256: newlyDueGlance.required_frame_sha256,
+                  trigger: newlyDueGlance.reason,
+                  required_relations: newlyDueGlance.required_relations ?? [],
+                  execution: 'not-executed',
+                },
+                compact_correction_recipe: {
+                  ...(rejection.compact_correction_recipe ?? {}),
+                  repeat_same_semantic_cycle: false,
+                  previous_operation_closed: true,
+                  first_response: 'review the durable exact-frame whole-image glance with Art Director; do not repeat the previous operation',
+                },
+                next_required_action: guidance,
+              };
               envelope.next_required_action = guidance;
             }
             envelope.cycle_latency = {

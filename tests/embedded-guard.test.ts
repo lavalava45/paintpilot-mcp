@@ -2811,6 +2811,70 @@ describe('embedded Photoshop Guard', () => {
       .toMatchObject({ scale: 'global', status: 'open', severity: 'must-fix' });
   });
 
+  it('durably closes an exact visual verdict when only its new whole-image glance blocks the paired next pass', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'embedded-guard-new-glance-transition-'));
+    dirs.push(dir);
+    const { registry } = fakeRegistry(dir);
+    const runtime = runtimeFor(registry, dir);
+    runtime.artRun({ document_id: 42, process_dir: 'processes/new-glance-transition-process/run-01',
+      painting_profile: 'simple_graphic' });
+
+    const first = await runtime.cycle({ next_pass: {
+      request_key: 'glance-boundary-source', document_id: 42,
+      goal: 'A whole-frame structural change requiring Director review after visual closure.',
+      stage: 'GLOBAL_BLOCK_IN', scale: 'medium', change_domains: ['silhouette'],
+      actions: [{ id: 'first-opacity', tool: 'photoshop_set_layer_opacity', args: { opacity: 55 } }],
+    } }) as any;
+    expect(first.preflight_rejection).toBeUndefined();
+    const source = runtime.store.read('glance-boundary-source') as any;
+    // The direct-opacity fake does not compile global-change microplan
+    // metadata; a real constructed visual pass persists these declared
+    // domains and Planner links on its visual operation record.
+    runtime.store.write({ ...source, change_domains: ['silhouette'],
+      planner_directive_id: 'glance-test-directive', planner_task_id: 'glance-task',
+      painter_scope: 'medium',
+    });
+    runtime.store.updatePaintingState(42, current => ({
+      ...current, art_director: {
+        directive_id: 'glance-test-directive', status: 'active',
+        review_after_microplans: 9, task_review_after_microplans: 9,
+        current_task_id: 'glance-task',
+        tasks: [{ task_id: 'glance-task', status: 'active',
+          allowed_scales: ['medium', 'small'], successful_microplans: 0 }],
+        whole_image_glance: { due: false, reason: null, history: [] },
+      },
+    }));
+    // The original source was submitted as a global silhouette pass. Its
+    // visual closure is required to create the exact SHA-bound glance.
+    expect((runtime.store.read('glance-boundary-source') as any)?.change_domains).toContain('silhouette');
+    const result = await runtime.cycle({ previous_operation_id: 'glance-boundary-source',
+      previous_observation: {
+        observed: 'The exact frame contains the new silhouette and still needs a whole-frame review.',
+        target: 'resolved', primary_mismatch: 'The local silhouette exists, but whole-frame relationships still require Director review.',
+      },
+      next_pass: {
+        request_key: 'glance-boundary-next', document_id: 42,
+        goal: 'Another bounded visual correction after the obligatory Director glance.',
+        stage: 'GLOBAL_BLOCK_IN', scale: 'medium',
+        actions: [{ id: 'second-opacity', tool: 'photoshop_set_layer_opacity', args: { opacity: 60 } }],
+      },
+    }) as any;
+    expect(result.preflight_rejection?.errors.join('\n')).toMatch(/whole_image_glance_required/);
+    expect(result.preflight_rejection?.post_closure_semantic_revalidation).toBe(true);
+    expect(result.closed_previous).toMatchObject({ closed: true, operation_id: 'glance-boundary-source' });
+    expect(result.preflight_rejection?.durable_visual_finalization).toMatchObject({
+      previous_operation_id: 'glance-boundary-source', previous_operation_closed: true,
+      review_kind: 'whole_image_glance', operation_id: 'glance-boundary-source',
+      execution: 'not-executed',
+    });
+    expect(runtime.store.read('glance-boundary-source')?.verdict).toBeDefined();
+    expect(runtime.store.read('glance-boundary-next')).toBeUndefined();
+    expect(runtime.store.paintingState().documents['42'].art_director?.whole_image_glance)
+      .toMatchObject({ due: true, reason: 'global_change',
+        required_operation_id: 'glance-boundary-source' });
+    expect(result.next_required_action).toMatch(/Do NOT close or replay.*photoshop_guard_art_director/);
+  });
+
   it('compactly finalizes the last visual pass in one cycle_auto call and records latency components', async () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'embedded-guard-finalize-'));
     dirs.push(dir);
