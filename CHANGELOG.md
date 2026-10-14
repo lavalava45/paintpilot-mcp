@@ -2,6 +2,39 @@
 
 ## 2026-10-15 — Roadmap reconciliation and Git branch consolidation
 
+- **Retired the last auxiliary Git worktree and five legacy experiment
+  folders, with independent archival verification.** The detached
+  `work/paintpilot-baseline-verify-20261014` checkout at frozen `3689249`
+  was clean; its ignored UXP deployment marker was preserved, and the
+  generated `dist` and `node_modules` removed before normal
+  `git worktree remove`. Five remaining 2026-10-12 experiment directories
+  under `E:/Downloads/devspace-test/work` were compared against the current
+  checkout and archived before deletion. The archive contains **1,587
+  files / 98,630,638 bytes**, with verified SHA-256 for each and a complete
+  2,729-file candidate/source manifest (1,142 byte-identical files already
+  in the canonical checkout were not duplicated):
+  `E:/Downloads/devspace-test/_archives/paintpilot-temp-folders-closure-20261015/`.
+  This includes the unique pagoda PSD, PNG, process/reference snapshots,
+  source variations, patch sets and test logs. Reproducible `dist` and
+  `node_modules` were excluded; **two external junctions** were detached
+  without removing their targets. The first junction safety guard halted
+  on Windows `\\?\\` path normalization; after a verified guard fix, cleanup
+  resumed. Final `git worktree list` shows exactly the canonical checkout;
+  the old work directory is empty, the main working tree is clean, and both
+  canonical and external dependency directories remain intact. No main
+  source, deployment, UXP or historical Git commit was changed.
+- **Audited remote branches without deleting them.** GitHub has **14
+  branches total**: the maintained `digital-painting`, 11 additional
+  branches fully reachable from it (zero unique commits), and two divergent
+  branches: `affix/readme-i18n-8c08` (16 branch-only commits) and
+  `docs/consolidate-readme` (1 branch-only commit). Verified remote SHAs
+  and Git ancestry, no protected branch flags, no repository rulesets,
+  no open or closed repository PRs, and no references in the checked
+  GitHub workflow/release scripts. A per-branch manifest with exact SHAs
+  and comparisons is saved locally at
+  `E:/Downloads/devspace-test/_archives/paintpilot-temp-folders-closure-20261015/remote-branch-audit-20261015.json`.
+  Deleting the 11 candidates and preserving the two unique histories remain
+  open work requiring explicit authorization; no remote ref was mutated.
 - **Converted the post-first-city archive branch to an annotated Git tag.**
   Created `artist-post-first-city-20261014` at exact commit
   `fac85eab4c978f65614da268243ae1d8747f9ec0`, containing the six
