@@ -281,7 +281,7 @@ is maintenance-only. [Details: E.8](PAINTING-WORK-DETAILS.md#e8).
 | Local warp, wider transactions and pressure profiling | A reproduced need justifies them and native safety prerequisites are met. [E.27](PAINTING-WORK-DETAILS.md#e27) |
 | Process video, release, other hosts and optional 3D/perception | Later or specifically requested; these do not block the main painting path. [E.22 and later sections](PAINTING-WORK-DETAILS.md#e22) |
 
-## Repository consolidation — ONE canonical product version (PLANNED, not executed)
+## Repository consolidation — ONE canonical product version (IN PROGRESS)
 
 **Decision:** `digital-painting` is the **single maintained integration/release
 branch** at `github.com/lavalava45/paintpilot-mcp`; its checkout is
@@ -293,19 +293,50 @@ lines. `origin/HEAD` / GitHub default branch should ultimately point to
 `digital-painting`. Do **not** equate consolidation with merging abandoned
 experimental features or overwriting the first-city baseline.
 
-**Inventory observed 2026-10-15 (re-evaluate immediately before deletion):**
+**Inventory observed 2026-10-15; updated after two authorized cleanups
+(re-evaluate immediately before any further deletion):**
 
 | Branch or worktree | Relationship to frozen `3689249` | Disposition after evidence review |
 | --- | --- | --- |
 | Local + remote `digital-painting` | Canonical baseline, clean and deployed | **KEEP** as the only active branch; later approved changes land through review here |
 | Local + remote `archive/post-first-city-20261014` | `fac85ea`, **6** post-baseline commits | **KEEP until** all required patches, tag/bundle checks and restoration work are signed off; then replace branch with an archive tag if retention permits |
-| Local `fix/brush-paint-stall-20261014` | Same tip `fac85ea`; occupied checkout `work/paintpilot-brush-recovery-20261014` | **DELETE CANDIDATE** once no agent uses it and archival equivalence is proven |
+| Former local `fix/brush-paint-stall-20261014` | Same tip `fac85ea` as preserved local and remote archive; **zero unique commits** | **DONE 2026-10-15:** redundant local branch and worktree `work/paintpilot-brush-recovery-20261014` removed; no corresponding GitHub branch existed; journals backed up separately |
 | Local `archive/retired-beta-rc-20261013` | Diverged (**10 baseline-only / 7 RC-only** commits), not merely an ancestor | **PRESERVE unique RC history** in tag/bundle before proposing removal; do not casually drop those 7 commits |
-| Local `integration/current-project-20261014` | Ancestor: 3 commits behind baseline | **DELETE CANDIDATE**, after confirming no surviving unique evidence |
-| Local `integration/night-refactor-20261014` | Ancestor: 4 commits behind; worktree still attached at `experiments/paintpilot-refactor-isolation-20261014` | **REMOVE worktree only after its owner stops**; then delete branch |
+| Former local `integration/current-project-20261014` | Ancestor of canonical history; **zero unique commits** | **DONE 2026-10-15:** redundant local branch removed |
+| Former local `integration/night-refactor-20261014` | Ancestor of canonical history; **zero unique commits** | **DONE 2026-10-15:** redundant local branch and worktree `experiments/paintpilot-refactor-isolation-20261014` removed; diagnostics archived |
 | Local `digital-painting-local-history-20260914` | Diverged (**113 baseline-only / 13 local-history-only**) | **PRESERVE 13 unique commits** as a tag/bundle or verify safe irrelevance; only then propose deletion |
 | Local + remote `master`, remote `develop` | Old ancestor lines, not the current digital-painting product | **DELETE CANDIDATES**, but audit GitHub protections, external PRs, default branch and provenance first |
 | Remote `origin/affix/*`, `origin/docs/*`, `origin/feat/*`, `origin/fix/*` | 2026-10-15 remote-tracking inventory has legacy branches (**16 branch refs**, excluding symbolic `origin/HEAD`) | Review branch ownership / open PRs / unique commits, then propose explicit per-ref remote deletion |
+
+**Completed cleanup receipts (2026-10-15, verified locally and against
+GitHub `git ls-remote --heads origin`):**
+
+- `integration/current-project-20261014` (formerly `a9f5867`) and
+  `integration/night-refactor-20261014` (formerly `aac7c72`) removed
+  **locally** after confirming both tips were ancestors of `digital-painting`.
+  The latter worktree was retired. Its ignored diagnostics were preserved at
+  `E:\Downloads\devspace-test\_archives\paintpilot-integration-branches-closure-20261015`.
+- `fix/brush-paint-stall-20261014` (formerly `fac85ea`) removed
+  **locally** after proving byte-for-byte SHA equivalence with
+  `archive/post-first-city-20261014` and
+  `origin/archive/post-first-city-20261014`. The temporary brush-recovery
+  worktree was retired; ignored runtime journals, final canonical test log and
+  UXP build marker were saved with SHA-256 hashes at
+  `E:\Downloads\devspace-test\_archives\paintpilot-brush-recovery-closure-20261015`.
+  An initial Windows `Filename too long` deletion failure was resolved with
+  a link-safe Python 3.12 cleanup; verification confirms the primary checkout
+  and its dependencies remained intact.
+- **GitHub:** `origin/integration/*` and
+  `origin/fix/brush-paint-stall-20261014` did **not exist** as remote
+  branches, so there was **nothing to delete remotely**. The GitHub archive
+  `origin/archive/post-first-city-20261014` remains deliberately preserved
+  at `fac85ea`; `origin/digital-painting` remains the one maintained
+  integration branch. No history rewrite or force push occurred.
+- **Still open:** one detached temporary worktree
+  `work/paintpilot-baseline-verify-20261014`, old local/remote refs enumerated
+  above and possible foreign/obsolete tracked files. They require separate
+  provenance/ownership review; the target of a **single main folder** is **not
+  yet fully achieved**.
 
 **Canonicalization sequence and acceptance gates:**
 
@@ -344,8 +375,9 @@ experimental features or overwriting the first-city baseline.
 **Definition of done:** exactly **one active maintained/deployed checkout and
 one canonical source branch**; no duplicate active release candidates, no
 stale COS/UXP paths, no unexplained working branches. Historical tags, bundles
-and third-party provenance **remain**. This is a **planned future cleanup**,
-not an authorization to rewrite published history or delete now.
+and third-party provenance **remain**. Only the three named redundant local
+branches and their two linked worktrees have been removed; **remaining cleanup
+is planned, not authorized for automatic branch removal or history rewriting**.
 
 ## Foreign / unexplained / obsolete Git files — provenance-first cleanup (PLANNED)
 
