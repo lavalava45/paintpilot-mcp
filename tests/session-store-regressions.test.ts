@@ -3675,8 +3675,9 @@ describe('Guard session-store regressions', () => {
     });
     expect(s.workflowStallStrategyContext(78).latest_ineffective_visual).toBeNull();
     expect(s.documentNextRequiredAction(78)).toMatch(
-      /^workflow stall after nonvisual\/protocol churn: dispatch one real visual pass for architecture-perspective;/
+      /^workflow stall \(blocked Painter route\): Art Director review required before Painter mutation:/
     );
+    expect(s.documentNextRequiredAction(78)).toContain('Open global must-fix');
     expect(s.documentNextRequiredAction(78)).not.toContain('Painter: execute bounded task decorative-sky');
   });
 
@@ -3921,13 +3922,16 @@ describe('Guard session-store regressions', () => {
         expect.objectContaining({
           candidate_id: 'A', kind: 'continue-current-task', task_id: 'hero-form',
           problem_id: 'hero-perspective', owner_ids: ['hero-owner'],
+          execution_route: expect.objectContaining({ status: 'requires-preflight', required_scale: 'medium' }),
         }),
         expect.objectContaining({
           candidate_id: 'B', kind: 'next-planner-task', task_id: 'support-light', owner_ids: ['support-owner'],
+          execution_route: expect.objectContaining({ status: 'pending-task' }),
         }),
         {
           candidate_id: 'C', kind: 'correct-current-problem', problem_id: 'hero-perspective',
           scale: 'medium', severity: 'must-fix', stage: 'FORM',
+          execution_route: expect.objectContaining({ status: 'requires-preflight', required_scale: 'medium' }),
         },
       ],
       protected_qualities: ['Preserve silhouette clarity.', 'Preserve quiet background hierarchy.'],
@@ -4175,6 +4179,58 @@ describe('Guard session-store regressions', () => {
         reason: 'dependency_changed', changed_dependency_ids: ['__projection__'],
       }),
     ]);
+  });
+
+  it('recommends Director review rather than a known-rejected Painter pass for global cumulative debt', () => {
+    const s = store();
+    writeProjectionRecord(s, { id: 'global-debt-cadence', documentId: 42, sequence: 1,
+      visual: true, report: true, ack: true, verdict: true });
+    const problem = { problem_id: 'cumulative-trend-primitive-footprint-repeating',
+      scale: 'global', severity: 'must-fix', status: 'open' };
+    s.updatePaintingState(42, state => ({ ...state,
+      workflow_lifecycle: { status: 'active', reason: 'operation_dispatched' },
+      visual_problems: { [problem.problem_id]: problem }, active_problem: problem,
+      art_director: {
+        status: 'active', directive_id: 'global-debt-directive', current_task_id: 'color-details',
+        tasks: [{ task_id: 'color-details', status: 'active', allowed_scales: ['small'],
+          allowed_global_changes: [] },
+          { task_id: 'next-mass', status: 'pending', allowed_scales: ['medium'] }],
+      },
+    }));
+    const expected = s.documentNextRequiredAction(42);
+    expect(expected).toContain('Art Director review required before Painter mutation');
+    expect(expected).not.toContain('Painter: execute bounded task');
+    const projection = s.captureProjectionContext({ activeJobs: [], capturedAt: Date.now() });
+    const recordsSpy = vi.spyOn(s, 'records').mockImplementation(() => {
+      throw new Error('continuation projection must reuse already supplied journal snapshot');
+    });
+    const candidates = (s.artisticContinuationContext(42, projection) as any).next_candidates;
+    expect(candidates.find((candidate: any) => candidate.candidate_id === 'A').execution_route)
+      .toMatchObject({ status: 'requires-director-review', blocker_problem_id: problem.problem_id });
+    expect(candidates.find((candidate: any) => candidate.candidate_id === 'B').execution_route.status)
+      .toBe('pending-task');
+    expect(candidates.find((candidate: any) => candidate.candidate_id === 'C').execution_route.status)
+      .toBe('requires-director-review');
+    expect(recordsSpy).not.toHaveBeenCalled();
+    expect(s.paintingState().documents['42'].visual_problems[problem.problem_id].status).toBe('open');
+    recordsSpy.mockRestore();
+    s.updatePaintingState(42, state => ({ ...state,
+      art_director: { ...state.art_director,
+        tasks: state.art_director.tasks.map((task: any) => task.task_id === 'color-details'
+          ? { ...task, allowed_scales: ['medium'], allowed_global_changes: ['depth-structure'],
+              construction_plan: { representation_strategy: 'Rebuild the bounded region' },
+              correction_target: { problem_id: problem.problem_id,
+                region_bounds: { left: 100, top: 100, right: 300, bottom: 400 } } }
+          : task),
+      },
+    }));
+    expect(s.documentNextRequiredAction(42)).not.toContain('Art Director review required before Painter mutation');
+    const admittedCandidate = (s.artisticContinuationContext(42) as any).next_candidates
+      .find((candidate: any) => candidate.candidate_id === 'A');
+    expect(admittedCandidate.execution_route).toMatchObject({
+      status: 'requires-preflight', required_scale: 'medium', blocker_problem_id: problem.problem_id,
+    });
+    expect(s.paintingState().documents['42'].visual_problems[problem.problem_id].status).toBe('open');
   });
 
   it('projects E.17c completion debt only from insufficient scene geometry or completion-relevant stale E.18 bindings', () => {

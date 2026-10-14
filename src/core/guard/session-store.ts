@@ -3,6 +3,7 @@ import { chatCriticRequest, validateChatCritic, persistChatCritic } from './chat
 import { criticCorrectionIssue, advanceCriticCorrections, criticCorrectionContext, originalBriefAnchor, selectedCriticCorrection, correctionAttemptState } from './critic-correction.js';
 import { requestProblemLinks } from './problem-links.js';
 import { correctionTargetFacts, plannedGlobalComponentCorrection } from './correction-admissibility.js';
+import { adviseTaskContinuation } from './continuation-admissibility.js';
 import { criticObligationState } from './critic-obligations.js';
 import { editableScopeRequest, validateEditableScopeReview, persistEditableScopeReview, editableOwnerScopeIssue } from './editable-scope.js';
 import { normalizeBrushAllowedScales } from './brush-scale-fit.js';
@@ -6895,6 +6896,16 @@ export class SessionStore {
     }
     const activeProblemId = textOrUndefined(state.active_problem?.problem_id);
     const largestMustFix = this.largestOpenMustFix(state.visual_problems);
+    // No invented next_pass here: only suppress conclusively impossible Painter
+    // advice. All admissible-looking routes still require real Guard preflight.
+    if (art?.status === 'active' && art.directive_id && largestMustFix) {
+      const task = art.tasks?.find(row => row.task_id === art.current_task_id);
+      const route = adviseTaskContinuation({ director: art, task, blocker: largestMustFix,
+        globalDomains: GLOBAL_CHANGE_DOMAINS });
+      if (route.status !== 'requires-preflight') {
+        return `${cadence.blockers.workflow_stall ? 'workflow stall (blocked Painter route): ' : ''}Art Director review required before Painter mutation: ${route.reason}`;
+      }
+    }
     if (cadence.blockers.workflow_stall) {
       const stall = this.workflowStallStrategyContext(documentId, records, projectionContext);
       const prior = stall.latest_ineffective_visual;
@@ -8805,12 +8816,16 @@ export class SessionStore {
     });
     const deferredPass = deferredRecord?.latency?.compiler_repair_audit?.deferred_next_pass;
     const projectedCurrentTask = projectTask(currentTask);
+    const priorityBlocker = this.largestOpenMustFix(state.visual_problems);
+    const currentTaskRoute = adviseTaskContinuation({ director: art, task: currentTask,
+      blocker: priorityBlocker, globalDomains: GLOBAL_CHANGE_DOMAINS });
     if (projectedCurrentTask) {
       nextCandidates.push({
         candidate_id: 'A',
         kind: 'continue-current-task',
         ...projectedCurrentTask,
         ...(textOrUndefined(activeProblem?.problem_id) ? { problem_id: activeProblem.problem_id } : {}),
+        execution_route: currentTaskRoute,
       });
     }
     const projectedNextTask = projectTask(nextTask);
@@ -8819,6 +8834,8 @@ export class SessionStore {
         candidate_id: 'B',
         kind: 'next-planner-task',
         ...projectedNextTask,
+        execution_route: adviseTaskContinuation({ director: art, task: nextTask,
+          blocker: priorityBlocker, globalDomains: GLOBAL_CHANGE_DOMAINS }),
       });
     }
     if (textOrUndefined(activeProblem?.problem_id)) {
@@ -8829,6 +8846,12 @@ export class SessionStore {
         ...(textOrUndefined(activeProblem.scale) ? { scale: activeProblem.scale } : {}),
         ...(textOrUndefined(activeProblem.severity) ? { severity: activeProblem.severity } : {}),
         ...(textOrUndefined(activeProblem.stage) ? { stage: activeProblem.stage } : {}),
+        execution_route: priorityBlocker?.problem_id && priorityBlocker.problem_id !== activeProblem.problem_id
+          ? { status: 'requires-director-review', blocker_problem_id: priorityBlocker.problem_id,
+              reason: 'Resolve or link the highest-priority must-fix before acting on this different problem.' }
+          : art?.status === 'active' ? currentTaskRoute
+            : { status: 'requires-preflight',
+                reason: 'No active Director task; prepare a concrete linked next_pass and run ordinary Guard priority and owner preflight.' },
       });
     }
     if (deferredPass && typeof deferredPass === 'object' && !Array.isArray(deferredPass)) {

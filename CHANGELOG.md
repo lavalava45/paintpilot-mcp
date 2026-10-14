@@ -1,5 +1,25 @@
 # Changelog
 
+- 2026-10-14 — **SessionStore P1-B: bounded Painter continuation recommendations.**
+  Added typed, pure `src/core/guard/continuation-admissibility.ts` and own
+  regression suite. `artisticContinuationContext().next_candidates` now
+  distinguishes `pending-task`, `requires-director-review`, and
+  `requires-preflight`: a pending task is never presented as immediately
+  executable, and a global/medium must-fix without an admissible Director
+  correction route no longer invites a doomed finer pass. When an exact
+  global-to-medium structural correction is declared, the candidate still
+  requires **actual** Guard preflight (not a guessed executable pass).
+  `documentNextRequiredAction()` prioritizes correction of an impossible
+  active task, including during workflow stall, without discarding the
+  watchdog indication or weakening rollback, preview, checkpoint or recovery
+  barriers. Existing `priorityGate()`, `plannerGate()`, authority and Photoshop
+  dispatch remain unchanged. Source-only validation: owning suites
+  **227/227 PASS**, `npm run verify:canonical` **PASS** with **176/176 test
+  files and 1915/1915 tests**, build, public Guard contract, lint and all
+  remaining canonical checks PASS. This is advisory source-level validation,
+  not full method/owner/geometry certification and not live Beta acceptance.
+
+
 - 2026-10-14 — **P1-A: typed, pure shared Director/Painter correction-admissibility boundary (source-only).**
   Added `src/core/guard/correction-admissibility.ts`: Director ingestion and the
   Guard's bounded global-to-medium correction route now share durable problem
