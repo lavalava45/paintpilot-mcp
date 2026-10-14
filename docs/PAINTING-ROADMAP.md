@@ -65,9 +65,10 @@ qualification; retain the first-city baseline for comparison.
 [SHA-256 manifest](painting-baseline-20261014/ARTIFACTS.sha256).
 The full-history bundle is at
 E:/Downloads/devspace-test/_archives/paintpilot-first-city-baseline-20261014/POST_FIRST_CITY_FULL_HISTORY.bundle;
-all six commits remain in local and remote
-**archive/post-first-city-20261014**. Do not delete these preservation
-references until archival retention is separately approved.
+all six commits remain reachable through the local and GitHub annotated tag
+**[artist-post-first-city-20261014](https://github.com/lavalava45/paintpilot-mcp/tree/artist-post-first-city-20261014)**
+(target `fac85ea`). Keep the tag, bundle, catalog and exact patches available
+until review of the deferred changes and archive-retention decisions is complete.
 
 ## 1. Make criticism lead to a real correction
 
@@ -174,10 +175,6 @@ tags/bundles, not permanent competing development branches.
   comparison) and digital-painting-local-history-20260914 (13
   branch-only commits at initial comparison). Verify each live SHA and
   provenance, create permanent archival tag/bundle and recovery proof.
-- [ ] **Review archival branch lifecycle** of
-  archive/post-first-city-20261014 (local and GitHub); preserve its exact six
-  commits until the ranked patch archive, bundle and user acceptance no
-  longer require that branch name. No deletion without explicit approval.
 - [ ] **Audit old remote branches**: develop, affix/*, docs/*, feat/* and
   fix/* (except any subsequently active PR heads). Before proposing deletion
   check branch SHA, unique commits, protections, external PRs, active users,

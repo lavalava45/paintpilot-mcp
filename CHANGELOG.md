@@ -2,6 +2,21 @@
 
 ## 2026-10-15 — Roadmap reconciliation and Git branch consolidation
 
+- **Converted the post-first-city archive branch to an annotated Git tag.**
+  Created `artist-post-first-city-20261014` at exact commit
+  `fac85eab4c978f65614da268243ae1d8747f9ec0`, containing the six
+  intentionally deferred commits after first-city source `3689249`. Pushed
+  the tag to GitHub and verified its peeled target SHA independently. Checked
+  that the previous `archive/post-first-city-20261014` branch had the same
+  tip, was not protected or the GitHub default, and had no open PR. Removed
+  that **branch name** locally and on GitHub; verified both removals and the
+  continued availability of the tag. The full-history Git bundle verified
+  as complete (SHA-256
+  `EBB88D770F904BAD9B212E5E329E77D18CD6A5DE9C8E4485BEF25F2BA6E03CC5`);
+  the full cumulative patch, six separate per-commit patches and change
+  index remain under `docs/painting-baseline-20261014/`. Nothing was
+  cherry-picked, merged or deployed. Review and possible selective reuse
+  of those technical/artistic changes remain **open in PAINTING-ROADMAP.md**.
 - **Removed obsolete Git master branch, locally and on GitHub.** The identical
   local/remote tip was 7b635963f87b5b8ff5380c3156841f5253ec8063,
   a complete ancestor of digital-painting (zero unique commits; 115 commits
