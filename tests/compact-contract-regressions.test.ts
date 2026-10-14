@@ -735,6 +735,23 @@ function physicalStackObservation() {
 }
 
 describe('public compact Guard contract regressions', () => {
+  it.each(['direct', 'microplan'] as const)(
+    'rejects invalid authored change domains in %s passes before Photoshop mutation', async kind => {
+      const f = fixture();
+      const before = f.counts();
+      const result = await body(await f.cycle.handler({ next_pass: {
+        request_key: `invalid-change-domain-${kind}`,
+        document_id: 42,
+        goal: 'Validate authored change domains before mutation.',
+        change_domains: ['not-an-authorized-domain'],
+        actions: kind === 'direct'
+          ? [{ id: 'save', tool: 'photoshop_save_document', args: { path: path.join(f.dir, 'should-not-save.psd') } }]
+          : [regionAction('invalid-domain-region')],
+      } }));
+      expect(result.preflight_rejection?.error_codes).toContain('compact_change_domains_invalid');
+      expect(f.counts()).toEqual(before);
+    }
+  );
   it.each([true, false])('localizes frame narration with initial commentary=%s and no additional painting or review', async initialCommentary => {
     const f = fixture({ stickyAfter: true });
     vi.spyOn(f.runtime.store, 'presentationContext').mockReturnValue({ language: 'ru', commentary_mode: 'artistic', commentary_detail: 'detailed' } as any);

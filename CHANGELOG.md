@@ -1,5 +1,24 @@
 # Changelog
 
+- 2026-10-14 — **P0 bounded extraction complete: fourteenth compact-change-domains helper integrated on isolated branch.**
+  Added `compact-change-domains.ts` and its four focused tests; wired the
+  validator into direct compact actions and VisualMicroPlan before dispatch.
+  Retains independently valid explicitly declared domains beside derived
+  execution-method domains; unknown declarations fail closed with
+  `compact_change_domains_invalid`. This is a **separate semantic Guard admission
+  change**, not a pure move of code from the baseline commit; do not claim
+  byte-for-byte equivalence to `3151952`. Added two end-to-end contract cases
+  requiring a pre-dispatch refusal without Photoshop tool execution.
+  `npx tsc --noEmit` PASS; focused tests **4 files / 114 tests PASS**;
+  `npm run verify:canonical` **PASS** on the isolated 14-module worktree
+  (150 acceptance test files; lint 0 errors, 84 warnings; build, pack, Guard
+  public contract, policy, provenance, evidence ledger, docs PASS).
+  No existing runtime session/UXP was modified. The P0 goal of extracting
+  14 bounded helper responsibilities is complete at source/offline level;
+  `compileCompactPass()` still contains stateful logic and Beta/live artistic
+  acceptance is not established. P1 SessionStore and P2/P3 inventories remain.
+
+
 - 2026-10-14 — **Isolated compact compiler refactor commit (13 independent helpers).**
   Extracted edge bindings, stroke/batch budgets, initial-layer tone,
   action-class/replace admission, method/tool admissibility, physical stack,

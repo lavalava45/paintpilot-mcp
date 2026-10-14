@@ -42,6 +42,7 @@ import {
 } from '../painting-stage-policy.js';
 import { normalizeMaterialResponsePlan, type MaterialResponsePlan } from '../material-response.js';
 import { collectCompactEdgeBindingViolations } from './compact-edge-bindings.js';
+import { validateCompactChangeDomains } from './compact-change-domains.js';
 import { collectCompactStrokeBudgetViolations } from './compact-stroke-budget.js';
 import {
   compactMutationLimitViolation,
@@ -955,9 +956,13 @@ function compileCompactPass(
       : undefined;
     const directActionClass = text(raw.action_class)?.toUpperCase();
     const directImpactClass = text(raw.impact_class);
-    const directChangeDomains = plannerDirectiveId && plannerTaskId && isVisual(onlyTool)
-      ? directVisualChangeDomains(onlyTool)
-      : undefined;
+    const methodDomains = plannerDirectiveId && plannerTaskId && isVisual(onlyTool)
+      ? directVisualChangeDomains(onlyTool) : undefined;
+    const { validDomains: declaredDomains, violations: domainViolations } =
+      validateCompactChangeDomains(raw.change_domains);
+    violations.push(...domainViolations);
+    const directChangeDomains = methodDomains ? [...new Set([...methodDomains,
+      ...declaredDomains])] : undefined;
     if (plannerDirectiveId && plannerTaskId && isVisual(onlyTool) && !directChangeDomains) {
       violations.push(violation(
         'next_operation',
@@ -2559,7 +2564,15 @@ function compileCompactPass(
   const art = context.art_director && typeof context.art_director === 'object'
     ? context.art_director as Record<string, unknown>
     : undefined;
-  const changeDomains = [...new Set(mutationSteps.map(step => compactChangeDomain(compactStepMethodClass(step, registry))))];
+  const { validDomains: declaredChangeDomains, violations: domainViolations } =
+    validateCompactChangeDomains(raw.change_domains);
+  violations.push(...domainViolations);
+  // Execution-method domains are not proof that authored structural scope is absent.
+  // Preserve the explicit domains for the existing attention/priority checks.
+  const changeDomains = [...new Set([
+    ...mutationSteps.map(step => compactChangeDomain(compactStepMethodClass(step, registry))),
+    ...declaredChangeDomains,
+  ])];
   const plannerDirectiveId = text(art?.directive_id);
   const plannerTaskId = text(art?.current_task_id);
   const plannerTasks = Array.isArray(art?.tasks) ? art.tasks as Array<Record<string, unknown>> : [];
