@@ -2,6 +2,7 @@
 import { chatCriticRequest, validateChatCritic, persistChatCritic } from './chat-critic.js';
 import { criticCorrectionIssue, advanceCriticCorrections, criticCorrectionContext, originalBriefAnchor, selectedCriticCorrection, correctionAttemptState } from './critic-correction.js';
 import { requestProblemLinks } from './problem-links.js';
+import { correctionTargetFacts, plannedGlobalComponentCorrection } from './correction-admissibility.js';
 import { criticObligationState } from './critic-obligations.js';
 import { editableScopeRequest, validateEditableScopeReview, persistEditableScopeReview, editableOwnerScopeIssue } from './editable-scope.js';
 import { normalizeBrushAllowedScales } from './brush-scale-fit.js';
@@ -3841,30 +3842,18 @@ export class SessionStore {
         const target = task.correction_target;
         const targetId = textOrUndefined(target?.problem_id);
         const problem = currentDocumentStateForRefinement.visual_problems?.[targetId];
-        const problemScale = normalizeScale(problem?.scale);
-        const globalTarget = !!problem && problem.status === 'open'
-          && problemScale === 'global' && problem.severity === 'must-fix';
-        // A medium defect may be repaired in bounded small steps only when
-        // Critic supplied a real defect region. A Director-drawn rectangle
-        // alone cannot invent spatial evidence for an arbitrary priority ID.
-        const mediumTarget = !!problem && problem.status === 'open'
-          && problemScale === 'medium' && problem.severity === 'must-fix'
-          && (!!textOrUndefined(problem.source_review_kind) || !!problem.structural_defect);
-        const reviewedBounds = problem?.review_region_bounds ?? problem?.structural_defect?.region_bounds;
-        let boundedMediumTarget = false;
-        if (mediumTarget && reviewedBounds && target?.region_bounds) {
-          try { boundedMediumTarget = regionContains(reviewedBounds, target.region_bounds); }
-          catch { /* Invalid or unrelated review bounds cannot authorize a target. */ }
-        }
         // A previously accepted global correction target becomes obsolete if
         // an exact-frame review reclassifies its problem to medium. A new
         // Director revision may carry the old field unchanged: retire only
         // this inherited privilege, not the problem or its structural debt.
         const inheritedTarget = (currentDocumentStateForRefinement.art_director?.tasks ?? [])
           .some(previousTask => previousTask.correction_target?.problem_id === targetId);
-        const reclassifiedMediumTarget = !globalTarget && !mediumTarget && inheritedTarget
-          && problem?.status === 'open' && problemScale === 'medium'
-          && problem.severity === 'must-fix';
+        const { globalTarget, boundedMediumTarget, reclassifiedMediumTarget } = correctionTargetFacts({
+          problem,
+          proposedBounds: target?.region_bounds,
+          inheritedTarget,
+        });
+        const problemScale = normalizeScale(problem?.scale);
         if (!target || typeof target !== 'object' || Array.isArray(target)
           || !targetId || (!globalTarget && !boundedMediumTarget && !reclassifiedMediumTarget)) {
           throw new Error(`directive.tasks[${index}].correction_target problem_id=${JSON.stringify(targetId ?? null)} requires an open global must-fix or an open medium must-fix with Critic-reviewed region_bounds enclosing the proposed target; current=${problem ? `${problem.status}/${problemScale ?? 'unknown'}/${problem.severity}` : 'missing'}. A label or Director-only region is not spatial evidence.`);
@@ -5341,25 +5330,24 @@ export class SessionStore {
     if (normalizeScale(blocker?.scale) === 'medium' && context.scale === 'small')
       return !this.boundedMediumCorrectionIssue(documentState, request, blocker);
     const art = documentState?.art_director;
-    const task = art?.tasks?.find(row => row.task_id === context.planner_task_id);
-    const target = task?.correction_target;
-    if (normalizeScale(blocker.scale) !== 'global' || context.scale !== 'medium'
-      || !context.problem_id || context.problem_id === blocker.problem_id
-      || !context.addresses_problem_ids.includes(blocker.problem_id)
-      || art?.status !== 'active' || art.review_due
-      || context.planner_directive_id !== art.directive_id || task?.status !== 'active'
-      || context.painter_scope !== 'medium' || !task.allowed_scales?.includes('medium')
-      || target?.problem_id !== blocker.problem_id || !task.construction_plan
-      || isDetailStage(context.stage) || isCosmeticCorrectiveAttempt(request)
-      || (request.impact_class ?? request.args?.impact_class) === 'texture'
-      || !context.change_domains.some(domain => GLOBAL_CHANGE_DOMAINS.has(domain)
-        && task.allowed_global_changes?.includes(domain))) return false;
-    // These are declared review bounds, not proof of a native pixel footprint.
-    // Existing target/owner/protection checks and exact-image review still apply.
-    const bounds = operationTrendRegion(request);
-    if (!bounds) return false;
-    try { return regionContains(target.region_bounds, bounds); }
-    catch { return false; }
+    return plannedGlobalComponentCorrection({
+      problem: blocker,
+      director: art,
+      task: art?.tasks?.find(row => row.task_id === context.planner_task_id),
+      request: {
+        scale: context.scale,
+        problem_id: context.problem_id,
+        addresses_problem_ids: context.addresses_problem_ids,
+        planner_directive_id: context.planner_directive_id,
+        painter_scope: context.painter_scope,
+        stageIsDetail: isDetailStage(context.stage),
+        cosmetic: isCosmeticCorrectiveAttempt(request),
+        impactClass: request.impact_class ?? request.args?.impact_class,
+        change_domains: context.change_domains,
+      },
+      operationBounds: operationTrendRegion(request),
+      globalDomains: GLOBAL_CHANGE_DOMAINS,
+    });
   }
   priorityGate(documentId, request, projectionContext) {
     if (!isVisual(request.tool)) return null;

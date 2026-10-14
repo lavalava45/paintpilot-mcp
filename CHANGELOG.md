@@ -1,5 +1,28 @@
 # Changelog
 
+- 2026-10-14 — **P1-A: typed, pure shared Director/Painter correction-admissibility boundary (source-only).**
+  Added `src/core/guard/correction-admissibility.ts`: Director ingestion and the
+  Guard's bounded global-to-medium correction route now share durable problem
+  eligibility (`open`/`must-fix`/scale), Critic-reviewed region containment for
+  medium debt, and explicit inherited-target retirement. Moved the corresponding
+  stateless Painter global-to-medium predicate out of `SessionStore` without
+  changing its independent Critic structural shortcut, medium-to-small guard,
+  owner/layer authority, rollback, journal, locks or Photoshop dispatch.
+  Added module tests and a subject-agnostic cumulative-global regression using
+  two spatially separate visual trends: valid Director medium construction and
+  Guard priority admission preserve the open global debt; invalid region and
+  unrelated change domain remain blocked. Preserved the existing scale-only
+  **preselected blocker** compiler contract without allowing incomplete facts
+  to authorize new Director targets. The original S01 `current=missing`
+  incident has **not** been reproduced on the same durable state; its live
+  resolution is **not** claimed by this extraction. Direct test selection
+  **124/124 PASS** (`component-scope`, `planner-painter`, typed module);
+  cross-system Guard/SessionStore/response suites **325/325 PASS**;
+  `npm run verify:canonical` **PASS**, **175/175 files and 1910/1910 tests**,
+  TypeScript/build/lint/policies/docs PASS. No native Photoshop/UXP operation
+  or release acceptance performed.
+
+
 - 2026-10-14 — **Public painting-process showcase video for Reddit/GitHub.**
   Published an exact copy of the previously produced 59.633-second
   `paintpilot-reddit-violinist-60s.mp4` under `assets/showcase/`, alongside

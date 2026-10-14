@@ -3070,6 +3070,53 @@ describe('Painter VisualMicroPlan envelope', () => {
 describe('bounded correction of a global priority defect', () => {
   const roi = { left: 100, top: 100, right: 400, bottom: 500 };
   const globalId = 'scene-primitive-debt';
+  it('routes cumulative global debt from two separate visual regions through the same Director and Guard admission', () => {
+    const s = store();
+    seedTrendSignal(s, 'primitive-left', 1, {
+      bounds: { left: 50, top: 100, right: 180, bottom: 260 },
+      region: 'left-subject',
+    });
+    seedTrendSignal(s, 'primitive-right', 2, {
+      bounds: { left: 760, top: 480, right: 900, bottom: 660 },
+      region: 'right-subject',
+    });
+    const trend = (s as any).cumulativeTrendState(42);
+    expect(trend.triggered).toBe(true);
+    s.updatePaintingState(42, current => (s as any).promoteCumulativeTrendProblem(42, current, trend));
+    const cumulativeId = 'cumulative-trend-primitive-footprint-repeating';
+    const state = s.paintingState().documents['42'];
+    expect(state.visual_problems[cumulativeId]).toMatchObject({
+      scale: 'global', severity: 'must-fix', status: 'open',
+      promotion_reason: 'materially_separate_regions',
+    });
+
+    const director = directive('cumulative-correction');
+    const region = { left: 55, top: 110, right: 170, bottom: 250 };
+    Object.assign(director.tasks[0], {
+      allowed_global_changes: ['depth-structure'],
+      construction_plan: {
+        representation_strategy: 'Rebuild one structurally weak region without masking the rest.',
+        structural_features: ['near plane', 'far plane'],
+        stage_exit_condition: 'The revised construction survives whole-frame review.',
+      },
+      correction_target: { problem_id: cumulativeId, region_bounds: region },
+    });
+    expect(() => s.setArtDirectorState({ document_id: 42, action: 'review', directive: director })).not.toThrow();
+    const req = painterRequest({
+      problem_id: 'left-part-rebuild', strategy_family: 'structural-rebuild',
+      args: { problem_id: 'left-part-rebuild', addresses_problem_id: cumulativeId,
+        region_bounds: region, change_domains: ['depth-structure'] },
+    });
+    req.args.planner_directive_id = director.directive_id;
+    expect(() => s.plannerGate(42, req)).not.toThrow();
+    expect(s.priorityGate(42, req)).toBeNull();
+    expect(s.paintingState().documents['42'].visual_problems[cumulativeId].status).toBe('open');
+    req.args.region_bounds = { ...region, right: 450 };
+    expect(() => s.priorityGate(42, req)).toThrow(/stage_priority_gate/);
+    req.args.region_bounds = region;
+    req.args.change_domains = ['local-tone'];
+    expect(() => s.priorityGate(42, req)).toThrow(/stage_priority_gate/);
+  });
   function fixture(withTarget = true) {
     const s = store();
     s.setPriorityState({ document_id: 42, problems: [{
