@@ -823,6 +823,13 @@ export function createPaintingTools(
           type: 'object',
           properties: {
             name: { type: 'string', description: 'Exact Photoshop brush preset name' },
+            fallback_names: {
+              type: 'array',
+              maxItems: 3,
+              items: { type: 'string' },
+              description:
+                'Optional ordered alternative preset names. Alternatives are selection-only recovery attempts. A verified alternative is reported for replanning and never treated as the requested preset.',
+            },
           },
           required: ['name'],
         },
@@ -1267,33 +1274,128 @@ async function selectBrushPreset(
       throw new Error('name is required');
     }
     const name = args.name.trim();
-    await backendRouter.backendFor('brush.presets.select');
-    const stableCommandId = currentStableCommandId();
-    const result = await invokeUxpSelectBrushPreset(name, stableCommandId);
-    if (!result.ok || !result.data) {
-      throw new Error(result.error ?? 'uxp_select_brush_preset_failed');
+    const fallbackNames: string[] = [];
+    if (args.fallback_names !== undefined) {
+      if (!Array.isArray(args.fallback_names)) throw new Error('fallback_names must be an array');
+      if (args.fallback_names.length > 3) throw new Error('fallback_names may contain at most 3 entries');
+      for (const [index, value] of args.fallback_names.entries()) {
+        if (typeof value !== 'string' || !value.trim()) {
+          throw new Error(`fallback_names[${index}] must be a non-empty string`);
+        }
+        const fallback = value.trim();
+        if (fallback !== name && !fallbackNames.includes(fallback)) fallbackNames.push(fallback);
+      }
     }
-    const parsed = result.data;
-    const effectivePreset = typeof parsed.preset === 'string' ? parsed.preset.trim() : '';
-    const setterOutcome = effectivePreset === name ? 'applied' : effectivePreset ? 'not-applied' : 'uncertain';
-    const message = setterOutcome === 'applied'
-        ? `Brush preset selected: ${name}`
-        : setterOutcome === 'not-applied'
-          ? `Brush preset setter completed but effective preset is ${effectivePreset}`
-          : `Brush preset setter outcome is uncertain`;
-    const details = {
+    await backendRouter.backendFor('brush.presets.select');
+    const stableCommandBase = currentStableCommandId();
+    const candidates = [name, ...fallbackNames];
+    const attempts: Array<Record<string, unknown>> = [];
+    let lastParsed: Record<string, unknown> | undefined;
+    let lastEffectivePreset = '';
+    let lastCommandId: string | undefined;
+
+    for (let index = 0; index < candidates.length; index++) {
+      const candidate = candidates[index]!;
+      const stableCommandId = index === 0
+        ? stableCommandBase
+        : stableCommandBase ? `${stableCommandBase}:preset-fallback:${index}` : undefined;
+      const result = await invokeUxpSelectBrushPreset(candidate, stableCommandId);
+      if (!result.ok || !result.data) {
+        if (index === 0) throw new Error(result.error ?? 'uxp_select_brush_preset_failed');
+        attempts.push({
+          requested_preset: candidate,
+          outcome: 'transport-uncertain',
+          effective_preset: null,
+          ...(result.error ? { error: result.error } : {}),
+          ...(stableCommandId ? { stable_command_id: stableCommandId } : {}),
+        });
+        return brushSetterNotApplied(
+          'Brush preset fallback selection became uncertain; no painting is authorized',
+          {
+            setter_outcome: 'uncertain',
+            requested_preset: name,
+            effective_preset: lastEffectivePreset || null,
+            requires_replan: true,
+            selection_only_recovery: true,
+            preset_attempts: attempts,
+            ...(stableCommandBase ? { stable_command_id: stableCommandBase } : {}),
+          }
+        );
+      }
+
+      const parsed = result.data;
+      const effectivePreset = typeof parsed.preset === 'string' ? parsed.preset.trim() : '';
+      const verified = effectivePreset === candidate;
+      const verification = parsed.preset_verification && typeof parsed.preset_verification === 'object'
+        ? parsed.preset_verification as Record<string, unknown>
+        : undefined;
+      attempts.push({
+        requested_preset: candidate,
+        effective_preset: effectivePreset || null,
+        outcome: verified ? 'verified' : effectivePreset ? 'different-preset' : 'identity-unavailable',
+        ...(verification?.source ? { verification_source: verification.source } : {}),
+        ...(stableCommandId ? { stable_command_id: stableCommandId } : {}),
+      });
+      lastParsed = parsed;
+      lastEffectivePreset = effectivePreset;
+      lastCommandId = stableCommandId;
+
+      if (!verified) continue;
+      const commonDetails = {
+        requested_preset: name,
+        effective_preset: effectivePreset,
+        preset: parsed.preset,
+        settings: parsed.settings,
+        ...(parsed.brush_tip ? { brush_tip: parsed.brush_tip } : {}),
+        ...(parsed.preset_verification ? { preset_verification: parsed.preset_verification } : {}),
+        ...(parsed.setter_recovery ? { setter_recovery: parsed.setter_recovery } : {}),
+        ...(stableCommandBase ? { stable_command_id: stableCommandBase } : {}),
+      };
+      if (index === 0) {
+        return atomicSuccess(`Brush preset selected: ${name}`, {
+          setter_outcome: 'applied',
+          ...commonDetails,
+        });
+      }
+
+      // Selecting a fallback is a global brush-state mutation but never a pixel
+      // mutation. Keep the original request failed so Guard cannot silently
+      // paint under a substituted preset. The verified alternative is evidence
+      // for a new/replanned pass that explicitly names that preset.
+      return brushSetterNotApplied(
+        `Requested brush preset was not verified; alternative ${candidate} was selected and verified for replanning`,
+        {
+          setter_outcome: 'verified-alternative',
+          ...commonDetails,
+          verified_alternative_preset: candidate,
+          requires_replan: true,
+          selection_only_recovery: true,
+          preset_attempts: attempts,
+          ...(lastCommandId ? { fallback_command_id: lastCommandId } : {}),
+        }
+      );
+    }
+
+    const setterOutcome = lastEffectivePreset ? 'not-applied' : 'uncertain';
+    const message = setterOutcome === 'not-applied'
+      ? `Brush preset setter completed but effective preset is ${lastEffectivePreset}`
+      : 'Brush preset setter outcome is uncertain';
+    return brushSetterNotApplied(message, {
       setter_outcome: setterOutcome,
       requested_preset: name,
-      effective_preset: effectivePreset || null,
-      preset: parsed.preset,
-      settings: parsed.settings,
-      ...(parsed.preset_verification ? { preset_verification: parsed.preset_verification } : {}),
-      ...(parsed.setter_recovery ? { setter_recovery: parsed.setter_recovery } : {}),
-      ...(stableCommandId ? { stable_command_id: stableCommandId } : {}),
-    };
-    return setterOutcome === 'applied'
-      ? atomicSuccess(message, details)
-      : brushSetterNotApplied(message, details);
+      effective_preset: lastEffectivePreset || null,
+      preset: lastParsed?.preset,
+      settings: lastParsed?.settings,
+      ...(lastParsed?.brush_tip ? { brush_tip: lastParsed.brush_tip } : {}),
+      ...(lastParsed?.preset_verification ? { preset_verification: lastParsed.preset_verification } : {}),
+      ...(lastParsed?.setter_recovery ? { setter_recovery: lastParsed.setter_recovery } : {}),
+      ...(attempts.length > 1 ? {
+        requires_replan: true,
+        selection_only_recovery: true,
+        preset_attempts: attempts,
+      } : {}),
+      ...(stableCommandBase ? { stable_command_id: stableCommandBase } : {}),
+    });
   } catch (error) {
     return atomicFailureFromError(error);
   }

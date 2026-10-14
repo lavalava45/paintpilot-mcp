@@ -9,6 +9,7 @@ import { editableScopeRequest, validateEditableScopeReview, persistEditableScope
 import { normalizeBrushAllowedScales } from './brush-scale-fit.js';
 import { brushUseKey, boundedBrushTrial } from './brush-role-extension.js';
 import { artisticContinuation, documentArtisticDebt, bindPaintingCompletion } from './document-artistic-debt.js';
+import { resolveBrushPackRecordDirectory } from '../brush-pack.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
@@ -825,6 +826,11 @@ function parseBrushPreflight(raw) {
   if (!Array.isArray(raw.roles) || raw.roles.length < 1 || raw.roles.length > 16) {
     throw new Error('brush_preflight.roles must contain 1-16 concrete brush roles');
   }
+  const brushPackId = textOrUndefined(raw.brush_pack_id) ?? null;
+  const preflightRuntimeWitness = textOrUndefined(raw.runtime_instance_witness) ?? null;
+  const authoritativeRuntimeWitness = raw.runtime_instance_verified === true
+    ? preflightRuntimeWitness
+    : null;
   const seen = new Set();
   const roles = raw.roles.map((role, index) => {
     if (!role || typeof role !== 'object' || Array.isArray(role)) {
@@ -889,6 +895,84 @@ function parseBrushPreflight(raw) {
           || !Number.isFinite(Number(scale.min_px)) || !Number.isFinite(Number(scale.max_px))) {
           throw new Error('brush_preflight role ' + roleId + '.candidate_evidence[' + candidateIndex + '] is incomplete');
         }
+        let probeEvidence;
+        if (candidate.probe_evidence !== undefined) {
+          const rawEvidence = candidate.probe_evidence;
+          if (!rawEvidence || typeof rawEvidence !== 'object' || Array.isArray(rawEvidence)) {
+            throw new Error('brush_preflight role ' + roleId + '.candidate_evidence[' + candidateIndex + '].probe_evidence must be an object');
+          }
+          const evidencePresetName = textOrUndefined(rawEvidence.preset_name);
+          const previewPath = textOrUndefined(rawEvidence.preview_path);
+          const previewSha = textOrUndefined(rawEvidence.preview_sha256)?.toLowerCase();
+          const operationId = textOrUndefined(rawEvidence.operation_id);
+          const evidenceRuntimeWitness = textOrUndefined(rawEvidence.runtime_instance_witness);
+          const receiptPath = textOrUndefined(rawEvidence.receipt_path);
+          const receiptSha = textOrUndefined(rawEvidence.receipt_sha256)?.toLowerCase();
+          if (evidencePresetName !== presetName || !previewPath || !/^[a-f0-9]{64}$/.test(previewSha ?? '')
+            || !/^brush-preset-probe:[a-f0-9]{64}$/.test(operationId ?? '')
+            || !evidenceRuntimeWitness || evidenceRuntimeWitness !== preflightRuntimeWitness
+            || !receiptPath || !/^[a-f0-9]{64}$/.test(receiptSha ?? '')) {
+            throw new Error('brush_preflight role ' + roleId + '.candidate_evidence[' + candidateIndex + '].probe_evidence is incomplete or does not match preset_name');
+          }
+          const recordRoot = fs.realpathSync(resolveBrushPackRecordDirectory());
+          const previewRoot = fs.realpathSync(path.join(recordRoot, 'probes', 'installed-presets'));
+          const receiptRoot = fs.realpathSync(path.join(recordRoot, 'probe-receipts', 'installed-presets'));
+          const resolveEvidenceFile = (candidatePath, expectedRoot, maxBytes, label) => {
+            const resolved = path.resolve(candidatePath);
+            if (!fs.existsSync(resolved)) {
+              throw new Error('brush_preflight role ' + roleId + '.candidate_evidence[' + candidateIndex + '].probe_evidence ' + label + ' file is missing');
+            }
+            const real = fs.realpathSync(resolved);
+            const relative = path.relative(expectedRoot, real);
+            if (!relative || relative.startsWith('..' + path.sep) || relative === '..' || path.isAbsolute(relative)) {
+              throw new Error('brush_preflight role ' + roleId + '.candidate_evidence[' + candidateIndex + '].probe_evidence ' + label + ' path is outside the installed-preset evidence directory');
+            }
+            const stat = fs.statSync(real);
+            if (!stat.isFile() || stat.size < 1 || stat.size > maxBytes) {
+              throw new Error('brush_preflight role ' + roleId + '.candidate_evidence[' + candidateIndex + '].probe_evidence ' + label + ' file size/type is invalid');
+            }
+            return real;
+          };
+          const resolvedPreviewPath = resolveEvidenceFile(previewPath, previewRoot, 12 * 1024 * 1024, 'preview');
+          const resolvedReceiptPath = resolveEvidenceFile(receiptPath, receiptRoot, 256 * 1024, 'receipt');
+          const previewBytes = fs.readFileSync(resolvedPreviewPath);
+          if (previewBytes.length < 4 || previewBytes[0] !== 0xff || previewBytes[1] !== 0xd8
+            || previewBytes[previewBytes.length - 2] !== 0xff || previewBytes[previewBytes.length - 1] !== 0xd9
+            || createHash('sha256').update(previewBytes).digest('hex') !== previewSha) {
+            throw new Error('brush_preflight role ' + roleId + '.candidate_evidence[' + candidateIndex + '].probe_evidence preview JPEG/SHA verification failed');
+          }
+          const receiptBytes = fs.readFileSync(resolvedReceiptPath);
+          if (createHash('sha256').update(receiptBytes).digest('hex') !== receiptSha) {
+            throw new Error('brush_preflight role ' + roleId + '.candidate_evidence[' + candidateIndex + '].probe_evidence receipt SHA verification failed');
+          }
+          let receipt;
+          try {
+            receipt = JSON.parse(receiptBytes.toString('utf8'));
+          } catch {
+            throw new Error('brush_preflight role ' + roleId + '.candidate_evidence[' + candidateIndex + '].probe_evidence receipt is not valid JSON');
+          }
+          if (receipt?.protocol !== 'photoshop.installed_brush.probe_receipt.v1'
+            || textOrUndefined(receipt?.probe_operation_id) !== operationId
+            || textOrUndefined(receipt?.preset_name) !== presetName
+            || textOrUndefined(receipt?.runtime_instance_witness) !== evidenceRuntimeWitness
+            || textOrUndefined(receipt?.evidence?.preview_sha256)?.toLowerCase() !== previewSha) {
+            throw new Error('brush_preflight role ' + roleId + '.candidate_evidence[' + candidateIndex + '].probe_evidence receipt does not bind this preset/preview');
+          }
+          const receiptPreviewPath = textOrUndefined(receipt?.evidence?.preview_path);
+          if (!receiptPreviewPath || !fs.existsSync(receiptPreviewPath)
+            || fs.realpathSync(receiptPreviewPath) !== resolvedPreviewPath) {
+            throw new Error('brush_preflight role ' + roleId + '.candidate_evidence[' + candidateIndex + '].probe_evidence receipt preview path does not bind the verified JPEG');
+          }
+          probeEvidence = {
+            preset_name: presetName,
+            preview_path: resolvedPreviewPath,
+            preview_sha256: previewSha,
+            operation_id: operationId,
+            runtime_instance_witness: evidenceRuntimeWitness,
+            receipt_path: resolvedReceiptPath,
+            receipt_sha256: receiptSha,
+          };
+        }
         return {
           preset_name: presetName,
           profile_id: profileId,
@@ -911,10 +995,26 @@ function parseBrushPreflight(raw) {
           },
           effective_settings: candidate.effective_settings && typeof candidate.effective_settings === 'object' && !Array.isArray(candidate.effective_settings)
             ? { ...candidate.effective_settings } : {},
+          ...(probeEvidence ? { probe_evidence: probeEvidence } : {}),
           caveats: Array.isArray(candidate.caveats) ? candidate.caveats.map(textOrUndefined).filter(Boolean) : [],
         };
       })
       : [];
+    const probeRequiredForRole = visualIntents.some(intent => [
+      'painted-mass', 'broken-mass', 'atmospheric-mass', 'directional-mass', 'surface-flow', 'texture',
+    ].includes(intent));
+    if (probeRequiredForRole && authoritativeRuntimeWitness) {
+      if (!['pass', 'cached'].includes(probeStatus)) {
+        throw new Error('brush_preflight role ' + roleId + ' requires a real probe for material-dependent painted-mass/texture intents; probe_status=not-needed is invalid');
+      }
+      const preferredCandidate = candidateEvidence.find(candidate => candidate.preset_name === preferredPreset);
+      if (!preferredCandidate) {
+        throw new Error('brush_preflight role ' + roleId + ' requires candidate_evidence for preferred_preset=' + preferredPreset);
+      }
+      if (!brushPackId && !preferredCandidate.probe_evidence) {
+        throw new Error('brush_preflight role ' + roleId + ' requires probe_evidence from action=probe_preset for preferred_preset=' + preferredPreset);
+      }
+    }
     const effective = role.effective_settings;
     if (!effective || typeof effective !== 'object' || Array.isArray(effective)) {
       throw new Error('brush_preflight role ' + roleId + ' requires effective_settings from Photoshop');
@@ -951,7 +1051,6 @@ function parseBrushPreflight(raw) {
       profile_id: textOrUndefined(role.profile_id) ?? null,
     };
   });
-  const brushPackId = textOrUndefined(raw.brush_pack_id) ?? null;
   const inventoryQuery = textOrUndefined(raw.inventory_query) ?? null;
   return {
     completed: true,
@@ -1130,8 +1229,9 @@ function validateBrushStrategyAgainstPreflight(artRun, request) {
         throw new Error(`brush_role_new_purpose_trial_required: material=${materialRole} and scale remain mandatory; visual_intent=${visualIntent} is advisory, not forbidden. Add next_pass.brush_use_reason (12+ chars), bounded region_bounds and trial strokes/dabs. ${issue ?? ''} ${strategy.brush_fitness_key !== key ? 'Compiler-provided brush settings identity does not match durable preflight.' : ''} Current role intents=${JSON.stringify(role.visual_intents ?? [])}. Review on the exact AFTER before reuse.`);
     }
   }
-  const selectedCandidate = presetName && Array.isArray(role.candidate_evidence)
-    ? role.candidate_evidence.find(candidate => candidate.preset_name === presetName)
+  const evidencePresetName = presetName ?? role.preferred_preset;
+  const selectedCandidate = evidencePresetName && Array.isArray(role.candidate_evidence)
+    ? role.candidate_evidence.find(candidate => candidate.preset_name === evidencePresetName)
     : undefined;
   const expectedPressurePolicy = selectedCandidate?.pressure_policy ?? role.pressure_policy;
   if (pressurePolicy !== expectedPressurePolicy) {
@@ -1143,12 +1243,6 @@ function validateBrushStrategyAgainstPreflight(artRun, request) {
   }
   if (methodClass === 'preset-brush' && !presetName) {
     throw new Error(`brush_preset_required: method_class=preset-brush requires preset_name from brush_role=${brushRole}`);
-  }
-  if (materialFitnessRequired && ['MATERIAL', 'DETAIL', 'MICRO_DETAIL'].includes(stage ?? '')) {
-    const probeStatus = textOrUndefined(role.probe_status)?.toLowerCase();
-    if (!['pass', 'cached'].includes(probeStatus ?? '')) {
-      throw new Error(`brush_role_probe_required: brush_role=${brushRole} requires probe_status=pass|cached for ${stage} material/finish work`);
-    }
   }
   if (packPolicy?.mode === 'exclusive') {
     if (artRun?.brush_preflight?.brush_pack_id !== packPolicy.brush_pack_id) {
@@ -1163,6 +1257,32 @@ function validateBrushStrategyAgainstPreflight(artRun, request) {
     const selectedPreset = [...steps].reverse().find(step => step?.tool === 'photoshop_select_brush_preset');
     if (!selectedPreset || textOrUndefined(selectedPreset?.args?.name) !== presetName) {
       throw new Error(`exclusive_brush_pack_selection_required: preset_name=${presetName} must be explicitly selected before mutation`);
+    }
+  }
+  const probeRequiredForIntent = [
+    'painted-mass', 'broken-mass', 'atmospheric-mass', 'directional-mass', 'surface-flow', 'texture',
+  ].includes(visualIntent ?? '');
+  const physicalStackCheck = artRun?.physical_stack_check ?? artRun?.art_director?.physical_stack_check;
+  const durableStageRank = paintingStageRank(artRun?.current_stage);
+  const legacyAlreadyPastPhysicalStackGate = !physicalStackCheck
+    && durableStageRank !== undefined && durableStageRank >= 3;
+  const physicalStackPrerequisitePending = isPhysicalStackGatedStage(stage)
+    && !legacyAlreadyPastPhysicalStackGate
+    && (!physicalStackCheck || physicalStackCheck.status !== 'pass');
+  if (!physicalStackPrerequisitePending
+    && (probeRequiredForIntent || (materialFitnessRequired && ['MATERIAL', 'DETAIL', 'MICRO_DETAIL'].includes(stage ?? '')))) {
+    const probeStatus = textOrUndefined(role.probe_status)?.toLowerCase();
+    if (!['pass', 'cached'].includes(probeStatus ?? '')) {
+      throw new Error(`brush_role_probe_required: brush_role=${brushRole} requires probe_status=pass|cached for material-dependent ${visualIntent ?? stage ?? 'brush'} work`);
+    }
+  }
+  if (probeRequiredForIntent && !physicalStackPrerequisitePending) {
+    const evidenceBoundPackRole = !!artRun?.brush_preflight?.brush_pack_id && !!role.profile_id;
+    if (!selectedCandidate && !evidenceBoundPackRole) {
+      throw new Error(`brush_candidate_evidence_required: brush_role=${brushRole} preset_name=${evidencePresetName ?? 'missing'} requires candidate_evidence for visual_intent=${visualIntent}`);
+    }
+    if (!artRun?.brush_preflight?.brush_pack_id && !selectedCandidate?.probe_evidence) {
+      throw new Error(`brush_probe_evidence_required: brush_role=${brushRole} preset_name=${evidencePresetName ?? 'missing'} requires verified probe_preset JPEG evidence for visual_intent=${visualIntent}`);
     }
   }
 }
@@ -1745,6 +1865,7 @@ function significanceModeOf(request) {
 }
 const WORKFLOW_STALL_ACTION_LIMIT = 8;
 const WORKFLOW_STALL_INSUFFICIENT_LIMIT = 2;
+const WORKFLOW_STALL_PREPARE_FAILURE_LIMIT = 2;
 const DECISION_LOOP_STALL_SECONDS = 90;
 const SILENT_STALL_SECONDS = 90;
 const CHECKPOINT_DEBT_LIMIT = 8;
@@ -1755,6 +1876,114 @@ const PRIMITIVE_FOOTPRINT = new Set(['none', 'acceptable', 'suspect', 'unknown']
 const RECOGNITION_SUBJECT = new Set(['yes', 'no', 'uncertain']);
 const RECOGNITION_STYLE = new Set(['yes', 'no', 'uncertain', 'not_applicable']);
 const RECOGNITION_EVALUATOR = new Set(['producer', 'blinded', 'human', 'external']);
+
+function preVisualPrepareFailure(record) {
+  if (!record || record.tool !== 'photoshop_execute_visual_microplan') return undefined;
+  const body = parseTexts(record.result).find(candidate =>
+    candidate?.code === 'microplan_prepare_failed' && candidate?.visual_mutation_started === false
+  );
+  if (!body) return undefined;
+  const failedStepId = textOrUndefined(body.failed_step);
+  const resultSteps = Array.isArray(body.steps) ? body.steps : [];
+  const failedStatus = failedStepId
+    ? resultSteps.find(step => textOrUndefined(step?.id) === failedStepId)
+    : undefined;
+  const requestedSteps = Array.isArray(record.args?.steps) ? record.args.steps : [];
+  const statusTool = textOrUndefined(failedStatus?.tool);
+  const requestedStep = (failedStepId
+    ? requestedSteps.find(step => textOrUndefined(step?.id) === failedStepId)
+    : undefined)
+    ?? (statusTool ? requestedSteps.find(step => textOrUndefined(step?.tool) === statusTool) : undefined);
+  const requestedArgs = requestedStep?.args && typeof requestedStep.args === 'object' && !Array.isArray(requestedStep.args)
+    ? requestedStep.args
+    : {};
+  const failureCategory = textOrUndefined(body.failure_category) ?? 'microplan_prepare_failed';
+  const failedTool = statusTool ?? textOrUndefined(requestedStep?.tool) ?? null;
+  const context = visualContext(record);
+  const routeFingerprint = fingerprint({
+    problem_id: context.problem_id ?? null,
+    method_class: record.args?.method_class ?? null,
+    brush_role: record.args?.paint_strategy?.brush_role ?? null,
+    preset_name: record.args?.paint_strategy?.preset_name ?? null,
+    failed_step: {
+      tool: failedTool,
+      method_id: requestedStep?.method_id ?? null,
+      args: requestedArgs,
+    },
+  });
+  return {
+    record,
+    failure_category: failureCategory,
+    failed_step: failedStepId ?? null,
+    failed_tool: failedTool,
+    route_fingerprint: routeFingerprint,
+  };
+}
+
+function prepareFailureRouteFingerprint(request, failedStepId, failedTool) {
+  if (!request || request.tool !== 'photoshop_execute_visual_microplan') return undefined;
+  const steps = Array.isArray(request.args?.steps) ? request.args.steps : [];
+  const failedStep = (failedStepId
+    ? steps.find(step => textOrUndefined(step?.id) === failedStepId)
+    : undefined)
+    ?? (failedTool ? steps.find(step => textOrUndefined(step?.tool) === failedTool) : undefined);
+  const failedArgs = failedStep?.args && typeof failedStep.args === 'object' && !Array.isArray(failedStep.args)
+    ? failedStep.args
+    : {};
+  const context = visualContext(request);
+  return fingerprint({
+    problem_id: context.problem_id ?? null,
+    method_class: request.args?.method_class ?? null,
+    brush_role: request.args?.paint_strategy?.brush_role ?? null,
+    preset_name: request.args?.paint_strategy?.preset_name ?? null,
+    failed_step: {
+      tool: textOrUndefined(failedStep?.tool) ?? failedTool ?? null,
+      method_id: failedStep?.method_id ?? null,
+      args: failedArgs,
+    },
+  });
+}
+
+function repeatedPrepareFailureContext(records) {
+  let latest;
+  let latestIndex = -1;
+  for (let index = records.length - 1; index >= 0; index -= 1) {
+    const candidate = preVisualPrepareFailure(records[index]);
+    if (!candidate) continue;
+    latest = candidate;
+    latestIndex = index;
+    break;
+  }
+  if (!latest) return { count: 0, latest: null };
+  if (records.slice(latestIndex + 1).some(record => record.visual && completedArtisticExecution(record))) {
+    return { count: 0, latest: null };
+  }
+  let count = 0;
+  for (let index = latestIndex; index >= 0; index -= 1) {
+    const record = records[index];
+    const candidate = preVisualPrepareFailure(record);
+    if (candidate) {
+      if (candidate.failure_category !== latest.failure_category
+        || candidate.route_fingerprint !== latest.route_fingerprint) break;
+      count += 1;
+      continue;
+    }
+    if (record.visual && completedArtisticExecution(record)) break;
+  }
+  return { count, latest };
+}
+
+function looksLikeCompositionDebt(problem) {
+  if (!problem || problem.status === 'resolved') return false;
+  const fields = [
+    problem.problem_id,
+    problem.region,
+    problem.hypothesis,
+    problem.source_review_kind,
+    problem.source_review_level,
+  ].map(value => textOrUndefined(value)?.toLowerCase()).filter(Boolean);
+  return fields.some(value => /composition|whole[- ]?(?:frame|canvas)|large[- ]?mass|layout|spatial(?:[- ]?coverage)?/.test(value));
+}
 function normalizeTrendSignal(value) {
   if (typeof value !== 'string') return undefined;
   const signal = value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
@@ -6248,6 +6477,8 @@ export class SessionStore {
       meaningful_visual_passes: 0,
       insufficient_visual_passes: 0,
       consecutive_insufficient_visual_passes: 0,
+      consecutive_prepare_failures: 0,
+      latest_prepare_failure_operation_id: null,
       external_actions_since_last_meaningful_visual_change: 0,
       last_visual_operation_id: null,
       last_visual_verdict_at: null,
@@ -6264,11 +6495,25 @@ export class SessionStore {
       suppliedRecords ?? projectionContext?.records ?? this.records(),
       projectionContext
     );
+    const prepareFailures = repeatedPrepareFailureContext(records);
+    const prepareFailureStall = prepareFailures.count >= WORKFLOW_STALL_PREPARE_FAILURE_LIMIT;
+    const prepareFailureReason = prepareFailureStall
+      ? `${prepareFailures.count} consecutive pre-visual preparation failures on the same executable route`
+      : null;
     // A rolled-back or superseded frame cannot reset the meaningful-art anchor:
     // that visual gain no longer exists in the authoritative Photoshop image.
     const tracked = records.filter(r => r.visual && r.verdict?.significance?.execution_effect
       && r.rolled_back !== true && r.current_frame_authority !== false);
-    if (!tracked.length) return empty;
+    if (!tracked.length) {
+      return {
+        ...empty,
+        consecutive_prepare_failures: prepareFailures.count,
+        latest_prepare_failure_operation_id: prepareFailures.latest?.record?.id ?? null,
+        workflow_stall: prepareFailureStall,
+        stall_reasons: prepareFailureReason ? [prepareFailureReason] : [],
+        artistic_throughput: this.artisticThroughputMetrics(documentId, records, projectionContext),
+      };
+    }
 
     const problems = new Map();
     let resolutionEvents = 0;
@@ -6322,6 +6567,7 @@ export class SessionStore {
     if (consecutiveInsufficient >= WORKFLOW_STALL_INSUFFICIENT_LIMIT) {
       stallReasons.push(`${consecutiveInsufficient} consecutive visually insufficient passes`);
     }
+    if (prepareFailureReason) stallReasons.push(prepareFailureReason);
     const resolvedIds = [...problems.entries()].filter(([, status]) => status === 'resolved').map(([id]) => id);
     const openIds = [...problems.entries()].filter(([, status]) => status === 'open').map(([id]) => id);
     return {
@@ -6334,6 +6580,8 @@ export class SessionStore {
       meaningful_visual_passes: meaningful,
       insufficient_visual_passes: insufficient,
       consecutive_insufficient_visual_passes: consecutiveInsufficient,
+      consecutive_prepare_failures: prepareFailures.count,
+      latest_prepare_failure_operation_id: prepareFailures.latest?.record?.id ?? null,
       external_actions_since_last_meaningful_visual_change: externalActionsSince,
       last_meaningful_visual_operation_id: lastMeaningful?.id,
       last_visual_operation_id: lastVisual?.id ?? null,
@@ -6353,7 +6601,13 @@ export class SessionStore {
       projectionContext
     );
     const metrics = this.workflowMetrics(documentId, records, projectionContext);
-    if (!metrics.workflow_stall) return { metrics, latest_ineffective_visual: null };
+    const prepareFailures = repeatedPrepareFailureContext(records);
+    const latestPrepareFailure = prepareFailures.count >= WORKFLOW_STALL_PREPARE_FAILURE_LIMIT
+      ? prepareFailures.latest
+      : null;
+    if (!metrics.workflow_stall) {
+      return { metrics, latest_ineffective_visual: null, latest_prepare_failure: null };
+    }
     const tracked = records.filter(record => record.visual && record.verdict?.significance?.execution_effect
       && record.rolled_back !== true && record.current_frame_authority !== false);
     const lastMeaningful = [...tracked].reverse().find(record =>
@@ -6370,7 +6624,19 @@ export class SessionStore {
         && record.verdict.disposition === 'accept'
         && significanceHasDetectedChange(record.verdict.significance));
     });
-    return { metrics, latest_ineffective_visual: latestIneffectiveVisual ?? null };
+    return {
+      metrics,
+      latest_ineffective_visual: latestIneffectiveVisual ?? null,
+      latest_prepare_failure: latestPrepareFailure ? {
+        operation_id: latestPrepareFailure.record.id,
+        problem_id: problemIdentity(latestPrepareFailure.record) ?? null,
+        failure_category: latestPrepareFailure.failure_category,
+        failed_step: latestPrepareFailure.failed_step,
+        failed_tool: latestPrepareFailure.failed_tool,
+        route_fingerprint: latestPrepareFailure.route_fingerprint,
+        repeated_count: prepareFailures.count,
+      } : null,
+    };
   }
   artisticRecoveryResolution(documentId, facts, projectionContext) {
     const records = this.currentDocumentRecords(
@@ -6909,11 +7175,19 @@ export class SessionStore {
     if (cadence.blockers.workflow_stall) {
       const stall = this.workflowStallStrategyContext(documentId, records, projectionContext);
       const prior = stall.latest_ineffective_visual;
+      const prepareFailure = stall.latest_prepare_failure;
       const targetProblemId = textOrUndefined(largestMustFix?.problem_id)
         ?? activeProblemId
+        ?? textOrUndefined(prepareFailure?.problem_id)
         ?? problemIdentity(prior)
         ?? 'the largest unresolved defect';
       const reasons = stall.metrics.stall_reasons.join('; ');
+      if (prepareFailure) {
+        const compositionAlternative = looksLikeCompositionDebt(largestMustFix)
+          ? ' Prefer a brush-independent bounded composition construction such as one owner-safe region block-in when it is admissible under the current ownership/scene-geometry contract; otherwise return to Art Director with the concrete preparation blocker.'
+          : ' Change the failed preparation route (preset/settings/brush role or method), or return a concrete systemic blocker if no valid route remains.';
+        return `workflow stall: ${prepareFailure.repeated_count} repeated pre-visual preparation failures at ${prepareFailure.failed_tool ?? prepareFailure.failed_step ?? 'preparation'} (${prepareFailure.failure_category}); do not retry the same failed preparation route.${compositionAlternative} (${reasons})`;
+      }
       if (prior) {
         return `workflow stall: make a causally distinct executable strategy change for ${targetProblemId}; equivalent retries are blocked; if no valid alternative exists, report an actionable blocker (${reasons})`;
       }
@@ -6941,7 +7215,12 @@ export class SessionStore {
     if (largestMustFix && state.active_problem?.scale && SCALE_RANK[normalizeScale(state.active_problem.scale)] > SCALE_RANK[normalizeScale(largestMustFix.scale)]) {
       return `review whole-frame priorities; unresolved ${largestMustFix.scale} must-fix ${largestMustFix.problem_id}`;
     }
-    if (cadence.decision_loop_stall) return 'decision-loop stall (advisory, no Guard execution block): dispatch next meaningful visual pass for the unresolved defect, or enter explicit bounded diagnostic mode; do not wait or request a manual tab switch';
+    if (cadence.decision_loop_stall) {
+      if (looksLikeCompositionDebt(largestMustFix)) {
+        return 'decision-loop stall (advisory, no Guard execution block): unresolved composition still needs visible large-mass coverage; dispatch one bounded brush-independent region block-in on a valid owner when the current ownership/scene-geometry contract admits it, otherwise return to Art Director with the concrete blocker; do not wait or repeat brush preparation';
+      }
+      return 'decision-loop stall (advisory, no Guard execution block): dispatch next meaningful visual pass for the unresolved defect, or enter explicit bounded diagnostic mode; do not wait or request a manual tab switch';
+    }
     if (art?.status === 'active' && art?.directive_id) {
       return `Painter: execute bounded task ${art.current_task_id ?? 'from directive'} under directive ${art.directive_id}`;
     }
@@ -7308,6 +7587,17 @@ export class SessionStore {
         && deferredSource.rolled_back !== true
       );
       const workflowStall = this.workflowStallStrategyContext(documentId, currentDocumentRecords, projectionContext);
+      const prepareFailure = workflowStall.latest_prepare_failure;
+      if (workflowStall.metrics.workflow_stall && prepareFailure && !compilerDeferredContinuation) {
+        const candidateRoute = prepareFailureRouteFingerprint(
+          request, prepareFailure.failed_step, prepareFailure.failed_tool
+        );
+        if (candidateRoute && candidateRoute === prepareFailure.route_fingerprint) {
+          add(
+            `workflow_stall: repeated pre-visual preparation failure exhausted the exact route from ${prepareFailure.operation_id} (${prepareFailure.failure_category}); change the failed preparation preset/settings/brush role/method or choose another admissible executable method before retrying`
+          );
+        }
+      }
       if (
         workflowStall.metrics.workflow_stall
         && workflowStall.latest_ineffective_visual

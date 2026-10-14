@@ -15,48 +15,14 @@ export const digitalPaintingControlTemplate: PhotoshopPromptTemplate = {
   description:
     'Guide arbitrary Photoshop subjects through multiscale visual checks, rollback and state-based completion.',
   arguments: [
-    {
-      name: 'subject',
-      description: 'What to draw or paint. Required.',
-      required: true,
-    },
-    {
-      name: 'style',
-      description: 'Optional style direction, e.g. anime, ink sketch, painterly, charcoal, comic.',
-      required: false,
-    },
-    {
-      name: 'finish_level',
-      description: 'Target finish level: sketch, study, or polished. Default: study.',
-      required: false,
-    },
-    {
-      name: 'constraints',
-      description: 'User constraints: monochrome, layer count, canvas size or required features.',
-      required: false,
-    },
-    {
-      name: 'preferred_brushes',
-      description:
-        'Preferred pack/presets; preference never makes all brushes mandatory.',
-      required: false,
-    },
-    {
-      name: 'required_brushes',
-      description:
-        'Required exact presets: use meaningfully; report missing, never substitute.',
-      required: false,
-    },
-    {
-      name: 'stroke_budget',
-      description: 'Approximate stroke count; soft default.',
-      required: false,
-    },
-    {
-      name: 'budget_mode',
-      description: 'soft (default) or hard; hard must not exceed stroke_budget.',
-      required: false,
-    },
+    { name: 'subject', description: 'What to draw or paint. Required.', required: true },
+    { name: 'style', description: 'Optional style direction.', required: false },
+    { name: 'finish_level', description: 'sketch, study, or polished. Default: study.', required: false },
+    { name: 'constraints', description: 'User constraints or required features.', required: false },
+    { name: 'preferred_brushes', description: 'Preferred pack/presets; preference is not mandatory.', required: false },
+    { name: 'required_brushes', description: 'Required exact presets: report missing, never substitute.', required: false },
+    { name: 'stroke_budget', description: 'Approximate stroke count; soft default.', required: false },
+    { name: 'budget_mode', description: 'soft or hard; hard must not exceed stroke_budget.', required: false },
   ],
   handler: (args) => {
     const subject = argString(args, 'subject', 'unspecified subject');
@@ -68,19 +34,17 @@ export const digitalPaintingControlTemplate: PhotoshopPromptTemplate = {
     const strokeBudget = Math.max(0, argInt(args, 'stroke_budget', 0));
     const budgetMode = argEnum(args, 'budget_mode', BUDGET_MODES, 'soft');
 
-    const budgetText =
-      strokeBudget > 0
-        ? budgetMode === 'hard'
-          ? `Hard stroke cap: ${strokeBudget}; simplify to fit the user constraint.`
-          : `Soft stroke budget: about ${strokeBudget} for scope/batching, not completion. Continue required correction.`
-        : `No stroke cap; choose marks by visual need and requested finish.`;
+    const budgetText = strokeBudget > 0
+      ? budgetMode === 'hard'
+        ? `Hard stroke cap: ${strokeBudget}; simplify to fit.`
+        : `Soft stroke budget: about ${strokeBudget}; required correction may continue.`
+      : `No stroke cap; choose marks by visual need.`;
 
-    const finishText =
-      finishLevel === 'sketch'
-        ? 'Sketch: readable silhouette/proportion/gesture and main values/colors; leave nonessential micro-detail.'
-        : finishLevel === 'polished'
-          ? 'Polished: resolve focal details, coherent edges/lines, deliberate accents and cleanup.'
-          : 'Study: resolve main forms/depth/focal details/values/colors and cleanup, without micro-detail chasing.';
+    const finishText = finishLevel === 'sketch'
+      ? 'Sketch: readable silhouette/proportion/gesture and main values/colors; omit nonessential micro-detail.'
+      : finishLevel === 'polished'
+        ? 'Polished: resolve focal details, edges, accents and cleanup.'
+        : 'Study: resolve main forms/depth/focal detail/values/colors and cleanup.';
 
     const text = [
       PHOTOSHOP_DRAWING_ROUTE,
@@ -107,7 +71,7 @@ export const digitalPaintingControlTemplate: PhotoshopPromptTemplate = {
       `- Derive a minimal STYLE CONTRACT; judge USER BRIEF + STRUCTURAL READABILITY + STYLE CONTRACT. Style never excuses broken tangencies/occlusion.`,
       `- ART RUN: bind one immutable processes/<subject>-process/<run>/ before paint; keep painting-state.json, frames/, checkpoints/, final/ there. accepted_frame != current_frame.`,
       `- PASS LIMITS: one VisualMicroPlan = one rollback unit, <=1 new layer, 1–4 contiguous compatible mutations; preparation first. Limits come from actions; a pass is not an artistic stage.`,
-      `- SUBJECT FIRST: first pixels include requested subject/recognition cues; next bounded owner passes establish setting/path/masses before refinement. No independent sky/fog/gradient first task. Director optional; initial value_check omitted or pending/observed=false on empty canvas.`,
+      `- SUBJECT FIRST: first pixels include subject/recognition cues; next owner passes establish setting/path/masses. Selected composition is a whole-frame contract: preserve multiplicity/relations, major masses/clusters and negative-space rhythm before refining an already-readable owner. tonal_regions never replace missing sibling masses. No sky/fog-only first task.`,
       `- EDITABLE COMPONENTS: predeclare scene_ownership_plan objects/units. Compound containers have independent semantic owners/layers for adjustable parts (bed/blanket/pillow; window/glass/curtain; body/head/eyes). Build/review one component per pass; tiny inseparable accents stay. Plans extend additively; never flatten to evade ownership.`,
       `- NO SOURCE DURING ART: use method selection.execution_contract.allowed_commands, input_schema and next_pass skeleton. If absent, retrieve exact public schema once via Guard capabilities(tool_names); never invent aliases or inspect src/tests/dist. Apply all field_correction_packet items together; Guard derives known technical pins but never invents art decisions. If still blocked, report cause. Confirmed closed target: reconcile(id,outcome=abandoned,document_closed_confirmed=true,reason).`,
       `- LAYER SEPARATION CHECK: substantial independent object/material/light/plane uses create-new/temporary-hypothesis, never layer per stroke. protected_layer_ids protects accepted ids; protected_regions is descriptive only. Replacement needs replace_protected_layer_ids.`,
@@ -118,7 +82,8 @@ export const digitalPaintingControlTemplate: PhotoshopPromptTemplate = {
       ``,
       `BRUSH PREFLIGHT / ROLE MAP:`,
       `- Before first brush-dependent stroke/dab in a non-trivial run, do bounded brush inventory → role map → effective settings → selective probe → completed brush_preflight. Region/fill and unrelated preparation do not require it.`,
-      `- photoshop_select_brush_preset returns fresh authoritative effective-settings readback; duplicate only if stale/changed/diagnostic. Guard may insert it from durable brush_preflight; do not repeat the preset.`,
+      `- probe_status=not-needed waives only a selective footprint probe; it never waives run-level brush_preflight. Preset names alone are not behavior evidence.`,
+      `- photoshop_select_brush_preset requires verified native preset identity plus fresh authoritative effective-settings readback; settings do not prove identity. preset_verification.source=unavailable is failed preparation: choose an evidenced preset/role or another admissible method; never repeat that setter route.`,
       `- Keep a compact brush role map. Guard compiles paint_strategy (material → intent → role → preset → pressure); optional next_pass.brush_role disambiguates roles. Raw bypass is blocked; simulated pressure must exist in the stroke.`,
       ``,
       `MARK / STRUCTURE GUARDS:`,
@@ -144,11 +109,11 @@ export const digitalPaintingControlTemplate: PhotoshopPromptTemplate = {
       `- PRIMARY PROGRESS METRIC: resolved visual problems, not protocol activity. Resolve only after meaningful change + improvement + accept + target_resolved=yes; accept alone retains pixels, not resolution. trend_signals are negative recurring defects only.`,
       `- HARD VISUAL EXECUTION-EVIDENCE GATE: meaningful|insufficient|unknown; unknown/no-op cannot be improvement. Delta proves execution; comparisons need comparable same-document BEFORE. SHA/delivery is identity, not art.`,
       `- subtle_local is pre-declared for fine corrections: require the same focus region BEFORE and AFTER; small/local work requires matching focus evidence.`,
-      `- WORKFLOW-STALL GATE: after 8 external actions without a meaningful visual change, or 2 visually insufficient passes, another mutation requires a structural executable strategy change. Legacy replan prose never bypasses the gate.`,
+      `- WORKFLOW-STALL GATE: after 8 external actions without meaningful visual change, 2 visually insufficient passes, or 2 same-route pre-visual prepare failures, require a causal executable change. Exhaust that exact preparation route until preset/settings/role/method changes; for missing composition prefer an admissible owner-safe region block-in. Legacy replan never bypasses the gate.`,
       `- HARD VISUAL CADENCE: next canonical cycle = next meaningful visual pass. photoshop_get_state is not required between normal visual passes. Proven systemic failure → one compact diagnostic investigation → causal replan → next visual pass. decision_loop_stall at 90s is advisory, NOT a Guard failure; continue the largest unresolved visual correction unless a safety gate blocks.`,
       `- Art Director plans; Painter uses adaptive cadence and judges brief/style pixels and repairs the main defect. At critic_role.required, switch to WHOLE-SCENE Critic; return previous_observation.critic_review and resume Painter in the same cycle. Exposed/user-authorized Core agents may delegate exact images/brief. No local model; roles are not calibrated authority.`,
       `- PAINTER: local preview/verdict; no global re-plan per stroke; bind directive/task/scope/change_domains.`,
-      `- METHOD CHOICE: use selected executable command, args schema and skeleton without extra status calls. Compound objects use authored constraints/IK; smooth contours use curve=smooth. Painterly passes use aligned reference or authored form_field/light with clip_exclusions. Rebuild changed rigid parts, retain brief/contact debt and independent layers. No fake references or source reads.`,
+      `- METHOD CHOICE: use the selected executable command/schema. Classify geometry honestly: flat/orthographic/non-Euclidean/continuous-field masses are not coherent-3D unless required; use the style-authorized projection opt-out when truthful, and keep strict bindings for coherent 3D. Compound objects use constraints/IK; smooth contours use curve=smooth. No fake references/source reads.`,
       `- EARLY PLANNER RETURN on serious error, global value/composition drift, likeness/main-shape loss or unsafe directive; global edits need task permission.`,
       `- Development capture: Guard archives a monotonic frame after each mutation/tiny bundle in frames/ with same-stem .txt commentary; split different regions/roles/stages.`,
       `- SILENT STALL: silent_stall after 90s with known next required action or pending obligation and no job; read-only churn does not reset it.`,

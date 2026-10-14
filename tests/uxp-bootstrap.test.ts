@@ -131,9 +131,14 @@ describe('UXP bootstrap mutations', () => {
   it('does not certify absent native brush settings merely because their defaults match', () => {
     const harness = bootstrapHarness();
     const snapshot = harness.normalizeBrushSettingsDescriptor({
-      currentToolOptions: { brush: { diameter: { _unit: 'pixelsUnit', _value: 16 } } },
+      currentToolOptions: {
+        presetName: 'Hard Round',
+        brush: { name: 'Hard Round', diameter: { _unit: 'pixelsUnit', _value: 16 } },
+      },
     });
     expect(snapshot.settings).toMatchObject({ size: 16, hardness: 100, opacity: 100 });
+    expect(snapshot.preset).toBeUndefined();
+    expect(snapshot.brush_tip).toEqual({ name: 'Hard Round', source: 'current_tool_options_brush' });
     expect(snapshot.observed_fields).toContain('size');
     expect(snapshot.observed_fields).not.toContain('hardness');
     expect(snapshot.observed_fields).not.toContain('opacity');
@@ -196,7 +201,7 @@ describe('UXP bootstrap mutations', () => {
     });
   });
 
-  it('rejects contradictory current-tool readback and native selection event', async () => {
+  it('rejects contradictory native brush-selection notifications', async () => {
     let listener: ((event: string, descriptor: any) => void) | undefined;
     const harness = bootstrapHarness({
       notifications: {
@@ -205,10 +210,11 @@ describe('UXP bootstrap mutations', () => {
       },
       batchPlay: async descriptors => descriptors.map(descriptor => {
         if (descriptor._obj === 'select' && descriptor._target[0]._ref === 'brush') {
+          listener?.('select', { _target: [{ _ref: 'brush', _name: 'Installed Dry Brush' }] });
           listener?.('select', { _target: [{ _ref: 'brush', _name: 'Different Brush' }] });
         }
         return descriptor._obj === 'get'
-          ? { currentToolOptions: { brush: { name: 'Installed Dry Brush', diameter: 16 } } }
+          ? { currentToolOptions: { presetName: 'Installed Dry Brush', brush: { diameter: 16 } } }
           : {};
       }),
     });
@@ -242,20 +248,27 @@ describe('UXP bootstrap mutations', () => {
     await expect(harness.selectBrushPreset({ name: 'Installed Dry Brush' })).rejects.toThrow('Preset unavailable');
     expect(removed).toBe(4);
   });
-  it('selects the paint tool before the preset, verifies actual readback and preserves unknown', async () => {
+  it('selects the paint tool before the preset but never promotes currentToolOptions labels to preset identity', async () => {
     let selected = 'previous-tool-brush';
-    let readable = true;
     const f = bootstrapHarness({ batchPlay: async descriptors => descriptors.map(descriptor => {
       const target = descriptor._target?.[0]?._ref;
       if (descriptor._obj === 'select' && target === 'paintbrushTool') selected = 'default-brush';
       if (descriptor._obj === 'select' && target === 'brush') selected = descriptor._target[0]._name;
-      if (descriptor._obj === 'get') return { currentToolOptions: { brush: {
-        ...(readable ? { name: selected } : {}), diameter: 20 } } };
+      if (descriptor._obj === 'get') return { currentToolOptions: {
+        presetName: selected,
+        brush: { name: 'Internal Tip Name', diameter: 20 },
+      } };
       return {};
     }) });
-    expect((await f.selectBrushPreset({ name: 'Installed Dry Brush' })).preset).toBe('Installed Dry Brush');
-    readable = false;
-    expect((await f.selectBrushPreset({ name: 'Installed Dry Brush' })).preset).toBeNull();
+    expect(await f.selectBrushPreset({ name: 'Installed Dry Brush' })).toMatchObject({
+      preset: null,
+      brush_tip: { name: 'Internal Tip Name' },
+      preset_verification: {
+        source: 'unavailable',
+        evidence: { brush_tip_name: 'Internal Tip Name' },
+      },
+    });
+    expect(selected).toBe('Installed Dry Brush');
   });
 
   it('captures the uniquely created identity even when modal/add return values are absent', async () => {

@@ -600,7 +600,7 @@ describe('scene ownership normalization', () => {
   });
 });
 
-function materialBrushPreflight(options: { filtered?: boolean; ambiguous?: boolean; scaleSeparated?: boolean; probeStatus?: 'pass' | 'cached' | 'not-needed'; candidateDynamics?: boolean } = {}) {
+function materialBrushPreflight(options: { filtered?: boolean; ambiguous?: boolean; scaleSeparated?: boolean; probeStatus?: 'pass' | 'cached' | 'not-needed'; candidateDynamics?: boolean; evidenceBoundPack?: boolean } = {}) {
   const settings = {
     size: 80, hardness: 65, roundness: 100, opacity: 75, flow: 55, spacing: 12,
     use_pressure_size: true, use_pressure_opacity: false, airbrush: false,
@@ -617,6 +617,7 @@ function materialBrushPreflight(options: { filtered?: boolean; ambiguous?: boole
     working_scale: 'medium',
     pressure_policy: 'native-preset',
     probe_status: options.probeStatus ?? 'pass',
+    ...(options.evidenceBoundPack ? { profile_id: 'media-profile-sha256:fur-breakup-fixture' } : {}),
     ...(options.candidateDynamics ? { candidate_evidence: [
       {
         preset_name: 'Fur Bristle', profile_id: 'profile:fur-bristle', evidence_score: 9,
@@ -655,6 +656,7 @@ function materialBrushPreflight(options: { filtered?: boolean; ambiguous?: boole
     completed: true,
     inventory_observed: true,
     inventory_total: 123,
+    ...(options.evidenceBoundPack ? { brush_pack_id: 'brush-pack-sha256:material-fixture' } : {}),
     ...(options.filtered ? { inventory_query: 'Soft Round; Hard Round; Flat Blunt' } : {}),
     roles,
   };
@@ -3234,7 +3236,7 @@ describe('public compact Guard contract regressions', () => {
       process_dir: 'processes/material-fitness-process/run-01',
       painting_profile: 'nontrivial_painting',
       commentary_mode: 'technical',
-      brush_preflight: materialBrushPreflight(),
+      brush_preflight: materialBrushPreflight({ candidateDynamics: true, evidenceBoundPack: true }),
     });
 
     const missingMaterial = await body(await f.cycle.handler({
@@ -3315,6 +3317,8 @@ describe('public compact Guard contract regressions', () => {
     });
     expect(unexplainedChoice.error_codes).not.toContain('brush_preset_choice_reason_required');
 
+    const evidenceFitStroke = strokeAction('fur-stroke-fit-explicit') as Record<string, any>;
+    evidenceFitStroke.args.strokes[0].dynamics = { size: [8, 20] };
     const valid = await body(await f.cycle.handler({
       next_pass: {
         request_key: 'fur-material-fit-explicit',
@@ -3328,10 +3332,10 @@ describe('public compact Guard contract regressions', () => {
         brush_preset_choice_reason: 'Dry Fur provides the more broken directional footprint needed for fur breakup at this scale.',
         visual_intent: 'directional-mass',
         impact_class: 'construct',
-        actions: [
-          { id: 'choose-dry-fur', tool: 'photoshop_select_brush_preset', args: { name: 'Dry Fur' } },
-          strokeAction('fur-stroke-fit-explicit'),
-        ],
+          actions: [
+            { id: 'choose-dry-fur', tool: 'photoshop_select_brush_preset', args: { name: 'Dry Fur' } },
+            evidenceFitStroke,
+          ],
       },
     }));
     expect(valid.preflight_rejection).toBeUndefined();
@@ -3414,7 +3418,7 @@ describe('public compact Guard contract regressions', () => {
       process_dir: 'processes/candidate-pressure-process/run-01',
       painting_profile: 'nontrivial_painting',
       commentary_mode: 'technical',
-      brush_preflight: materialBrushPreflight({ candidateDynamics: true }),
+      brush_preflight: materialBrushPreflight({ candidateDynamics: true, evidenceBoundPack: true }),
     });
 
     const basePass = {
@@ -3466,7 +3470,7 @@ describe('public compact Guard contract regressions', () => {
       process_dir: 'processes/preset-method-class-process/run-01',
       painting_profile: 'nontrivial_painting',
       commentary_mode: 'technical',
-      brush_preflight: materialBrushPreflight(),
+      brush_preflight: materialBrushPreflight({ candidateDynamics: true, evidenceBoundPack: true }),
     });
 
     const action = strokeAction('preset-method-stroke') as Record<string, unknown>;

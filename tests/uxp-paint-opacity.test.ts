@@ -67,9 +67,13 @@ it.each([false, true])('regression: native outline replaces only its pinned comp
   await expect(api.paintRegions(wrong)).rejects.toThrow('paint_target_layer_unverified');
 });
 
-it('returns the native brush preset readback instead of echoing a requested but unapplied preset', async () => {
+it('does not promote preset-like brush settings readback or echo a requested preset', async () => {
   const selects: unknown[] = [];
-  const observed = { preset: 'Old Hard Brush', settings: { hardness: 100 } };
+  const observed = {
+    preset: 'Old Hard Brush',
+    brush_tip: { name: 'Old Hard Brush', source: 'current_tool_options_brush' },
+    settings: { hardness: 100 },
+  };
   const api: any = runInNewContext(source + `
     snapshotBrushSettings = async () => harness.observed;
     ({ selectBrushPreset });`, {
@@ -86,10 +90,17 @@ it('returns the native brush preset readback instead of echoing a requested but 
   });
   const result = await api.selectBrushPreset({ name: 'Soft Round Brush' });
   expect(selects).toHaveLength(1);
-  expect(result).toMatchObject({ ok: true, preset: 'Old Hard Brush', settings: { hardness: 100 } });
-  observed.preset = 'Soft Round Brush';
-  expect(await api.selectBrushPreset({ name: 'Soft Round Brush' }))
-    .toMatchObject({ preset: 'Soft Round Brush' });
+  expect(result).toMatchObject({
+    ok: true,
+    preset: null,
+    brush_tip: { name: 'Old Hard Brush', source: 'current_tool_options_brush' },
+    settings: { hardness: 100 },
+    preset_verification: {
+      source: 'unavailable',
+      observed_preset: null,
+      requested_match: null,
+    },
+  });
 });
 
 function fixture(opacity = 100, flow = 100, useNativePathStroke = false) {

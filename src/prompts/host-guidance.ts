@@ -352,6 +352,12 @@ Multi-step etiquette
 - SUBJECT-FIRST START: the first meaningful visual pass must contain the requested main subject
   and its discriminative recognition cues. Establish its relationship to the setting/path/large
   scene masses in the next bounded construction passes before polishing any one component.
+  Treat the selected composition as a whole-frame contract: preserve every explicit multiplicity,
+  major spatial relation and large-mass role committed by the selected hypothesis, plus any stronger
+  requirement from the original brief. Establish the required major
+  masses/clusters and their negative-space rhythm across early owner-specific passes before spending
+  a second refinement pass on one already-readable owner, unless the brief truly contains only that
+  one major mass. A rich same-owner tonal-regions pass does not substitute for missing sibling masses.
   Do not spend an independent first task on an empty sky/fog/gradient or finish the background
   before introducing the subject. Keep separately editable owners on separate layers; the
   whole-scene milestone may span bounded passes, never one illegal multi-owner rollback unit.
@@ -394,6 +400,11 @@ Multi-step etiquette
   into one layer or ignore the single-owner/rollback boundary. Preserve a user-
   requested brush medium or stronger evidence for visible painterly marks, soft
   volumes or atmospheric fields instead of substituting polygon art for them.
+  Choose scene-geometry applicability from the actual spatial brief/style before committed
+  construction. Do not accidentally classify every stylized/flat/continuous-field mass as a
+  coherent 3D compound object; when a style-authorized orthographic/flat/non-Euclidean projection
+  is the truthful model, declare that explicit opt-out once. When coherent 3D relations are real,
+  keep the durable geometry/bindings and satisfy them rather than weakening the safety contract.
 
   \`photoshop_paint_regions\` is broad closed-mass scaffolding during
   RECOGNITION_BLOCK_IN / COMPOSITION / SHAPE / GLOBAL_BLOCK_IN. Exit broad ADD block-in only when
@@ -422,6 +433,11 @@ Multi-step etiquette
   then re-call \`photoshop_guard_set_art_run\` with the same process_dir and completed
   \`brush_preflight\`. Brush-dependent painting is fail-closed until this durable preflight exists;
   brush-independent region/fill construction is not blocked merely because brush_preflight is absent.
+  A role's probe_status=not-needed only waives that selective footprint probe when the preset is
+  already sufficiently evidenced; it never means the run-level brush_preflight is optional. Preset
+  names alone are not behavioral evidence. If the requested medium depends on brush marks, complete
+  inventory/role/effective-settings preflight before the first such mutation, while broad
+  brush-independent composition can continue through an admissible region/fill route.
 - Route non-trivial strokes/dabs/region construction through \`photoshop_execute_visual_microplan\`.
   On compact \`next_pass\`, Guard may choose the durable preflighted brush role by working scale
   (or the optional \`brush_role\` hint) and compile \`paint_strategy\`. When that role has more than
@@ -444,6 +460,12 @@ Multi-step etiquette
 - If status reports \`workflow_stall\`, stop protocol churn and make a real executable strategy
   change (method, scale, region, brush role or mutation structure) before another mutation.
   Legacy \`replan\` prose is not an override. Required recovery reads/checkpoints remain allowed.
+  Two repeated microplan_prepare_failed results before any visual mutation exhaust that exact
+  preparation route. Do not keep selecting the same failing brush/preset/settings package. Apply the
+  named correction once; then change the preparation route or use another admissible executable
+  method. If unresolved composition/large-mass coverage is the blocker and brush setup is failing,
+  prefer one bounded brush-independent region block-in on a valid owner when the current
+  ownership/scene-geometry contract permits it; otherwise return a concrete blocker to the Director.
 - HARD VISUAL CADENCE: after a visual preview has been inspected and its verdict recorded,
   the next healthy canonical cycle must contain the next meaningful visual pass. Do not insert
   routine status/get_state/document-list/schema/source/grep/extra-preview investigation between

@@ -1797,7 +1797,7 @@ describe('Guard session-store regressions', () => {
       problem_id: 'receiverSurface-flow', stage: 'FORM', scale: 'medium',
     })).toThrow(/physical_stack_check_required/);
 
-    const admitted = s.begin({
+    expect(() => s.begin({
       ...request('preflighted-brush-plan', 'photoshop_execute_visual_microplan', {
         document_id: 42,
         plan_id: 'preflighted-brush-plan',
@@ -1815,8 +1815,7 @@ describe('Guard session-store regressions', () => {
       problem_id: 'receiverSurface-flow',
       stage: 'SHAPE',
       scale: 'medium',
-    }).record;
-    expect(admitted.phase).toBe('started');
+    })).toThrow(/brush_candidate_evidence_required/);
   });
 
   it('enforces an exclusive supplied brush pack for brush marks while leaving pack identity explicit for stamps', () => {
@@ -2457,6 +2456,185 @@ describe('Guard session-store regressions', () => {
     expect(partialCompleted.execution).not.toBe('not-executed');
     expect(partial.visualBarrier(42)?.operationId).toBe('e16-partial');
     expect(partial.status().uncertain).toContain('e16-partial');
+  });
+
+  it('stalls repeated pre-visual preparation failures, blocks the exact failed route, and suggests a safe composition fallback', () => {
+    const s = store() as any;
+    s.setArtRunState({
+      document_id: 42,
+      process_dir: 'processes/session-regression-process/repeated-prepare-failure',
+      commentary_mode: 'technical',
+      painting_profile: 'simple_graphic',
+    });
+    s.setWorkflowLifecycle(42, 'active', 'test-painting');
+    s.updatePaintingState(42, (current: any) => ({
+      ...current,
+      active_problem: { problem_id: 'composition-coverage', scale: 'global' },
+      visual_problems: {
+        ...(current.visual_problems ?? {}),
+        'composition-coverage': {
+          problem_id: 'composition-coverage',
+          scale: 'global',
+          severity: 'must-fix',
+          status: 'open',
+          region: 'whole-canvas',
+          hypothesis: 'The selected composition still lacks its required large-mass spatial coverage.',
+        },
+      },
+    }));
+    const route = (id: string, preset = 'Broken Marker') => ({
+      ...request(id, 'photoshop_execute_visual_microplan', {
+        document_id: 42,
+        plan_id: id,
+        problem_id: 'composition-coverage',
+        region: 'whole-canvas',
+        stage: 'COMPOSITION',
+        scale: 'global',
+        method_class: 'paint',
+        action_class: 'ADD',
+        paint_strategy: { brush_role: 'broad-marker', preset_name: preset },
+        steps: [
+          { id: 'preset', tool: 'photoshop_select_brush_preset', args: { name: preset } },
+          { id: 'paint', tool: 'photoshop_paint_strokes', args: { strokes: [{ points: [{ x: 20, y: 20 }, { x: 80, y: 50 }] }] } },
+          { id: 'preview', tool: 'photoshop_get_preview', args: {} },
+        ],
+      }),
+      problem_id: 'composition-coverage',
+      region: 'whole-canvas',
+      stage: 'COMPOSITION',
+      scale: 'global',
+    });
+    const fail = (id: string, sequence: number, preset = 'Broken Marker') => {
+      const failed = route(id, preset);
+      s.write({
+        id,
+        tool: failed.tool,
+        args: failed.args,
+        problem_id: failed.problem_id,
+        region: failed.region,
+        stage: failed.stage,
+        scale: failed.scale,
+        sequence,
+        created_at: new Date(Date.UTC(2026, 9, 14, 17, 0, sequence)).toISOString(),
+        completed_at: new Date(Date.UTC(2026, 9, 14, 17, 0, sequence)).toISOString(),
+        phase: 'completed',
+        execution: 'not-executed',
+        visual: false,
+        failed: true,
+        result: { content: [{ type: 'text', text: JSON.stringify({
+          ok: false,
+          code: 'microplan_prepare_failed',
+          failure_category: 'brush_setter_unverified',
+          execution: 'not-executed',
+          terminal: true,
+          visual_mutation_started: false,
+          failed_step: 'preset',
+          steps: [{ id: 'preset', tool: 'photoshop_select_brush_preset', ok: false }],
+          preparation_execution: {
+            failed_step_class: 'preparation-only',
+            failed_step_execution: 'not-executed',
+            prior_side_effecting_preparation_completed: false,
+            side_effects_possible: false,
+          },
+        }) }] },
+      });
+    };
+
+    fail('prepare-fail-1', 1);
+    expect(s.workflowMetrics(42)).toMatchObject({ workflow_stall: false, consecutive_prepare_failures: 1 });
+    fail('prepare-fail-2', 2);
+    expect(s.workflowMetrics(42)).toMatchObject({ workflow_stall: true, consecutive_prepare_failures: 2 });
+    expect(s.documentNextRequiredAction(42)).toMatch(/repeated pre-visual preparation failures[\s\S]*region block-in/);
+
+    const sameErrors = s.collectPreflightErrors(route('prepare-fail-3')).join('\n');
+    expect(sameErrors).toMatch(/repeated pre-visual preparation failure exhausted the exact route/);
+    const changedErrors = s.collectPreflightErrors(route('prepare-fail-changed', 'Alternate Marker')).join('\n');
+    expect(changedErrors).not.toMatch(/repeated pre-visual preparation failure exhausted the exact route/);
+  });
+
+  it('resets repeated preparation-failure counting after a different failed route or a real visual pass', () => {
+    const s = store() as any;
+    s.setArtRunState({
+      document_id: 42,
+      process_dir: 'processes/session-regression-process/prepare-failure-reset',
+      commentary_mode: 'technical',
+      painting_profile: 'simple_graphic',
+    });
+    const writeFailure = (id: string, sequence: number, preset: string) => s.write({
+      id,
+      tool: 'photoshop_execute_visual_microplan',
+      args: {
+        document_id: 42,
+        problem_id: 'composition-reset',
+        method_class: 'paint',
+        paint_strategy: { brush_role: 'marker', preset_name: preset },
+        steps: [{ id: 'preset', tool: 'photoshop_select_brush_preset', args: { name: preset } }],
+      },
+      problem_id: 'composition-reset',
+      sequence,
+      created_at: new Date(Date.UTC(2026, 9, 14, 18, 0, sequence)).toISOString(),
+      completed_at: new Date(Date.UTC(2026, 9, 14, 18, 0, sequence)).toISOString(),
+      phase: 'completed',
+      execution: 'not-executed',
+      visual: false,
+      failed: true,
+      result: { content: [{ type: 'text', text: JSON.stringify({
+        ok: false,
+        code: 'microplan_prepare_failed',
+        failure_category: 'brush_setter_unverified',
+        visual_mutation_started: false,
+        failed_step: 'preset',
+        steps: [{ id: 'preset', tool: 'photoshop_select_brush_preset', ok: false }],
+      }) }] },
+    });
+
+    writeFailure('route-a-1', 1, 'Marker A');
+    writeFailure('route-b-1', 2, 'Marker B');
+    expect(s.workflowMetrics(42)).toMatchObject({ workflow_stall: false, consecutive_prepare_failures: 1 });
+    writeFailure('route-b-2', 3, 'Marker B');
+    expect(s.workflowMetrics(42)).toMatchObject({ workflow_stall: true, consecutive_prepare_failures: 2 });
+
+    writeProjectionRecord(s, { id: 'meaningful-after-prepare', documentId: 42, sequence: 4, visual: true, report: true, ack: true, verdict: true });
+    expect(s.workflowMetrics(42)).toMatchObject({ workflow_stall: false, consecutive_prepare_failures: 0 });
+  });
+
+  it('turns a 90-second composition decision-loop stall into a concrete brush-independent next action', () => {
+    const s = store() as any;
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date(Date.UTC(2026, 8, 20, 12, 5, 0)));
+      s.setArtRunState({
+        document_id: 42,
+        process_dir: 'processes/session-regression-process/composition-decision-loop-stall',
+        commentary_mode: 'technical',
+        painting_profile: 'simple_graphic',
+      });
+      s.setWorkflowLifecycle(42, 'active', 'test-painting');
+      writeProjectionRecord(s, {
+        id: 'composition-anchor', documentId: 42, sequence: 1,
+        visual: true, report: true, ack: true, verdict: true,
+      });
+      s.updatePaintingState(42, (current: any) => ({
+        ...current,
+        active_problem: { problem_id: 'composition-spatial-coverage', scale: 'global' },
+        visual_problems: {
+          ...(current.visual_problems ?? {}),
+          'composition-spatial-coverage': {
+            problem_id: 'composition-spatial-coverage',
+            scale: 'global',
+            severity: 'must-fix',
+            status: 'open',
+            region: 'whole-canvas',
+            hypothesis: 'Major scene masses are still missing from the selected composition.',
+          },
+        },
+      }));
+
+      expect(s.visualCadenceState(42).decision_loop_stall).toBe(true);
+      expect(s.documentNextRequiredAction(42)).toMatch(/decision-loop stall[\s\S]*region block-in/);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('never classifies a successful visual mutation as not-executed', () => {

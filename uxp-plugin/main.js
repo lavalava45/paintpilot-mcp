@@ -1233,13 +1233,12 @@ function normalizeBrushSettingsDescriptor(descriptor) {
     return numeric == null ? fallback : numeric;
   }
 
-  const presetName = [
-    brush.name,
-    brush._name,
-    opts.presetName,
-    opts.brushPreset,
-    opts.brushName,
-  ].find((value) => typeof value === 'string' && value.trim().length > 0);
+  // `currentToolOptions.brush` describes the active sampled brush/tip on many
+  // Photoshop builds, not the user-visible presetManager entry. Even
+  // preset-looking sibling labels are not a documented active-preset identity
+  // contract, so this readback intentionally never certifies a preset name.
+  const brushTipName = [brush.name, brush._name]
+    .find((value) => typeof value === 'string' && value.trim().length > 0);
 
   // A fallback is useful for painting-state initialization, but it is not
   // evidence that Photoshop actually read back a requested setter value.
@@ -1271,7 +1270,12 @@ function normalizeBrushSettingsDescriptor(descriptor) {
   return {
     ok: true,
     observed_fields: observedFields,
-    ...(presetName ? { preset: presetName.trim() } : {}),
+    ...(brushTipName ? {
+      brush_tip: {
+        name: brushTipName.trim(),
+        source: 'current_tool_options_brush',
+      },
+    } : {}),
     settings: {
       size: valueOr(brush.diameter, 1),
       hardness: valueOr(brush.hardness, 100),
@@ -1471,7 +1475,7 @@ async function selectBrushPreset(params = {}) {
   let resolveBrushSelect;
   const brushSelectObserved = new Promise(resolve => { resolveBrushSelect = resolve; });
   const onSelect = (event, descriptor) => {
-    if (!observing || event !== 'select') return;
+    if (!observing || (event !== 'select' && descriptor?._obj !== 'select')) return;
     const targets = Array.isArray(descriptor?._target) ? descriptor._target : [descriptor?._target];
     const brush = targets.find(target => target?._ref === 'brush');
     if (brush) {
@@ -1489,7 +1493,11 @@ async function selectBrushPreset(params = {}) {
   };
   try {
     if (typeof action.addNotificationListener === 'function' && typeof action.removeNotificationListener === 'function') {
-      try { await action.addNotificationListener(['select'], onSelect); listenerInstalled = true; }
+      // Alchemist/UXP action recording exposes the user-visible brush preset
+      // name on the native select action. Listen to all action notifications
+      // and filter the descriptor because some hosts do not deliver tool/UI
+      // selection through a narrowly subscribed `select` listener.
+      try { await action.addNotificationListener(['all'], onSelect); listenerInstalled = true; }
       catch { /* Effective-state readback remains available without events. */ }
     }
     const returned = await core.executeAsModal(
@@ -1520,27 +1528,33 @@ async function selectBrushPreset(params = {}) {
     // for the actual event rather than treating a fixed 100ms sleep as proof
     // that no evidence will arrive. The deadline bounds unavailable events;
     // neither path retries selection or mutates document/layer pixels.
-    if (!current.preset && listenerInstalled && !observedSelection)
+    if (listenerInstalled && !observedSelection)
       await Promise.race([brushSelectObserved, new Promise(resolve => setTimeout(resolve, 500))]);
-    const conflictingEvidence = conflictingSelectNotifications || Boolean(
-      current.preset && observedSelection && current.preset !== observedSelection
-    );
-    // Two native identity sources disagreeing is not confirmation of either.
-    // Guard must refuse the pass rather than painting with a guessed preset.
-    const preset = conflictingEvidence ? null : current.preset ?? observedSelection;
+    const notificationPreset = typeof observedSelection === 'string' && observedSelection.trim()
+      ? observedSelection.trim()
+      : null;
+    const conflictingEvidence = conflictingSelectNotifications;
+    // An absent notification is unknown, not evidence that the requested name
+    // became active. Multiple contradictory notifications are equally unsafe.
+    const preset = conflictingEvidence ? null : notificationPreset;
+    const verificationSource = conflictingEvidence
+      ? 'conflicting_evidence'
+      : notificationPreset
+        ? 'photoshop_select_notification'
+        : 'unavailable';
     return { ok: true, preset: preset ?? null, settings: current.settings,
-      preset_verification: { source: conflictingEvidence ? 'conflicting_evidence'
-        : current.preset ? 'current_tool_options'
-        : observedSelection ? 'photoshop_select_notification' : 'unavailable',
+      ...(current.brush_tip ? { brush_tip: current.brush_tip } : {}),
+      preset_verification: { source: verificationSource,
         observed_preset: preset ?? null,
-        ...(conflictingEvidence ? {
-          current_tool_options_preset: current.preset ?? null,
-          select_notification_preset: observedSelection,
-        } : {}) } };
+        requested_match: preset == null ? null : preset === name,
+        evidence: {
+          select_notification_preset: notificationPreset,
+          brush_tip_name: current.brush_tip?.name ?? null,
+        } } };
   } finally {
     observing = false;
     if (listenerInstalled) {
-      try { await action.removeNotificationListener(['select'], onSelect); }
+      try { await action.removeNotificationListener(['all'], onSelect); }
       catch { /* A cleanup error cannot erase the actual selection evidence. */ }
     }
   }

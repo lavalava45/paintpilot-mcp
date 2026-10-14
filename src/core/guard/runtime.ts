@@ -891,7 +891,10 @@ export class EmbeddedGuardRuntime {
     const brushPreflight = input.brush_preflight && typeof input.brush_preflight === 'object' && !Array.isArray(input.brush_preflight)
       ? {
           ...(input.brush_preflight as Record<string, unknown>),
-          ...(runtimeInstanceWitness ? { runtime_instance_witness: runtimeInstanceWitness } : {}),
+          ...(runtimeInstanceWitness ? {
+            runtime_instance_witness: runtimeInstanceWitness,
+            runtime_instance_verified: true,
+          } : {}),
         }
       : input.brush_preflight;
     const response = this.artRun({
@@ -1339,17 +1342,26 @@ export class EmbeddedGuardRuntime {
       if (!result.ok || !result.data) {
         throw new Error(result.error ?? `brush_pack_probe_failed:${commandId}`);
       }
+      const verifiedPresetName = typeof result.data.preset_name === 'string' ? result.data.preset_name.trim() : '';
+      if (verifiedPresetName !== presetName) {
+        throw new Error(`brush_pack_probe_native_identity_mismatch: requested=${presetName} verified=${verifiedPresetName || 'missing'}`);
+      }
       const preview = recordOrEmpty(result.data.preview);
       const whole = recordOrEmpty(preview.whole);
       const base64 = typeof whole.base64 === 'string' ? whole.base64 : '';
       if (!base64) throw new Error(`brush_pack_probe_preview_missing:${commandId}`);
       const bytes = Buffer.from(base64, 'base64');
+      if (bytes.length < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8
+        || bytes[bytes.length - 2] !== 0xff || bytes[bytes.length - 1] !== 0xd9) {
+        throw new Error(`brush_pack_probe_preview_not_jpeg:${commandId}`);
+      }
       const sha = createHash('sha256').update(bytes).digest('hex');
       const evidenceDir = path.join(recordDirectory, 'probes', brushPackId.replace(/[^a-zA-Z0-9._-]+/g, '_'));
       fs.mkdirSync(evidenceDir, { recursive: true });
       const evidencePath = path.join(evidenceDir, `${sha}.jpg`);
       if (!fs.existsSync(evidencePath)) fs.writeFileSync(evidencePath, bytes);
       const evidence = {
+        preset_name: verifiedPresetName,
         preview_path: evidencePath,
         preview_sha256: sha,
         operation_id: commandId,
@@ -1376,6 +1388,98 @@ export class EmbeddedGuardRuntime {
         effective_settings: result.data.effective_settings ?? {},
         layout: result.data.layout ?? {},
         evidence,
+        stable_command_id: commandId,
+        receipt_state: result.receipt?.state ?? null,
+      };
+    } finally {
+      releaseExecution?.();
+    }
+  }
+
+  async brushPresetProbe(input: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const presetName = typeof input.preset_name === 'string' ? input.preset_name.trim() : '';
+    if (!presetName) throw new Error('brush_preset_probe_requires_preset_name');
+
+    let releaseExecution: (() => void) | undefined;
+    try {
+      releaseExecution = this.executionLease.acquire('photoshop_guard_brush_pack_profile');
+      const commandId = `brush-preset-probe:${createHash('sha256').update(JSON.stringify({
+        preset_name: presetName,
+        bridge_revision: UXP_BRIDGE_REVISION,
+        probe_nonce: randomUUID(),
+      })).digest('hex')}`;
+      const result = await invokeUxpProbeMediaBrush({ preset_name: presetName }, commandId);
+      if (!result.ok || !result.data) {
+        throw new Error(result.error ?? `brush_preset_probe_failed:${commandId}`);
+      }
+      const verifiedPresetName = typeof result.data.preset_name === 'string' ? result.data.preset_name.trim() : '';
+      if (verifiedPresetName !== presetName) {
+        throw new Error(`brush_preset_probe_native_identity_mismatch: requested=${presetName} verified=${verifiedPresetName || 'missing'}`);
+      }
+      const preview = recordOrEmpty(result.data.preview);
+      const whole = recordOrEmpty(preview.whole);
+      const base64 = typeof whole.base64 === 'string' ? whole.base64 : '';
+      if (!base64) throw new Error(`brush_preset_probe_preview_missing:${commandId}`);
+      const bytes = Buffer.from(base64, 'base64');
+      if (bytes.length < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8
+        || bytes[bytes.length - 2] !== 0xff || bytes[bytes.length - 1] !== 0xd9) {
+        throw new Error(`brush_preset_probe_preview_not_jpeg:${commandId}`);
+      }
+      const sha = createHash('sha256').update(bytes).digest('hex');
+      const bridgeHealth = getUxpBridgeHealthSnapshot();
+      const runtimeInstanceWitness = typeof bridgeHealth.runtime_instance_witness === 'string'
+        ? bridgeHealth.runtime_instance_witness.trim()
+        : '';
+      if (!bridgeHealth.plugin_connected || bridgeHealth.bridge_revision !== UXP_BRIDGE_REVISION || !runtimeInstanceWitness) {
+        throw new Error('brush_preset_probe_runtime_identity_unavailable');
+      }
+      const evidenceDir = path.join(
+        resolveBrushPackRecordDirectory(),
+        'probes',
+        'installed-presets',
+        presetName.replace(/[^a-zA-Z0-9._-]+/g, '_').slice(0, 96) || 'preset'
+      );
+      fs.mkdirSync(evidenceDir, { recursive: true });
+      const evidencePath = path.join(evidenceDir, `${sha}.jpg`);
+      if (!fs.existsSync(evidencePath)) fs.writeFileSync(evidencePath, bytes);
+      const receipt = {
+        protocol: 'photoshop.installed_brush.probe_receipt.v1',
+        probe_operation_id: commandId,
+        preset_name: verifiedPresetName,
+        effective_settings: recordOrEmpty(result.data.effective_settings),
+        backend: 'uxp',
+        runtime_revision: RUNTIME_STATE_VERSION,
+        bridge_revision: UXP_BRIDGE_REVISION,
+        runtime_instance_witness: runtimeInstanceWitness,
+        evidence: {
+          preview_path: evidencePath,
+          preview_sha256: sha,
+        },
+        layout: recordOrEmpty(result.data.layout),
+        recorded_at: new Date().toISOString(),
+      };
+      const receiptBytes = Buffer.from(JSON.stringify(receipt, null, 2), 'utf8');
+      const receiptSha = createHash('sha256').update(receiptBytes).digest('hex');
+      const receiptDir = path.join(resolveBrushPackRecordDirectory(), 'probe-receipts', 'installed-presets');
+      fs.mkdirSync(receiptDir, { recursive: true });
+      const receiptPath = path.join(receiptDir, `${createHash('sha256').update(commandId).digest('hex')}.json`);
+      const receiptTemp = `${receiptPath}.${process.pid}.${randomUUID()}.tmp`;
+      fs.writeFileSync(receiptTemp, receiptBytes);
+      fs.renameSync(receiptTemp, receiptPath);
+      return {
+        ok: true,
+        preset_name: verifiedPresetName,
+        effective_settings: result.data.effective_settings ?? {},
+        layout: result.data.layout ?? {},
+        evidence: {
+          preset_name: verifiedPresetName,
+          preview_path: evidencePath,
+          preview_sha256: sha,
+          operation_id: commandId,
+          runtime_instance_witness: runtimeInstanceWitness,
+          receipt_path: receiptPath,
+          receipt_sha256: receiptSha,
+        },
         stable_command_id: commandId,
         receipt_state: result.receipt?.state ?? null,
       };

@@ -1571,11 +1571,11 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
       tool: {
         name: 'photoshop_guard_brush_pack_profile',
         description:
-          'Plan/probe a brush pack, record observed media or stamp behavior, or build its preflight role map; probe_media draws a disposable sheet.',
+          'Plan/probe a brush pack, probe one ordinary installed Photoshop preset, record observed media or stamp behavior, or build its preflight role map; probe_media/probe_preset draw a disposable sheet and return exact JPEG evidence.',
         inputSchema: {
           type: 'object',
           properties: {
-            action: { type: 'string', enum: ['plan', 'probe_media', 'record_media', 'record_stamp', 'build_preflight'] },
+            action: { type: 'string', enum: ['plan', 'probe_media', 'probe_preset', 'record_media', 'record_stamp', 'build_preflight'] },
             brush_pack_id: { type: 'string' },
             preset_name: { type: 'string' },
             occurrence_index: { type: 'number', minimum: 0 },
@@ -1658,18 +1658,28 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
       },
       handler: async (args) => {
         try {
-          if (args.action === 'probe_media') {
-            const result = await runtime.brushPackProbe(args);
+          if (args.action === 'probe_media' || args.action === 'probe_preset') {
+            const result = args.action === 'probe_media'
+              ? await runtime.brushPackProbe(args)
+              : await runtime.brushPresetProbe(args);
             const evidence = result.evidence && typeof result.evidence === 'object'
               ? result.evidence as Record<string, unknown>
               : {};
+            if (args.action === 'probe_preset') {
+              const requestedPreset = typeof args.preset_name === 'string' ? args.preset_name.trim() : '';
+              const verifiedPreset = typeof result.preset_name === 'string' ? result.preset_name.trim() : '';
+              const evidencePreset = typeof evidence.preset_name === 'string' ? evidence.preset_name.trim() : '';
+              if (!requestedPreset || verifiedPreset !== requestedPreset || evidencePreset !== requestedPreset) {
+                throw new Error(`brush_preset_probe_identity_mismatch: requested=${requestedPreset || 'missing'}, verified=${verifiedPreset || 'missing'}, evidence=${evidencePreset || 'missing'}`);
+              }
+            }
             const previewPath = typeof evidence.preview_path === 'string' ? evidence.preview_path : '';
             const previewSha = typeof evidence.preview_sha256 === 'string' ? evidence.preview_sha256 : '';
             const output = json(result);
             if (previewPath && previewSha && existsSync(previewPath)) {
               const bytes = readFileSync(previewPath);
               const actualSha = createHash('sha256').update(bytes).digest('hex');
-              if (actualSha !== previewSha) throw new Error('brush_pack_probe_materialized_sha_mismatch');
+              if (actualSha !== previewSha) throw new Error('brush_probe_materialized_sha_mismatch');
               output.content.push({ type: 'image', data: bytes.toString('base64'), mimeType: 'image/jpeg' });
             }
             return output;
@@ -1784,6 +1794,24 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
                               additionalProperties: false,
                             },
                             effective_settings: { type: 'object', additionalProperties: true },
+                            probe_evidence: {
+                              type: 'object',
+                              description: 'Exact JPEG evidence returned by action=probe_preset for an ordinary installed preset. The candidate preset_name must match this verified native preset identity.',
+                              properties: {
+                                preset_name: { type: 'string' },
+                                preview_path: { type: 'string' },
+                                preview_sha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+                                operation_id: { type: 'string' },
+                                runtime_instance_witness: { type: 'string' },
+                                receipt_path: { type: 'string' },
+                                receipt_sha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+                              },
+                              required: [
+                                'preset_name', 'preview_path', 'preview_sha256', 'operation_id',
+                                'runtime_instance_witness', 'receipt_path', 'receipt_sha256',
+                              ],
+                              additionalProperties: false,
+                            },
                             caveats: { type: 'array', items: { type: 'string' } },
                           },
                           required: ['preset_name', 'profile_id', 'evidence_score', 'mark_character', 'edge_behavior', 'buildup_behavior', 'useful_scale_range', 'rotation_meaningful', 'pressure_policy', 'dynamics_capability'],

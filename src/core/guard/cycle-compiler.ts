@@ -3120,13 +3120,17 @@ function compileCompactPass(
       brushRole = candidates[0] ?? roles[0];
     }
 
-    if (brushRole && materialFitnessRequired && ['MATERIAL', 'DETAIL', 'MICRO_DETAIL'].includes(String(stage))) {
+    const probeRequiredForIntent = [
+      'painted-mass', 'broken-mass', 'atmospheric-mass', 'directional-mass', 'surface-flow', 'texture',
+    ].includes(visualIntent ?? '');
+    if (brushRole && (probeRequiredForIntent
+      || (materialFitnessRequired && ['MATERIAL', 'DETAIL', 'MICRO_DETAIL'].includes(String(stage))))) {
       const probeStatus = text(brushRole.probe_status)?.toLowerCase();
       if (!['pass', 'cached'].includes(probeStatus ?? '')) {
         violations.push(violation(
           'next_operation',
           'brush_role_probe_required',
-          `brush_role=${text(brushRole.role_id)} must have probe_status=pass|cached for substantial ${stage} material/finish work`
+          `brush_role=${text(brushRole.role_id)} must have probe_status=pass|cached for material-dependent ${visualIntent ?? stage ?? 'brush'} work`
         ));
       }
     }
@@ -3136,9 +3140,7 @@ function compileCompactPass(
         text(brushRole.preferred_preset),
         ...(Array.isArray(brushRole.alternative_presets) ? brushRole.alternative_presets.map(text) : []),
       ].filter(Boolean));
-      const candidateEvidence = Array.isArray(brushRole.candidate_evidence)
-        ? brushRole.candidate_evidence.find(candidate => text(candidate?.preset_name) === selectedPreset)
-        : undefined;
+      const candidateRows = Array.isArray(brushRole.candidate_evidence) ? brushRole.candidate_evidence : [];
       const viablePresetCount = acceptedPresets.size;
       if (materialFitnessRequired && viablePresetCount > 1 && !selectedPreset) {
         violations.push(violation(
@@ -3181,6 +3183,33 @@ function compileCompactPass(
       if (viablePresetCount <= 1 || !materialFitnessRequired) {
         selectedPreset ??= text(brushRole.preferred_preset);
       }
+      const candidateEvidence = candidateRows.find(candidate => text(candidate?.preset_name) === selectedPreset);
+      if (probeRequiredForIntent) {
+        if (!candidateEvidence) {
+          violations.push(violation(
+            'next_operation',
+            'brush_candidate_evidence_required',
+            `brush_role=${text(brushRole.role_id)} preset_name=${selectedPreset ?? 'missing'} requires candidate_evidence for visual_intent=${visualIntent}`
+          ));
+        } else if (!text(context.brush_pack_id) && !candidateEvidence.probe_evidence) {
+          violations.push(violation(
+            'next_operation',
+            'brush_probe_evidence_required',
+            `brush_role=${text(brushRole.role_id)} preset_name=${selectedPreset ?? 'missing'} requires verified probe_preset JPEG evidence for visual_intent=${visualIntent}`
+          ));
+        }
+      }
+      const fallbackNames = candidateRows
+        .filter(candidate => {
+          const name = text(candidate?.preset_name);
+          if (!name || name === selectedPreset || !acceptedPresets.has(name)) return false;
+          if (probeRequiredForIntent && !text(context.brush_pack_id) && !candidate?.probe_evidence) return false;
+          return Number.isFinite(Number(candidate?.evidence_score));
+        })
+        .sort((a, b) => Number(b?.evidence_score) - Number(a?.evidence_score))
+        .map(candidate => text(candidate?.preset_name))
+        .filter(Boolean)
+        .slice(0, 2);
       const fitIntents = Array.isArray(brushRole.visual_intents) ? brushRole.visual_intents.map(text).filter(Boolean) : [];
       const novelIntent = !!visualIntent && !fitIntents.includes(visualIntent);
       const useKey = brushUseKey(brushRole, requestedMaterialRole ?? '', visualIntent ?? '', requestedBrushScale ?? '', selectedPreset ?? '', text(context.brush_pack_id));
@@ -3205,7 +3234,10 @@ function compileCompactPass(
         actions.unshift({
           id: selectId,
           tool: 'photoshop_select_brush_preset',
-          args: { name: selectedPreset },
+          args: {
+            name: selectedPreset,
+            ...(fallbackNames.length ? { fallback_names: fallbackNames } : {}),
+          },
           description: 'Guard-selected material-fit preflighted brush role for this compact pass.',
         });
       }

@@ -1,5 +1,23 @@
 # Changelog
 
+- 2026-10-14 — **Investigate stalled pink-marker city and distinguish brush inventory from verified marks.**
+  Compared the previous `simple_graphic` run (19 artistic dispatches and
+  17/55 Guard rejections) with the later `nontrivial_painting` run
+  (3 artistic dispatches and 14/24 rejections). The latter Director selected
+  a single central island rather than the multi-island composition. Its
+  `Hard Round` preparation failed `brush_setter_unverified` before any
+  of the 12 planned strokes were dispatched; the Photoshop host omitted
+  native preset identity. A 123-preset catalog and brush roles marked
+  `probe_status=not-needed` with empty `candidate_evidence` did **not**
+  establish that the real marks resemble felt-tip strokes. The same native
+  limitation had appeared in previous Mykonos tests. See
+  `docs/ART-REGRESSION-PINK-CITY-20261014.md` for evidence and A/B limits.
+  The recovery work adds a bounded, explicit alternative-preset selection
+  path without silent substitution, isolated installed-preset mark probes
+  with JPEG/receipt proof, and a distinct recovery gate for repeated
+  pre-visual preparation failures; the composition guidance prioritizes
+  coverage and relations before revisiting local finish.
+
 - 2026-10-14 — **Reconcile release-candidate Guard fixes with the maintained painter.**
   Reapplied RC commits `83dc5bb` and `b54faf8` to the refactored
   `digital-painting` runtime. A valid exact-frame closure that exposes a new
