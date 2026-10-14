@@ -280,7 +280,7 @@ describe('canonical painting tools UXP routing', () => {
 
     bridge.setBrush.mockResolvedValueOnce({
       ok: true,
-      data: { settings: { size: 48, hardness: 100, opacity: 82 } },
+      data: { settings: { size: 48, hardness: 100, opacity: 82 }, observed_fields: ['size', 'hardness', 'opacity'] },
     });
     const mismatch = await setBrush.handler({ size: 48, hardness: 70, opacity: 82 });
     const mismatchPayload = JSON.parse(textOf(mismatch));
@@ -288,12 +288,12 @@ describe('canonical painting tools UXP routing', () => {
     expect(mismatchPayload.details.requested_settings).toMatchObject({ size: 48, hardness: 70, opacity: 82 });
     expect(mismatchPayload.details.effective_settings).toMatchObject({ size: 48, hardness: 100, opacity: 82 });
     expect(mismatchPayload.details.mismatches).toEqual([
-      { key: 'hardness', expected: 70, actual: 100 },
+      { key: 'hardness', expected: 70, native_expected: 70, actual: 100 },
     ]);
 
     bridge.setBrush.mockResolvedValueOnce({
       ok: true,
-      data: { settings: { size: 48, hardness: 70, opacity: 82 } },
+      data: { settings: { size: 48, hardness: 70, opacity: 82 }, observed_fields: ['size', 'hardness', 'opacity'] },
     });
     const applied = await setBrush.handler({ size: 48, hardness: 70, opacity: 82 });
     const appliedPayload = JSON.parse(textOf(applied));

@@ -13,6 +13,7 @@ import {
 import { normalizeGeometryBinding, type GeometryBinding } from './geometry-binding.js';
 import { normalizeCameraBinding, type CameraBinding } from './scene-camera-imaging-model.js';
 import { normalizeAttentionBinding, type AttentionBinding } from './perceptual-hierarchy.js';
+import { normalizeProblemLinks } from './guard/problem-links.js';
 
 export const VISUAL_MICROPLAN_ACTION_CLASSES = [
   'ADD',
@@ -129,6 +130,34 @@ export const VISUAL_MICROPLAN_SURFACE_FRAME_DISTRIBUTIONS = [
   'directional',
   'perspective-regular',
 ] as const;
+/** The wire fields and ranges enforced by the VisualMicroPlan surface-frame parser. */
+export const VISUAL_MICROPLAN_SURFACE_FRAME_SCHEMA = {
+  type: 'object',
+  properties: {
+    axes: { type: 'array', minItems: 1, maxItems: 3, items: {
+      type: 'object', properties: {
+        id: { type: 'string', minLength: 1 },
+        angle_degrees: { type: 'number', minimum: -180, maximum: 180 },
+        weight: { type: 'number', exclusiveMinimum: 0, maximum: 1 },
+      }, required: ['id', 'angle_degrees'], additionalProperties: false,
+    } },
+    convergence_anchor: { type: 'object', properties: {
+      x: { type: 'number' }, y: { type: 'number' },
+    }, required: ['x', 'y'], additionalProperties: false },
+    scene_vanishing_family_ids: { type: 'array', items: { type: 'string' } },
+    scene_support_plane_id: { type: 'string' },
+    depth_progression: { type: 'object', properties: {
+      near_scale: { type: 'number', exclusiveMinimum: 0 },
+      far_scale: { type: 'number', exclusiveMinimum: 0 },
+      direction: { type: 'string', enum: ['toward-anchor', 'away-from-anchor'] },
+    }, required: ['near_scale', 'far_scale', 'direction'], additionalProperties: false },
+    distribution: { type: 'string', enum: [...VISUAL_MICROPLAN_SURFACE_FRAME_DISTRIBUTIONS] },
+    local_exceptions: { type: 'array', items: { type: 'string' } },
+  },
+  required: ['axes'],
+  additionalProperties: false,
+  description: 'For perspective-regular supply convergence_anchor; axes ids must be unique. All geometry/direction values are artist-chosen.',
+};
 export type VisualMicroPlanSurfaceFrameDistribution =
   (typeof VISUAL_MICROPLAN_SURFACE_FRAME_DISTRIBUTIONS)[number];
 export interface VisualMicroPlanSurfaceFrame {
@@ -340,6 +369,7 @@ export interface VisualMicroPlan {
     createStepId?: string;
     physicalRole?: VisualMicroPlanPhysicalRole;
     opacityRole?: VisualMicroPlanOpacityRole;
+    componentSpace?: 'canvas' | 'world';
     constructionTier?: VisualMicroPlanConstructionTier;
     parentHypothesisId?: string;
     parentConstructionRevision?: string;
@@ -387,6 +417,7 @@ export interface VisualMicroPlan {
   independentRegion: boolean;
   addressesPrimaryMismatch: boolean;
   addressesProblemId?: string;
+  addressesProblemIds: string[];
   paintStrategy?: {
     constructionRole?: PaintingConstructionRole;
     materialRole: string;
@@ -394,6 +425,9 @@ export interface VisualMicroPlan {
     fallbackFromMethodId?: string;
     fallbackReason?: string;
     brushRole?: string;
+    brushUseReason?: string;
+    brushTrialBounds?: {left: number; top: number; right: number; bottom: number};
+    brushFitnessKey?: string;
     presetName?: string;
     selectionReason?: string;
     brushPackId?: string;
@@ -423,6 +457,9 @@ export interface VisualMicroPlan {
 }
 
 const PLACEHOLDER_RE = /^\$steps\.([^.]+)(?:\.(.+))?$/;
+const GUARANTEED_STEP_RESULTS: Record<string, Record<string, { type: 'positive-integer'; target: 'layer_id' }>> = {
+  photoshop_create_layer: { 'details.layerId': { type: 'positive-integer', target: 'layer_id' } },
+};
 
 function requireString(value: unknown, name: string): string {
   if (typeof value !== 'string' || !value.trim()) {
@@ -549,7 +586,7 @@ function isRecognitionBlockInStage(stage: string): boolean {
   return stage.trim().toUpperCase().replace(/[\s-]+/g, '_') === 'RECOGNITION_BLOCK_IN';
 }
 
-function isRegionBlockInStage(stage: string): boolean {
+export function isRegionBlockInStage(stage: string): boolean {
   const normalized = stage.trim().toUpperCase().replace(/[\s-]+/g, '_');
   return normalized === 'RECOGNITION_BLOCK_IN'
     || normalized === 'COMPOSITION'
@@ -635,40 +672,57 @@ function parsePreviousPreview(value: unknown): PreviousPreviewVerdict | undefine
   };
 }
 
-function visitPlaceholderStrings(value: unknown, visitor: (value: string) => void): void {
-  if (typeof value === 'string') {
-    visitor(value);
-    return;
-  }
-  if (Array.isArray(value)) {
-    for (const item of value) visitPlaceholderStrings(item, visitor);
-    return;
-  }
-  if (value && typeof value === 'object') {
-    for (const item of Object.values(value as Record<string, unknown>)) {
-      visitPlaceholderStrings(item, visitor);
-    }
-  }
-}
-
-function validateBackwardReferences(steps: VisualMicroPlanStep[]): void {
+/** Single static contract for deferred results. Returned args are schema-only
+ * stand-ins; caller must retain the original references for runtime resolution. */
+export function preflightDeferredStepReferences(
+  steps: ReadonlyArray<{ id?: unknown; tool?: unknown; args?: unknown }>
+): { schemaArgs: unknown[]; errors: string[] } {
+  const errors: string[] = [];
   const positions = new Map<string, number>();
-  steps.forEach((step, index) => positions.set(step.id, index));
-
   steps.forEach((step, index) => {
-    visitPlaceholderStrings(step.args, (value) => {
-      const match = PLACEHOLDER_RE.exec(value);
-      if (!match) return;
-      const referencedId = match[1]!;
-      const referencedIndex = positions.get(referencedId);
-      if (referencedIndex === undefined) {
-        throw new Error(`step "${step.id}" references unknown step "${referencedId}"`);
-      }
-      if (referencedIndex >= index) {
-        throw new Error(`step "${step.id}" may reference only an earlier step, not "${referencedId}"`);
-      }
-    });
+    if (typeof step.id === 'string') positions.set(step.id, index);
   });
+  const schemaArgs = steps.map((step, index) => {
+    const id = String(step.id ?? index);
+    const visit = (value: unknown, argumentPath: string): unknown => {
+      if (typeof value === 'string' && value.startsWith('$steps.')) {
+        const match = /^\$steps\.([A-Za-z0-9_-]+)\.([A-Za-z0-9_.]+)$/.exec(value);
+        const producer = match?.[1];
+        const producerIndex = producer === undefined ? undefined : positions.get(producer);
+        const location = `step "${id}" args.${argumentPath}`;
+        if (!match) {
+          errors.push(`${location}: malformed deferred step reference ${JSON.stringify(value)}`);
+        } else if (producerIndex === undefined) {
+          const eligible = steps.slice(0, index).filter(source => source.tool === 'photoshop_create_layer'
+            && typeof source.id === 'string').map(source => String(source.id));
+          errors.push(`${location}: step "${id}" references unknown step "${producer}"; `
+            + `available earlier photoshop_create_layer producer ids=${JSON.stringify(eligible)}; `
+            + 'for a layer_id reference use $steps.<producer-id>.details.layerId');
+        } else if (producerIndex >= index) {
+          errors.push(`${location}: step "${id}" may reference only an earlier step, not "${producer}"`);
+        } else {
+          const source = steps[producerIndex]!;
+          const result = GUARANTEED_STEP_RESULTS[String(source.tool)]?.[match[2]!];
+          if (!result || argumentPath.split('.').at(-1) !== result.target) {
+            errors.push(`${location}: ${JSON.stringify(value)} has no guaranteed compatible result; `
+              + 'use details.layerId of an earlier photoshop_create_layer in layer_id only');
+          } else {
+            return 1; // guaranteed positive-integer layerId, for pre-execution schema validation only
+          }
+        }
+        return value;
+      }
+      if (Array.isArray(value)) return value.map((item, offset) => visit(item, `${argumentPath}[${offset}]`));
+      if (value && typeof value === 'object') return Object.fromEntries(
+        Object.entries(value as Record<string, unknown>).map(([key, item]) => [
+          key, visit(item, argumentPath ? `${argumentPath}.${key}` : key),
+        ])
+      );
+      return value;
+    };
+    return visit(step.args, '');
+  });
+  return { schemaArgs, errors };
 }
 
 /** Collect independent construction requirements even when an earlier field is invalid. */
@@ -805,6 +859,7 @@ export function parseVisualMicroPlan(args: Record<string, unknown>): VisualMicro
   const addressesProblemId = args.addresses_problem_id === undefined
     ? undefined
     : requireString(args.addresses_problem_id, 'addresses_problem_id');
+  const addressesProblemIds = normalizeProblemLinks(addressesProblemId, args.addresses_problem_ids);
   if ((plannerDirectiveId || plannerTaskId) && changeDomains.length === 0) {
     throw new Error('Painter-bound VisualMicroPlan requires at least one change_domains entry');
   }
@@ -843,6 +898,9 @@ export function parseVisualMicroPlan(args: Record<string, unknown>): VisualMicro
       ...(fallbackFromMethodId ? { fallbackFromMethodId } : {}),
       ...(fallbackReason ? { fallbackReason } : {}),
       ...(raw.brush_role === undefined ? {} : { brushRole: requireString(raw.brush_role, 'paint_strategy.brush_role') }),
+      ...(raw.brush_use_reason === undefined ? {} : { brushUseReason: requireString(raw.brush_use_reason, 'paint_strategy.brush_use_reason') }),
+      ...(raw.brush_trial_bounds === undefined ? {} : { brushTrialBounds: raw.brush_trial_bounds as {left: number; top: number; right: number; bottom: number} }),
+      ...(raw.brush_fitness_key === undefined ? {} : { brushFitnessKey: requireString(raw.brush_fitness_key, 'paint_strategy.brush_fitness_key') }),
       ...(raw.preset_name === undefined ? {} : { presetName: requireString(raw.preset_name, 'paint_strategy.preset_name') }),
       ...(raw.selection_reason === undefined ? {} : { selectionReason: requireString(raw.selection_reason, 'paint_strategy.selection_reason') }),
       ...(raw.brush_pack_id === undefined ? {} : { brushPackId: requireString(raw.brush_pack_id, 'paint_strategy.brush_pack_id') }),
@@ -942,6 +1000,8 @@ export function parseVisualMicroPlan(args: Record<string, unknown>): VisualMicro
           'logical_layer.opacity_role',
           VISUAL_MICROPLAN_OPACITY_ROLES
         ) as VisualMicroPlanOpacityRole;
+    const componentSpace = raw.component_space === undefined ? undefined
+      : parseEnum(raw.component_space, 'logical_layer.component_space', ['canvas', 'world']) as 'canvas' | 'world';
     const constructionTier = raw.construction_tier === undefined
       ? undefined
       : parseEnum(
@@ -1151,6 +1211,7 @@ export function parseVisualMicroPlan(args: Record<string, unknown>): VisualMicro
         : { mergeTargetLayerId: positiveInteger(raw.merge_target_layer_id, 'logical_layer.merge_target_layer_id') }),
       ...(physicalRole ? { physicalRole } : {}),
       ...(opacityRole ? { opacityRole } : {}),
+      ...(componentSpace ? { componentSpace } : {}),
       ...(constructionTier ? { constructionTier } : {}),
       ...(parentHypothesisId ? { parentHypothesisId } : {}),
       ...(parentConstructionRevision ? { parentConstructionRevision } : {}),
@@ -1315,7 +1376,8 @@ export function parseVisualMicroPlan(args: Record<string, unknown>): VisualMicro
     };
   });
 
-  validateBackwardReferences(steps);
+  const deferred = preflightDeferredStepReferences(steps);
+  if (deferred.errors.length) throw new Error(deferred.errors.join('\n'));
 
   const mutationIndexes = steps
     .map((step, index) => (VISUAL_MICROPLAN_MUTATION_TOOLS.has(step.tool) ? index : -1))
@@ -1630,6 +1692,7 @@ export function parseVisualMicroPlan(args: Record<string, unknown>): VisualMicro
     independentRegion,
     addressesPrimaryMismatch,
     addressesProblemId,
+    addressesProblemIds,
     paintStrategy,
     ...(materialResponse ? { materialResponse } : {}),
     edges,

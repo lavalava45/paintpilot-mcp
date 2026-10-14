@@ -18,7 +18,14 @@ const { tryHandleP3LayerAdvancedOperation } = require('./p3-layer-advanced-ops')
 
 const BRIDGE_PORT = 38452;
 const BRIDGE_BASE = `http://127.0.0.1:${BRIDGE_PORT}`;
-const BRIDGE_REVISION = 'compact-v2-20261009-component-rebuild';
+const BRIDGE_REVISION = 'compact-v2-20261012-component-outline-v18';
+// Generated paired-build identity, captured once. A rebuild must not relabel loaded UXP code.
+const DEPLOYMENT_SOURCE_SHA256 = (() => {
+  try {
+    const value = require('./deployment-build').source_sha256;
+    return typeof value === 'string' && /^[a-f0-9]{64}$/.test(value) ? value : '';
+  } catch { return ''; }
+})();
 const REGISTRATION_PROTOCOL = 'photoshop.uxp.registration.v1';
 const COMMAND_PROTOCOL = 'photoshop.uxp.command.v1';
 const RESULT_PROTOCOL = 'photoshop.uxp.command_result.v1';
@@ -1214,8 +1221,15 @@ function normalizeBrushSettingsDescriptor(descriptor) {
     throw new Error('brush_settings_unavailable_for_current_tool');
   }
 
-  function valueOr(value, fallback) {
+  function observedNumber(value) {
+    // Number(null), Number(false) and Number('') are all zero in JavaScript,
+    // but none is a native numeric brush readback.
+    if (value == null || value === '' || typeof value === 'boolean') return null;
     const numeric = numericValue(value);
+    return Number.isFinite(numeric) ? numeric : null;
+  }
+  function valueOr(value, fallback) {
+    const numeric = observedNumber(value);
     return numeric == null ? fallback : numeric;
   }
 
@@ -1227,8 +1241,36 @@ function normalizeBrushSettingsDescriptor(descriptor) {
     opts.brushName,
   ].find((value) => typeof value === 'string' && value.trim().length > 0);
 
+  // A fallback is useful for painting-state initialization, but it is not
+  // evidence that Photoshop actually read back a requested setter value.
+  // Preserve which values came from the native descriptor independently.
+  const observedFields = [];
+  for (const [field, value] of Object.entries({
+    size: brush.diameter,
+    hardness: brush.hardness,
+    angle: brush.angle,
+    roundness: brush.roundness,
+    spacing: brush.spacing,
+    opacity: opts.opacity,
+    flow: opts.flow,
+    smoothing: opts.smooth,
+  })) {
+    if (observedNumber(value) != null) observedFields.push(field);
+  }
+  for (const [field, value] of Object.entries({
+    flip_x: brush.flipX,
+    flip_y: brush.flipY,
+    use_pressure_size: opts.usePressureOverridesSize,
+    use_pressure_opacity: opts.usePressureOverridesOpacity,
+    airbrush: opts.repeat,
+    smoothing_enabled: opts.smoothing,
+  })) {
+    if (typeof value === 'boolean') observedFields.push(field);
+  }
+
   return {
     ok: true,
+    observed_fields: observedFields,
     ...(presetName ? { preset: presetName.trim() } : {}),
     settings: {
       size: valueOr(brush.diameter, 1),
@@ -1302,10 +1344,12 @@ async function preflightStrokeToolsModal(strokes) {
   )];
   const readiness = [];
   for (const name of names) {
-    await action.batchPlay(
+    const selected = await action.batchPlay(
       [selectStrokeToolDescriptor(name)],
       { synchronousExecution: true }
     );
+    if (!selected?.length || selected.some(item => item?._obj === 'error'))
+      throw new Error(`paint_tool_not_ready:${name}: native selection was not confirmed`);
     const [descriptor] = await action.batchPlay(
       [currentToolOptionsDescriptor()],
       { synchronousExecution: true }
@@ -1317,6 +1361,11 @@ async function preflightStrokeToolsModal(strokes) {
     if (name === 'BRUSH' && (!options.brush || typeof options.brush !== 'object')) {
       throw new Error(`paint_tool_not_ready:BRUSH: brush descriptor unavailable after explicit tool activation`);
     }
+    if (name === 'PENCIL') {
+      const size = numericValue(options.brush?.diameter), opacity = numericValue(options.opacity);
+      if (!(Number.isFinite(size) && size > 0 && Number.isFinite(opacity) && opacity > 0))
+        throw new Error('paint_tool_not_ready:PENCIL: positive native diameter/opacity are unverified; use BRUSH with explicit size/opacity/flow for pencil appearance');
+    }
     readiness.push({
       tool: name,
       current_tool_options: true,
@@ -1326,8 +1375,13 @@ async function preflightStrokeToolsModal(strokes) {
   return readiness;
 }
 
-async function applyBrushSettingsModal(settings = {}) {
-  await action.batchPlay([selectPaintbrushToolDescriptor()], { synchronousExecution: true });
+async function applyBrushSettingsModal(settings = {}, options = {}) {
+  // A stamp already has a verified selected preset. Re-selecting the Brush Tool
+  // on some hosts restores its older saved preset even when the subsequent
+  // currentToolOptions readback omits the brush name.
+  if (options.activateBrushTool !== false) {
+    await action.batchPlay([selectPaintbrushToolDescriptor()], { synchronousExecution: true });
+  }
   const [descriptor] = await action.batchPlay(
     [currentToolOptionsDescriptor()],
     { synchronousExecution: true }
@@ -1407,24 +1461,89 @@ async function writeBrushSettings(params = {}) {
 async function selectBrushPreset(params = {}) {
   const name = String(params.name ?? '').trim();
   if (!name) throw new Error('name is required');
-  return core.executeAsModal(
-    async () => {
-      await action.batchPlay(
+  // Some Photoshop builds omit preset names from currentToolOptions. Observe
+  // Photoshop's actual select event instead of echoing the requested name.
+  let observedSelection = null;
+  let conflictingSelectNotifications = false;
+  let listenerInstalled = false;
+  let observing = true;
+  let snapshot;
+  let resolveBrushSelect;
+  const brushSelectObserved = new Promise(resolve => { resolveBrushSelect = resolve; });
+  const onSelect = (event, descriptor) => {
+    if (!observing || event !== 'select') return;
+    const targets = Array.isArray(descriptor?._target) ? descriptor._target : [descriptor?._target];
+    const brush = targets.find(target => target?._ref === 'brush');
+    if (brush) {
+      const selected = typeof brush._name === 'string' ? brush._name : descriptor?.name;
+      if (typeof selected === 'string' && selected.trim()) {
+        const nativeName = selected.trim();
+        if (observedSelection && observedSelection !== nativeName) conflictingSelectNotifications = true;
+        observedSelection = nativeName;
+        resolveBrushSelect();
+      }
+    }
+    // Tool activation is not a preset identity event. Its notification may be
+    // delivered after the brush selection; clearing the brush event here loses
+    // otherwise valid native identity evidence.
+  };
+  try {
+    if (typeof action.addNotificationListener === 'function' && typeof action.removeNotificationListener === 'function') {
+      try { await action.addNotificationListener(['select'], onSelect); listenerInstalled = true; }
+      catch { /* Effective-state readback remains available without events. */ }
+    }
+    const returned = await core.executeAsModal(
+      async () => {
+      const responses = await action.batchPlay(
         [
+          // Switching tools may restore that tool's saved preset. Select the tool
+          // first so it cannot replace the requested brush after selection.
+          selectPaintbrushToolDescriptor(),
           {
             _obj: 'select',
             _target: [{ _ref: 'brush', _name: name }],
             _options: { dialogOptions: 'silent' },
           },
-          selectPaintbrushToolDescriptor(),
         ],
         { synchronousExecution: true }
       );
-      const current = await snapshotBrushSettings({ synchronousExecution: true });
-      return { ok: true, preset: name, settings: current.settings };
+      const failure = responses.find(response => response?._obj === 'error');
+      if (failure) throw new Error(failure.message ?? 'brush_preset_select_failed');
+      snapshot = await snapshotBrushSettings({ synchronousExecution: true });
+      return snapshot;
     },
     { commandName: 'MCP Select Brush Preset' }
-  );
+    );
+    const current = returned ?? snapshot;
+    if (!current) throw new Error('brush_preset_readback_unavailable');
+    // Native select notifications can flush well after the modal exits. Wait
+    // for the actual event rather than treating a fixed 100ms sleep as proof
+    // that no evidence will arrive. The deadline bounds unavailable events;
+    // neither path retries selection or mutates document/layer pixels.
+    if (!current.preset && listenerInstalled && !observedSelection)
+      await Promise.race([brushSelectObserved, new Promise(resolve => setTimeout(resolve, 500))]);
+    const conflictingEvidence = conflictingSelectNotifications || Boolean(
+      current.preset && observedSelection && current.preset !== observedSelection
+    );
+    // Two native identity sources disagreeing is not confirmation of either.
+    // Guard must refuse the pass rather than painting with a guessed preset.
+    const preset = conflictingEvidence ? null : current.preset ?? observedSelection;
+    return { ok: true, preset: preset ?? null, settings: current.settings,
+      preset_verification: { source: conflictingEvidence ? 'conflicting_evidence'
+        : current.preset ? 'current_tool_options'
+        : observedSelection ? 'photoshop_select_notification' : 'unavailable',
+        observed_preset: preset ?? null,
+        ...(conflictingEvidence ? {
+          current_tool_options_preset: current.preset ?? null,
+          select_notification_preset: observedSelection,
+        } : {}) } };
+  } finally {
+    observing = false;
+    if (listenerInstalled) {
+      try { await action.removeNotificationListener(['select'], onSelect); }
+      catch { /* A cleanup error cannot erase the actual selection evidence. */ }
+    }
+  }
 }
 
 async function writeForegroundColor(params = {}) {
@@ -1449,6 +1568,17 @@ function setForegroundColorModal(colorValue) {
   color.rgb.green = Number(colorValue.green);
   color.rgb.blue = Number(colorValue.blue);
   app.foregroundColor = color;
+  // A resolved assignment does not prove that Photoshop changed the color.
+  // RGB readback may round to native 8-bit channels; larger differences are
+  // unsafe for painting and restoration alike.
+  const nativeRgb = app.foregroundColor?.rgb;
+  for (const channel of ['red', 'green', 'blue']) {
+    const expected = Number(colorValue[channel]);
+    const observed = Number(nativeRgb?.[channel]);
+    if (!Number.isFinite(expected) || !Number.isFinite(observed) || Math.abs(expected - observed) > 0.51) {
+      throw new Error('paint_color_unverified:' + channel + ':native_readback_mismatch');
+    }
+  }
 }
 
 async function snapshotForegroundColor() {
@@ -1490,6 +1620,22 @@ function selectLayerByIdDescriptor(layerId) {
     makeVisible: false,
     _options: { dialogOptions: 'silent' },
   };
+}
+
+async function selectVerifiedPaintLayerModal(doc, layerId) {
+  // A resolved batchPlay select is not proof that Photoshop activated the
+  // requested layer. Painting after a rejected/no-op select corrupts a
+  // different layer while reporting the pinned target as successful.
+  const responses = await action.batchPlay(
+    [selectLayerByIdDescriptor(layerId)], { synchronousExecution: true }
+  );
+  if (!Array.isArray(responses) || responses.some(row => row?._obj === 'error')) {
+    throw new Error('paint_target_layer_unverified:native_select_failed');
+  }
+  const active = Array.from(doc.activeLayers ?? []);
+  if (active.length !== 1 || active[0]?.id !== layerId) {
+    throw new Error('paint_target_layer_unverified:native_readback_mismatch');
+  }
 }
 
 async function selectLayerByNameMutation(params = {}) {
@@ -2297,9 +2443,19 @@ async function fillLayer(params = {}) {
     sessionDescriptors.documentDescriptor?.selection != null;
 
   return core.executeAsModal(
-    async () => {
+    async (executionContext) => {
       let selectedAll = false;
+      let suspensionId;
+      let committedHistoryUnit = false;
+      let originalLayerRestored = originalActiveLayerId === targetLayerId;
       try {
+        // Selection preparation, fill, deselection, and any temporary layer
+        // activation must be ONE native Undo unit. A modal boundary alone
+        // does not merge Photoshop's three history states.
+        suspensionId = await executionContext.hostControl.suspendHistory({
+          documentID: doc.id,
+          name: 'MCP Fill Layer',
+        });
         if (originalActiveLayerId !== targetLayerId) {
           await action.batchPlay(
             [selectLayerByIdDescriptor(targetLayerId)],
@@ -2310,7 +2466,7 @@ async function fillLayer(params = {}) {
           await doc.selection.selectAll();
           selectedAll = true;
         }
-        await action.batchPlay(
+        const fillResult = await action.batchPlay(
           [{
             _obj: 'fill',
             using: { _enum: 'fillContents', _value: 'color' },
@@ -2321,27 +2477,69 @@ async function fillLayer(params = {}) {
           }],
           { synchronousExecution: true }
         );
+        if (!Array.isArray(fillResult) || fillResult.some(row => row?._obj === 'error')) {
+          throw new Error('fill_execution_failed: Photoshop did not confirm a successful fill');
+        }
         if (selectedAll) {
           await doc.selection.deselect();
           selectedAll = false;
         }
+        if (originalActiveLayerId != null && originalActiveLayerId !== targetLayerId) {
+          await action.batchPlay(
+            [selectLayerByIdDescriptor(originalActiveLayerId)],
+            { synchronousExecution: true }
+          );
+          originalLayerRestored = true;
+        }
         const context = normalizeSessionState(
           await readSessionDescriptors({ synchronousExecution: true })
         );
+        await executionContext.hostControl.resumeHistory(suspensionId, true);
+        suspensionId = undefined;
+        committedHistoryUnit = true;
         return {
           filled: true,
           layerName: String(targetDescriptor.name ?? ''),
           layerId: targetLayerId,
           color: { red, green, blue },
+          history_steps: 1,
           context,
         };
+      } catch (error) {
+        // Restore temporary UI state while the owned history is STILL
+        // suspended; cleanup after resumeHistory(false) could otherwise
+        // create new unrelated Photoshop history states.
+        if (selectedAll) {
+          try { await doc.selection.deselect(); selectedAll = false; } catch {}
+        }
+        if (!originalLayerRestored && originalActiveLayerId != null) {
+          try {
+            await action.batchPlay(
+              [selectLayerByIdDescriptor(originalActiveLayerId)],
+              { synchronousExecution: true }
+            );
+            originalLayerRestored = true;
+          } catch {}
+        }
+        if (suspensionId !== undefined) {
+          try {
+            await executionContext.hostControl.resumeHistory(suspensionId, false);
+            suspensionId = undefined;
+          } catch (rollbackError) {
+            throw new Error(
+              `fill_history_rollback_unconfirmed: ${String(rollbackError?.message ?? rollbackError)}; original_error=${String(error?.message ?? error)}`
+            );
+          }
+        }
+        throw error;
       } finally {
         if (selectedAll) {
           try { await doc.selection.deselect(); } catch {}
         }
         if (
           originalActiveLayerId != null &&
-          originalActiveLayerId !== targetLayerId
+          originalActiveLayerId !== targetLayerId &&
+          !originalLayerRestored
         ) {
           try {
             await action.batchPlay(
@@ -2629,8 +2827,12 @@ async function deleteNamedPathModal(pathName) {
   } catch {}
 }
 
-async function strokeNamedPathModal(doc, pathName, tool, simulatePressure) {
-  const pathItem = doc.pathItems.getByName(pathName);
+async function strokeNamedPathModal(doc, pathName, tool, simulatePressure, createdPath = null) {
+  // pathItems.add returns the new PathItem on supported UXP hosts. Its direct
+  // handle avoids one extra native collection lookup per mark. Retain the old
+  // lookup for hosts which return no usable PathItem from add().
+  const pathItem = createdPath && typeof createdPath.strokePath === 'function'
+    ? createdPath : doc.pathItems.getByName(pathName);
   if (!pathItem || typeof pathItem.strokePath !== 'function') {
     throw new Error('uxp_path_stroke_method_unavailable');
   }
@@ -2665,10 +2867,46 @@ function sameCoreBrushStyle(a, b) {
   return ['size', 'opacity', 'flow'].every(key => Number(a[key]) === Number(b[key]));
 }
 
+async function applyVerifiedBatchBrushStyle(style) {
+  const expected = {
+    size: Number(style.size),
+    opacity: Math.round(Number(style.opacity)),
+    flow: Math.round(Number(style.flow)),
+  };
+  const updated = await applyBrushSettingsModal(expected);
+  // A successful batchPlay setter is not evidence of the effective style.
+  // Check the native readback before any pixels are drawn, as stamp placement does.
+  const mismatch = stampStyleReadbackMismatch(expected, updated);
+  if (mismatch) throw new Error(`paint_style_unverified:${mismatch}`);
+  return updated;
+}
+
 async function restoreBatchBrushStyle(baseline, current, dirty = false) {
   if (!baseline || (!dirty && sameCoreBrushStyle(baseline, current))) return;
   await action.batchPlay([selectPaintbrushToolDescriptor()], { synchronousExecution: true });
-  await applyBrushSettingsModal(batchBrushStyle(baseline, {}));
+  // Restoration needs the same native readback guarantee as preparation:
+  // a resolved setter can leave Photoshop using the last stroke's opacity.
+  await applyVerifiedBatchBrushStyle(batchBrushStyle(baseline, {}));
+}
+
+async function abortFailedPaintBatch(executionContext, suspensionId, originalError, restorations) {
+  // Restore the Photoshop-global state before closing suspended History. Doing
+  // this after resumeHistory(false) creates extra Undo entries and can hide a
+  // failed restoration behind the original drawing error.
+  const failures = [];
+  for (const [name, restore] of restorations) {
+    try { await restore(); }
+    catch (error) { failures.push(`${name}:${error?.message ?? String(error)}`); }
+  }
+  try {
+    await executionContext.hostControl.resumeHistory(suspensionId, false);
+  } catch (error) {
+    throw new Error(`paint_history_abort_failed:${error?.message ?? String(error)}; original_error:${originalError?.message ?? String(originalError)}${failures.length ? `; restore_errors:${failures.join(';')}` : ''}`);
+  }
+  if (failures.length) {
+    throw new Error(`paint_state_restore_failed:${failures.join(';')}; original_error:${originalError?.message ?? String(originalError)}`);
+  }
+  throw originalError;
 }
 
 // Mask edits use the established BRUSH renderer, never ERASER or an RGB fallback.
@@ -2738,10 +2976,7 @@ async function paintStrokesBatch(params = {}) {
       try {
         if (maskPainting && !originalChannels.length) throw new Error('mask_channel_restore_unavailable');
         if (targetLayerId !== originalLayerId) {
-          await action.batchPlay(
-            [selectLayerByIdDescriptor(targetLayerId)],
-            { synchronousExecution: true }
-          );
+          await selectVerifiedPaintLayerModal(doc, targetLayerId);
         }
         if (maskPainting) maskDetails = await selectStrokeMaskModal(doc, targetLayerId);
         const hasBrushStroke = strokes.some(
@@ -2761,10 +2996,16 @@ async function paintStrokesBatch(params = {}) {
           brushState = { ...brushBaseline };
         }
         let cachedColor = currentForegroundRgb();
+        let activeStrokeTool = null;
 
         for (let index = 0; index < strokes.length; index++) {
           const stroke = strokes[index];
           const strokeToolName = String(stroke.tool ?? 'BRUSH').toUpperCase();
+          if (activeStrokeTool !== strokeToolName) {
+            const selected = await action.batchPlay([selectStrokeToolDescriptor(strokeToolName)], { synchronousExecution: true });
+            if (selected?.some(item => item?._obj === 'error')) throw new Error(`paint_tool_not_ready:${strokeToolName}: selection failed`);
+            activeStrokeTool = strokeToolName;
+          }
           const usesBrushSettings = strokeToolName === 'BRUSH';
           let brushChanged = false;
           if (usesBrushSettings) {
@@ -2787,7 +3028,7 @@ async function paintStrokesBatch(params = {}) {
           // Re-apply the desired core brush state after a color write so
           // per-stroke style semantics match the legacy PathItem route.
           if (usesBrushSettings && (brushChanged || brushStateDirty)) {
-            const updated = await applyBrushSettingsModal({
+            const updated = await applyVerifiedBatchBrushStyle({
               size: Number(brushState.size),
               opacity: Number(brushState.opacity),
               flow: Number(brushState.flow),
@@ -2797,13 +3038,13 @@ async function paintStrokesBatch(params = {}) {
           }
 
           const pathName = `__MCP_PAINT_${Date.now()}_${index}`;
-          await doc.pathItems.add(pathName, [makeUxpStrokeSubPath(stroke)]);
+          const createdPath = await doc.pathItems.add(pathName, [makeUxpStrokeSubPath(stroke)]);
           try {
             const tool = constants.ToolType[strokeToolName];
             if (!tool) throw new Error(`unsupported UXP stroke tool: ${String(stroke.tool)}`);
             // Tool/color writes may affect channel targeting. Pin the mask immediately before every draw.
             if (maskPainting) await selectStrokeMaskChannelModal(doc, targetLayerId);
-            await strokeNamedPathModal(doc, pathName, tool, stroke.simulatePressure);
+            await strokeNamedPathModal(doc, pathName, tool, stroke.simulatePressure, createdPath);
           } finally {
             await deleteNamedPathModal(pathName);
           }
@@ -2838,25 +3079,22 @@ async function paintStrokesBatch(params = {}) {
         };
       } catch (error) {
         if (!committed) {
-          try { await executionContext.hostControl.resumeHistory(suspensionId, false); } catch {}
+          await abortFailedPaintBatch(executionContext, suspensionId, error, [
+            ['color', async () => {
+              if (maskPainting && originalColor) { setForegroundColorModal(originalColor); brushStateDirty = true; }
+            }],
+            ['brush', async () => restoreBatchBrushStyle(brushBaseline, brushState, brushStateDirty)],
+            ['layer', async () => {
+              if (originalLayerId != null && originalLayerId !== targetLayerId) {
+                await action.batchPlay([selectLayerByIdDescriptor(originalLayerId)], { synchronousExecution: true });
+              }
+            }],
+            ['channels', async () => {
+              if (maskPainting && originalChannels?.length) doc.activeChannels = originalChannels;
+            }],
+          ]);
         }
         throw error;
-      } finally {
-        if (!committed) {
-          if (maskPainting) { try { setForegroundColorModal(originalColor); brushStateDirty = true; } catch {} }
-          try { await restoreBatchBrushStyle(brushBaseline, brushState, brushStateDirty); } catch {}
-        }
-        if (originalLayerId != null && originalLayerId !== targetLayerId) {
-          try {
-            await action.batchPlay(
-              [selectLayerByIdDescriptor(originalLayerId)],
-              { synchronousExecution: true }
-            );
-          } catch {}
-        }
-        if (!committed && maskPainting && originalChannels.length) {
-          try { doc.activeChannels = originalChannels; } catch {}
-        }
       }
     },
     { commandName: 'MCP Digital Painting' }
@@ -2880,31 +3118,37 @@ async function paintDabsBatch(params = {}) {
       let brushStateDirty = false;
       try {
         if (targetLayerId !== originalLayerId) {
-          await action.batchPlay(
-            [selectLayerByIdDescriptor(targetLayerId)],
-            { synchronousExecution: true }
-          );
+          await selectVerifiedPaintLayerModal(doc, targetLayerId);
         }
         await action.batchPlay([selectPaintbrushToolDescriptor()], { synchronousExecution: true });
         const initialBrush = await snapshotBrushSettings({ synchronousExecution: true });
         brushBaseline = { ...initialBrush.settings };
         brushState = { ...brushBaseline };
+        // Foreground writes are not free: this host can also reset the brush's
+        // opacity/flow, forcing another modal brush-settings write. Track the
+        // color actually established for this batch, as in paintStrokesBatch.
+        let cachedColor = currentForegroundRgb();
 
         for (let groupIndex = 0; groupIndex < groups.length; groupIndex++) {
           const group = groups[groupIndex];
           const desiredStyle = batchBrushStyle(brushBaseline, group);
           const brushChanged = !sameCoreBrushStyle(desiredStyle, brushState);
           brushState = { ...brushState, ...desiredStyle };
-          const colorWritten = Boolean(group.color);
+          const colorWritten = Boolean(group.color && !samePaintColor(cachedColor, group.color));
           if (colorWritten) {
             brushStateDirty = true;
             setForegroundColorModal(group.color);
+            cachedColor = {
+              red: Number(group.color.red),
+              green: Number(group.color.green),
+              blue: Number(group.color.blue),
+            };
           }
           // Foreground-color assignment can restore stale brush opacity/flow
           // inside the same modal. Restore the desired style after every color
           // write, including color-only groups that use the batch baseline.
           if (brushChanged || colorWritten) {
-            const updated = await applyBrushSettingsModal({
+            const updated = await applyVerifiedBatchBrushStyle({
               size: Number(brushState.size),
               opacity: Number(brushState.opacity),
               flow: Number(brushState.flow),
@@ -2914,9 +3158,9 @@ async function paintDabsBatch(params = {}) {
           }
           const points = Array.isArray(group.points) ? group.points : [];
           const pathName = `__MCP_DABS_${Date.now()}_${groupIndex}`;
-          await doc.pathItems.add(pathName, points.map(makeUxpDabSubPath));
+          const createdPath = await doc.pathItems.add(pathName, points.map(makeUxpDabSubPath));
           try {
-            await strokeNamedPathModal(doc, pathName, constants.ToolType.BRUSH, false);
+            await strokeNamedPathModal(doc, pathName, constants.ToolType.BRUSH, false, createdPath);
           } finally {
             await deleteNamedPathModal(pathName);
           }
@@ -2945,21 +3189,16 @@ async function paintDabsBatch(params = {}) {
         };
       } catch (error) {
         if (!committed) {
-          try { await executionContext.hostControl.resumeHistory(suspensionId, false); } catch {}
+          await abortFailedPaintBatch(executionContext, suspensionId, error, [
+            ['brush', async () => restoreBatchBrushStyle(brushBaseline, brushState, brushStateDirty)],
+            ['layer', async () => {
+              if (originalLayerId != null && originalLayerId !== targetLayerId) {
+                await action.batchPlay([selectLayerByIdDescriptor(originalLayerId)], { synchronousExecution: true });
+              }
+            }],
+          ]);
         }
         throw error;
-      } finally {
-        if (!committed) {
-          try { await restoreBatchBrushStyle(brushBaseline, brushState, brushStateDirty); } catch {}
-        }
-        if (originalLayerId != null && originalLayerId !== targetLayerId) {
-          try {
-            await action.batchPlay(
-              [selectLayerByIdDescriptor(originalLayerId)],
-              { synchronousExecution: true }
-            );
-          } catch {}
-        }
       }
     },
     { commandName: 'MCP Paint Dabs' }
@@ -2968,6 +3207,10 @@ async function paintDabsBatch(params = {}) {
 
 async function paintRegions(params = {}) {
   const regions = Array.isArray(params.regions) ? params.regions : [];
+  for (const region of regions) {
+    if (region.render_mode !== undefined && !['fill', 'outline'].includes(region.render_mode)) throw new Error('region_render_mode_invalid');
+    if (region.render_mode === 'outline' && !(Number.isFinite(region.stroke_size) && region.stroke_size > 0 && region.stroke_size <= 5000)) throw new Error('region_outline_style_required');
+  }
   if (regions.length < 1) throw new Error('regions must be a non-empty array');
   const clipBounds =
     params.clip_bounds && typeof params.clip_bounds === 'object'
@@ -3025,6 +3268,10 @@ async function paintRegions(params = {}) {
         : [];
       const criticalPoints = bezierCriticalPoints(points, true);
       for (let pointIndex = 0; pointIndex < criticalPoints.length; pointIndex++) {
+        const radius = region.render_mode === 'outline' ? Number(region.stroke_size) / 2 : 0;
+        if (radius) for (const sign of [-1, 1]) assertCanvasPoint(
+          { x: criticalPoints[pointIndex].x + sign * radius, y: criticalPoints[pointIndex].y + sign * radius },
+          `regions[${regionIndex}].outline footprint`, width, height, clipBounds);
         assertCanvasPoint(
           criticalPoints[pointIndex],
           `regions[${regionIndex}].contours[${contourIndex}].curve[${pointIndex}]`,
@@ -3050,13 +3297,21 @@ async function paintRegions(params = {}) {
       });
       const painted = [];
       let committed = false;
+      let outlineBaseline, outlineState;
+      const outlineColor = regions.some(region => region.render_mode === 'outline') ? currentForegroundRgb() : null;
       try {
+        if (regions.some(region => region.render_mode === 'outline')) {
+          await preflightStrokeToolsModal([{ tool: 'BRUSH' }]);
+          outlineBaseline = (await snapshotBrushSettings({ synchronousExecution: true })).settings;
+          outlineState = { ...outlineBaseline };
+        }
         if (params.replace_contents === true) {
           const selected = await action.batchPlay([selectLayerByIdDescriptor(targets[0].id), {
             _obj: 'select', _target: [{ _ref: 'channel', _enum: 'channel', _value: 'RGB' }],
             _options: { dialogOptions: 'silent' },
           }], { synchronousExecution: true });
           if (selected.some(result => result?._obj === 'error')) throw new Error('component_rebuild_pixel_target_failed');
+          if (outlineBaseline) await selectVerifiedPaintLayerModal(doc, targets[0].id);
           await doc.selection.selectAll();
           const cleared = await action.batchPlay([{ _obj: 'delete', _options: { dialogOptions: 'silent' } }], { synchronousExecution: true });
           if (cleared.some(result => result?._obj === 'error')) throw new Error('component_rebuild_clear_failed');
@@ -3071,10 +3326,17 @@ async function paintRegions(params = {}) {
               { synchronousExecution: true }
             );
           }
+          if (region.render_mode === 'outline') await selectVerifiedPaintLayerModal(doc, target.id);
           const subpaths = region.contours.map(makeUxpRegionSubPath);
           const pathName = `__MCP_REGION_${Date.now()}_${regionIndex}`;
-          await doc.pathItems.add(pathName, subpaths);
+          const outlinePath = await doc.pathItems.add(pathName, subpaths);
           try {
+            if (region.render_mode === 'outline') {
+              await doc.selection.deselect();
+              setForegroundColorModal(region.color);
+              outlineState = (await applyVerifiedBatchBrushStyle({ size: region.stroke_size, opacity: region.opacity, flow: region.stroke_flow ?? 100 })).settings;
+              await strokeNamedPathModal(doc, pathName, constants.ToolType.BRUSH, false, outlinePath);
+            } else {
             await action.batchPlay(
               [{
                 _obj: 'set',
@@ -3103,6 +3365,7 @@ async function paintRegions(params = {}) {
               { synchronousExecution: true }
             );
             await doc.selection.deselect();
+            }
           } finally {
             try { await doc.selection.deselect(); } catch {}
             try {
@@ -3122,6 +3385,7 @@ async function paintRegions(params = {}) {
             layer_name: String(target.descriptor.name ?? ''),
             paint_target: paintTargetCompositing(doc, target.id),
             contour_count: region.contours.length,
+            render_mode: region.render_mode ?? 'fill',
             opacity: Number(region.opacity),
           });
         }
@@ -3131,6 +3395,8 @@ async function paintRegions(params = {}) {
             { synchronousExecution: true }
           );
         }
+        if (outlineColor) setForegroundColorModal(outlineColor);
+        await restoreBatchBrushStyle(outlineBaseline, outlineState, Boolean(outlineColor));
         await executionContext.hostControl.resumeHistory(suspensionId, true);
         committed = true;
         return {
@@ -3143,6 +3409,12 @@ async function paintRegions(params = {}) {
           clip_bounds: clipBounds,
         };
       } catch (error) {
+        if (!committed && outlineBaseline) {
+          await abortFailedPaintBatch(executionContext, suspensionId, error, [
+            ['color', async () => { if (outlineColor) setForegroundColorModal(outlineColor); }],
+            ['brush', () => restoreBatchBrushStyle(outlineBaseline, outlineState, true)],
+          ]);
+        }
         if (!committed) {
           try { await executionContext.hostControl.resumeHistory(suspensionId, false); } catch {}
         }
@@ -3726,6 +3998,27 @@ async function openImageMutation(params = {}) {
 
 async function paintColorGradient(params = {}) {
   const requestedLayerId = Number(params.layer_id);
+  if (params.preserve_transparency !== undefined && typeof params.preserve_transparency !== 'boolean') {
+    throw new Error('preserve_transparency must be boolean');
+  }
+  const preserveTransparency = params.preserve_transparency === true;
+  const opacity = params.opacity === undefined ? 100 : params.opacity;
+  if (typeof opacity !== 'number' || !Number.isFinite(opacity) || opacity < 1 || opacity > 100) throw new Error('color_gradient opacity must be in [1,100]');
+  let clipContour = null;
+  if (params.clip_contour !== undefined) {
+    if (!preserveTransparency || !Array.isArray(params.clip_contour)
+      || params.clip_contour.length < 3 || params.clip_contour.length > 256
+      || params.clip_contour.some(p => !p || typeof p.x !== 'number' || !Number.isFinite(p.x)
+        || typeof p.y !== 'number' || !Number.isFinite(p.y))) {
+      throw new Error('surface_gradient_clip_invalid');
+    }
+    clipContour = params.clip_contour.map(p => ({ x: p.x, y: p.y }));
+    const area2 = clipContour.reduce((sum, p, i) => {
+      const q = clipContour[(i + 1) % clipContour.length];
+      return sum + p.x * q.y - q.x * p.y;
+    }, 0);
+    if (!Number.isFinite(area2) || Math.abs(area2) < 1e-7) throw new Error('surface_gradient_clip_invalid');
+  }
   const from = params.from || {}, to = params.to || {};
   const stops = Array.isArray(params.stops) ? params.stops : [];
   if (!Number.isInteger(requestedLayerId) || requestedLayerId <= 0) throw new Error('color_gradient requires layer_id');
@@ -3737,7 +4030,7 @@ async function paintColorGradient(params = {}) {
     return { position, red, green, blue };
   });
   if (normalizedStops[0].position !== 0 || normalizedStops[normalizedStops.length - 1].position !== 1 || normalizedStops.some((s, i) => i > 0 && s.position <= normalizedStops[i - 1].position)) throw new Error('color_gradient stops must be strictly ordered from 0 to 1');
-  return core.executeAsModal(async () => {
+  return core.executeAsModal(async (executionContext) => {
     const prepared = await prepareLayerMutation(params, 'color_gradient');
     const targetLayerId = requestedLayerId;
     const [targetDescriptor] = await action.batchPlay([layerByIdDescriptor(targetLayerId)], { synchronousExecution: true });
@@ -3745,20 +4038,109 @@ async function paintColorGradient(params = {}) {
     if (layerSectionValue(targetDescriptor) === 'layerSectionStart') throw new Error('Cannot paint a color gradient on a LayerSet');
     if (fillLayerLockState(targetDescriptor)) throw new Error('Cannot paint a color gradient on a fully locked layer');
     if (legacyLayerKind(targetDescriptor) === 'LayerKind.TEXT') throw new Error('Cannot paint a color gradient on a text layer. Rasterize it first.');
+    if (preserveTransparency && (legacyLayerKind(targetDescriptor) !== 'LayerKind.NORMAL' || targetDescriptor.background)) {
+      throw new Error('surface_gradient_requires_normal_raster_layer');
+    }
+    const originalLock = targetDescriptor.layerLocking || {};
+    if (preserveTransparency && (
+      originalLock.protectTransparency === true ||
+      ['protectAll', 'allLocked', 'protectComposite', 'protectPosition'].some(key => originalLock[key] === true)
+    )) throw new Error('surface_gradient_requires_unlocked_raster_layer');
+    const initialBounds = preserveTransparency ? normalizedBounds(targetDescriptor.bounds) : null;
+    if (preserveTransparency && (!initialBounds || Object.values(initialBounds).some(value => !Number.isFinite(value))
+      || initialBounds.right <= initialBounds.left || initialBounds.bottom <= initialBounds.top)) {
+      throw new Error('surface_gradient_requires_existing_opaque_pixels');
+    }
+    if (clipContour) {
+      const selection = await snapshotSelectionBounds({ synchronousExecution: true });
+      if (selection?.ok !== true || selection.has_selection !== false) {
+        throw new Error('surface_gradient_existing_selection: clear or explicitly preserve the current selection before a clipped surface pass');
+      }
+    }
     const originalLayerId = prepared.originalActiveLayerId;
-    if (originalLayerId !== targetLayerId) await action.batchPlay([selectLayerByIdDescriptor(targetLayerId)], { synchronousExecution: true });
-    await action.batchPlay([{
+    let clipPathName = null;
+    let suspensionId = null;
+    if (preserveTransparency) {
+      if (typeof executionContext?.hostControl?.suspendHistory !== 'function'
+        || typeof executionContext.hostControl.resumeHistory !== 'function') {
+        throw new Error('surface_gradient_history_unavailable');
+      }
+      suspensionId = await executionContext.hostControl.suspendHistory({
+        documentID: prepared.doc.id, name: 'MCP Continuous Surface Tone',
+      });
+    }
+    const mustSucceed = async descriptor => {
+      const [result] = await action.batchPlay([descriptor], { synchronousExecution: true });
+      if (!result || result._obj === 'error') throw new Error('surface_gradient_native_action_failed');
+    };
+    const setTransparencyLock = async enabled => mustSucceed({
+      _obj: 'set',
+      _target: [{ _ref: 'layer', _id: targetLayerId }],
+      to: { _obj: 'layer', layerLocking: { _obj: 'layerLocking', protectTransparency: enabled } },
+      _options: { dialogOptions: 'silent' },
+    });
+    try {
+    if (originalLayerId !== targetLayerId) await mustSucceed(selectLayerByIdDescriptor(targetLayerId));
+    if (preserveTransparency) {
+      await setTransparencyLock(true);
+      const [lockedDescriptor] = await action.batchPlay([layerByIdDescriptor(targetLayerId)], { synchronousExecution: true });
+      if (lockedDescriptor?.layerLocking?.protectTransparency !== true) {
+        throw new Error('surface_gradient_transparency_lock_unverified');
+      }
+    }
+    if (clipContour) {
+      clipPathName = `__MCP_SURFACE_CLIP_${Date.now()}`;
+      await prepared.doc.pathItems.add(clipPathName, [makeUxpRegionSubPath({ operation: 'ADD', points: clipContour })]);
+      await mustSucceed({
+        _obj: 'set', _target: [{ _property: 'selection', _ref: 'channel' }],
+        to: { _ref: 'path', _name: clipPathName }, version: 1, vectorMaskParams: true,
+        antiAlias: false, feather: { _unit: 'pixelsUnit', _value: 0 },
+        _options: { dialogOptions: 'silent' },
+      });
+      const selected = await snapshotSelectionBounds({ synchronousExecution: true });
+      if (selected?.ok !== true || selected.has_selection !== true) throw new Error('surface_gradient_clip_selection_unverified');
+    }
+    await mustSucceed({
       _obj: 'gradientClassEvent',
+      opacity: { _unit: 'percentUnit', _value: 100 }, mode: { _enum: 'blendMode', _value: 'normal' },
       from: { _obj: 'paint', horizontal: { _unit: 'pixelsUnit', _value: from.x }, vertical: { _unit: 'pixelsUnit', _value: from.y } },
       to: { _obj: 'paint', horizontal: { _unit: 'pixelsUnit', _value: to.x }, vertical: { _unit: 'pixelsUnit', _value: to.y } },
       type: { _enum: 'gradientType', _value: 'linear' }, dither: true, useMask: false, reverse: false,
       gradient: { _obj: 'gradientClassEvent', name: 'MCP Continuous Color Field', gradientForm: { _enum: 'gradientForm', _value: 'customStops' }, interfaceIconFrameDimmed: 4096,
         colors: normalizedStops.map(s => ({ _obj: 'colorStop', color: { _obj: 'RGBColor', red: s.red, green: s.green, blue: s.blue }, type: { _enum: 'colorStopType', _value: 'userStop' }, location: Math.round(s.position * 4096), midpoint: 50 })),
-        transparency: [{ _obj: 'transferSpec', opacity: { _unit: 'percentUnit', _value: 100 }, location: 0, midpoint: 50 }, { _obj: 'transferSpec', opacity: { _unit: 'percentUnit', _value: 100 }, location: 4096, midpoint: 50 }] },
+        transparency: [{ _obj: 'transferSpec', opacity: { _unit: 'percentUnit', _value: opacity }, location: 0, midpoint: 50 }, { _obj: 'transferSpec', opacity: { _unit: 'percentUnit', _value: opacity }, location: 4096, midpoint: 50 }] },
       _options: { dialogOptions: 'silent' },
-    }], { synchronousExecution: true });
-    if (originalLayerId != null && originalLayerId !== targetLayerId) await action.batchPlay([selectLayerByIdDescriptor(originalLayerId)], { synchronousExecution: true });
-    return { applied: true, layer_id: targetLayerId, from: { x: from.x, y: from.y }, to: { x: to.x, y: to.y }, stops: normalizedStops, gradient_kind: 'raster-color-linear' };
+    });
+    if (clipContour) {
+      await mustSucceed({ _obj: 'set', _target: [{ _ref: 'channel', _property: 'selection' }],
+        to: { _enum: 'ordinal', _value: 'none' }, _options: { dialogOptions: 'silent' } });
+      await mustSucceed({ _obj: 'delete', _target: [{ _ref: 'path', _name: clipPathName }],
+        _options: { dialogOptions: 'silent' } });
+      const restored = await snapshotSelectionBounds({ synchronousExecution: true });
+      if (restored?.ok !== true || restored.has_selection !== false) throw new Error('surface_gradient_selection_restore_unverified');
+    }
+    if (preserveTransparency) await setTransparencyLock(false);
+    if (originalLayerId != null && originalLayerId !== targetLayerId) await mustSucceed(selectLayerByIdDescriptor(originalLayerId));
+    if (preserveTransparency) {
+      const [after] = await action.batchPlay([layerByIdDescriptor(targetLayerId)], { synchronousExecution: true });
+      const finalBounds = normalizedBounds(after?.bounds);
+      if (!finalBounds || ['left', 'top', 'right', 'bottom'].some(key => finalBounds[key] !== initialBounds[key])) {
+        throw new Error('surface_gradient_alpha_bounds_changed');
+      }
+      if (after?.layerLocking?.protectTransparency === true) throw new Error('surface_gradient_lock_restore_unverified');
+      await executionContext.hostControl.resumeHistory(suspensionId, true);
+      suspensionId = null;
+    }
+    return { applied: true, layer_id: targetLayerId, from: { x: from.x, y: from.y }, to: { x: to.x, y: to.y }, stops: normalizedStops, opacity, gradient_kind: 'raster-color-linear',
+      ...(clipContour ? { clip_contour: clipContour, clip_contour_applied: true, selection_restored: true } : {}),
+      ...(preserveTransparency ? { surface_alpha_preserved: true, history_steps: 1, history_name: 'MCP Continuous Surface Tone' } : {}) };
+    } catch (error) {
+      if (suspensionId !== null) {
+        try { await executionContext.hostControl.resumeHistory(suspensionId, false); }
+        catch (abortError) { throw new Error(`surface_gradient_history_abort_failed: ${String(abortError)}; original_error: ${String(error)}`); }
+      }
+      throw error;
+    }
   }, { commandName: 'MCP Continuous Color Field' });
 }
 
@@ -3773,11 +4155,36 @@ function stampPlacementBounds(instance) {
   };
 }
 
+// Native brush setters may return successfully while Photoshop retains the
+// previous size/angle/opacity. Never count a motif as placed on that evidence.
+function stampStyleReadbackMismatch(desired, readback) {
+  const observed = new Set(Array.isArray(readback?.observed_fields) ? readback.observed_fields : []);
+  const settings = readback?.settings ?? {};
+  for (const [key, expected] of Object.entries(desired)) {
+    if (!observed.has(key)) return `${key}:native_readback_missing`;
+    const actual = settings[key];
+    if (typeof expected !== typeof actual || (typeof expected === 'number'
+      ? !Number.isFinite(actual) || Math.abs(expected - actual) > 1e-6
+      : expected !== actual)) return `${key}:native_readback_mismatch`;
+  }
+  return null;
+}
+
 async function paintStampInstancesBatch(params = {}) {
   const instances = Array.isArray(params.instances) ? params.instances : [];
   if (instances.length < 1) throw new Error('instances must be a non-empty array');
   if (instances.length > 64) throw new Error('instances may contain at most 64 entries per semantic placement pass');
+  const presetName = String(params.preset_name ?? '').trim();
+  if (!presetName) throw new Error('stamp_preset_name_required');
+  // Validate the pinned document and writable target before changing the
+  // Photoshop-global brush preset. Rejected targets must have no side effects.
   const target = await preparePaintTarget(params, 'paint_stamp_instances');
+  // A profile name in the Guard receipt is not proof that Photoshop is using
+  // that brush. Select and verify it before creating any history or pixels.
+  const selectedPreset = await selectBrushPreset({ name: presetName });
+  if (selectedPreset?.ok !== true || selectedPreset.preset !== presetName) {
+    throw new Error('stamp_preset_unverified');
+  }
   const { doc, targetLayerId, targetDescriptor, originalLayerId, resolution } = target;
   return core.executeAsModal(
     async (executionContext) => {
@@ -3785,16 +4192,31 @@ async function paintStampInstancesBatch(params = {}) {
         documentID: doc.id,
         name: 'MCP Stamp Placement',
       });
-      const initialBrush = await snapshotBrushSettings({ synchronousExecution: true });
-      let brushState = { ...initialBrush.settings };
-      const initialColor = currentForegroundRgb();
-      let cachedColor = { ...initialColor };
+      let initialBrush = null;
+      let brushState = null;
+      let brushEvidence = null;
+      let initialColor = null;
+      let cachedColor = null;
       const completed = [];
       let failed = null;
-      let historyResumed = false;
+      let strokeDispatched = false;
       try {
+        // selectBrushPreset already activated the Brush Tool and verified its
+        // native preset identity. Re-activation here can restore a stale preset.
+        // A missing brush descriptor still fails closed inside this try block.
+        initialBrush = await snapshotBrushSettings({ synchronousExecution: true });
+        // A later tool activation must not silently substitute a different
+        // brush. Nameless native readback is allowed only after the selector's
+        // independently observed identity above.
+        if (initialBrush.preset && initialBrush.preset !== presetName) {
+          throw new Error('stamp_preset_changed_after_selection');
+        }
+        brushState = { ...initialBrush.settings };
+        brushEvidence = initialBrush;
+        initialColor = currentForegroundRgb();
+        cachedColor = { ...initialColor };
         if (targetLayerId !== originalLayerId) {
-          await action.batchPlay([selectLayerByIdDescriptor(targetLayerId)], { synchronousExecution: true });
+          await selectVerifiedPaintLayerModal(doc, targetLayerId);
         }
         for (let index = 0; index < instances.length; index++) {
           const instance = instances[index] ?? {};
@@ -3803,7 +4225,10 @@ async function paintStampInstancesBatch(params = {}) {
             let brushChanged = false;
             const desired = {
               size: Number(instance.size),
-              opacity: instance.opacity === undefined ? Number(brushState.opacity) : Number(instance.opacity),
+              // applyBrushSettingsModal writes native opacity as an integer.
+              // Compare the value Photoshop can actually retain, not a
+              // fractional request that its setter necessarily rounds.
+              opacity: instance.opacity === undefined ? Number(brushState.opacity) : Math.round(Number(instance.opacity)),
               flow: Number(brushState.flow),
               angle: instance.angle === undefined ? 0 : Number(instance.angle),
               flip_x: Boolean(instance.flip_x),
@@ -3825,12 +4250,21 @@ async function paintStampInstancesBatch(params = {}) {
               };
             }
             if (brushChanged || colorChanged) {
-              const updated = await applyBrushSettingsModal(desired);
+              const updated = await applyBrushSettingsModal(desired, { activateBrushTool: false });
               brushState = { ...updated.settings };
+              brushEvidence = updated;
+            }
+            const styleMismatch = stampStyleReadbackMismatch(desired, brushEvidence);
+            if (styleMismatch) throw new Error(`stamp_style_unverified:${styleMismatch}`);
+            if (brushEvidence.preset && brushEvidence.preset !== presetName) {
+              throw new Error('stamp_preset_changed_during_style_update');
             }
             const pathName = `__MCP_STAMP_${Date.now()}_${index}`;
             await doc.pathItems.add(pathName, [makeUxpDabSubPath({ x: Number(instance.x), y: Number(instance.y) })]);
             try {
+              // Once native stroke dispatch begins, a thrown error cannot
+              // prove that Photoshop left pixels untouched. Preserve History.
+              strokeDispatched = true;
               await strokeNamedPathModal(doc, pathName, constants.ToolType.BRUSH, false);
             } finally {
               await deleteNamedPathModal(pathName);
@@ -3857,11 +4291,6 @@ async function paintStampInstancesBatch(params = {}) {
           }
         }
 
-        // Once any instance has been dispatched, commit the history suspension even
-        // when a later instance fails. The durable stable-command receipt prevents
-        // replay; the caller reconciles from fresh preview evidence.
-        await executionContext.hostControl.resumeHistory(suspensionId, true);
-        historyResumed = true;
         return {
           placement_status: failed ? 'partial' : 'complete',
           layer_id: targetLayerId,
@@ -3878,25 +4307,56 @@ async function paintStampInstancesBatch(params = {}) {
             : [],
         };
       } finally {
-        if (!historyResumed) {
+        // Restore brush settings, color and active layer while History is still
+        // suspended. Restoring after resumeHistory creates separate undo states
+        // and can leave the user's next Undo targeting setup instead of pixels.
+        // A native restoration failure is not a successful stamp receipt:
+        // the user's active brush/color/layer may have been left changed.
+        // Still attempt every restoration and release History before surfacing it.
+        const restoreFailures = [];
+        if (initialColor && cachedColor && !samePaintColor(cachedColor, initialColor)) {
           try {
-            await executionContext.hostControl.resumeHistory(suspensionId, completed.length > 0 || Boolean(failed));
-          } catch (resumeError) {
-            void resumeError;
+            setForegroundColorModal(initialColor);
+          } catch (error) {
+            restoreFailures.push(`color:${error?.message ?? String(error)}`);
           }
         }
-        try {
-          if (!samePaintColor(cachedColor, initialColor)) setForegroundColorModal(initialColor);
-          await applyBrushSettingsModal(initialBrush.settings);
-        } catch (restoreBrushError) {
-          void restoreBrushError;
+        if (initialBrush) {
+          try {
+            const restored = await applyBrushSettingsModal(initialBrush.settings, { activateBrushTool: false });
+            // A resolved native setter is not proof that the stamp's angle,
+            // flips or opacity were restored. Check the six fields a stamp
+            // can override before reporting a completed placement.
+            const baseline = initialBrush.settings;
+            const mismatch = stampStyleReadbackMismatch({
+              size: Number(baseline.size),
+              opacity: Math.round(Number(baseline.opacity)),
+              flow: Math.round(Number(baseline.flow)),
+              angle: Number(baseline.angle),
+              flip_x: Boolean(baseline.flip_x),
+              flip_y: Boolean(baseline.flip_y),
+            }, restored);
+            if (mismatch) throw new Error(`stamp_restore_style_unverified:${mismatch}`);
+          } catch (error) {
+            restoreFailures.push(`brush:${error?.message ?? String(error)}`);
+          }
         }
         if (originalLayerId != null && originalLayerId !== targetLayerId) {
           try {
             await action.batchPlay([selectLayerByIdDescriptor(originalLayerId)], { synchronousExecution: true });
-          } catch (restoreLayerError) {
-            void restoreLayerError;
+          } catch (error) {
+            restoreFailures.push(`layer:${error?.message ?? String(error)}`);
           }
+        }
+        // A failed stamp may already have changed pixels before its receipt
+        // was recorded, so retain uncertain work for Guard reconciliation.
+        // Do not swallow a failed resume: the caller must know History is unsafe.
+        // A rejected style before any stroke has no stamp pixels to retain.
+        // Do not commit an empty Undo step merely because it has a failure
+        // receipt. Native stroke failures remain uncertain and are retained.
+        await executionContext.hostControl.resumeHistory(suspensionId, completed.length > 0 || strokeDispatched);
+        if (restoreFailures.length) {
+          throw new Error(`stamp_state_restore_failed:${restoreFailures.join(';')}`);
         }
       }
     },
@@ -3945,6 +4405,13 @@ async function probeMediaBrush(params = {}) {
     const layerId = Number(layer?.layer?.id ?? layer?.layerId ?? layer?.layer_id);
     if (!Number.isInteger(layerId) || layerId <= 0) throw new Error('brush_probe_layer_id_unavailable');
     const selected = await selectBrushPreset({ name: presetName });
+    const effectivePreset = typeof selected?.preset === 'string' ? selected.preset.trim() : '';
+    // A successful selector command does not prove which native preset is active.
+    // Do not render and label a sample as the requested brush on an unknown or
+    // conflicting Photoshop readback (the probe is intentionally disposable).
+    if (!selected?.ok || effectivePreset !== presetName) {
+      throw new Error(`brush_probe_preset_unverified: requested=${presetName}, effective=${effectivePreset || 'unknown'}`);
+    }
     const baseSize = Math.max(24, Math.min(120, Number(selected?.settings?.size) || 64));
     const small = Math.max(12, Math.round(baseSize * 0.45));
     const medium = Math.max(24, Math.round(baseSize));
@@ -4645,6 +5112,7 @@ async function pollOnce() {
     const query = [
       `protocol=${encodeURIComponent(REGISTRATION_PROTOCOL)}`,
       `revision=${encodeURIComponent(BRIDGE_REVISION)}`,
+      `deploymentSourceSha256=${encodeURIComponent(DEPLOYMENT_SOURCE_SHA256)}`,
       `runtimeInstanceWitness=${encodeURIComponent(RUNTIME_INSTANCE_WITNESS)}`,
       `photoshopVersion=${encodeURIComponent(String(app.version || ''))}`,
       `documentCount=${encodeURIComponent(String(app.documents?.length ?? 0))}`,

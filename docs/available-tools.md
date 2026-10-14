@@ -10,6 +10,16 @@ the directive cannot be followed safely; `action=complete` closes a fully satisf
 queue. `photoshop_guard_status` / `photoshop_guard_resume` expose the active directive,
 current task, completed micro-plan count and review/interrupt reason.
 
+A global must-fix describes the defect scope, not the required mutation size. For a
+bounded structural correction, an active Director task may declare
+`correction_target={problem_id,region_bounds}` plus `construction_plan`, medium
+`allowed_scales` and the applicable `allowed_global_changes`. Submit a medium pass
+with a distinct component `problem_id`, `addresses_problem_id` equal to the global
+target and declared `region_bounds` contained in the planned review region. Global
+Painter execution, unrelated detail and exhausted strategies remain blocked. Component
+success leaves global debt open for exact-current whole-frame reassessment. The bounds
+describe review scope, not a native pixel mask; ordinary owner/protection checks apply.
+
 Reference for all atomic `photoshop_*` MCP tools exposed by this server (parameters, examples, and return shapes).
 
 ← Back to [README](../README.md)
@@ -1509,7 +1519,7 @@ Current totals: **A=23, B=3, C=106, D=0** across **132 registered tools**.
 | `photoshop_move_layer_up` | `src/tools/layer-ordering-tools.ts` / layer-ordering | Guard-required mutation | layers | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
 | `photoshop_neural_filter` | `src/tools/effect-catalog.ts` / style | Guard-required mutation | neural-filter | UXP only — fail closed | compatible UXP companion | C | done/retain | Already UXP bridge; separate feature, not migration driver. |
 | `photoshop_open_image` | `src/tools/image-placement-tools.ts` / image-placement | Guard-required mutation | document open/place | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |
-| `photoshop_paint_color_gradient` | `src/tools/layer-tools.ts` / layer | Guard-required mutation | layers | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP linear raster-color gradient mutation with exact layer targeting and bounded color stops; distinct from mask gradients. |
+| `photoshop_paint_color_gradient` | `src/tools/layer-tools.ts` / layer | Guard-required mutation | layers | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP linear raster-color gradient with exact layer targeting, bounded color stops and explicit opacity. Optional clip_contour requires alpha protection and no existing selection; its temporary unfeathered selection/path is removed within one History state. Native receipts bind the exact clip and strength; distinct from mask gradients. |
 | `photoshop_paint_dabs` | `src/tools/painting-tools.ts` / painting | Guard-required mutation | painting | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP dab mutation preserving ordered adjacent style runs and one-step history semantics. |
 | `photoshop_paint_regions` | `src/tools/painting-tools.ts` / painting | Guard-required mutation | painting | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP compound-region mutation with accepted ADD/SUBTRACT geometry, cleanup and one-step history semantics. |
 | `photoshop_paint_stamp_instances` | `src/tools/painting-tools.ts` / painting | Guard-required mutation | painting | UXP only — fail closed | compatible UXP companion | C | done/retain | UXP-only production capability; preserve fail-closed semantics. |

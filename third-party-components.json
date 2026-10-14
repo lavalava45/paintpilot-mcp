@@ -178,6 +178,17 @@
         "src/core/painterly-strokes.ts"
       ],
       "relationship": "Algorithm inspiration; project-authored bounded implementation, no upstream code copied."
+    },
+    {
+      "author": "Scott Schaefer, Travis McLean, Scott Hoppe",
+      "title": "Image Deformation Using Moving Least Squares",
+      "year": 2006,
+      "source_revision": "SIGGRAPH 2006 paper; no upstream code imported",
+      "url": "https://people.engr.tamu.edu/schaefer/research/mls.pdf",
+      "used_in": [
+        "src/core/local-warp-geometry.ts"
+      ],
+      "relationship": "Similarity MLS mathematical inspiration for an inert, project-authored preparatory mesh. No Photoshop capability, external source code or third-party runtime dependency."
     }
   ]
 }

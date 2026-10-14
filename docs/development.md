@@ -10,6 +10,16 @@ while executable contracts remain in these technical docs and source schemas.
 
 For end-user installation and MCP host configuration, see [`INSTALL.md`](../INSTALL.md). Architecture and Guard/UXP contracts live in [`architecture.md`](architecture.md).
 
+**Where different document types belong:** maintained user/developer guidance
+stays under `docs/`; executable contract input belongs under `tests/fixtures/`;
+completed measurements and dated migration incidents belong under
+[`evidence/historical/`](../evidence/historical/). Archived results are
+evidence of their original run, **not** present-day runtime acceptance.
+The current public schema verification guide is
+[`GUARD-PUBLIC-CONTRACT-AUDIT.md`](GUARD-PUBLIC-CONTRACT-AUDIT.md);
+the superseded October 9 COS schema synchronization investigation is retained
+[as historical evidence](../evidence/historical/COS-GUARD-SCHEMA-SYNC.md).
+
 ## 1. Build from source
 
 ```bash
@@ -22,6 +32,11 @@ npm run build
 `pnpm-lock.yaml` is part of the canonical repository and must stay synchronized with `package.json`.
 Do not maintain an ad-hoc dependency set in `node_modules`; after dependency changes, regenerate the
 lockfile deliberately and verify that a clean `pnpm install --frozen-lockfile` succeeds.
+
+After coordinated changes, follow [deployment health and paired activation](deployment-health.md):
+build → CoS plugin Restart → UXP Reload when changed → `npm run deployment:health`.
+Build fingerprints prevent stale or partial `dist` from starting; a successful offline build
+does not prove that the already running MCP/UXP pair was updated. No automatic restart occurs.
 
 The canonical checkout keeps only this project's own repository remote (`origin`). Do **not** configure
 a standing `upstream` remote for the historical source project. Normal build, test, packaging, release
@@ -71,6 +86,9 @@ npm run verify:tool-counts
 npm run verify:compact-v2-contract
 npm run verify:acceptance-matrix
 npm run verify:live-evidence-ledger
+
+# Optional local forensic check: require ALL historical gitignored evidence
+node scripts/verify-live-evidence-ledger.mjs --require-all-local
 npm run verify:docs
 ```
 

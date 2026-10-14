@@ -1,12 +1,16 @@
+import { COMPONENT_SPACE_SCHEMA } from '../core/component-space.js';
 import type { CallToolResult, Tool } from '@modelcontextprotocol/sdk/types.js';
 import { createHash } from 'node:crypto';
 import { ATTENTION_BINDING_SCHEMA } from '../core/perceptual-hierarchy.js';
+import { ADDRESSES_PROBLEM_IDS_SCHEMA } from '../core/guard/problem-links.js';
 import { bezierCriticalPoints } from '../core/bezier-geometry.js';
+import { paintRegionTopologyIssues } from '../core/filled-contour-topology.js';
 import {
   normalizeToolResultForPlaceholders,
   parseVisualMicroPlan,
   collectVisualMicroPlanConstructionErrors,
   resolveVisualMicroPlanArgs,
+  preflightDeferredStepReferences,
   VISUAL_MICROPLAN_ACTION_CLASSES,
   VISUAL_MICROPLAN_MAX_STEPS,
   VISUAL_MICROPLAN_DISPOSITIONS,
@@ -51,6 +55,7 @@ import {
   withToolExecutionStepContext,
 } from '../core/execution-context.js';
 import { guardExecutionClass } from '../core/guard/execution-policy.js';
+import { STRUCTURAL_CORRECTION_SCHEMA } from '../core/guard/critic-correction.js';
 import {
   compileVisualMicroPlan,
   VISUAL_MICROPLAN_STAGES,
@@ -117,9 +122,16 @@ function passExecutionProjection(
   const completedMutationIds = actions
     .filter(action => action.kind === 'visual-mutation' && action.state === 'completed')
     .map(action => action.step_id);
-  const explicitHistorySteps = (value: unknown): number | undefined => {
+  const explicitHistorySteps = (value: unknown, tool: string): number | undefined => {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
     const row = value as Record<string, unknown>;
+    if (tool === 'photoshop_undo') {
+      return row.undone === true && row.evidence === 'uxp_native_undo_receipt'
+        && typeof row.undo_history_states_consumed === 'number'
+        && Number.isSafeInteger(row.undo_history_states_consumed) && row.undo_history_states_consumed > 0
+        && row.steps === row.undo_history_states_consumed
+        ? row.undo_history_states_consumed : undefined;
+    }
     for (const candidate of [row.history_steps, (row.details as Record<string, unknown> | undefined)?.history_steps]) {
       if (typeof candidate === 'number' && Number.isSafeInteger(candidate) && candidate >= 0) return candidate;
     }
@@ -133,7 +145,7 @@ function passExecutionProjection(
     && (action.kind === 'visual-mutation' || (guardExecutionClass(action.tool) !== 'read-only' && !historyFree.has(action.tool))));
   const ownedActions = historyActions.map(action => ({
     step_id: action.step_id,
-    history_steps: results ? explicitHistorySteps(results[action.step_id]) : undefined,
+    history_steps: results ? explicitHistorySteps(results[action.step_id], action.tool) : undefined,
   }));
   const historyProven = ownedActions.length > 0 && ownedActions.every(action => action.history_steps !== undefined);
   const uncertainMutation = actions.some(action => action.state === 'failed-or-uncertain' && guardExecutionClass(action.tool) !== 'read-only');
@@ -869,11 +881,17 @@ function validateCompiledVisualMicroPlan(
   try { plan = parseVisualMicroPlan(args); }
   catch (error) { errors.push(error instanceof Error ? error.message : String(error)); }
   if (Array.isArray(args.steps)) {
+    const refs = preflightDeferredStepReferences(args.steps);
+    errors.push(...refs.errors);
     for (const step of args.steps) {
       if (!step || typeof step !== 'object' || Array.isArray(step)) continue;
       const definition = registry.get(step.tool);
       if (!definition) { errors.push(`tool not found: ${String(step.tool)}`); continue; }
       errors.push(...collectSchemaErrors(step.args, definition.tool.inputSchema, `step "${String(step.id)}" args`));
+      if (step.tool === 'photoshop_paint_regions') {
+        const payload = step.args as Record<string, unknown> | undefined;
+        errors.push(...paintRegionTopologyIssues(payload?.regions).map(issue => `${issue.code}: ${issue.message}`));
+      }
       if (step.args && typeof step.args === 'object' && step.args.document_id !== undefined && step.args.document_id !== args.document_id) {
         errors.push(`step "${String(step.id)}" document_id must match micro-plan document_id`);
       }
@@ -1219,6 +1237,20 @@ function normalizedResultRecord(value: unknown): Record<string, unknown> | undef
     : undefined;
 }
 
+/** A completed tool transport is not proof that Photoshop accepted the
+ * requested brush. The real setters publish their effective readback under
+ * details.setter_outcome; keep older synthetic tool fixtures compatible but
+ * never treat an explicit negative/uncertain readback as an applied setter.
+ */
+function brushPreparationUnverified(tool: string, normalized: unknown): boolean {
+  if (tool !== 'photoshop_set_brush' && tool !== 'photoshop_select_brush_preset') return false;
+  const root = normalizedResultRecord(normalized);
+  const details = normalizedResultRecord(root?.details);
+  return root?.ok === false
+    || (details?.setter_outcome !== undefined && details.setter_outcome !== 'applied')
+    || (Array.isArray(details?.mismatches) && details.mismatches.length > 0);
+}
+
 function preparationFailureOutcome(input: {
   step: VisualMicroPlanStep;
   normalizedResult?: unknown;
@@ -1454,6 +1486,8 @@ function visualMicroPlanToolSchema(): Tool {
           type: 'string',
           description: 'Stable unresolved problem id directly addressed by this pass.',
         },
+        addresses_problem_ids: ADDRESSES_PROBLEM_IDS_SCHEMA,
+        structural_correction: STRUCTURAL_CORRECTION_SCHEMA,
         paint_strategy: {
           type: 'object',
           description:
@@ -1471,6 +1505,9 @@ function visualMicroPlanToolSchema(): Tool {
               description: 'Optional capability/fit audit guidance for the fallback; fallback_from_method_id carries executable routing authority.',
             },
             brush_role: { type: 'string' },
+            brush_use_reason: { type: 'string', minLength: 12 },
+            brush_trial_bounds: { type: 'object', properties: { left: { type: 'number' }, top: { type: 'number' }, right: { type: 'number' }, bottom: { type: 'number' } }, required: ['left','top','right','bottom'], additionalProperties: false },
+            brush_fitness_key: { type: 'string', description: 'Compiler-derived identity; not proof of suitability.' },
             preset_name: { type: 'string' },
             selection_reason: {
               type: 'string',
@@ -1607,6 +1644,7 @@ function visualMicroPlanToolSchema(): Tool {
               enum: [...VISUAL_MICROPLAN_OPACITY_ROLES],
               description: 'Physical opacity contract for this semantic owner; do not use transparency merely to soften an otherwise opaque scene mass.',
             },
+            component_space: COMPONENT_SPACE_SCHEMA,
             construction_tier: {
               type: 'string', enum: [...VISUAL_MICROPLAN_CONSTRUCTION_TIERS],
               description: 'Subject-agnostic construction hierarchy: primary -> secondary -> tertiary -> surface.',
@@ -2159,8 +2197,19 @@ export function createVisualMicroPlanTools(registry: ToolRegistry, barrierDirect
             }
             stepInvoked = true;
             const result = await executeStep(step);
-            const ok = result.isError !== true;
             results[step.id] = normalizeToolResultForPlaceholders(result);
+            const unverifiedBrush = brushPreparationUnverified(step.tool, results[step.id]);
+            if (unverifiedBrush) {
+              const brushResult = normalizedResultRecord(results[step.id]);
+              if (brushResult) {
+                results[step.id] = { ...brushResult, ok: false, code: 'brush_setter_unverified' };
+              }
+            }
+            const ok = result.isError !== true
+              && !unverifiedBrush;
+            if (!ok && (step.tool === 'photoshop_set_brush' || step.tool === 'photoshop_select_brush_preset')) {
+              clearPreparationFacts(registry, preparationCache.cache, 'invalidate_uncertainty');
+            }
             const exactChildNotExecuted = normalizedResultRecord(results[step.id])?.execution === 'not-executed';
             statuses.push({
               id: step.id,
@@ -2513,6 +2562,7 @@ export function createVisualMicroPlanTools(registry: ToolRegistry, barrierDirect
             decision: plan.logicalLayer.decision,
             ...(plan.logicalLayer.physicalRole ? { physical_role: plan.logicalLayer.physicalRole } : {}),
             ...(plan.logicalLayer.opacityRole ? { opacity_role: plan.logicalLayer.opacityRole } : {}),
+            ...(plan.logicalLayer.componentSpace ? { component_space: plan.logicalLayer.componentSpace } : {}),
             ...(plan.logicalLayer.constructionTier ? { construction_tier: plan.logicalLayer.constructionTier } : {}),
             ...(plan.logicalLayer.parentHypothesisId ? { parent_hypothesis_id: plan.logicalLayer.parentHypothesisId } : {}),
             ...(plan.logicalLayer.parentConstructionRevision ? { parent_construction_revision: plan.logicalLayer.parentConstructionRevision } : {}),
@@ -2593,6 +2643,7 @@ export function createVisualMicroPlanTools(registry: ToolRegistry, barrierDirect
             decision: plan.logicalLayer.decision,
             ...(plan.logicalLayer.physicalRole ? { physical_role: plan.logicalLayer.physicalRole } : {}),
             ...(plan.logicalLayer.opacityRole ? { opacity_role: plan.logicalLayer.opacityRole } : {}),
+            ...(plan.logicalLayer.componentSpace ? { component_space: plan.logicalLayer.componentSpace } : {}),
             ...(plan.logicalLayer.constructionTier ? { construction_tier: plan.logicalLayer.constructionTier } : {}),
             ...(plan.logicalLayer.parentHypothesisId ? { parent_hypothesis_id: plan.logicalLayer.parentHypothesisId } : {}),
             ...(plan.logicalLayer.parentConstructionRevision ? { parent_construction_revision: plan.logicalLayer.parentConstructionRevision } : {}),
@@ -2699,7 +2750,8 @@ export function createVisualMicroPlanTools(registry: ToolRegistry, barrierDirect
               ...(plan.logicalLayer.mergeTargetLayerId === undefined ? {} : { merge_target_layer_id: plan.logicalLayer.mergeTargetLayerId }),
               ...(plan.logicalLayer.physicalRole ? { physical_role: plan.logicalLayer.physicalRole } : {}),
               ...(plan.logicalLayer.opacityRole ? { opacity_role: plan.logicalLayer.opacityRole } : {}),
-              ...(plan.logicalLayer.constructionTier ? { construction_tier: plan.logicalLayer.constructionTier } : {}),
+              ...(plan.logicalLayer.componentSpace ? { component_space: plan.logicalLayer.componentSpace } : {}),
+            ...(plan.logicalLayer.constructionTier ? { construction_tier: plan.logicalLayer.constructionTier } : {}),
               ...(plan.logicalLayer.parentHypothesisId ? { parent_hypothesis_id: plan.logicalLayer.parentHypothesisId } : {}),
               ...(plan.logicalLayer.parentConstructionRevision ? { parent_construction_revision: plan.logicalLayer.parentConstructionRevision } : {}),
               ...(plan.logicalLayer.constructionChange ? { construction_change: true } : {}),

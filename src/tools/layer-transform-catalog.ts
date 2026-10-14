@@ -59,6 +59,29 @@ export function createLayerTransformTools(
       {
         deltaX: { type: 'number', description: 'Horizontal offset in pixels (can be negative)' },
         deltaY: { type: 'number', description: 'Vertical offset in pixels (can be negative)' },
+        connected_move: {
+          type: 'object',
+          description: 'Optional E.25 native atomic multi-layer move. Requires one pinned parent and 1–7 pinned child owners with exact Photoshop BEFORE bounds. Guard checks durable parent/child ownership; omitted means ordinary single active-layer move.',
+          properties: {
+            parent: { type: 'object', properties: {
+              owner_id: { type: 'string', minLength: 1 },
+              layer_id: { type: 'integer', minimum: 1 },
+              expected_bounds: { type: 'object', properties: {
+                left: { type: 'number' }, top: { type: 'number' },
+                right: { type: 'number' }, bottom: { type: 'number' },
+              }, required: ['left', 'top', 'right', 'bottom'] },
+            }, required: ['owner_id', 'layer_id', 'expected_bounds'] },
+            children: { type: 'array', minItems: 1, maxItems: 7, items: { type: 'object', properties: {
+              owner_id: { type: 'string', minLength: 1 },
+              layer_id: { type: 'integer', minimum: 1 },
+              expected_bounds: { type: 'object', properties: {
+                left: { type: 'number' }, top: { type: 'number' },
+                right: { type: 'number' }, bottom: { type: 'number' },
+              }, required: ['left', 'top', 'right', 'bottom'] },
+            }, required: ['owner_id', 'layer_id', 'expected_bounds'] } },
+          },
+          required: ['parent', 'children'],
+        },
       },
       ['deltaX', 'deltaY'],
       (args) => runMoveLayerPixels(router, args)

@@ -620,6 +620,38 @@ describe('Art Director / Painter controller contract', () => {
     expect(next.art_director.review_reason).toBeNull();
   });
 
+  it('forces Art Director review when consecutive insufficient passes trip workflow stall', () => {
+    const s = store();
+    s.setArtDirectorState({ document_id: 42, action: 'review', directive: directive('focalForm-focus', 8) });
+    const current = s.paintingState().documents['42'];
+    const next = s.advanceArtDirectorAfterVerdict({
+      ...current,
+      workflow_metrics: {
+        workflow_stall: true,
+        consecutive_insufficient_visual_passes: 2,
+      },
+    }, context(), {
+      ...acceptedVerdict(),
+      verdict: 'neutral',
+      disposition: 'correct',
+      target_resolved: 'no',
+    }, {
+      id: 'second-insufficient-no-gain',
+      verdict: {
+        significance: { execution_effect: 'insufficient' },
+        trend_signals: [],
+        at: new Date().toISOString(),
+      },
+    });
+
+    expect(next.art_director).toMatchObject({
+      status: 'review_due',
+      review_due: true,
+      current_task_id: 'shadow-side',
+      review_reason: 'workflow_stall:no_gain:shadow-side',
+    });
+  });
+
   it('requires exact-current-frame strategy validation and forces a changed strategy on replan', () => {
     const s = store();
     const d = directive('focalForm-focus', 8);
@@ -1856,6 +1888,163 @@ describe('Art Director / Painter controller contract', () => {
     }))).toThrow(/structural_debt_requires_structural_correction/);
   });
 
+  it('rebinds an outstanding whole-image review to verified rollback pixels, never the discarded frame', () => {
+    const s = store();
+    const rejected = seedClassifiedFrame(s, 'legacy-bad-bracket-pass', 1);
+    s.setArtDirectorState({ document_id: 42, action: 'review', directive: directive('rollback-director', 8) });
+    s.updatePaintingState(42, state => ({
+      ...state,
+      art_director: { ...state.art_director, whole_image_glance: {
+        due: true, reason: 'global_change',
+        required_operation_id: rejected.operation_id, required_frame_sha256: rejected.sha256,
+        required_relations: ['occlusion/depth'], history: [],
+      } },
+    }));
+    const restored = seedClassifiedFrame(s, 'legacy-verified-rollback', 2);
+    s.updatePaintingState(42, state => ({
+      ...state,
+      last_rollback: { operation_id: restored.operation_id, source_operation_id: rejected.operation_id },
+    }));
+    const stale = {
+      trigger: 'global_change',
+      observation: 'Inspect preserved architecture after the destructive bracket pass was undone.',
+      operation_id: rejected.operation_id, frame_sha256: rejected.sha256,
+      relationship_audit: { checks: [{ relation: 'occlusion/depth', status: 'pass' }] },
+    };
+    const revised = directive('rollback-director-revised', 8);
+    expect(() => s.setArtDirectorState({
+      document_id: 42, action: 'review', directive: revised, whole_image_glance: stale,
+    })).toThrow(/operation_id must match the exact pending artistic frame/);
+    const reviewed = s.setArtDirectorState({
+      document_id: 42, action: 'review', directive: revised,
+      whole_image_glance: { ...stale, operation_id: restored.operation_id, frame_sha256: restored.sha256 },
+    });
+    expect(reviewed.art_director.whole_image_glance).toMatchObject({
+      due: false, reason: null,
+      history: [{ operation_id: restored.operation_id, frame_sha256: restored.sha256,
+        relationship_audit: { checks: [{ relation: 'occlusion/depth', status: 'pass' }] } }],
+    });
+  });
+
+  it('never migrates a pending review to a different frame without verified rollback provenance', () => {
+    const s = store();
+    const oldFrame = seedClassifiedFrame(s, 'unrelated-old', 1);
+    s.setArtDirectorState({ document_id: 42, action: 'review', directive: directive('no-rollback-director', 8) });
+    s.updatePaintingState(42, state => ({
+      ...state, art_director: { ...state.art_director, whole_image_glance: {
+        due: true, reason: 'global_change',
+        required_operation_id: oldFrame.operation_id, required_frame_sha256: oldFrame.sha256,
+        required_relations: ['occlusion/depth'],
+      } },
+    }));
+    const newFrame = seedClassifiedFrame(s, 'unrelated-new', 2);
+    expect(() => s.setArtDirectorState({
+      document_id: 42, action: 'review', directive: directive('no-rollback-director-v2', 8),
+      whole_image_glance: {
+        trigger: 'global_change', observation: 'Observe the unrelated current frame.',
+        operation_id: newFrame.operation_id, frame_sha256: newFrame.sha256,
+        relationship_audit: { checks: [{ relation: 'occlusion/depth', status: 'pass' }] },
+      },
+    })).toThrow(/operation_id must match the exact pending artistic frame/);
+  });
+  it('does not clear a due whole-frame review when a required relation remains uncertain', () => {
+    const s = store();
+    const frame = seedClassifiedFrame(s, 'glance-uncertain-frame', 1);
+    s.setArtDirectorState({ document_id: 42, action: 'review', directive: directive('glance-uncertain', 8) });
+    s.updatePaintingState(42, current => ({
+      ...current, art_director: {
+        ...current.art_director,
+        whole_image_glance: {
+          due: true, reason: 'stage_boundary', required_operation_id: frame.operation_id,
+          required_frame_sha256: frame.sha256,
+          required_relations: ['figure support/contact', 'occlusion/depth'],
+          history: [],
+        },
+      },
+    }));
+    const base = {
+      trigger: 'stage_boundary', operation_id: frame.operation_id, frame_sha256: frame.sha256,
+      observation: 'Contact is ambiguous despite clear overlap and current whole-frame evidence.',
+    };
+    const uncertain = s.setArtDirectorState({
+      document_id: 42, action: 'review', directive: directive('glance-uncertain-reviewed', 8),
+      whole_image_glance: { ...base, relationship_audit: {
+        checks: [
+          { relation: 'figure support/contact', status: 'uncertain' },
+          { relation: 'occlusion/depth', status: 'pass' },
+        ],
+      } },
+    });
+    expect(uncertain.art_director.whole_image_glance).toMatchObject({
+      due: true, reason: 'stage_boundary',
+      required_operation_id: frame.operation_id, required_frame_sha256: frame.sha256,
+      required_relations: ['figure support/contact'],
+      last_record: { relationship_audit: { checks: [
+        { relation: 'figure support/contact', status: 'uncertain' },
+        { relation: 'occlusion/depth', status: 'pass' },
+      ] } },
+    });
+    expect(uncertain.art_director.whole_image_glance.history).toHaveLength(1);
+    expect(() => s.plannerGate(42, painterRequest({
+      args: { planner_directive_id: 'glance-uncertain-reviewed', problem_id: 'focalForm-shadow-side' },
+    }))).toThrow(/whole_image_glance_required:.*unresolved relations: figure support\/contact.*report an actionable blocker/);
+    const resolved = s.setArtDirectorState({
+      document_id: 42, action: 'review', directive: directive('glance-uncertain-resolved', 8),
+      whole_image_glance: { ...base, observation: 'Figure support is now confirmed from the same full frame.',
+        relationship_audit: { checks: [{ relation: 'figure support/contact', status: 'pass' }] } },
+    });
+    expect(resolved.art_director.whole_image_glance).toMatchObject({ due: false, reason: null });
+    expect(resolved.art_director.whole_image_glance).not.toHaveProperty('required_relations');
+    expect(resolved.art_director.whole_image_glance.history).toHaveLength(2);
+  });
+
+  it('rejects a final whole-frame relationship audit that is still uncertain', () => {
+    const s = store();
+    const primary = seedClassifiedFrame(s, 'finish-glance-primary', 1);
+    const single = directive('finish-glance-directive', 5);
+    single.tasks = [single.tasks[0]];
+    s.setArtDirectorState({
+      document_id: 42, action: 'review', directive: single,
+      anchor_decision: { action: 'promote_primary', operation_id: primary.operation_id },
+    });
+    const current = seedClassifiedFrame(s, 'finish-glance-current', 2);
+    s.updatePaintingState(42, state => ({
+      ...state, art_director: {
+        ...state.art_director,
+        tasks: state.art_director.tasks.map(task => ({ ...task, status: 'completed' })),
+        current_task_id: null,
+        whole_image_glance: {
+          due: true, reason: 'final_review', required_operation_id: current.operation_id,
+          required_frame_sha256: current.sha256, required_relations: ['occlusion/depth'],
+          history: [],
+        },
+      },
+    }));
+    const completion = {
+      document_id: 42, action: 'complete', ...completionReviewEvidence(s),
+      final_comparison: {
+        scope: 'compared', current_operation_id: current.operation_id,
+        best_previous_operation_id: primary.operation_id, preferred: 'current',
+      },
+      whole_image_glance: {
+        trigger: 'final_review', observation: 'Whole frame leaves depth overlap uncertain.',
+        operation_id: current.operation_id, frame_sha256: current.sha256,
+        relationship_audit: { checks: [{ relation: 'occlusion/depth', status: 'uncertain' }] },
+      },
+    };
+    expect(() => s.setArtDirectorState(completion)).toThrow(/whole_image_glance_uncertain/);
+    expect(s.paintingState().documents['42'].art_director.whole_image_glance.due).toBe(true);
+    const finished = s.setArtDirectorState({
+      ...completion,
+      whole_image_glance: {
+        ...completion.whole_image_glance,
+        relationship_audit: { checks: [{ relation: 'occlusion/depth', status: 'pass' }] },
+      },
+    });
+    expect(finished.art_director.status).toBe('completed');
+    expect(finished.art_director.whole_image_glance.due).toBe(false);
+  });
+
   it('blocks Painter from global/compositional changes unless the directive task explicitly permits them', () => {
     const s = store();
     s.setArtDirectorState({ document_id: 42, action: 'review', directive: directive() });
@@ -2874,5 +3063,423 @@ describe('Painter VisualMicroPlan envelope', () => {
 
     expect(() => parseVisualMicroPlan({ ...base, planner_task_id: undefined })).toThrow(/supplied together/);
     expect(() => parseVisualMicroPlan({ ...base, change_domains: [] })).toThrow(/requires at least one change_domains/);
+  });
+});
+
+
+describe('bounded correction of a global priority defect', () => {
+  const roi = { left: 100, top: 100, right: 400, bottom: 500 };
+  const globalId = 'scene-primitive-debt';
+  function fixture(withTarget = true) {
+    const s = store();
+    s.setPriorityState({ document_id: 42, problems: [{
+      problem_id: globalId, scale: 'global', severity: 'must-fix', status: 'open',
+      region: 'whole image', hypothesis: 'Several components need structural reconstruction.',
+    }] });
+    const plan = directive();
+    Object.assign(plan.tasks[0], {
+      allowed_global_changes: ['depth-structure'],
+      construction_plan: {
+        representation_strategy: 'Reconstruct one component rather than masking its primitive scaffold.',
+        structural_features: ['front plane', 'recessed opening'],
+        stage_exit_condition: 'The component reads as a coherent volume in the whole frame.',
+      },
+      ...(withTarget ? { correction_target: { problem_id: globalId, region_bounds: roi } } : {}),
+    });
+    s.setArtDirectorState({ document_id: 42, action: 'review', directive: plan });
+    const req = painterRequest({
+      problem_id: 'component-rebuild', strategy_family: 'structural-rebuild',
+      args: { problem_id: 'component-rebuild', addresses_problem_id: globalId,
+        region_bounds: roi, change_domains: ['depth-structure'] },
+    });
+    return { s, plan, req };
+  }
+
+  it('admits a planned medium reconstruction through both gates without closing global debt', () => {
+    const { s, req } = fixture();
+    expect(() => s.plannerGate(42, req)).not.toThrow();
+    expect(s.priorityGate(42, req)).toBeNull();
+    const state = s.paintingState().documents['42'];
+    expect(state.visual_problems[globalId]).toMatchObject({ scale: 'global', status: 'open' });
+    expect(s.compactPassContext(42).art_director.tasks[0].correction_target)
+      .toEqual({ problem_id: globalId, region_bounds: roi });
+    const reopened = storeAt(path.dirname(s.directory));
+    expect(reopened.priorityGate(42, req)).toBeNull();
+  });
+
+  it('unified admission uses the ranked Critic selection in Painter even with an older local mismatch', () => {
+    const { s, req } = fixture();
+    s.updatePaintingState(42, current => ({ ...current,
+      last_critique: { problem_id: 'old-local-defect', primary_mismatch: 'An earlier local task was unfinished.', target_resolved: 'no' },
+      chat_critic_findings: [
+        { problem_id: 'critic-form_proportions', criterion: 'form_proportions', correction_kind: 'form',
+          visible: 'The major component proportions need repair.', next_change: 'Rebuild the large form before material.' },
+        { problem_id: 'critic-light_material', criterion: 'light_material', correction_kind: 'material',
+          visible: 'The surface response needs development.', next_change: 'Develop material after the form.' } ],
+      critic_obligations: [{ id: 'material-surface', parent_problem_id: 'critic-light_material', criterion: 'light_material',
+        component_ids: ['surface'], depends_on_ids: [], status: 'fail', visible: 'Surface material remains incomplete.' }],
+    }));
+    req.args.addresses_problem_ids = [globalId, 'critic-form_proportions'];
+    expect(() => s.plannerGate(42, req)).not.toThrow();
+    expect(() => s.priorityGate(42, req)).not.toThrow();
+    s.updatePaintingState(42, current => ({ ...current, critic_obligations: [] }));
+    expect(() => s.plannerGate(42, req)).not.toThrow();
+    expect(s.paintingState().documents['42'].last_critique.target_resolved).toBe('no');
+    req.args.addresses_problem_ids = [globalId];
+    expect(() => s.plannerGate(42, req)).toThrow(/primary_mismatch_unresolved.*critic-form_proportions/);
+  });
+
+  it('links a component to the previous Critic deficit and global Director target without resolving either', () => {
+    const { s, req } = fixture();
+    const previousId = 'mykonos-distant-architecture';
+    s.updatePaintingState(42, current => ({ ...current, last_critique: {
+      operation_id: 'distant-house-last', problem_id: previousId,
+      primary_mismatch: 'Intermediate architecture is missing.', target_resolved: 'no',
+    } }));
+    expect(() => s.plannerGate(42, req)).toThrow(new RegExp(
+      `primary_mismatch_unresolved:.*${previousId}.*addresses_problem_ids=.*${globalId}`));
+    expect(() => s.priorityGate(42, req)).not.toThrow();
+    const linked = structuredClone(req);
+    linked.args.addresses_problem_ids = [globalId, previousId];
+    expect(() => s.plannerGate(42, linked)).not.toThrow();
+    expect(s.priorityGate(42, linked)).toBeNull();
+    expect(s.paintingState().documents['42'].last_critique).toMatchObject({
+      problem_id: previousId, target_resolved: 'no',
+    });
+    expect(s.paintingState().documents['42'].visual_problems[globalId].status).toBe('open');
+    const unrelated = structuredClone(linked);
+    unrelated.args.addresses_problem_ids = [globalId, 'unrelated-defect'];
+    expect(() => s.plannerGate(42, unrelated)).toThrow(new RegExp(
+      `requires.*${previousId}.*addresses_problem_ids=.*unrelated-defect`));
+    const wrongGlobal = structuredClone(linked);
+    wrongGlobal.args.addresses_problem_id = 'unrelated-defect';
+    wrongGlobal.args.addresses_problem_ids = [previousId];
+    expect(() => s.priorityGate(42, wrongGlobal)).toThrow(/stage_priority_gate.*addresses_problem_ids/);
+  });
+
+  it('uses reviewed Critic prerequisite states consistently in Painter and global stage priority', () => {
+    const { s, req } = fixture();
+    const prior = 'mykonos-architecture-stage', following = 'mykonos-paving-stage';
+    s.updatePaintingState(42, current => ({ ...current,
+      last_critique: { operation_id: 'old-house', problem_id: 'old-composite-message',
+        primary_mismatch: 'The missing architecture and paving are a composite concern.', target_resolved: 'no' },
+      critic_obligations: [
+        { id: prior, criterion: 'composition_context', component_ids: ['house'],
+          depends_on_ids: [], status: 'fail', visible: 'Middle architecture is missing from the scene.' },
+        { id: following, criterion: 'composition_context', component_ids: ['paving'],
+          depends_on_ids: [prior], status: 'fail', visible: 'Stone paving has not been built below the buildings.' },
+      ],
+    }));
+    const paving = structuredClone(req);
+    paving.problem_id = 'separate-paving-owner';
+    paving.args.problem_id = 'separate-paving-owner';
+    paving.args.addresses_problem_ids = [globalId, following];
+    expect(() => s.priorityGate(42, paving)).toThrow(/stage_priority_gate.*prerequisite/);
+    expect(() => s.plannerGate(42, paving)).toThrow(new RegExp(`primary_mismatch_unresolved:.*${prior}`));
+    s.updatePaintingState(42, current => ({ ...current,
+      critic_obligations: current.critic_obligations.map((obligation: any) => obligation.id === prior
+        ? { ...obligation, status: 'pass', frame_sha256: 'validated-frame', operation_id: 'house-visual-review' }
+        : obligation),
+    }));
+    expect(() => s.priorityGate(42, paving)).not.toThrow();
+    expect(() => s.plannerGate(42, paving)).not.toThrow();
+    const live = s.paintingState().documents['42'];
+    expect(live.visual_problems[globalId].status).toBe('open');
+    expect(live.critic_obligations.find((obligation: any) => obligation.id === following).status).toBe('fail');
+    expect(live.last_critique.target_resolved).toBe('no');
+  });
+
+  it.each(['unplanned', 'unrelated', 'outside', 'cosmetic', 'detail', 'parent-goal', 'stale-directive'])
+  ('rejects a %s pass instead of letting a flag bypass the larger problem', kind => {
+    const { s, req } = fixture(kind !== 'unplanned');
+    if (kind === 'unrelated') req.args.addresses_problem_id = 'another-problem';
+    if (kind === 'outside') req.args.region_bounds = { ...roi, right: 600 };
+    if (kind === 'cosmetic') req.strategy_family = 'cosmetic-texture';
+    if (kind === 'detail') { req.scale = 'small'; req.args.scale = 'small'; }
+    if (kind === 'parent-goal') { req.problem_id = globalId; req.args.problem_id = globalId; }
+    if (kind === 'stale-directive') req.args.planner_directive_id = 'old-directive';
+    expect(() => s.priorityGate(42, req)).toThrow(/stage_priority_gate.*correction_target/);
+    expect(s.paintingState().documents['42'].visual_problems[globalId].status).toBe('open');
+  });
+
+  it('keeps global execution forbidden and gives the bounded correction route', () => {
+    const { s, req } = fixture();
+    req.scale = 'global'; req.args.scale = 'global';
+    expect(() => s.plannerGate(42, req)).toThrow(
+      /painter_contract_gate: scale global.*allowed_scales=medium,small.*Use scale=medium/
+    );
+  });
+
+  it.each(['roof-texture-rebuild', 'cloud-stamp-mass', 'background-surface-mask-reconstruction'])
+  ('uses typed structural intent rather than the strategy name %s', name => {
+    const { s, req } = fixture();
+    req.strategy_family = name;
+    req.args.impact_class = 'construct'; req.args.visual_intent = 'mass';
+    expect(() => s.priorityGate(42, req)).not.toThrow();
+    req.args.impact_class = 'texture';
+    expect(() => s.priorityGate(42, req)).toThrow(/stage_priority_gate/);
+  });
+
+  it('retains exhausted global strategy history across a new component problem id', () => {
+    const { s, req } = fixture();
+    for (const [i, family] of ['paint', 'smudge', 'line'].entries()) {
+      const id = 'failed-global-' + i;
+      seedTrendSignal(s, id, i + 1, { primitiveFootprint: 'none' });
+      const record = s.read(id)! as any;
+      record.problem_id = globalId;
+      record.causal_strategy_id = family;
+      record.strategy_family = family;
+      s.write(record);
+    }
+    req.causal_strategy_id = 'paint';
+    const errors = s.collectPreflightErrors(req);
+    expect(errors.join('\n')).toMatch(/artistic_recovery.*exhausted causal strategy/);
+    expect(errors.join('\n')).not.toMatch(/stage_priority_gate/);
+    const child = s.read('failed-global-2')! as any;
+    child.problem_id = 'component-rebuild';
+    child.addresses_problem_id = globalId;
+    s.write(child);
+    expect(s.artisticRecoveryForProblem(42, globalId, req).strategy_families_tried).toContain('line');
+  });
+
+  it('validates the public correction target at directive ingestion', () => {
+    const { s, plan } = fixture();
+    const first = plan.tasks[0] as any;
+    first.correction_target.region_bounds = { ...roi, right: NaN };
+    expect(() => s.setArtDirectorState({ document_id: 42, action: 'review', directive: plan }))
+      .toThrow(/finite number/);
+    first.correction_target.region_bounds = roi;
+    first.correction_target.problem_id = 'missing-problem';
+    expect(() => s.setArtDirectorState({ document_id: 42, action: 'review', directive: plan }))
+      .toThrow(/correction_target.*open global/);
+  });
+
+  it('retires an inherited global correction target when a verified review downscopes the issue to medium', () => {
+    const { s, plan, req } = fixture();
+    s.updatePaintingState(42, state => ({
+      ...state,
+      visual_problems: {
+        ...state.visual_problems,
+        [globalId]: { ...state.visual_problems[globalId], scale: 'medium' },
+      },
+    }));
+    const replanned = s.setArtDirectorState({ document_id: 42, action: 'review', directive: plan });
+    expect(replanned.art_director.tasks[0]).not.toHaveProperty('correction_target');
+    expect(replanned.visual_problems[globalId]).toMatchObject({
+      status: 'open', scale: 'medium', severity: 'must-fix',
+    });
+    // The retired waiver cannot authorize a finer pass across the medium debt.
+    req.scale = 'small';
+    req.args.scale = 'small';
+    expect(() => s.priorityGate(42, req)).toThrow(/stage_priority_gate/);
+  });
+
+  it('rejects a newly invented correction_target for medium debt without a former global target', () => {
+    const { s, plan } = fixture(false);
+    s.updatePaintingState(42, state => ({
+      ...state,
+      visual_problems: {
+        ...state.visual_problems,
+        [globalId]: { ...state.visual_problems[globalId], scale: 'medium' },
+      },
+    }));
+    plan.tasks[0].correction_target = { problem_id: globalId, region_bounds: roi };
+    expect(() => s.setArtDirectorState({ document_id: 42, action: 'review', directive: plan }))
+      .toThrow(/Critic-reviewed region_bounds.*current=open\/medium\/must-fix/);
+  });
+
+  function mediumCorrectionFixture() {
+    const { s, plan, req } = fixture();
+    // Simulate the durable finding written by an accepted exact-image Critic
+    // review. A hand-authored priority label without review bounds is rejected.
+    s.updatePaintingState(42, current => ({
+      ...current,
+      visual_problems: {
+        ...current.visual_problems,
+        [globalId]: {
+          ...current.visual_problems[globalId],
+          scale: 'medium', structural_review: false,
+          source_review_kind: 'local_value_color', review_region_bounds: roi,
+        },
+      },
+    }));
+    Object.assign(plan.tasks[0], {
+      correction_target: { problem_id: globalId, region_bounds: roi },
+      affected_qualities: ['local_value_color'],
+      allowed_scales: ['medium', 'small'],
+    });
+    s.setArtDirectorState({ document_id: 42, action: 'review', directive: plan });
+    req.scale = 'small';
+    Object.assign(req.args, {
+      scale: 'small', region_bounds: { left: 130, top: 140, right: 240, bottom: 280 },
+      affected_qualities: ['local_value_color'], change_domains: ['local-tone'],
+      addresses_problem_ids: [globalId], addresses_problem_id: globalId,
+      steps: [{ tool: 'photoshop_paint_regions', args: {
+        regions: [{ contours: [{ points: [
+          { x: 140, y: 150 }, { x: 190, y: 150 }, { x: 190, y: 220 },
+        ] }] }],
+      } }],
+    });
+    return { s, plan, req };
+  }
+
+  it('admits reviewed medium must-fix in a causally bound small region, leaving parent debt open', () => {
+    const { s, req } = mediumCorrectionFixture();
+    expect(() => s.plannerGate(42, req)).not.toThrow();
+    expect(s.priorityGate(42, req)).toBeNull();
+    expect(s.paintingState().documents['42'].visual_problems[globalId].status).toBe('open');
+  });
+
+  it('rejects a small pass with only the correct ID but no reviewed quality linkage', () => {
+    const { s, req } = mediumCorrectionFixture();
+    req.args.affected_qualities = [];
+    expect(() => s.priorityGate(42, req)).toThrow(/stage_priority_gate.*causal quality link.*local_value_color/);
+  });
+
+  it('keeps unrelated small detail work blocked while the medium must-fix remains open', () => {
+    const { s, req } = mediumCorrectionFixture();
+    req.args.addresses_problem_id = 'unrelated-detail';
+    req.args.addresses_problem_ids = ['unrelated-detail'];
+    expect(() => s.priorityGate(42, req)).toThrow(/does not address priority problem/);
+  });
+
+  it('permits sequential small component subpasses without resolving the medium parent from a local success', () => {
+    const { s, req } = mediumCorrectionFixture();
+    for (let i = 0; i < 3; i++) {
+      req.problem_id = `subpass-${i}`;
+      req.args.problem_id = `subpass-${i}`;
+      req.args.region_bounds = { left: 130, top: 140, right: 240 - i * 5, bottom: 280 - i * 10 };
+      expect(s.priorityGate(42, req)).toBeNull();
+      s.updatePaintingState(42, state => ({
+        ...state,
+        visual_problems: {
+          ...state.visual_problems,
+          [req.problem_id]: { problem_id: req.problem_id, scale: 'small', severity: 'should-fix', status: 'resolved' },
+        },
+      }));
+      expect(s.paintingState().documents['42'].visual_problems[globalId].status).toBe('open');
+    }
+  });
+
+  it('still blocks cosmetic masking of a structurally reviewed medium must-fix', () => {
+    const { s, req } = mediumCorrectionFixture();
+    s.updatePaintingState(42, state => ({
+      ...state, visual_problems: { ...state.visual_problems,
+        [globalId]: { ...state.visual_problems[globalId], structural_review: true } },
+    }));
+    req.args.impact_class = 'texture';
+    expect(() => s.priorityGate(42, req)).toThrow(/structural_debt_requires_structural_correction/);
+  });
+
+  it('diagnoses a wrong priority ID without suggesting geometry changes as the first fix', () => {
+    const { s, req } = mediumCorrectionFixture();
+    req.args.addresses_problem_id = 'wrong-id';
+    req.args.addresses_problem_ids = ['wrong-id'];
+    expect(() => s.priorityGate(42, req)).toThrow(/include its exact ID in addresses_problem_ids/);
+  });
+
+  it('does not suggest changing correct addresses_problem_ids when the bounded region is absent', () => {
+    const { s, req } = mediumCorrectionFixture();
+    delete req.args.region_bounds;
+    expect(() => s.priorityGate(42, req)).toThrow(/requires valid next_pass.region_bounds/);
+  });
+
+  it('rejects a matching ID and crop if the compiled strokes paint outside the defect', () => {
+    const { s, req } = mediumCorrectionFixture();
+    req.args.steps[0].args.regions[0].contours[0].points[0].x = 500;
+    expect(() => s.priorityGate(42, req)).toThrow(/Compiled mark coordinates leave/);
+  });
+
+  it('does not admit a medium-to-small priority exception with labels but no pixel mutation', () => {
+    const { s, req } = mediumCorrectionFixture();
+    req.args.steps = [{ tool: 'photoshop_create_layer', args: { name: 'Only metadata' } }];
+    expect(() => s.priorityGate(42, req)).toThrow(/actual bounded pixel mutation/);
+  });
+
+  it('rejects scale=local with only scales that the active medium correction can actually admit', () => {
+    const { s, req } = mediumCorrectionFixture();
+    req.scale = 'local'; req.args.scale = 'local';
+    expect(() => s.priorityGate(42, req)).toThrow(
+      /invalid scale="local".*active task shadow-side allowed_scales=medium\|small; use scale=medium\|small/
+    );
+    expect(() => s.plannerGate(42, req)).toThrow(
+      /painter_contract_gate: scale local.*allowed_scales=medium,small.*Use scale=medium\|small/
+    );
+  });
+
+  it('does not suggest small or global when a global must-fix has only the bounded medium route', () => {
+    const { s, req } = fixture();
+    req.scale = 'local'; req.args.scale = 'local';
+    expect(() => s.priorityGate(42, req)).toThrow(
+      /invalid scale="local".*active task shadow-side allowed_scales=medium\|small; use scale=medium\./
+    );
+    expect(() => s.plannerGate(42, req)).toThrow(
+      /painter_contract_gate: scale local.*allowed_scales=medium,small.*Use scale=medium;/
+    );
+  });
+
+  it('rejects a medium correction target outside the Critic spatial evidence at Director ingestion', () => {
+    const { s, plan } = mediumCorrectionFixture();
+    plan.tasks[0].correction_target.region_bounds = { ...roi, right: 650 };
+    expect(() => s.setArtDirectorState({ document_id: 42, action: 'review', directive: plan }))
+      .toThrow(/Critic-reviewed region_bounds/);
+  });
+
+  function structuralMediumFixture() {
+    const { s, req } = mediumCorrectionFixture();
+    const defect = {
+      id: globalId, kind: 'attachment', part_ids: ['wall-panel', 'window-frame'],
+      relation_ids: ['opening-alignment'],
+      visible: 'The opening is detached from the enclosing wall plane.',
+      brief_relevance: 'The window must be part of a continuous architectural facade.',
+      recheck: 'Check the exact frame for the joined facade and opening.',
+      region_bounds: roi,
+    };
+    s.updatePaintingState(42, state => ({ ...state, visual_problems: {
+      ...state.visual_problems, [globalId]: {
+        ...state.visual_problems[globalId], structural_review: true, structural_defect: defect,
+      },
+    } }));
+    req.args.impact_class = 'construct';
+    req.args.visual_intent = 'mass';
+    req.args.structural_correction = {
+      defect_id: globalId, part_ids: ['window-frame'], relation_ids: ['opening-alignment'],
+      target: 'Rebuild the window opening aligned with its enclosing facade plane.',
+      execution: 'brush', sequence: 'partial-rebuild',
+    };
+    req.args.steps = [{ tool: 'photoshop_paint_regions', args: { layer_id: 7,
+      regions: [{ contours: [{ points: [{ x: 140, y: 150 }, { x: 190, y: 150 }, { x: 190, y: 220 }] }] }],
+    } }];
+    return { s, req };
+  }
+
+  it('admits a structural medium defect in a verified small construction pass without closing it', () => {
+    const { s, req } = structuralMediumFixture();
+    expect(s.priorityGate(42, req)).toBeNull();
+    expect(s.paintingState().documents['42'].visual_problems[globalId].status).toBe('open');
+  });
+
+  it('does not admit cosmetic or empty-geometry claims under structural small-step correction', () => {
+    const { s, req } = structuralMediumFixture();
+    req.args.steps = [{ tool: 'photoshop_paint_regions', args: { regions: [] } }];
+    expect(() => s.priorityGate(42, req)).toThrow(/paint_regions must contain actual contours/);
+    req.args.steps = [{ tool: 'photoshop_paint_regions', args: {
+      regions: [{ contours: [{ points: [{ x: 140, y: 150 }, { x: 190, y: 150 }, { x: 190, y: 220 }] }] }],
+    } }];
+    req.args.structural_correction.relation_ids = ['some-other-relation'];
+    expect(() => s.priorityGate(42, req)).toThrow(/matching defect_id, part_ids and relation_ids/);
+  });
+
+  it('does not let a valid structural correction plan bypass component ownership checks', () => {
+    const { s, req } = structuralMediumFixture();
+    s.updatePaintingState(42, state => ({
+      ...state,
+      logical_layer_owners: [{ layer_id: 7, hypothesis_id: 'another-owner' }],
+      scene_ownership_plan: {
+        units: [{ semantic_id: 'another-component', owner_id: 'another-owner' }],
+        objects: [{ object_id: 'another-object', component_semantic_ids: ['another-component'] }],
+      },
+    }));
+    expect(() => s.priorityGate(42, req)).toThrow(/structural_correction_owner_mismatch/);
   });
 });

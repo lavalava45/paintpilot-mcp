@@ -120,6 +120,31 @@ function failedRecord(request: Record<string, any>, sequence = 1) {
 }
 
 describe('production artistic recovery policy', () => {
+  it('technical failures of ANY method never exhaust artistic recovery strategies', () => {
+    const { store } = fixture();
+    const technical = [
+      { failed: true, error: 'brush_setter_unverified' },
+      { failed: true, error: 'microplan_prepare_failed' },
+      { execution: 'not-executed' },
+      { execution: 'uncertain' },
+      { execution: 'partial', resolved: { outcome: 'partial' } },
+    ];
+    technical.forEach((failure, index) => store.write({ ...failedRecord(microplan('technical-' + index), index + 1),
+      ...failure, causal_strategy_id: 'different-technical-' + index }));
+    expect(store.artisticRecoveryForProblem(42, 'localRegion-edge', microplan('repair'))).toBeNull();
+    store.write(failedRecord(microplan('real-rendered-miss'), technical.length + 1));
+    const recovery = store.artisticRecoveryForProblem(42, 'localRegion-edge', microplan('repair'));
+    expect(recovery.failed_attempt_count).toBe(1);
+    expect(recovery.strategy_families_tried).toEqual(['stroke']);
+    store.updatePaintingState(42, current => ({ ...current, critic_correction_attempts: {
+      technical: { operation_id: 'technical-0', no_gain_count: 2 },
+      genuine: { operation_id: 'real-rendered-miss', no_gain_count: 2 },
+    } }));
+    store.priorityGate(42, microplan('repair'));
+    expect(store.paintingState().documents['42'].critic_correction_attempts)
+      .toEqual({ genuine: { operation_id: 'real-rendered-miss', no_gain_count: 2 } });
+  });
+
   it('delivers same-problem strategy outcomes through the existing continuation without fresh journal/state reads', () => {
     const { store } = fixture();
     store.write({ ...failedRecord(microplan('feedback-failed'), 1), strategy_family: 'cosmetic-surface' });

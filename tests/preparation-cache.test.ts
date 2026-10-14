@@ -97,6 +97,71 @@ describe('session preparation cache', () => {
     resetPreparationCacheForTests(setup.r);
   });
 
+  it.each(['not-applied', 'uncertain'])('blocks visual painting and cache reuse when a brush setter reports %s despite a nominal success envelope', async setterOutcome => {
+    const execute = createVisualMicroPlanTools(setup.r)[0]!.handler;
+    let setterCalls = 0;
+    setup.r.register('photoshop_set_brush', tool('photoshop_set_brush', async () => {
+      setterCalls++;
+      return { content: [{ type: 'text', text: JSON.stringify({
+        ok: true, summary: 'Brush command acknowledged, effective settings not verified',
+        details: { setter_outcome: setterOutcome,
+          requested_settings: { hardness: 70 },
+          effective_settings: { hardness: setterOutcome === 'not-applied' ? 100 : null },
+          mismatches: [{ key: 'hardness', expected: 70, actual: 100 }],
+        },
+      }) }] };
+    }, { hardness: { type: 'number' } }));
+    const withSetter = (id: string) => {
+      const source = plan(id);
+      return { ...source, steps: [
+        source.steps[0],
+        { id: 'set-brush', tool: 'photoshop_set_brush', args: { hardness: 70 } },
+        ...source.steps.slice(1),
+      ] };
+    };
+    for (const id of ['wrong-brush-1', 'wrong-brush-2']) {
+      const result = await guardedRun(execute, withSetter(id));
+      const failed = body(result);
+      expect(result.isError).toBe(true);
+      expect(failed).toMatchObject({
+        code: 'microplan_prepare_failed',
+        failure_category: 'brush_setter_unverified',
+        failed_step: 'set-brush',
+        visual_mutation_started: false,
+        preparation_execution: { failed_step_execution: 'failed-or-uncertain', side_effects_possible: true },
+      });
+      expect(failed.completed_results['set-brush'].ok).toBe(false);
+      expect(failed.completed_results['set-brush'].details.setter_outcome).toBe(setterOutcome);
+    }
+    expect(setterCalls).toBe(2);
+    expect(setup.calls.paint).toBe(0);
+    expect(setup.calls.preview).toBe(0);
+  });
+
+  it('keeps a verified applied brush setter cacheable without repeating native setter calls', async () => {
+    let setterCalls = 0;
+    setup.r.register('photoshop_set_brush', tool('photoshop_set_brush', async () => {
+      setterCalls++;
+      return { content: [{ type: 'text', text: JSON.stringify({
+        ok: true, details: { setter_outcome: 'applied', requested_settings: { hardness: 70 },
+          effective_settings: { hardness: 70 }, mismatches: [] },
+      }) }] };
+    }, { hardness: { type: 'number' } }));
+    const execute = createVisualMicroPlanTools(setup.r)[0]!.handler;
+    const withSetter = (id: string) => {
+      const source = plan(id);
+      // A brush-preset selection intentionally invalidates cached settings;
+      // isolate a stable brush setting with no intervening setter mutation.
+      return { ...source, steps: [
+        { id: 'set-brush', tool: 'photoshop_set_brush', args: { hardness: 70 } },
+        ...source.steps.slice(1)] };
+    };
+    expect(body(await guardedRun(execute, withSetter('verified-1'))).ok).toBe(true);
+    expect(body(await guardedRun(execute, withSetter('verified-2'))).ok).toBe(true);
+    expect(setterCalls).toBe(1);
+    expect(setup.calls.paint).toBe(2);
+  });
+
   it('reuses exact proven preparation across repeated local passes and reduces preparation call-count latency proxy', async () => {
     const execute = createVisualMicroPlanTools(setup.r)[0]!.handler;
 

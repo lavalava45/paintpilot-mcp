@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto';
+import { VISUAL_MICROPLAN_CHANGE_DOMAINS } from '../visual-microplan.js';
+import { normalizeProblemLinks } from './problem-links.js';
 
 /** Fill omitted technical keys without changing caller-owned references or input. */
 export function normalizeGuardActionIds(input: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
@@ -62,7 +64,21 @@ export interface PaintingIntentBounds {
   bottom: number;
 }
 
-export interface PaintingIntent {
+export const PAINTING_INTENT_CONTRACT_FIELDS = [
+  'scene_ownership_plan', 'scene_geometry_model', 'scene_camera_imaging_model',
+  'scene_lighting_color_model', 'construction', 'painterly', 'logical_layer',
+  'layer_separation_check', 'imaging_preflight',
+  'color_gradient_preflight', 'cross_layer_correction', 'structural_correction',
+] as const;
+type PaintingIntentContractField = typeof PAINTING_INTENT_CONTRACT_FIELDS[number];
+const CORE_FIELDS = ['request_key', 'problem_id', 'document_id', 'goal', 'artistic_commentary',
+  'target_owner_id', 'region', 'region_bounds', 'action', 'scale', 'visual_intent', 'material_role',
+  'preferred_method_id', 'preferred_brush_role', 'brush_use_reason', 'preserve', 'addresses_primary_mismatch',
+  'addresses_problem_id', 'addresses_problem_ids', 'change_domains', 'deferred_from_operation_id', 'actions', 'stage',
+  'stage_reset', 'impact_class', 'construction_role', 'material_response'];
+const ACCEPTED_FIELDS = new Set<string>([...CORE_FIELDS, ...PAINTING_INTENT_CONTRACT_FIELDS]);
+
+export interface PaintingIntent extends Partial<Record<PaintingIntentContractField, Record<string, unknown>>> {
   request_key: string;
   problem_id: string;
   document_id: number;
@@ -77,8 +93,12 @@ export interface PaintingIntent {
   material_role?: string;
   preferred_method_id?: string;
   preferred_brush_role?: string;
+  brush_use_reason?: string;
   preserve?: string[];
   addresses_primary_mismatch?: boolean;
+  addresses_problem_id?: string;
+  addresses_problem_ids?: string[];
+  change_domains?: string[];
   deferred_from_operation_id?: string;
 
   /**
@@ -155,6 +175,18 @@ export function parsePaintingIntent(value: unknown): PaintingIntent {
   const scale = nonEmptyText(raw.scale)?.toLowerCase();
 
   const errors: PaintingIntentError[] = [];
+  const contracts: Partial<Record<PaintingIntentContractField, Record<string, unknown>>> = {};
+  for (const key of Object.keys(raw)) if (!ACCEPTED_FIELDS.has(key)) {
+    errors.push(new PaintingIntentError('painting_intent_field_unsupported',
+      `painting_intent.${key} is unsupported and was not discarded. Use a supported field from the public typed contract; use complete next_pass only for fields actually published there. Do not move unknown fields blindly between forms. Retain ownership, construction and scene declarations when correcting the request. Do not read source.`));
+  }
+  for (const key of PAINTING_INTENT_CONTRACT_FIELDS) {
+    if (raw[key] === undefined) continue;
+    const value = raw[key];
+    if (!value || typeof value !== 'object' || Array.isArray(value)) errors.push(new PaintingIntentError(
+      'painting_intent_contract_invalid', `painting_intent.${key} must be an object using the same contract as next_pass.${key}.`));
+    else contracts[key] = structuredClone(value as Record<string, unknown>);
+  }
   if (!requestKey) errors.push(new PaintingIntentError('painting_intent_request_key_required', 'PaintingIntent request_key is required.'));
   if (!problemId) errors.push(new PaintingIntentError('painting_intent_problem_id_required', 'PaintingIntent problem_id is required.'));
   if (!documentId) errors.push(new PaintingIntentError('painting_intent_document_required', 'PaintingIntent document_id must be a positive integer.'));
@@ -181,6 +213,14 @@ export function parsePaintingIntent(value: unknown): PaintingIntent {
     errors.push(new PaintingIntentError('painting_intent_actions_invalid', 'PaintingIntent actions must be an array when supplied.'));
   }
 
+  let problemLinks: string[] = [];
+  try { problemLinks = normalizeProblemLinks(raw.addresses_problem_id, raw.addresses_problem_ids); }
+  catch (error) { errors.push(new PaintingIntentError('painting_intent_problem_link_invalid', String((error as Error).message))); }
+  if (raw.change_domains !== undefined && (!Array.isArray(raw.change_domains)
+    || raw.change_domains.some(value => typeof value !== 'string'
+      || !(VISUAL_MICROPLAN_CHANGE_DOMAINS as readonly string[]).includes(value)))) {
+    errors.push(new PaintingIntentError('painting_intent_change_domains_invalid', `change_domains must contain only ${VISUAL_MICROPLAN_CHANGE_DOMAINS.join('|')}.`));
+  }
   let regionBounds: PaintingIntentBounds | undefined;
   try { regionBounds = bounds(raw.region_bounds); }
   catch (error) { if (error instanceof PaintingIntentError) errors.push(error); else throw error; }
@@ -189,6 +229,7 @@ export function parsePaintingIntent(value: unknown): PaintingIntent {
     { errors: errors.map(error => ({ code: error.code, message: error.message })) });
 
   return {
+    ...contracts,
     request_key: requestKey!,
     problem_id: problemId!,
     document_id: documentId!,
@@ -203,12 +244,16 @@ export function parsePaintingIntent(value: unknown): PaintingIntent {
     ...(nonEmptyText(raw.material_role) ? { material_role: nonEmptyText(raw.material_role) } : {}),
     ...(nonEmptyText(raw.preferred_method_id) ? { preferred_method_id: nonEmptyText(raw.preferred_method_id) } : {}),
     ...(nonEmptyText(raw.preferred_brush_role) ? { preferred_brush_role: nonEmptyText(raw.preferred_brush_role) } : {}),
+    ...(nonEmptyText(raw.brush_use_reason) ? { brush_use_reason: nonEmptyText(raw.brush_use_reason) } : {}),
     ...(Array.isArray(raw.preserve) ? {
       preserve: [...new Set(raw.preserve.map(nonEmptyText).filter((item): item is string => !!item))],
     } : {}),
     ...(typeof raw.addresses_primary_mismatch === 'boolean'
       ? { addresses_primary_mismatch: raw.addresses_primary_mismatch }
       : {}),
+    ...(nonEmptyText(raw.addresses_problem_id) ? { addresses_problem_id: nonEmptyText(raw.addresses_problem_id) } : {}),
+    ...(problemLinks.length ? { addresses_problem_ids: problemLinks } : {}),
+    ...(Array.isArray(raw.change_domains) ? { change_domains: [...new Set(raw.change_domains as string[])] } : {}),
     ...(nonEmptyText(raw.deferred_from_operation_id)
       ? { deferred_from_operation_id: nonEmptyText(raw.deferred_from_operation_id) }
       : {}),

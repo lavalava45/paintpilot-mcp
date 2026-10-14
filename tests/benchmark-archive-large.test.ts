@@ -86,4 +86,12 @@ it('refuses exact counters when selected events exceed a bounded retention budge
   const evidence = benchmarkArchiveEvidence(root, state);
   expect(evidence).toMatchObject({ integrity: 'unverified', events: [] });
   expect(evidence?.warning).toContain('selected event retention limit exceeded');
+  let streamedCount = 0;
+  const streamed = benchmarkArchiveEvidence(root, state, {
+    onSelectedEvent: () => { streamedCount += 1; },
+  });
+  expect(streamed).toMatchObject({
+    integrity: 'consistent', events: [], streamed: true, selected_count: 20, warning: null,
+  });
+  expect(streamedCount).toBe(20);
 }, 30_000);

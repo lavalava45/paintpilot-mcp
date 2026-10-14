@@ -4,6 +4,24 @@ export type CameraViewCharacter = 'wide' | 'normal' | 'compressed' | 'custom';
 export type CameraDepthRole = 'near' | 'focal' | 'mid' | 'far';
 export type CameraFocusRole = 'sharp' | 'moderately_soft' | 'soft' | 'lost';
 export const CAMERA_BINDING_DEPENDENCY_DOMAINS = ['focus', 'motion', 'optical-response', 'capture-finish'] as const;
+/** Published owner-camera relation mirrors normalizeCameraBinding; artistic depth remains authored. */
+export const CAMERA_BINDING_SCHEMA = {
+  type: 'object',
+  properties: {
+    scene_camera_model_id: { type: 'string', minLength: 1 },
+    scene_camera_revision: { type: 'integer', minimum: 1 },
+    geometry_binding_owner_id: { type: 'string', minLength: 1 },
+    approximate_depth_rationale: { type: 'string', minLength: 1 },
+    depth_role: { type: 'string', enum: ['near', 'focal', 'mid', 'far'] },
+    expected_focus_role: { type: 'string', enum: ['sharp', 'moderately_soft', 'soft', 'lost'] },
+    dependency_domains: { type: 'array', minItems: 1, maxItems: 4,
+      uniqueItems: true, items: { type: 'string', enum: [...CAMERA_BINDING_DEPENDENCY_DOMAINS] } },
+    local_exception: { type: 'string' },
+  },
+  required: ['scene_camera_model_id', 'scene_camera_revision', 'depth_role', 'expected_focus_role'],
+  description: 'Also requires geometry_binding_owner_id OR an authored approximate_depth_rationale. Revision and owner pins are validated against durable state.',
+  additionalProperties: false,
+};
 export type CameraBindingDependencyDomain = (typeof CAMERA_BINDING_DEPENDENCY_DOMAINS)[number];
 
 export interface CameraBinding {

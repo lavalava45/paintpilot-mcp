@@ -9,6 +9,22 @@ function paintingGuideText(): string {
 }
 
 describe('commentary mode content contract', () => {
+  it('routes document tab mismatches through the registered Guard navigation tool with focus consent', () => {
+    const guide = paintingGuideText();
+    for (const text of [guide, PHOTOSHOP_MCP_INSTRUCTIONS]) {
+      expect(text).toContain('photoshop_set_active_document');
+      expect(text).toContain('photoshop_guard_capabilities');
+      expect(text).toContain('photoshop_guard_cycle_auto');
+      expect(text).toContain('photoshop_get_state');
+      expect(text).toContain('document_id');
+    }
+    expect(guide).toContain('Without permission, ask to activate through MCP instead of making the user click the tab');
+    expect(PHOTOSHOP_MCP_INSTRUCTIONS).toContain('Without permission,');
+    expect(PHOTOSHOP_MCP_INSTRUCTIONS).toContain('If the intended id is already active, just continue.');
+    expect(guide).toContain('decision_loop_stall at 90s is advisory, NOT a Guard failure');
+    expect(PHOTOSHOP_MCP_INSTRUCTIONS).toContain('Guard prohibition. Do not wait, ask for a manual tab switch');
+  });
+
   it('defines technical as developer/debug telemetry rather than artist-facing Photoshop craft', () => {
     expect(PHOTOSHOP_MCP_INSTRUCTIONS).toContain('`technical` is developer/debug telemetry only');
     expect(PHOTOSHOP_MCP_INSTRUCTIONS).toContain('Guard admission/barriers/evidence/receipts/checkpoints/recovery');

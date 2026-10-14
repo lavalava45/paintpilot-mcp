@@ -31,6 +31,70 @@ export interface ClassifiedViolation {
   repair_class: ViolationRepairClass;
 }
 
+/** Construction creates its own layer. Drop only an inert, redundant create-layer
+ * declaration; layer placement, mismatched names and other actions are decisions. */
+export function omitRedundantConstructionLayerAction<T extends Record<string, any>>(
+  input: T,
+): { pass: T; repair?: StructuredRepairOperation } {
+  const pass = structuredClone(input);
+  const actions = Array.isArray(pass.actions) ? pass.actions : [];
+  if (!pass.construction || actions.length !== 1 || actions[0]?.tool !== 'photoshop_create_layer'
+    || pass.restore_anchor_operation_id !== undefined) return { pass };
+  const action = actions[0];
+  if (Object.keys(action).some(key => !['id', 'tool', 'args', 'description'].includes(key))) return { pass };
+  const args = action.args && typeof action.args === 'object' && !Array.isArray(action.args)
+    ? action.args as Record<string, unknown> : {};
+  if (Object.keys(args).some(key => !['name', 'document_id'].includes(key))) return { pass };
+  if (args.document_id !== undefined && args.document_id !== pass.document_id) return { pass };
+  const declaredName = nonEmptyText(args.name);
+  const construction = pass.construction as Record<string, unknown>;
+  const model = construction.model as Record<string, unknown> | undefined;
+  const part = Array.isArray(model?.parts)
+    ? model.parts.find((item: any) => item?.id === construction.part_id) : undefined;
+  // A supplied display name is safe to remove only when the generated layer
+  // will use exactly that name. Model-id-only construction has no local proof.
+  if (args.name !== undefined && (!declaredName || declaredName !== nonEmptyText(part?.role))) return { pass };
+  delete pass.actions;
+  return { pass, repair: {
+    kind: 'normalize', path: 'next_pass.actions', normalizer: 'construction_owned_layer',
+    reason: 'The selected construction already creates this exact layer; the extra create_layer has no placement or independent effect.',
+  } };
+}
+
+/** Restore a spelling/alias of an object only when EVERY authored component
+ * already belongs to the SAME durable object. Never migrate ownership. */
+function alignKnownConstructionObject(
+  pass: Record<string, unknown>, context: Record<string, unknown>, repairs: StructuredRepairOperation[],
+): void {
+  const construction = pass.construction as Record<string, any> | undefined;
+  const model = construction?.model as Record<string, any> | undefined;
+  const durable = context.scene_ownership_plan as Record<string, any> | undefined;
+  if (!model || !durable || pass.scene_ownership_plan !== undefined
+    || !Array.isArray(model.objects) || !Array.isArray(model.parts)
+    || !Array.isArray(model.points) || !Array.isArray(durable.objects) || !Array.isArray(durable.units)) return;
+  for (const object of model.objects) {
+    if (!object || typeof object.id !== 'string'
+      || durable.objects.some((item: any) => item.object_id === object.id)) continue;
+    const parts = model.parts.filter((part: any) => part?.object_id === object.id);
+    if (!parts.length) continue;
+    const matches = parts.map((part: any) => durable.units.filter((unit: any) => unit.owner_id === part.id));
+    if (matches.some((rows: any[]) => rows.length !== 1)) continue;
+    const savedObjects = durable.objects.filter((candidate: any) =>
+      candidate.subject_kind === object.subject_kind
+      && parts.every((_: any, i: number) => candidate.component_semantic_ids?.includes(matches[i][0].semantic_id)));
+    if (savedObjects.length !== 1 || model.objects.some((candidate: any) => candidate !== object && candidate.id === savedObjects[0].object_id)) continue;
+    const originalId = object.id;
+    const canonicalId = savedObjects[0].object_id;
+    object.id = canonicalId;
+    for (const part of parts) part.object_id = canonicalId;
+    for (const point of model.points) if (point?.object_id === originalId) point.object_id = canonicalId;
+    repairs.push({ kind: 'replace_from_context', path: 'next_pass.construction.model.objects[].id',
+      source: `scene_ownership_plan.objects[${canonicalId}]`,
+      reason: `All construction parts of ${originalId} have unique, unchanged semantic membership in durable object ${canonicalId}; preserve object identity, not a new ownership declaration.`,
+    });
+  }
+}
+
 const VISUAL_MUTATION_TOOLS = new Set([
   'photoshop_paint_strokes',
   'photoshop_paint_dabs',
@@ -53,6 +117,8 @@ const MODEL_DECISION_CODES = new Set([
   'scene_component_plan_required',
   'scene_component_scope_required',
   'scene_component_decomposition_required',
+  'scene_editable_inventory_required',
+  'scene_editable_scope_blocked',
   'scene_component_layer_conflict',
   'stroke_batch_budget_exceeded',
   'construction_role_material_role_required',
@@ -84,12 +150,13 @@ const NORMALIZE_CODES = new Set([
 
 const PATCH_CODES = new Set([
   'semantic_layer_pollution',
-  'scene_geometry_model_incarnation_mismatch',
-  'scene_lighting_color_model_incarnation_mismatch',
-  'scene_camera_imaging_model_incarnation_mismatch',
 ]);
 
 export function classifyViolation(violation: RepairableViolation): ViolationRepairClass {
+  if (violation.code === 'current_frame_review_stale'
+    || (violation.code === 'previous_operation_finalization_invalid'
+      && /current_frame_review_stale:/.test(violation.message))) return 'SYSTEMIC_FAILURE';
+  if (['current_frame_review_conflict', 'current_frame_review_required'].includes(violation.code)) return 'CONTRACT_CORRECTION';
   if (SYSTEMIC_CODES.has(violation.code) || /_state_invalid$/.test(violation.code)) return 'SYSTEMIC_FAILURE';
   if (SPLIT_CODES.has(violation.code)) return 'SPLIT_DEFER';
   if (['geometry_contract_invalid', 'attention_binding_invalid'].includes(violation.code)) return 'CONTRACT_CORRECTION';
@@ -98,7 +165,8 @@ export function classifyViolation(violation: RepairableViolation): ViolationRepa
   if (NORMALIZE_CODES.has(violation.code)) return 'AUTO_NORMALIZE';
   if (PATCH_CODES.has(violation.code)) return 'AUTO_PATCH';
   if (['compact_actions_required','compact_action_schema_invalid','compact_request_key_required',
-    'compact_goal_required','guard_tool_contract_unknown','construction_role_intent_mismatch',
+    'compact_goal_required','compact_action_tool_invalid','technical_binding_conflict',
+    'guard_tool_contract_unknown','construction_role_intent_mismatch',
     'previous_operation_finalization_invalid'].includes(violation.code)) return 'CONTRACT_CORRECTION';
   if (violation.code === 'invalid_visual_microplan'
     && /final VisualMicroPlan step|mutations must target logical_layer/.test(violation.message)) return 'AUTO_PATCH';
@@ -109,6 +177,34 @@ export function classifyViolation(violation: RepairableViolation): ViolationRepa
 
 export function classifyViolations(violations: RepairableViolation[]): ClassifiedViolation[] {
   return violations.map(violation => ({ violation, repair_class: classifyViolation(violation) }));
+}
+
+/** A single bounded field-level reply for all independent errors in the same attempted pass. */
+export function fieldCorrectionPacket(violations: RepairableViolation[]) {
+  const rows = violations.map(item => {
+    const path = nonEmptyText(item.details?.path)
+      ?? item.message.match(/(?:next_pass|painting_intent)\.[A-Za-z0-9_.[\]-]+/)?.[0]
+      ?? item.message.match(/args(?:\.[A-Za-z0-9_[\]]+)+/)?.[0]
+      ?? 'next_pass';
+    const allowed = item.details?.allowed_commands ?? item.details?.allowed_ids;
+    const expected = item.details?.expected;
+    return {
+      path,
+      code: item.code,
+      reason: item.message,
+      ...(allowed ? { allowed } : {}),
+      ...(expected ? { expected } : {}),
+      ...(item.details?.method_id ? { selected_method_id: item.details.method_id } : {}),
+      ...(classifyViolation(item) === 'MODEL_SEMANTIC_DECISION'
+        ? { artistic_decision_required: true } : {}),
+    };
+  });
+  return {
+    corrections: rows.slice(0, 24),
+    remaining_count: Math.max(0, rows.length - 24),
+    preserved_input: 'Keep valid ownership, model, component, proportion and light declarations; edit only rejected fields. Nothing was registered or painted.',
+    next: 'Resubmit corrected next_pass in the SAME cycle_auto call; no repeated unchanged status, preview or separate schema round.',
+  };
 }
 
 function nonEmptyText(value: unknown): string | undefined {
@@ -206,39 +302,135 @@ function patchKnownOwner(
   pass.logical_layer = logicalLayer;
 }
 
-function patchAuthoritativeModelIncarnation(
-  pass: Record<string, unknown>,
+/** Preflight-only completion of unique technical pins. Never choose an artistic owner or rewrite conflicts. */
+export function prepareTechnicalPassBindings(
+  rawPass: Record<string, unknown>,
   context: Record<string, unknown>,
-  violations: RepairableViolation[],
-  repairs: StructuredRepairOperation[]
-): void {
-  const incarnation = nonEmptyText(context.document_incarnation_id);
-  if (!incarnation) return;
-  const fields: Array<{ code: string; field: string }> = [
-    { code: 'scene_geometry_model_incarnation_mismatch', field: 'scene_geometry_model' },
-    { code: 'scene_lighting_color_model_incarnation_mismatch', field: 'scene_lighting_color_model' },
-    { code: 'scene_camera_imaging_model_incarnation_mismatch', field: 'scene_camera_imaging_model' },
-  ];
-  const violationCodes = new Set(violations.map(item => item.code));
-  for (const { code, field } of fields) {
-    if (!violationCodes.has(code)) continue;
-    const model = pass[field];
-    if (!model || typeof model !== 'object' || Array.isArray(model)) continue;
-    const clonedModel = structuredClone(model) as Record<string, unknown>;
-    const source = clonedModel.source_frame;
-    if (!source || typeof source !== 'object' || Array.isArray(source)) continue;
-    const clonedSource = structuredClone(source) as Record<string, unknown>;
-    if (clonedSource.document_incarnation === incarnation) continue;
-    clonedSource.document_incarnation = incarnation;
-    clonedModel.source_frame = clonedSource;
-    pass[field] = clonedModel;
-    repairs.push({
-      kind: 'replace_from_context',
-      path: `next_pass.${field}.source_frame.document_incarnation`,
-      source: 'compactPassContext.document_incarnation_id',
-      reason: 'The exact current document incarnation is durable Guard state and must not be restated or guessed by the model.',
+): { pass: Record<string, unknown>; repairs: StructuredRepairOperation[]; issues: Array<{ path: string; message: string }> } {
+  const redundant = omitRedundantConstructionLayerAction(rawPass);
+  const pass = redundant.pass;
+  const repairs: StructuredRepairOperation[] = redundant.repair ? [redundant.repair] : [];
+  const issues: Array<{ path: string; message: string }> = [];
+  alignKnownConstructionObject(pass, context, repairs);
+  let logical = pass.logical_layer && typeof pass.logical_layer === 'object' && !Array.isArray(pass.logical_layer)
+    ? pass.logical_layer as Record<string, unknown> : undefined;
+  const actions = Array.isArray(pass.actions) ? pass.actions as Array<Record<string, unknown>> : [];
+  const ownerId = nonEmptyText(logical?.hypothesis_id);
+  const owner = ownerId ? ownerMap(context).get(ownerId) : undefined;
+  const continuing = ['continue-logical-layer', 'adjust'].includes(nonEmptyText(logical?.decision) ?? '');
+  const targetId = Number(owner?.layer_id);
+  if (continuing && Number.isSafeInteger(targetId) && targetId > 0) {
+    const physicalLayerIds = Array.isArray(owner?.physical_layer_ids)
+      ? owner.physical_layer_ids.map(Number).filter(id => Number.isSafeInteger(id) && id > 0)
+      : [targetId];
+    const crossLayer = pass.cross_layer_correction
+      && typeof pass.cross_layer_correction === 'object'
+      && !Array.isArray(pass.cross_layer_correction)
+      ? pass.cross_layer_correction as Record<string, unknown>
+      : undefined;
+    const crossMode = nonEmptyText(crossLayer?.mode)?.toLowerCase();
+    const crossCurrent = Number(crossLayer?.current_layer_id);
+    const crossPost = Number(crossLayer?.post_authoritative_layer_id);
+    const crossTargets = Array.isArray(crossLayer?.target_layer_ids)
+      ? crossLayer.target_layer_ids.map(Number).filter(id => Number.isSafeInteger(id) && id > 0)
+      : [];
+    const historicalTargetSet = new Set<number>();
+    const crossBindingEnvelopeValid = !!crossLayer
+      && ['correction', 'migration'].includes(crossMode ?? '')
+      && crossCurrent === targetId
+      && crossTargets.length > 0
+      && new Set(crossTargets).size === crossTargets.length
+      && crossTargets.every(id => id !== targetId && physicalLayerIds.includes(id))
+      && (crossMode === 'correction'
+        ? crossPost === targetId
+        : (crossTargets.length === 1 && crossPost === crossTargets[0]));
+    if (crossBindingEnvelopeValid) {
+      for (const id of crossTargets) historicalTargetSet.add(id);
+    }
+    const checkCurrentPin = (value: unknown, path: string) => {
+      if (value !== undefined && value !== targetId) issues.push({
+        path, message: `Explicit layer_id=${String(value)} conflicts with authoritative owner ${ownerId} layer_id=${targetId}; preserve the owner and choose its actual layer or explicitly plan a migration.`,
+      });
+    };
+    const checkActionTarget = (value: unknown, path: string) => {
+      if (value === undefined || value === targetId || historicalTargetSet.has(value as number)) return;
+      issues.push({
+        path, message: `Explicit layer_id=${String(value)} conflicts with authoritative owner ${ownerId} layer_id=${targetId}; preserve the owner and choose its actual layer or explicitly plan a migration.`,
+      });
+    };
+    checkCurrentPin(logical?.layer_id, 'next_pass.logical_layer.layer_id');
+    actions.forEach((action, i) => {
+      const args = action?.args as Record<string, unknown> | undefined;
+      if (!args || typeof args !== 'object') return;
+      checkActionTarget(args.layer_id, `next_pass.actions[${i}].args.layer_id`);
+      if (action.tool === 'photoshop_paint_regions' && Array.isArray(args.regions)) {
+        args.regions.forEach((region, j) => checkActionTarget((region as Record<string, unknown>)?.layer_id,
+          `next_pass.actions[${i}].args.regions[${j}].layer_id`));
+      }
     });
+    if (!issues.length && logical) {
+      patchKnownOwner(pass, context, repairs);
+      logical = pass.logical_layer as Record<string, unknown>;
+    }
   }
+  // The semantic layer declaration is authoritative for the display name of
+  // the very same newly created layer. This is not an ownership/target change.
+  // An explicit rename of an existing durable owner remains outside this path.
+  if (logical && ['create-new', 'temporary-hypothesis'].includes(nonEmptyText(logical.decision) ?? '')) {
+    const create = actions.find(action => action?.tool === 'photoshop_create_layer');
+    const args = create?.args && typeof create.args === 'object' && !Array.isArray(create.args)
+      ? create.args as Record<string, unknown> : undefined;
+    const logicalName = nonEmptyText(logical.layer_name);
+    const actionName = nonEmptyText(args?.name);
+    if (logicalName && actionName && logicalName !== actionName) {
+      args!.name = logicalName;
+      repairs.push({ kind: 'normalize', path: 'next_pass.actions[].args.name',
+        source: 'next_pass.logical_layer.layer_name',
+        reason: `Synchronized new-layer display name ${JSON.stringify(actionName)} to the explicitly declared semantic layer name ${JSON.stringify(logicalName)}; no owner or Photoshop layer id changes.` });
+    } else if (args && logicalName && !actionName) {
+      args.name = logicalName;
+      repairs.push({ kind: 'inject_from_context', path: 'next_pass.actions[].args.name',
+        source: 'next_pass.logical_layer.layer_name', reason: 'One explicitly named new semantic layer.' });
+    } else if (actionName && !logicalName) {
+      logical.layer_name = actionName;
+      repairs.push({ kind: 'inject_from_context', path: 'next_pass.logical_layer.layer_name',
+        source: 'next_pass.actions[].args.name', reason: 'One explicitly named new semantic layer.' });
+    }
+  }
+  // Technical model identities are uniquely known from the pinned pass or its
+  // durable scene. Do not fill in missing artistic model structures or choices.
+  const record = (value: unknown): Record<string, unknown> | undefined =>
+    value && typeof value === 'object' && !Array.isArray(value)
+      ? value as Record<string, unknown> : undefined;
+  const inject = (object: Record<string, unknown> | undefined, key: string, value: unknown,
+    path: string, source: string) => {
+    if (!object || object[key] !== undefined || value === undefined || value === null) return;
+    object[key] = structuredClone(value);
+    repairs.push({ kind: 'inject_from_context', path, source,
+      reason: 'Unambiguous identity inherited from the pinned document or explicitly selected model.' });
+  };
+  for (const field of ['scene_lighting_color_model', 'scene_camera_imaging_model'] as const) {
+    const model = record(pass[field]);
+    const frame = record(model?.source_frame);
+    inject(frame, 'document_id', pass.document_id, `next_pass.${field}.source_frame.document_id`, 'next_pass.document_id');
+    inject(frame, 'document_incarnation', context.document_incarnation_id,
+      `next_pass.${field}.source_frame.document_incarnation`, 'compactPassContext.document_incarnation_id');
+  }
+  const camera = record(pass.scene_camera_imaging_model);
+  const selectedGeometry = record(pass.scene_geometry_model) ?? record(context.scene_geometry_model);
+  inject(camera, 'geometry_model_id', selectedGeometry?.model_id,
+    'next_pass.scene_camera_imaging_model.geometry_model_id', 'selected_geometry.model_id');
+  inject(camera, 'geometry_model_revision', selectedGeometry?.revision,
+    'next_pass.scene_camera_imaging_model.geometry_model_revision', 'selected_geometry.revision');
+  const binding = record(logical?.camera_binding);
+  const selectedCamera = camera ?? record(context.scene_camera_imaging_model);
+  inject(binding, 'scene_camera_model_id', selectedCamera?.model_id,
+    'next_pass.logical_layer.camera_binding.scene_camera_model_id', 'selected_camera.model_id');
+  inject(binding, 'scene_camera_revision', selectedCamera?.revision,
+    'next_pass.logical_layer.camera_binding.scene_camera_revision', 'selected_camera.revision');
+  if (record(logical?.geometry_binding)) inject(binding, 'geometry_binding_owner_id', ownerId,
+    'next_pass.logical_layer.camera_binding.geometry_binding_owner_id', 'next_pass.logical_layer.hypothesis_id');
+  return { pass, repairs, issues };
 }
 
 export function applyDeterministicPassRepairs(
@@ -330,7 +522,10 @@ export function applyDeterministicPassRepairs(
         repairs.push({ kind: 'normalize', path: 'next_pass.actions.args.steps', normalizer: 'terminal_preview', reason: 'The final exact preview is a technical requirement of the existing authored microplan' });
       }
     }
-    patchAuthoritativeModelIncarnation(repairedPass, context, violations, repairs);
+    // Never replace an explicitly mismatched model incarnation. Its camera/
+    // geometry/lighting measurements may belong to another physical document.
+    // prepareGeometryContract already injects a missing technical incarnation
+    // from unique current context; an explicit stale value is a real blocker.
   }
 
   return { repaired_pass: repairedPass, repairs, classified };

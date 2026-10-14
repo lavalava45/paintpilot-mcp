@@ -653,6 +653,7 @@ export async function invokeUxpPaintStampInstances(
   params: {
     document_id?: number;
     layer_id: number;
+    preset_name: string;
     instances: Array<Record<string, unknown>>;
   },
   commandId: string
@@ -913,6 +914,9 @@ export async function invokeUxpFillLayer(params: {
 export async function invokeUxpColorGradient(params: {
   document_id?: number;
   layer_id: number;
+  preserve_transparency?: boolean;
+  clip_contour?: Array<{ x: number; y: number }>;
+  opacity?: number;
   from: { x: number; y: number };
   to: { x: number; y: number };
   stops: Array<{ position: number; red: number; green: number; blue: number }>;

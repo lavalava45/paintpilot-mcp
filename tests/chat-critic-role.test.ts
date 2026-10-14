@@ -4,14 +4,32 @@ import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import jpeg from 'jpeg-js';
-import { chatCriticRequest, validateChatCritic, persistChatCritic, CHAT_CRITIC_CRITERIA, criticSpawnHandoff } from '../src/core/guard/chat-critic.js';
+import { chatCriticRequest, validateChatCritic, persistChatCritic, CHAT_CRITIC_CRITERIA, criticSpawnHandoff, supportContactWeightInstruction, SUPPORT_CONTACT_WEIGHT_REVIEW_VERSION } from '../src/core/guard/chat-critic.js';
 import { documentArtisticDebt, artisticContinuation } from '../src/core/guard/document-artistic-debt.js';
 import { EmbeddedGuardRuntime } from '../src/core/guard/runtime.js';
 import { ToolRegistry } from '../src/core/tool-registry.js';
 import { createGuardTools } from '../src/tools/guard-tools.js';
 import { compileGuardCycle } from '../src/core/guard/cycle-compiler.js';
 import { projectGuardDiagnostics } from '../src/core/guard/response-budget.js';
+import { selectedCriticCorrection, criticCorrectionIssue } from '../src/core/guard/critic-correction.js';
+import { openCriticObligation } from '../src/core/guard/critic-obligations.js';
 const dirs: string[] = [];
+it('regression: admits substantive brush construction on an existing semantic component for missing-object and form findings', () => {
+  const request: any = { tool: 'photoshop_execute_visual_microplan', impact_class: 'construct', visual_intent: 'line',
+    args: { stage: 'GLOBAL_BLOCK_IN', logical_layer: { hypothesis_id: 'frame', layer_id: 2 }, steps: [
+      { tool: 'photoshop_paint_strokes', args: { layer_id: 2, strokes: [{ points: [{ x: 1, y: 2 }, { x: 7, y: 9 }] }] } },
+    ] } };
+  const base: any = { logical_layer_owners: [{ hypothesis_id: 'frame', layer_id: 2 }],
+    scene_ownership_plan: { units: [{ semantic_id: 'frame', owner_id: 'frame' }],
+      objects: [{ component_semantic_ids: ['frame'] }] } };
+  for (const kind of ['missing-object', 'form']) {
+    const s = { ...base, chat_critic_findings: [{ criterion: 'brief_fidelity', problem_id: 'critic-brief_fidelity',
+      correction_kind: kind, visible: 'The structural contour is absent or wrong.', next_change: 'Rebuild the actual structural contour.' }] };
+    expect(criticCorrectionIssue(s, request)).toBeUndefined();
+    const cosmetic = structuredClone(request); cosmetic.impact_class = 'texture';
+    expect(criticCorrectionIssue(s, cosmetic)?.code).toBe('critic_correction_method_mismatch');
+  }
+});
 afterEach(() => { vi.restoreAllMocks(); for (const dir of dirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true }); });
 const state = () => ({ painting_profile: 'nontrivial_painting', original_brief: 'Painterly scene with a lit room and arbitrary subject', document_incarnation_id: 'stable:one' });
 const record = (n: number, stage = 'GLOBAL_BLOCK_IN'): any => ({ id: 'pass-'+n, sequence: n, stage,
@@ -20,7 +38,116 @@ const record = (n: number, stage = 'GLOBAL_BLOCK_IN'): any => ({ id: 'pass-'+n, 
 const records = (n: number) => Array.from({ length: n }, (_, i) => record(i+1));
 const reply = (request: any, fail = false): any => ({ request_id: request.request_id, reviewer: 'same-chat-role',
   criteria: Object.fromEntries(CHAT_CRITIC_CRITERIA.map(key => [key, fail && key === 'composition_context' ? 'fail' : 'pass'])),
-  findings: fail ? [{ criterion: 'composition_context', visible: 'The wall remains one flat field without spatial light.', next_change: 'Build large lit and shadow planes joining the room to the subject.' }] : [] });
+  findings: [
+    { criterion: 'contact_and_protection', visible: 'The subject rests on the floor; its feet meet it and its weight reads over that support.', next_change: 'Preserve the grounded contact and balanced pose while correcting other scene defects.' },
+    ...(fail ? [{ criterion: 'composition_context', visible: 'The wall remains one flat field without spatial light.', next_change: 'Build large lit and shadow planes joining the room to the subject.' }] : [])] });
+
+it('advances a compound Critic finding only after frame-bound prerequisite review and invalidates touched components', () => {
+  const s: any = state(), first = record(3), request = chatCriticRequest(first, s, records(3))!;
+  const obligations = [
+    { id: 'intermediate-architecture', criterion: 'composition_context', component_ids: ['house-owner'],
+      depends_on_ids: [], status: 'fail', visible: 'The middle-depth building mass does not yet establish readable perspective.' },
+    { id: 'stone-paving', criterion: 'composition_context', component_ids: ['paving-owner'],
+      depends_on_ids: ['intermediate-architecture'], status: 'fail', visible: 'The paving planes are absent and their depth order is not yet visible.' },
+  ];
+  const initial = { ...reply(request, true), obligations };
+  const initialReview = validateChatCritic(initial, request, first, s)!;
+  const retained: any = { ...s, ...persistChatCritic(s, initialReview, first) };
+  expect(openCriticObligation(retained)?.id).toBe('intermediate-architecture');
+  const house = { ...record(4), args: { document_id: 42, logical_layer: { hypothesis_id: 'house-owner' } } };
+  const secondRequest = chatCriticRequest(house, retained, [...records(3), house])!;
+  const next = { ...reply(secondRequest, true), obligations: [
+    { ...obligations[0], status: 'pass', visible: 'On this delivered frame the middle-depth building mass has complete perspective and size relationships.' },
+    { ...obligations[1], status: 'fail', visible: 'Paving remains unconstructed below the newly coherent intermediate architecture.' },
+  ] };
+  const checked = validateChatCritic(next, secondRequest, house, retained)!;
+  const afterHouse: any = { ...retained, ...persistChatCritic(retained, checked, house) };
+  expect(openCriticObligation(afterHouse)?.id).toBe('stone-paving');
+  expect(afterHouse.critic_obligations.map((row: any) => row.status)).toEqual(['pass', 'fail']);
+  expect(afterHouse.critic_obligations[0]).toMatchObject({ frame_sha256: house.preview.sha256, operation_id: house.id });
+  const unknown: any = { ...afterHouse, critic_obligations: afterHouse.critic_obligations.map((row: any) =>
+    row.id === 'intermediate-architecture' ? { ...row, status: 'unknown' } : row) };
+  expect(openCriticObligation(unknown)?.id).toBe('intermediate-architecture');
+  const premature = { ...reply(secondRequest, true), obligations: [{ ...obligations[1], status: 'pass',
+    visible: 'Paving appears in the trial but its architecture prerequisite is unknown.' }] };
+  expect(() => validateChatCritic(premature, secondRequest, house, unknown)).toThrow(/prerequisite_unresolved/);
+  const changedHouse = { ...record(5), args: { document_id: 42, logical_layer: { hypothesis_id: 'house-owner' } } };
+  const stale: any = { ...afterHouse, ...persistChatCritic(afterHouse, undefined, changedHouse) };
+  expect(stale.critic_obligations[0].status).toBe('unknown');
+  expect(openCriticObligation(stale)?.id).toBe('intermediate-architecture');
+  expect(stale.critic_obligations[1].status).toBe('fail');
+});
+it('migrates a retained compound finding on the exact frame without reopening its passed prerequisite', () => {
+  const s: any = { ...state(), chat_critic_findings: [{ criterion: 'brief_fidelity',
+    correction_kind: 'form', problem_id: 'critic-brief_fidelity', visible: 'Both the furniture assembly and its material are missing.',
+    next_change: 'Build the assembly first, then model its surface.' }] };
+  const r = record(3), req = chatCriticRequest(r, s, records(3))!;
+  expect(req.retained_findings[0].problem_id).toBe('critic-brief_fidelity');
+  expect(req.obligation_contract.items.properties.correction_kind).toBeDefined();
+  const response = { ...reply(req),
+    criteria: { ...reply(req).criteria, brief_fidelity: 'fail' },
+    findings: [...reply(req).findings, { criterion: 'brief_fidelity', correction_kind: 'form',
+      visible: 'The assembly now reads, while its surface remains flat.',
+      next_change: 'Review the assembly prerequisite and construct the material response.' }],
+    obligations: [
+    { id: 'assembly', parent_problem_id: 'critic-brief_fidelity', criterion: 'brief_fidelity', correction_kind: 'form',
+      component_ids: ['assembly-owner'], depends_on_ids: [], status: 'pass', visible: 'The connected assembly is visibly complete on this exact frame.' },
+    { id: 'surface', parent_problem_id: 'critic-brief_fidelity', criterion: 'brief_fidelity', correction_kind: 'material',
+      component_ids: ['surface-owner'], depends_on_ids: ['assembly'], status: 'fail', visible: 'The surface remains a flat unshaded field on the delivered frame.' },
+  ] };
+  const reviewed = validateChatCritic(response, req, r, s)!;
+  const after: any = { ...s, ...persistChatCritic(s, reviewed, r) };
+  const brush: any = { impact_class: 'construct', visual_intent: 'mass', addresses_problem_ids: ['surface'],
+    tool: 'photoshop_paint_strokes', args: { strokes: [{ points: [{ x: 1, y: 1 }, { x: 5, y: 5 }] }] } };
+  expect(selectedCriticCorrection(after, brush)).toMatchObject({ problem_id: 'surface', correction_kind: 'material' });
+  expect(criticCorrectionIssue(after, brush)).toBeUndefined();
+  expect(documentArtisticDebt(after)).toContain('chat_critic_scene_unfinished');
+  const unrelated = { criterion: 'form_proportions', correction_kind: 'form', problem_id: 'unrelated-form',
+    visible: 'A separate load-bearing assembly has broken proportions.', next_change: 'Rebuild that unrelated assembly before details.' };
+  expect(selectedCriticCorrection({ ...after, chat_critic_findings: [unrelated, ...after.chat_critic_findings] }, brush)?.problem_id)
+    .toBe('unrelated-form');
+  after.critic_obligations[0].status = 'unknown';
+  expect(selectedCriticCorrection(after, brush)?.problem_id).toBe('assembly');
+  expect(criticCorrectionIssue(after, brush)?.code).toBe('critic_correction_method_mismatch');
+  const allPassed: any = { ...after, critic_obligations: after.critic_obligations.map((row: any) => ({ ...row, status: 'pass' })),
+    chat_critic_findings: [s.chat_critic_findings[0], { criterion: 'composition_context', correction_kind: 'composition',
+      problem_id: 'other', visible: 'Another unrelated placement still needs correction.', next_change: 'Reposition the unrelated object.' }] };
+  expect(selectedCriticCorrection(allPassed)?.problem_id).toBe('other');
+});
+it('requires visible support/contact/weight evidence for pass and retains fail or unknown as scene debt', () => {
+  const s: any=state(), r=record(3), request=chatCriticRequest(r,s,records(3))!;
+  expect(()=>validateChatCritic({...reply(request),findings:[]},request,r,s)).toThrow(/support_observation_required/);
+  const grounded=validateChatCritic(reply(request),request,r,s)!;
+  expect(grounded.support_review_version).toBe(SUPPORT_CONTACT_WEIGHT_REVIEW_VERSION);
+  expect(persistChatCritic(s,grounded).chat_critic_findings).toEqual([]);
+  const defect={...reply(request),criteria:{...reply(request).criteria,contact_and_protection:'fail'},
+    findings:[{criterion:'contact_and_protection',visible:'The chair back overhangs its feet and the legs stop above the floor.',next_change:'Rebuild the leg contacts and shift the supporting footprint under the chair mass.'}]};
+  const failed=validateChatCritic(defect,request,r,s)!;
+  const retained={...s,...persistChatCritic(s,failed)};
+  expect(documentArtisticDebt(retained)).toContain('chat_critic_scene_unfinished');
+  expect(artisticContinuation(retained)).toContain('Rebuild the leg contacts');
+  const uncertain={...reply(request),criteria:{...reply(request).criteria,contact_and_protection:'unknown'},findings:[]};
+  expect(persistChatCritic(retained,validateChatCritic(uncertain,request,r,retained)).chat_critic_findings).toHaveLength(1);
+  expect(()=>validateChatCritic(uncertain,request,r,retained,{criteria:reply(request).criteria})).toThrow(/completion_conflict/);
+  const suspended={...reply(request),findings:[{criterion:'contact_and_protection',
+    visible:'The lamp hangs from a taut cable above its mass; floor contact is inapplicable to this suspension.',
+    next_change:'Preserve the cable connection and hanging balance requested in the brief.'}]};
+  expect(validateChatCritic(suspended,request,r,s)?.criteria.contact_and_protection).toBe('pass');
+});
+it('old approvals cannot suppress the new support checkpoint and existing defect debt survives policy refresh', () => {
+  const s: any=state(), r=record(3), request=chatCriticRequest(r,s,records(3))!;
+  const legacy:any=validateChatCritic(reply(request,true),request,r,s)!;
+  delete legacy.support_review_version;
+  legacy.findings=legacy.findings.filter((f:any)=>f.criterion!=='contact_and_protection');
+  const retained={...s,...persistChatCritic(s,legacy)};
+  const fresh=chatCriticRequest(r,retained,records(3))!;
+  expect(fresh).toMatchObject({required:true,trigger:'early-scene'});
+  expect(()=>validateChatCritic(undefined,fresh,r,retained)).toThrow(/review_required/);
+  const unknown={...reply(fresh),criteria:Object.fromEntries(CHAT_CRITIC_CRITERIA.map(key=>[key,'unknown'])),findings:[]};
+  expect(persistChatCritic(retained,validateChatCritic(unknown,fresh,r,retained)).chat_critic_findings)
+    .toMatchObject([{criterion:'composition_context'}]);
+});
+
 it('schedules early scene, bounded periodic, stage and final roles without a reviewer after every component', () => {
   const s: any = state();
   expect(chatCriticRequest(record(1),s,records(1))!.required).toBe(false);
@@ -75,7 +202,7 @@ it('does not import previous-canvas Critic findings even when the original brief
   expect(oldState.chat_critic_findings).toHaveLength(1);
   const reopened={...oldState,document_incarnation_id:'stable:reopened'};
   const newRequest=chatCriticRequest(record(3),reopened,records(3))!;
-  const uncertain={...reply(newRequest),criteria:Object.fromEntries(CHAT_CRITIC_CRITERIA.map(key=>[key,'unknown']))};
+  const uncertain={...reply(newRequest),criteria:Object.fromEntries(CHAT_CRITIC_CRITERIA.map(key=>[key,'unknown'])),findings:[]};
   const fresh=validateChatCritic(uncertain,newRequest,record(3),reopened)!;
   expect(persistChatCritic(reopened,fresh).chat_critic_findings).toEqual([]);
   // Historical reviews predating incarnation binding also cannot grant a checkpoint.
@@ -95,7 +222,7 @@ it('uses the stable host witness as incarnation when the caller has no explicit 
   expect(freshRequest).toMatchObject({required:true,trigger:'early-scene',document_incarnation_id:'host:new'});
   expect(freshRequest.request_id).not.toBe(oldRequest.request_id);
   const freshReview=validateChatCritic({...reply(freshRequest),
-    criteria:Object.fromEntries(CHAT_CRITIC_CRITERIA.map(key=>[key,'unknown']))},freshRequest,r,reopened)!;
+    criteria:Object.fromEntries(CHAT_CRITIC_CRITERIA.map(key=>[key,'unknown'])),findings:[]},freshRequest,r,reopened)!;
   expect(persistChatCritic(reopened,freshReview).chat_critic_findings).toEqual([]);
 });
 it('does not treat an unknown document incarnation as permission to reuse Critic approvals or findings', () => {
@@ -109,7 +236,7 @@ it('does not treat an unknown document incarnation as permission to reuse Critic
     .toThrow(/review_required/);
   const freshRequest=chatCriticRequest(r,retained,records(3))!;
   const freshReview=validateChatCritic({...reply(freshRequest),
-    criteria:Object.fromEntries(CHAT_CRITIC_CRITERIA.map(key=>[key,'unknown']))},freshRequest,r,retained)!;
+    criteria:Object.fromEntries(CHAT_CRITIC_CRITERIA.map(key=>[key,'unknown'])),findings:[]},freshRequest,r,retained)!;
   expect(persistChatCritic(retained,freshReview).chat_critic_findings).toEqual([]);
 });
 it('rejects contradictory/missing findings and invented independent authority while admitting honest uncertainty', () => {
@@ -140,10 +267,21 @@ it('builds only an optional exact-image Core agents handoff without Painter expl
   const worker=handoff.spawn_template.workers[0];
   expect(worker.task).toContain('frame-3.jpg'); expect(worker.task).toContain(request.request_id);
   expect(worker.task).not.toContain('Painter says perfect');
+  expect(worker.task).toContain(supportContactWeightInstruction('en'));
   expect(worker).not.toHaveProperty('model'); expect(worker).not.toHaveProperty('reasoning_effort');
   expect(handoff.precondition).toContain('sleeping');
   expect(handoff.prepare_before_dispatch).toContain('complete original brief');
   expect(JSON.stringify(handoff)).not.toContain(s.original_brief);
+});
+it('ordinary simple-profile review carries the same visual support rule without a Critic or extra images', async () => {
+  const f=fixture();
+  f.runtime.store.updatePaintingState(42,current=>({...current,painting_profile:'simple_graphic'}));
+  const result:any=await f.review.handler({operation_id:'pass-3'});
+  const body=JSON.parse(result.content[0].text);
+  expect(body.artistic_review.critic_role).toBeUndefined();
+  expect(body.artistic_review.instruction).toContain(supportContactWeightInstruction('en'));
+  expect(result.content.filter((x:any)=>x.type==='image')).toHaveLength(1);
+  expect(f.evaluate).not.toHaveBeenCalled();
 });
 function fixture() {
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'chat-critic-'));dirs.push(dir);
@@ -178,6 +316,8 @@ it('actual review delivery and compact projection retain Critic role/public sche
   expect(body.next_required_action).toContain('Switch to Critic');
   const compact:any=projectGuardDiagnostics(body,f.runtime.runtimeDirectory,{operation_id:'pass-1',sha256:'brief-hash'});
   expect(compact.artistic_review.instruction).toContain('Switch to Critic');
+  expect(compact.artistic_review.instruction).toContain(supportContactWeightInstruction('en', true));
+  expect(supportContactWeightInstruction('ru', true)).toContain('баланс веса');
   expect(compact.artistic_review.critic_role.request_id).toBe(body.artistic_review.critic_role.request_id);
   expect(result.content.filter((x:any)=>x.type==='image')).toHaveLength(1);
   const cycle=createGuardTools(f.runtime).find(x=>x.tool.name==='photoshop_guard_cycle_auto')!;
@@ -192,6 +332,88 @@ it('compact compiler carries the separate Critic judgment into the ordinary clos
   expect(closure).toHaveBeenCalledWith(expect.objectContaining({previous_visual_verdict:expect.objectContaining({critic_review:critic})}));
   expect(compiled.input.previous_visual_verdict).toMatchObject({critic_review:critic});
   expect(f.runtime.store.read('pass-3').verdict).toBeUndefined();
+});
+function retainedFixture() {
+  const f = fixture(), store = f.runtime.store;
+  const r = store.read('pass-3');
+  store.write({ ...r, report: { did: 'Completed the assembly', why: 'Establish the scene', result: 'Exact frame reviewed' },
+    verdict: { sha256: r.preview.sha256, disposition: 'correct', target_resolved: 'no', at: new Date().toISOString() } });
+  store.updatePaintingState(42, current => ({ ...current,
+    current_frame: { operation_id: r.id, sha256: r.preview.sha256, accepted: false } }));
+  return f;
+}
+it('re-evaluates a closed current frame after save through the real compiler/runtime without closing or painting again', async () => {
+  const f = retainedFixture();
+  await f.review.handler({ operation_id: 'pass-3', review_scope: 'whole-scene' });
+  const store = f.runtime.store, r = store.read('pass-3');
+  const req = store.chatCriticRequest(r.id, undefined, true)!;
+  const critic = store.validateChatCritic(r, { critic_review: reply(req, true) }, true);
+  store.updatePaintingState(42, current => ({ ...current, ...persistChatCritic(current, critic, r) }));
+  store.write({ id: 'save-4', created_at: new Date().toISOString(), sequence: 4, tool: 'photoshop_save_document', args: { document_id: 42 },
+    phase: 'completed', visual: false, report: { did: 'Saved document', why: 'Keep the current scene', result: 'Saved exact pixels' } });
+  const before = store.read(r.id);
+  const updated = { ...reply(req), criteria: { ...reply(req).criteria, brief_fidelity: 'fail' },
+    findings: [...reply(req).findings, { criterion: 'brief_fidelity', correction_kind: 'material',
+      visible: 'The assembly is complete but its surface still has no material response.', next_change: 'Construct material response on the independent surface.' }],
+    obligations: [
+      { id: 'built', criterion: 'brief_fidelity', correction_kind: 'form', parent_problem_id: 'critic-brief_fidelity',
+        component_ids: ['assembly'], depends_on_ids: [], status: 'pass', visible: 'The completed assembly is visible on the retained whole frame.' },
+      { id: 'finish', criterion: 'brief_fidelity', correction_kind: 'material', parent_problem_id: 'critic-brief_fidelity',
+        component_ids: ['surface'], depends_on_ids: ['built'], status: 'fail', visible: 'The surface remains flat without material response on this frame.' } ] };
+  const projected = store.projectCriticClosure({ review_operation_id: r.id,
+    previous_visual_verdict: { critic_review: updated } }, store.captureProjectionContext());
+  expect(selectedCriticCorrection(projected.paintingState.documents['42'])).toMatchObject({ problem_id: 'finish', correction_kind: 'material' });
+  expect(store.artRunState(42).chat_critic_findings[0].criterion).toBe('composition_context');
+  const result: any = await f.runtime.cycleAuto({ review_operation_id: r.id,
+    previous_observation: { observed: 'The assembly is complete; its material still needs construction.', target: 'unresolved', critic_review: updated } });
+  expect(result.preflight_rejection).toBeUndefined();
+  expect(result.closed_previous).toMatchObject({ closed: false, reviewed_current_frame: true, operation_id: r.id });
+  expect(store.read(r.id)).toEqual(before);
+  expect(store.records()).toHaveLength(4);
+  expect(selectedCriticCorrection(store.artRunState(42))).toMatchObject({ problem_id: 'finish', correction_kind: 'material' });
+  expect(f.evaluate).not.toHaveBeenCalled();
+  const rejected: any = await f.runtime.cycleAuto({ review_operation_id: r.id,
+    previous_observation: { observed: 'The retained assembly is complete but the surface is still flat.', target: 'unresolved', critic_review: updated },
+    next_pass: { request_key: 'invalid-next', document_id: 42, goal: '', actions: [] } });
+  expect(rejected.preflight_rejection).toBeDefined();
+  expect(rejected.closed_previous).toMatchObject({ closed: false, reviewed_current_frame: true });
+  expect(store.records()).toHaveLength(4);
+  const saveInput: any = { previous_operation_id: 'save-4', previous_visual_verdict: { critic_review: updated } };
+  expect(store.collectClosePreviousErrors(saveInput)).toEqual([]);
+  store.closePreviousCycle(saveInput);
+  expect(store.read(r.id)).toEqual(before);
+  // Same-frame reassessment must not invalidate an already assessed prerequisite.
+  const { correction_kind: _kind, parent_problem_id: _parent, ...surfaceUpdate } = updated.obligations[1];
+  const repeat = { ...updated, obligations: [surfaceUpdate] };
+  store.explicitCurrentFrameReview({ review_operation_id: r.id, previous_visual_verdict: { critic_review: repeat } }, true);
+  expect(store.artRunState(42).critic_obligations[0].status).toBe('pass');
+  expect(store.artRunState(42).critic_obligations[1]).toMatchObject({ correction_kind: 'material', parent_problem_id: 'critic-brief_fidelity' });
+  expect(store.collectClosePreviousErrors({ previous_operation_id: r.id, previous_visual_verdict: { critic_review: repeat } })).toEqual([]);
+  expect(store.closePreviousCycle({ previous_operation_id: r.id, previous_visual_verdict: { critic_review: repeat } }))
+    .toMatchObject({ closed: false, reviewed_current_frame: true });
+});
+it('retained-frame review rejects stale, undelivered, rolled-back and newer uncertain evidence without persisting', async () => {
+  const f = retainedFixture();
+  await f.review.handler({ operation_id: 'pass-3', review_scope: 'whole-scene' });
+  const store = f.runtime.store, r = store.read('pass-3'), req = store.chatCriticRequest(r.id, undefined, true)!;
+  const input: any = { review_operation_id: r.id, previous_visual_verdict: { critic_review: reply(req) } };
+  const original = store.artRunState(42);
+  expect(() => store.explicitCurrentFrameReview({ ...input, review_operation_id: 'pass-2' }, true)).toThrow(/current_frame_review_stale/);
+  expect(() => store.explicitCurrentFrameReview({ ...input, previous_operation_id: 'save-4' }, true)).toThrow(/conflict/);
+  const delivery = vi.spyOn(store, 'visualDeliveryDebt').mockReturnValue({ pending: true } as any);
+  expect(() => store.explicitCurrentFrameReview(input, true)).toThrow(/current_frame_review_stale/);
+  delivery.mockRestore();
+  store.write({ ...r, rolled_back: true });
+  expect(store.chatCriticRequest(r.id)).toBeUndefined();
+  expect(() => store.explicitCurrentFrameReview(input, true)).toThrow(/current_frame_review_stale/);
+  store.write(r);
+  store.write({ ...r, id: 'uncertain-4', sequence: 4, phase: 'uncertain', verdict: undefined, execution: 'uncertain' });
+  expect(() => store.explicitCurrentFrameReview(input, true)).toThrow(/current_frame_review_stale/);
+  expect(store.artRunState(42)).toEqual(original);
+  store.write({ ...store.read('uncertain-4'), execution: 'not-executed', current_frame_authority: false });
+  fs.writeFileSync(r.preview.materialized_path, 'wrong pixels');
+  expect(() => store.explicitCurrentFrameReview(input, true)).toThrow(/current_frame_review_stale/);
+  expect(store.artRunState(42)).toEqual(original);
 });
 it('store refuses an omitted checkpoint and a final save claiming pass over an unresolved Critic scene', async () => {
   const f=fixture();await f.review.handler({operation_id:'pass-3'});
@@ -221,7 +443,7 @@ it('ordinary verdict persists Critic findings and final saved-frame review canno
   f.runtime.store.write({...f.runtime.store.read('pass-3'),verdict:{...original,disposition:'accept'}});
   f.runtime.store.updatePaintingState(42,current=>({...current,current_frame:{operation_id:r.id,sha256:r.preview.sha256,accepted:true}}));
   const completion={scope:'whole-brief',summary:'Exact current scene is assessed against the original task',
-    criteria:{...reply(request).criteria,editable_parts:'pass'}};
+    criteria:{...reply(request).criteria,editable_parts:'unknown'}}; // No owner map in this fixture; never invent editability proof.
   const save={visual:false,args:{document_id:42}};
   expect(()=>f.runtime.store.finalWholeBriefReview({previous_visual_verdict:{painting_completion:completion}},save)).toThrow(/completion_conflict/);
   const before=f.runtime.store.read('pass-3').verdict;

@@ -1,0 +1,126 @@
+{
+  "request_key": "tiger_silhouette_blockin_20261011_a1",
+  "document_id": 60,
+  "goal": "Наметить монументальный силуэт рычащего тигра как основу картины",
+  "artistic_commentary": "Сначала строю цельную крупную массу тигра с поднятой к луне головой: это задаёт характер всей композиции, прежде чем писать ночной пейзаж.",
+  "stage": "GLOBAL_BLOCK_IN",
+  "scale": "global",
+  "visual_intent": "painted-mass",
+  "impact_class": "construct",
+  "construction_role": "structured-mass",
+  "scene_ownership_plan": {
+    "plan_id": "tiger_ownership_v1",
+    "objects": [
+      {
+        "object_id": "tiger",
+        "kind": "compound-object",
+        "subject_kind": "animal",
+        "component_semantic_ids": [
+          "tiger_underpaint"
+        ]
+      }
+    ],
+    "units": [
+      {
+        "semantic_id": "tiger_underpaint",
+        "owner_id": "tiger_underpaint",
+        "role": "Временный общий силуэт тигра",
+        "editability": "temporary",
+        "edit_axes": [
+          "visibility",
+          "color",
+          "rollback"
+        ]
+      }
+    ]
+  },
+  "logical_layer": {
+    "decision": "create-new",
+    "hypothesis_id": "tiger_underpaint",
+    "hypothesis": "Фигура тигра до отдельных анатомических частей",
+    "rollback_value": "high",
+    "expected_independent_rollback": true,
+    "layer_name": "Tiger | silhouette",
+    "physical_role": "opaque-mass",
+    "opacity_role": "opaque",
+    "construction_tier": "primary"
+  },
+  "actions": [
+    {
+      "tool": "photoshop_fill_polygon",
+      "args": {
+        "points": [
+          [
+            240,
+            800
+          ],
+          [
+            350,
+            690
+          ],
+          [
+            550,
+            675
+          ],
+          [
+            630,
+            520
+          ],
+          [
+            650,
+            420
+          ],
+          [
+            730,
+            430
+          ],
+          [
+            730,
+            460
+          ],
+          [
+            680,
+            460
+          ],
+          [
+            650,
+            550
+          ],
+          [
+            640,
+            820
+          ],
+          [
+            610,
+            1060
+          ],
+          [
+            550,
+            1060
+          ],
+          [
+            510,
+            850
+          ],
+          [
+            400,
+            850
+          ],
+          [
+            360,
+            1060
+          ],
+          [
+            290,
+            1060
+          ],
+          [
+            290,
+            920
+          ]
+        ],
+        "color": "#BA703D"
+      }
+    }
+  ]
+}

@@ -4,6 +4,7 @@ import {
   PAINTING_CONSTRUCTION_ROLES,
   PAINTING_VISUAL_INTENTS,
   paintingMethodCapabilities,
+  paintingMethodExecutionContract,
   selectPaintingMethod,
   selectPaintingConstructionMethod,
   type PaintingConstructionRole,
@@ -84,7 +85,13 @@ export function createMethodPaletteTools(registry: ToolRegistry): ToolDefinition
                 avoidMethodIds: avoid,
               })
             : undefined;
-          return json({ ok: true, selection, ...(edgeSelection ? { edge_selection: edgeSelection } : {}) });
+          return json({ ok: true, selection,
+            execution_contract: paintingMethodExecutionContract(registry, selection.selected),
+            fallback_commands: selection.fallbacks.map(method => ({
+              method_id: method.id,
+              allowed_commands: paintingMethodExecutionContract(registry, method).allowed_commands,
+            })),
+            ...(edgeSelection ? { edge_selection: edgeSelection } : {}) });
         } catch (error) {
           return {
             isError: true,

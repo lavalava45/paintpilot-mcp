@@ -1,3 +1,4 @@
+import { PHOTOSHOP_DRAWING_ROUTE } from '../prompts/host-guidance.js';
 import type { ToolDefinition, ToolHandler } from '../core/tool-registry.js';
 import type { PhotoshopConnection } from '../platform/connection.js';
 import { PhotoshopBackendRouter } from '../platform/photoshop-backend.js';
@@ -48,7 +49,7 @@ export function createStateTools(
   return [
     stateTool(
       'photoshop_get_state',
-      'Read the current Photoshop document/layer/selection state without mutation; use it to establish or recover a document target.',
+      PHOTOSHOP_DRAWING_ROUTE + ' Read current document/layer/selection state without mutation; establish or recover the document target.',
       EMPTY_INPUT,
       () => runStateRead(router)
     ),

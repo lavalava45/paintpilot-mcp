@@ -15,6 +15,9 @@ function corrected() {
   // This geometry-only fixture treats each semantic unit as an isolated part;
   // the active color-key owner still requires an explicit subject scope.
   value.next_pass.scene_ownership_plan.objects = value.next_pass.scene_ownership_plan.units.map((unit: any) => ({ object_id: unit.semantic_id, subject_kind: 'single-component', kind: 'single-part', component_semantic_ids: [unit.semantic_id] }));
+  value.next_pass.scene_ownership_plan.units.forEach((unit: any) => {
+    unit.edit_axes = ['visibility', 'color', 'position', 'rollback'];
+  });
   const scene = value.next_pass.scene_geometry_model;
   scene.projection.horizon = { line: [{ x: 0, y: 450 }, { x: 1400, y: 450 }] };
   scene.projection.vanishing_points[0].evidence = 'proposed';
@@ -37,6 +40,26 @@ function store(extra = {}) {
 function body(result: any) { return JSON.parse(result.rejection.content[0].text); }
 
 describe('geometry contract repair (offline only)', () => {
+  it('regression: admits an independent canvas field inside a spatial compound plan without removing world geometry gates', async () => {
+    const p: any = corrected().next_pass;
+    p.logical_layer = { ...p.logical_layer, component_space: 'canvas' };
+    delete p.logical_layer.geometry_binding;
+    delete p.logical_layer.construction_tier;
+    delete p.construction_role;
+    p.scene_ownership_plan.units.forEach((unit: any) => { unit.edit_axes = ['visibility', 'color', 'rollback']; });
+    p.material_role = 'paper';
+    const units = p.scene_ownership_plan.units;
+    p.scene_ownership_plan.objects = [{ object_id: 'paper-and-ground', subject_kind: 'custom-compound',
+      kind: 'compound-object', component_semantic_ids: units.map((u: any) => u.semantic_id) }];
+    const accepted = await compileGuardCycle({ next_pass: p }, store(), registry());
+    expect(accepted.violations, JSON.stringify(accepted.violations)).toEqual([]);
+    const world = structuredClone(p); world.logical_layer.component_space = 'world';
+    world.construction_role = 'structured-mass'; world.logical_layer.construction_tier = 'primary';
+    const rejected = await compileGuardCycle({ next_pass: world }, store(), registry());
+    expect(rejected.violations.map(v => v.code)).toContain('geometry_binding_required');
+    const conflict = structuredClone(p); conflict.logical_layer.geometry_binding = { support_plane_id: 'floor' };
+    expect(prepareGeometryContract(conflict, context).issues.map(i => i.code)).toContain('component_space_conflict');
+  });
   it('replays the real failed cabin request and reports horizon, evidence, plane roles and missing binding together', async () => {
     const input = structuredClone(saved);
     const dynamic = vi.fn(async () => []);
@@ -55,8 +78,17 @@ describe('geometry contract repair (offline only)', () => {
     expect(response.compact_correction_recipe.geometry_contract.correction_template.logical_layer.geometry_binding).toEqual({
       owner_id: 'base-scene-blockin', scene_geometry_model_id: 'cabin-weak-perspective-v1', scene_geometry_revision: 1,
     });
+    expect(response.error_codes).toContain('geometry_contract_invalid');
+    const issues = response.compact_correction_recipe.geometry_contract.issues;
+    const packet = response.compact_correction_recipe.field_correction_packet.corrections;
+    expect(packet.every((row: any) => !issues.some((issue: any) =>
+      row.path === issue.path && row.reason === issue.message))).toBe(true);
+    expect(response.violations.some((v: any) => v.code === 'geometry_contract_invalid')).toBe(true);
+    expect(response.compact_correction_recipe.geometry_contract.correction_template).toBeDefined();
     expect(input).toEqual(saved);
-    expect(dynamic).not.toHaveBeenCalled();
+    // Aggregate diagnostics still compile the bounded operation so independent
+    // dynamic preflight can report alongside static geometry errors; dispatch remains blocked.
+    expect(dynamic).toHaveBeenCalledTimes(1);
     expect(Buffer.byteLength(JSON.stringify(response))).toBeLessThan(20000);
     expect(classifyViolation({ scope: 'next_operation', code: 'geometry_contract_invalid', message: '' })).toBe('CONTRACT_CORRECTION');
   });

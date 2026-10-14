@@ -511,7 +511,8 @@ Related current documents:
 - [Digital painting agent skill](digital-painting-agent-skill.md) — runtime artistic-control kernel;
 - [Digital painting implementation index](digital-painting.md) — mapping from painting concepts to code;
 - [Available tools](available-tools.md) — public tool reference plus generated backend/access inventory;
-- [Painting roadmap](PAINTING-ROADMAP.md) — forward-looking work only;
+- [Painting roadmap](PAINTING-ROADMAP.md) — short priority plan;
+- [Painting work details](PAINTING-WORK-DETAILS.md) — task-specific requirements and conditional acceptance;
 - [Final acceptance matrix](roadmap-final-acceptance-matrix.md) — accepted/pending evidence status;
 - [Visual evaluation](visual-evaluation.md) — multiscale review rationale, experiments and human evaluation protocols;
 - [Ownership, provenance and retirement](ownership-and-retirement.md) — current ownership decisions plus P1-A/P2 retirement history.

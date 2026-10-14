@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { supportContactWeightInstruction } from './chat-critic.js';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 
@@ -39,6 +40,26 @@ export function serializeGuardState(
     if (output.projection === 'ownership' && key === 'scene_ownership_plan') continue;
     remove(row, key);
   }
+  // A long artistic session can accumulate hundreds of historical findings and
+  // Director explanations. These are *not* mutation/recovery authority in a
+  // status overview: the primary blocker, active action, owner bindings, exact
+  // frame and outstanding operation identities remain authoritative. Preserve
+  // the full snapshot in the diagnostic archive and direct detailed artistic
+  // planning to the public document-scoped resume/Director projection.
+  if (surface === 'status') {
+    const historical = [
+      'problem_backlog', 'artistic_losses', 'relation_review',
+      'unresolved_visual_basis', 'last_critique',
+    ];
+    for (const row of rows) for (const key of historical) remove(row, key);
+    if (Object.keys(omitted).some(key => historical.includes(key)) && object(output.response_budget)) {
+      output.response_budget.artistic_detail_requires_resume = true;
+      output.response_budget.artistic_detail_next_public_call = {
+        tool: 'photoshop_guard_resume', args: { projection: 'recovery' },
+        note: 'Specify the document_id of the selected status document; do not infer omitted artistic details.',
+      };
+    }
+  }
   // Broad inventories are diagnostics; retain readiness/backend revision and next action.
   if (object(output.guard_capabilities)) {
     for (const key of Object.keys(output.guard_capabilities)) {
@@ -48,6 +69,46 @@ export function serializeGuardState(
   if (object(output.capability_snapshots)) {
     for (const snapshot of Object.values(output.capability_snapshots).filter(object)) {
       for (const key of ['supported_semantic_methods', 'unavailable_methods', 'tools', 'brush_catalog']) remove(snapshot, key);
+    }
+  }
+  if (fits()) return JSON.stringify(output);
+  // The Director stores historical analyses that are useful for a requested
+  // deep read but must not displace current safety/priority information from
+  // the always-on status. Do not touch the active directive, review flags,
+  // selected task, correction target or its admitted scales.
+  if (surface === 'status') {
+    for (const row of rows) {
+      if (!object(row.art_director)) continue;
+      const director = row.art_director;
+      for (const key of [
+        'style_contract', 'prompt_conflict_preflight', 'strategy_validation_after_microplans',
+        'strategy_validation', 'assessment', 'artistic_evaluation_contract',
+        'composition_freedom', 'composition_exploration', 'brush_pack_scene_plan',
+        'perceptual_hierarchy', 'priorities', 'value_check', 'refinement_check',
+      ]) remove(director, key);
+      if (object(director.whole_image_glance)) {
+        const glance = director.whole_image_glance;
+        if (glance.due === true) {
+          // Pending whole-frame review is mutation authority, not historical
+          // Director analysis. Keep its exact frame/relation binding visible;
+          // only archive prior observations that cannot authorize continuation.
+          remove(glance, 'history');
+          remove(glance, 'last_record');
+          if (object(output.response_budget)) {
+            const documentId = row.document_id ?? output.document_id;
+            output.response_budget.artistic_detail_next_public_call = {
+              tool: 'photoshop_guard_art_director',
+              args: { ...(documentId !== undefined ? { document_id: documentId } : {}), action: 'review' },
+              note: 'Review the exact pending whole_image_glance frame and required_relations before another Painter mutation.',
+            };
+          }
+        } else {
+          remove(director, 'whole_image_glance');
+        }
+      }
+      if (object(output.response_budget)) {
+        output.response_budget.artistic_detail_requires_resume = true;
+      }
     }
   }
   if (fits()) return JSON.stringify(output);
@@ -81,7 +142,9 @@ export function serializeGuardState(
   for (const limit of [8, 2, 1]) {
     for (const row of selectedRows) for (const [key, item] of Object.entries(row)) {
       if (!Array.isArray(item) || item.length <= limit) continue;
-      if (output.projection === 'ownership' && key === 'logical_layer_owners') continue;
+      // Recovery identities and owner bindings are authority. If they cannot
+      // fit intact, use the explicit fail-closed public projection below.
+      if (key === 'identity_recovery_blockers' || key === 'logical_layer_owners') continue;
       // A running job/pending operation must remain actionable even when older rows are omitted.
       row[key] = key === 'active_jobs' ? item.slice(-limit) : item.slice(0, limit);
       omitted[key] = Number(omitted[key] ?? 0) + item.length - limit;
@@ -161,10 +224,16 @@ export function projectGuardDiagnostics(value: unknown, directory: string,
   compactCycle(output, '');
   if (object(output.result)) compactCycle(output.result, 'result.');
   if (observedBrief && object(output.artistic_review)) {
-    remove(output.artistic_review, 'original_brief', 'artistic_review.');
-    output.artistic_review.original_brief_reference = { ...observedBrief, already_observed_in_this_chat: true };
+    const restoreBrief = (object(output.artistic_review.critic_role) && output.artistic_review.critic_role.required === true)
+      || (object(output.artistic_review.task_anchor) && output.artistic_review.task_anchor.restore_full_brief === true);
+    if (!restoreBrief) {
+      remove(output.artistic_review, 'original_brief', 'artistic_review.');
+      output.artistic_review.original_brief_reference = { ...observedBrief, already_observed_in_this_chat: true };
+    }
     remove(output.artistic_review, 'instruction', 'artistic_review.');
-    output.artistic_review.instruction = (object(output.artistic_review.critic_role) && output.artistic_review.critic_role.required ? 'Switch to Critic for the whole scene and return critic_review in the same continuation. ' : '') + 'Compare exact AFTER/BEFORE against the original brief already reviewed in this chat. Record observed form/light/material, primary_mismatch and honest target/primitive_footprint in previous_observation; the next pass addresses the largest defect. Pass success does not finish the task or image.';
+    if (object(output.artistic_review.editable_scope) && output.artistic_review.editable_scope.required === false) delete output.artistic_review.editable_scope; // accepted unchanged inventory; report scope discoveries at any review
+
+    output.artistic_review.instruction = (object(output.artistic_review.critic_role) && output.artistic_review.critic_role.required ? 'Switch to Critic for the whole scene and return critic_review in the same continuation. ' : '') + 'Compare exact AFTER/BEFORE against the original brief already reviewed in this chat. Record observed form/light/material, primary_mismatch and honest target/primitive_footprint in previous_observation; the next pass addresses the largest defect. Pass success does not finish the task or image.' + ' ' + supportContactWeightInstruction(String(output.artistic_review.language ?? 'en'), true);
   }
   const summaryTimes = new Set([
     'guard_cycle_total_ms', 'guard_preflight_ms', 'photoshop_dispatch_wall_ms', 'semantic_cycle_wall_ms',
@@ -231,7 +300,7 @@ export function guardResumeSubset(value: Row, projection: string, ownerId?: stri
   const fields = ['document_id', 'uncertain', 'active_job', 'pending_reports', 'pending_operation_ack',
     'pending_operation_acks', 'pending_report_delivery_acks', 'pending_visual_verdict', 'last_operation',
     'checkpoint_due_before_next_visual_mutation', 'checkpoint_due_reason', 'next_required_action', 'canonical_next_command',
-    'resume_mode', 'mutation_allowed', 'identity_recovery_blockers', 'next_public_call'];
+    'resume_mode', 'mutation_allowed', 'identity_recovery_blockers', 'next_public_call', 'task_anchor'];
   const doc = object(value.document) ? value.document : {};
   return { ...Object.fromEntries(fields.filter(key => value[key] !== undefined).map(key => [key, value[key]])),
     projection, document: Object.fromEntries(['document_id', 'document_incarnation_id', 'current_frame',

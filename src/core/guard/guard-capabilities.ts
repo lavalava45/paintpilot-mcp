@@ -13,8 +13,11 @@ export const OPERATION_PROGRESS_PROTOCOL = 'operation.progress.v1';
 export function guardCapabilities(env = process.env) {
   return {
     protocol: GUARD_CAPABILITIES_PROTOCOL,
-    implementation_revision: '2026-10-10-chat-critic-journal-boundary',
+    implementation_revision: '2026-10-12-brush-scope-recovery-v1',
     contour_geometry: { bezier_js: '6.1.4', clipper2_ts: '2.0.1-18', curve_tolerance_pixels: 0.25, explicit_clip_exclusions: true, new_mcp_tools: 0 },
+    editable_scope: { inventory: 'scene_ownership_plan.units[].edit_axes', review: 'previous_observation.editable_scope_review',
+      checkpoints: ['ownership-scope-change', 'ordinary-whole-scene-critic', 'final-review'],
+      unchanged_component_scope: 'reuse', arbitrary_object_recognition: false },
     chat_critic: { default: 'same-chat-role', response: 'previous_observation.critic_review',
       checkpoints: ['after-3-visual-passes', 'every-6-further-visual-passes', 'stage-boundary', 'final-review'],
       optional_delegation: 'exposed authorized Core agents status/message/spawn',
@@ -129,6 +132,7 @@ export function guardCapabilities(env = process.env) {
         problem_id_is_stable_artistic_problem_identity: true,
         step_prose_is_explanatory: true,
         compact_visual_closure: ['previous_operation_id', 'previous_observation'],
+        retained_frame_review: ['review_operation_id', 'previous_observation'],
         preferred_previous_observation: ['observed', 'target'],
         optional_previous_observation: [
           'regression', 'action', 'planner_task_assessment',

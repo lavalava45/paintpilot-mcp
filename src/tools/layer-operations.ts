@@ -156,6 +156,26 @@ export async function runFillLayer(router: PhotoshopBackendRouter, args: LayerAr
 export async function runColorGradient(router: PhotoshopBackendRouter, args: LayerArgs): Promise<ToolResult> {
   const layerId = positiveInteger(args.layer_id);
   if (!layerId) return invalid('layer_id must be a positive integer');
+  if (args.preserve_transparency !== undefined && typeof args.preserve_transparency !== 'boolean')
+    return invalid('preserve_transparency must be a boolean');
+  const opacity = args.opacity ?? 100;
+  if (typeof opacity !== 'number' || !Number.isFinite(opacity) || opacity < 1 || opacity > 100)
+    return invalid('opacity must be a finite number in [1,100]');
+  let clipContour: Array<{ x: number; y: number }> | undefined;
+  if (args.clip_contour !== undefined) {
+    if (args.preserve_transparency !== true || !Array.isArray(args.clip_contour)
+      || args.clip_contour.length < 3 || args.clip_contour.length > 256
+      || args.clip_contour.some(p => !p || typeof p !== 'object'
+        || typeof p.x !== 'number' || !Number.isFinite(p.x)
+        || typeof p.y !== 'number' || !Number.isFinite(p.y)))
+      return invalid('clip_contour requires preserve_transparency=true and 3..256 finite polygon points');
+    clipContour = args.clip_contour.map(p => ({ x: p.x, y: p.y }));
+    const area2 = clipContour.reduce((sum, p, i) => {
+      const q = clipContour![(i + 1) % clipContour!.length];
+      return sum + p.x * q.y - q.x * p.y;
+    }, 0);
+    if (!Number.isFinite(area2) || Math.abs(area2) < 1e-7) return invalid('clip_contour must have nonzero area');
+  }
   const point = (value: unknown): { x: number; y: number } | undefined => {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
     const v = value as Record<string, unknown>;
@@ -182,8 +202,25 @@ export async function runColorGradient(router: PhotoshopBackendRouter, args: Lay
   try {
     await router.backendFor('layer.color_gradient');
     const targetDocument = documentId(args);
-    const outcome = await invokeUxpColorGradient({ ...(targetDocument === undefined ? {} : { document_id: targetDocument }), layer_id: layerId, from, to, stops });
+    const outcome = await invokeUxpColorGradient({ ...(targetDocument === undefined ? {} : { document_id: targetDocument }), layer_id: layerId, from, to, stops,
+      ...(args.preserve_transparency === true ? { preserve_transparency: true } : {}),
+      ...(clipContour ? { clip_contour: clipContour } : {}),
+      ...(args.opacity !== undefined ? { opacity } : {}) });
     if (!outcome.ok || !outcome.data) return atomicFailureFromError(new Error(outcome.error ?? 'uxp_color_gradient_failed'));
+    if (args.preserve_transparency === true && (
+      outcome.data.surface_alpha_preserved !== true ||
+      outcome.data.history_steps !== 1 ||
+      outcome.data.layer_id !== layerId ||
+      outcome.data.history_name !== 'MCP Continuous Surface Tone'
+    )) {
+      return atomicFailureFromError(new Error('surface_gradient_native_receipt_unproven: do not accept or replay a possibly dispatched mutation'));
+    }
+    if ((clipContour && (outcome.data.clip_contour_applied !== true
+        || outcome.data.selection_restored !== true
+        || JSON.stringify(outcome.data.clip_contour) !== JSON.stringify(clipContour)))
+      || (args.opacity !== undefined && outcome.data.opacity !== opacity)) {
+      return atomicFailureFromError(new Error('surface_gradient_clip_or_opacity_receipt_unproven: do not accept or replay a possibly dispatched mutation'));
+    }
     return atomicSuccess(`Color gradient painted on layer ${layerId}`, outcome.data);
   } catch (error) { return atomicFailureFromError(error); }
 }

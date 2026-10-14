@@ -1,4 +1,9 @@
+import { normalizeSceneOwnershipPlan, completeSceneOwnershipContinuation, extendSceneOwnershipPlan } from '../scene-ownership-plan.js';
+import { normalizeProblemLinks } from './problem-links.js';
+import { brushRoleMatchesScale } from './brush-scale-fit.js';
+import { omitRedundantConstructionLayerAction } from './preflight-repair.js';
 import {
+  PAINTING_INTENT_CONTRACT_FIELDS,
   normalizeGuardActionIds,
   type PaintingIntent,
   type PaintingIntentAction,
@@ -156,7 +161,20 @@ export function resolveIntentScale(
   intent: PaintingIntent,
   context: Record<string, unknown>
 ): PaintingIntentScale | undefined {
-  const value = intent.scale ?? text(context.scale);
+  if (intent.scale) return intent.scale;
+  const value = text(context.scale);
+  const art = context.art_director as Record<string, any> | undefined;
+  const task = currentTask(context);
+  if (art?.status === 'active' && !art.review_due && task?.status === 'active') {
+    const allowed = Array.isArray(task.allowed_scales)
+      ? [...new Set(task.allowed_scales.filter(scale => ['medium', 'small'].includes(String(scale))))] : [];
+    if (allowed.length && !allowed.includes(value)) {
+      if (allowed.length === 1) return allowed[0] as PaintingIntentScale;
+      throw new NextPassCompilerError('painting_intent_scale_ambiguous',
+        `The active task permits ${allowed.join('|')}, while durable scale=${value ?? 'missing'} describes another scope. Choose painting_intent.scale from the task; do not copy the global defect scale.`,
+        { path: 'painting_intent.scale', allowed_scales: allowed });
+    }
+  }
   return value as PaintingIntentScale | undefined;
 }
 
@@ -258,11 +276,13 @@ export function resolveMaterialContract(
   const roles = records(context.brush_roles);
   const explicitMaterial = intent.material_role;
   const explicitBrush = intent.preferred_brush_role;
+  const scale = resolveIntentScale(intent, context);
   const compatible = roles.filter(role => {
     const materials = Array.isArray(role.material_roles) ? role.material_roles.map(text).filter(Boolean) : [];
     const intents = Array.isArray(role.visual_intents) ? role.visual_intents.map(text).filter(Boolean) : [];
     return (!explicitMaterial || materials.includes(explicitMaterial))
-      && (!intent.visual_intent || intents.includes(intent.visual_intent))
+      && brushRoleMatchesScale(role, scale)
+      && (!!explicitBrush || !intent.visual_intent || intents.includes(intent.visual_intent))
       && (!explicitBrush || text(role.role_id) === explicitBrush);
   });
   const materialCandidates = [...new Set(compatible.flatMap(role =>
@@ -318,6 +338,30 @@ export function resolvePlannerBinding(context: Record<string, unknown>): Record<
     allowed_scales: Array.isArray(task?.allowed_scales) ? [...task.allowed_scales] : [],
     allowed_global_changes: Array.isArray(task?.allowed_global_changes) ? [...task.allowed_global_changes] : [],
   };
+}
+
+/** Inherit the single approved bounded construction, never an unrelated or cosmetic task. */
+function boundedCorrectionForIntent(intent: PaintingIntent, context: Record<string, unknown>, scale: string | undefined) {
+  const art = context.art_director as Record<string, any> | undefined;
+  const task = currentTask(context);
+  const target = task?.correction_target as Record<string, any> | undefined;
+  const targetId = text(target?.problem_id);
+  const impact = intent.impact_class ?? inferImpactClass(intent);
+  if (art?.status !== 'active' || art.review_due || task?.status !== 'active'
+    || !task.construction_plan || scale !== 'medium' || !Array.isArray(task.allowed_scales)
+    || !task.allowed_scales.includes('medium') || !targetId || intent.problem_id === targetId
+    || !['construct', 'subtract', 'transform'].includes(impact) || intent.action === 'rollback'
+    || ['DETAIL', 'FINISH', 'FINAL', 'FINAL_SELECTION'].includes((intent.stage ?? text(context.stage) ?? '').toUpperCase())) return undefined;
+  const outer = target?.region_bounds;
+  const inner = intent.region_bounds;
+  if (!outer || !inner || [outer.left, outer.top, outer.right, outer.bottom,
+    inner.left, inner.top, inner.right, inner.bottom].some(value => !Number.isFinite(value))
+    || inner.left < outer.left || inner.top < outer.top || inner.right > outer.right || inner.bottom > outer.bottom
+    || inner.left >= inner.right || inner.top >= inner.bottom) return undefined;
+  const domains = Array.isArray(task.allowed_global_changes) ? task.allowed_global_changes.filter(value =>
+    typeof value === 'string' && ['composition', 'large-value', 'lighting-structure', 'silhouette',
+      'depth-structure', 'likeness-main-shape', 'background-scope'].includes(value)) : [];
+  return domains.length ? { problem_id: targetId, change_domains: domains } : undefined;
 }
 
 export function resolveVerificationProfile(
@@ -412,10 +456,11 @@ export function compileIntentActions(
   intent: PaintingIntent,
   owner: Record<string, unknown> | undefined
 ): Array<Record<string, unknown>> {
+  if (!intent.actions?.length && (intent.construction || intent.painterly)) return [];
   if (!intent.actions?.length) {
     throw new NextPassCompilerError(
       'painting_intent_actions_required',
-      'The artistic intent is clear, but concrete Photoshop action geometry is not uniquely derivable. Supply bounded actions; Guard will compile the protocol fields locally.'
+      'Choose bounded actions, construction or painterly; artistic geometry is not inferred. Keep scene_ownership_plan and required scene/model declarations in this painting_intent or a complete next_pass.'
     );
   }
   const actions = normalizeGuardActionIds(intent.actions);
@@ -513,7 +558,23 @@ export function compilePaintingIntentToNextPass(
   projectionContext?: unknown
 ): NextPassCompileResult {
   const injectionStartedAt = Date.now();
-  const context = store.compactPassContext?.(intent.document_id, projectionContext) ?? {};
+  const durableContext = store.compactPassContext?.(intent.document_id, projectionContext) ?? {};
+  let context = durableContext;
+  if (intent.scene_ownership_plan) {
+    try {
+      const proposed = durableContext.scene_ownership_plan
+        ? completeSceneOwnershipContinuation(normalizeSceneOwnershipPlan(durableContext.scene_ownership_plan), intent.scene_ownership_plan)
+        : normalizeSceneOwnershipPlan(intent.scene_ownership_plan);
+      const plan = durableContext.scene_ownership_plan
+        ? extendSceneOwnershipPlan(normalizeSceneOwnershipPlan(durableContext.scene_ownership_plan), proposed)
+        : proposed;
+      context = { ...durableContext, scene_ownership_plan: plan };
+    } catch (error) {
+      throw new NextPassCompilerError('painting_intent_ownership_plan_invalid',
+        `${error instanceof Error ? error.message : String(error)}. Correct painting_intent.scene_ownership_plan without changing established owner bindings.`,
+        { path: 'painting_intent.scene_ownership_plan' });
+    }
+  }
   const diagnostics: NextPassCompileDiagnostic[] = [];
   let effectiveIntent = intent;
   if (intent.deferred_from_operation_id) {
@@ -596,19 +657,35 @@ export function compilePaintingIntentToNextPass(
       source: `operation:${intent.deferred_from_operation_id}.compiler_repair_audit.deferred_next_pass`,
     });
   }
+  const constructionLayer = omitRedundantConstructionLayerAction(effectiveIntent);
+  if (constructionLayer.repair) {
+    effectiveIntent = constructionLayer.pass;
+    diagnostics.push({
+      code: 'intent_redundant_construction_layer_removed',
+      message: constructionLayer.repair.reason,
+      source: 'painting_intent.construction + redundant photoshop_create_layer',
+    });
+  }
+  const methods = [effectiveIntent.actions?.length ? 'actions' : null,
+    effectiveIntent.construction ? 'construction' : null, effectiveIntent.painterly ? 'painterly' : null].filter(Boolean);
+  if (methods.length > 1) throw new NextPassCompilerError('painting_intent_execution_conflict',
+    'Choose exactly one of actions, construction or painterly. Retain scene/ownership declarations in the same request; changing method must not discard them.');
+  if (effectiveIntent.logical_layer && effectiveIntent.logical_layer.hypothesis_id !== effectiveIntent.target_owner_id)
+    throw new NextPassCompilerError('painting_intent_owner_conflict',
+      'logical_layer.hypothesis_id must match target_owner_id; do not retarget ownership when forwarding the declared logical layer.');
   const owner = resolveTargetOwner(effectiveIntent, context);
   const plannedOwner = scenePlanOwner(effectiveIntent, context);
   if (effectiveIntent.target_owner_id && !owner && !plannedOwner) {
     throw new NextPassCompilerError(
       'painting_intent_owner_missing',
-      `Cannot target semantic owner ${effectiveIntent.target_owner_id}: it is neither durably bound nor predeclared by the current scene ownership plan.`,
+      `Cannot target semantic owner ${effectiveIntent.target_owner_id}: it is neither durably bound nor predeclared. Supply painting_intent.scene_ownership_plan with its unit/owner/edit_axes and object membership (or correct the same declarations in next_pass). A rejected earlier pass did not register its plan. Keep target_owner_id; do not remove it or read source.`,
       { owner_id: effectiveIntent.target_owner_id }
     );
   }
   if (!effectiveIntent.target_owner_id && text(context.painting_profile) === 'nontrivial_painting') {
     throw new NextPassCompilerError(
       'painting_intent_target_owner_required',
-      'This nontrivial painting pass needs a semantic owner decision. Select an existing/predeclared owner instead of making the compiler guess ownership.'
+      'This nontrivial painting pass needs target_owner_id. Select an existing owner or declare a new unit/owner in painting_intent.scene_ownership_plan in this same call; a rejected earlier plan is not durable. Do not remove ownership or guess it from a layer name.'
     );
   }
 
@@ -620,6 +697,28 @@ export function compilePaintingIntentToNextPass(
   const protectedLayerIds = resolveProtectionSet(effectiveIntent, context, owner);
   const verification = resolveVerificationProfile(effectiveIntent, scale);
   const actions = compileIntentActions(effectiveIntent, owner);
+  const correction = boundedCorrectionForIntent(effectiveIntent, context, scale);
+  const criticCorrection = context.critic_correction as Record<string, any> | undefined;
+  const explicitLinks = normalizeProblemLinks(effectiveIntent.addresses_problem_id, effectiveIntent.addresses_problem_ids);
+  const components = Array.isArray(criticCorrection?.component_ids) ? criticCorrection.component_ids : [];
+  const ownerMatches = components.some(id => [effectiveIntent.target_owner_id, owner?.hypothesis_id,
+    plannedOwner?.owner_id, plannedOwner?.semantic_id].includes(id));
+  const criticMatches = !components.length || ownerMatches;
+  // A Director parent never erases the component's reviewed Critic link.
+  // Only add to an explicitly parent-only request when the semantic owner proves
+  // the exact component binding; other artistic choices remain explicit.
+  const inheritCritic = criticMatches && (!explicitLinks.length || (ownerMatches && correction
+    && explicitLinks.every(id => id === correction.problem_id)));
+  const inheritedTargets = [correction?.problem_id, inheritCritic ? criticCorrection?.problem_id : undefined].filter(Boolean);
+  const links = [...new Set([...explicitLinks, ...inheritedTargets,
+    ...(!explicitLinks.length && !inheritedTargets.length && effectiveIntent.addresses_primary_mismatch ? [effectiveIntent.problem_id] : [])])];
+  const addressesProblemId = effectiveIntent.addresses_problem_id ?? (links.length === 1 ? links[0] : undefined);
+  const criticLinked = links.includes(criticCorrection?.problem_id) || effectiveIntent.problem_id === criticCorrection?.problem_id;
+  const changeDomains = effectiveIntent.change_domains ?? correction?.change_domains
+    ?? (criticLinked ? criticCorrection?.allowed_change_domains : undefined);
+  if (correction) diagnostics.push({ code: 'intent_bounded_correction_inherited',
+    message: `Bound component ${effectiveIntent.problem_id} to active correction target ${correction.problem_id}; retain global debt and final Guard validation.`,
+    source: 'compactPassContext.art_director.current_task.correction_target' });
 
   if (!intent.scale && scale) diagnostics.push({
     code: 'intent_scale_inherited',
@@ -638,7 +737,7 @@ export function compilePaintingIntentToNextPass(
   });
   if (!intent.material_role && material.material_role) diagnostics.push({
     code: 'intent_material_role_inherited',
-    message: `Derived material_role=${material.material_role} from the unique compatible durable brush role.`,
+    message: `Derived material_role=${material.material_role} from the unique technically compatible durable brush role; a novel visual purpose still requires the ordinary bounded trial.`,
     source: 'brush_preflight',
   });
   if (!intent.preferred_brush_role && material.brush_role) diagnostics.push({
@@ -665,6 +764,7 @@ export function compilePaintingIntentToNextPass(
     ...(effectiveIntent.construction_role ? { construction_role: effectiveIntent.construction_role } : {}),
     ...(material.material_role ? { material_role: material.material_role } : {}),
     ...(material.brush_role ? { brush_role: material.brush_role } : {}),
+    ...(effectiveIntent.brush_use_reason ? { brush_use_reason: effectiveIntent.brush_use_reason } : {}),
     ...(effectiveIntent.material_response ? { material_response: structuredClone(effectiveIntent.material_response) } : {}),
     ...(separation ? { layer_separation_check: separation } : {}),
     ...(logicalLayer ? { logical_layer: logicalLayer } : {}),
@@ -673,11 +773,13 @@ export function compilePaintingIntentToNextPass(
       ? (resolvePhysicalLayer(owner) ? { replace_protected_layer_ids: [resolvePhysicalLayer(owner)] } : {})
       : {}),
     significance_mode: verification.significance_mode,
-    ...(effectiveIntent.addresses_primary_mismatch ? {
-      addresses_primary_mismatch: true,
-      addresses_problem_id: intent.problem_id,
-    } : {}),
-    actions,
+    ...(effectiveIntent.addresses_primary_mismatch ? { addresses_primary_mismatch: true } : {}),
+    ...(addressesProblemId ? { addresses_problem_id: addressesProblemId } : {}),
+    ...(links.length ? { addresses_problem_ids: links } : {}),
+    ...(changeDomains ? { change_domains: [...changeDomains] } : {}),
+    ...(actions.length ? { actions } : {}),
+    ...Object.fromEntries(PAINTING_INTENT_CONTRACT_FIELDS.filter(key => effectiveIntent[key] !== undefined)
+      .map(key => [key, structuredClone(effectiveIntent[key])])),
   };
 
   return {

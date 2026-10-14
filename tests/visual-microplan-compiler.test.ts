@@ -13,8 +13,18 @@ import {
 import type { PhotoshopConnection } from '../src/platform/connection.js';
 import { executeLogicalOperation, preflightRejectionEnvelope } from '../src/core/guard/cycle.js';
 
+it('preserves dependencies and preview boundaries while moving independent setters ahead of layer setup', () => {
+  const create = { id: 'create', tool: 'photoshop_create_layer', args: { name: 'Part' } };
+  const preset = { id: 'preset', tool: 'photoshop_select_brush_preset', args: { name: 'Installed Brush' } };
+  const paint = { id: 'paint', tool: 'photoshop_paint_strokes', args: { layer_id: '$steps.create.details.layerId' } };
+  const ids = (steps: any[]) => (compileVisualMicroPlan({ steps }).steps as any[]).map(step => step.id);
+  expect(ids([create, preset, paint]).slice(0, 3)).toEqual(['preset', 'create', 'paint']);
+  expect(ids([create, { ...preset, args: { name: '$steps.create.details.preset' } }, paint]).slice(0, 3)).toEqual(['create', 'preset', 'paint']);
+  expect(ids([create, { id: 'before', tool: 'photoshop_get_preview', args: {} }, preset, paint]).slice(0, 4)).toEqual(['create', 'before', 'preset', 'paint']);
+});
+
 function fixture(name = 'region') {
-  const doc = readFileSync(new URL('../docs/visual-microplan-contract-fixtures.md', import.meta.url), 'utf8');
+  const doc = readFileSync(new URL('./fixtures/visual-microplan-contract-fixtures.md', import.meta.url), 'utf8');
   const marker = `<!-- fixture:${name} -->`;
   const section = doc.split(marker)[1];
   if (!section) throw new Error(`missing contract fixture ${name}`);
@@ -58,7 +68,7 @@ function resultBody(result: { content: Array<{ type: string; text?: string }> })
 
 describe('microplan request compilation and pre-dispatch diagnostics', () => {
   it('keeps protocol fixtures distinct from artistic method selection', () => {
-    const doc = readFileSync(new URL('../docs/visual-microplan-contract-fixtures.md', import.meta.url), 'utf8');
+    const doc = readFileSync(new URL('./fixtures/visual-microplan-contract-fixtures.md', import.meta.url), 'utf8');
     expect(doc).toMatch(/not an artistic recipe/i);
     expect(doc).toMatch(/must not be used as an\s+allowlist/i);
 

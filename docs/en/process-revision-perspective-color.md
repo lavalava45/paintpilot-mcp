@@ -58,7 +58,7 @@ component contours, rigid transforms and articulated IK chains.
 This does **not** close the need for real-Photoshop validation of
 all dependent transforms, perspective invalidation, source/pixel
 correspondence and artistic quality. See [object construction](../object-construction.md)
-and [the live acceptance roadmap](../PAINTING-ROADMAP.md).
+and [the live acceptance requirements](../PAINTING-WORK-DETAILS.md#e18).
 
 ## The same pattern appeared in color
 

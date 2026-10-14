@@ -5,6 +5,7 @@ import jpeg from 'jpeg-js';
 import {
   CONTOUR_GEOMETRY,
   compileContourMask,
+  intersectContourCoverage,
   insetContourMask,
   contourMaskContains,
   ContourGeometryError,
@@ -16,7 +17,7 @@ import { strokeExecutionBudget } from '../tools/painting-tools.js';
 // Native Photoshop brush rendering is deliberately not claimed to match this planning rasterizer.
 type Point = { x: number; y: number };
 type Bounds = { left: number; top: number; right: number; bottom: number };
-type Image = { width: number; height: number; data: Uint8Array };
+type Image = { width: number; height: number; data: Uint8Array; source_mask?: Point[][] };
 export type PainterlyFrame = {
   path: string;
   sha256: string;
@@ -310,6 +311,143 @@ export function normalizePainterly(value: unknown): PainterlySettings {
   return settings;
 }
 
+/**
+ * An authored light-field is continuous, unlike an image reference whose
+ * short edge-following marks can be desirable. A very narrow component
+ * exposes Hertzmann's circular brush footprints as isolated bright blobs.
+ * Sweep along the long surface axis instead, varying the sampled field
+ * color in short overlapping intervals. This remains editable BRUSH work
+ * with the same exact owner, native budget and contour clearance gates.
+ */
+function planNarrowLightFieldStrokes(
+  source: Image,
+  before: Image,
+  canvas: { width: number; height: number },
+  settings: PainterlySettings
+): ReturnType<typeof planPainterlyStrokes> | undefined {
+  const clip = settings.clip_contour;
+  const box = {
+    left: Math.min(...clip.map(p => p.x)),
+    top: Math.min(...clip.map(p => p.y)),
+    right: Math.max(...clip.map(p => p.x)),
+    bottom: Math.max(...clip.map(p => p.y)),
+  };
+  const width = box.right - box.left;
+  const height = box.bottom - box.top;
+  const short = Math.min(width, height);
+  const long = Math.max(width, height);
+  if (long / short < 3 || settings.clip_exclusions.length || settings.max_strokes < 4) {
+    return undefined;
+  }
+  const radius = settings.brush_radii.find(r => r <= short / 5);
+  if (!radius || short < 4 * radius + 2) return undefined;
+  const vertical = height >= width;
+  const majorStart = vertical ? box.top : box.left;
+  const majorEnd = vertical ? box.bottom : box.right;
+  const minorStart = vertical ? box.left : box.top;
+  const minorEnd = vertical ? box.right : box.bottom;
+  const trackCount = 2;
+  const intervals = Math.min(11, Math.floor(settings.max_strokes / trackCount));
+  const start = majorStart + radius + 1;
+  const end = majorEnd - radius - 1;
+  const segmentLength = (end - start) / intervals;
+  if (segmentLength < 2 * radius) return undefined;
+  const pointAt = (major: number, minor: number): Point =>
+    vertical ? { x: minor, y: major } : { x: major, y: minor };
+  const sampleField = (point: Point, channel: number) => {
+    const b = settings.reference_bounds;
+    return sample(
+      source,
+      ((point.x - b.left) / (b.right - b.left)) * source.width - 0.5,
+      ((point.y - b.top) / (b.bottom - b.top)) * source.height - 0.5,
+      channel
+    );
+  };
+  // The footprint must remain fully inside the component, even where the
+  // slender wall tapers. Skip an unsafe interval instead of painting across
+  // a side/cutout or assuming a rectangular mask.
+  const strokes: PainterlyStroke[] = [];
+  for (let band = 0; band < intervals; band++) {
+    const from = Math.max(start, start + band * segmentLength - radius * 0.6);
+    const to = Math.min(end, start + (band + 1) * segmentLength + radius * 0.6);
+    for (let track = 0; track < trackCount; track++) {
+      const path: Point[] = [];
+      const count = Math.max(2, Math.ceil((to - from) / Math.min(4, radius / 2)));
+      for (let i = 0; i <= count; i++) {
+        const major = from + ((to - from) * i) / count;
+        const eligible: number[] = [];
+        for (let minor = minorStart; minor <= minorEnd; minor += 1) {
+          const p = pointAt(major, minor);
+          if (painterlyClearance(p, clip) >= radius + 0.6) eligible.push(minor);
+        }
+        if (!eligible.length) { path.length = 0; break; }
+        const index = Math.min(eligible.length - 1,
+          Math.floor(((track + 0.5) / trackCount) * eligible.length));
+        path.push(pointAt(major, eligible[index]));
+      }
+      if (path.length < 3) continue;
+      // Polygonal side walls have piecewise-linear edges; sampled sweep
+      // segments follow those edges. Verify the swept brush centers as
+      // well as their endpoints before handing them to native Photoshop.
+      let safe = true;
+      for (let i = 1; i < path.length && safe; i++) {
+        const a = path[i - 1], b = path[i];
+        for (let s = 0; s <= 4; s++) {
+          const p = { x: a.x + (b.x - a.x) * s / 4, y: a.y + (b.y - a.y) * s / 4 };
+          if (painterlyClearance(p, clip) < radius + 0.5) { safe = false; break; }
+        }
+      }
+      if (!safe) continue;
+      const middle = path[Math.floor(path.length / 2)];
+      strokes.push({
+        tool: 'BRUSH',
+        simulate_pressure: false,
+        closed: false,
+        points: path,
+        color: {
+          red: Math.round(sampleField(middle, 0)),
+          green: Math.round(sampleField(middle, 1)),
+          blue: Math.round(sampleField(middle, 2)),
+        },
+        size: radius * 2,
+        opacity: Math.min(settings.opacity, 80),
+        flow: 100,
+      });
+    }
+  }
+  // No raster surrogate is applied for these overlapping native sweeps.
+  // Preserve a measured starting residual, but never report a simulated
+  // improvement that was not actually calculated or visually accepted.
+  let residual = 0;
+  for (const stroke of strokes) {
+    const p = stroke.points[Math.floor(stroke.points.length / 2)];
+    const observed = [0, 1, 2].map(c => sample(before,
+      p.x * before.width / canvas.width - 0.5,
+      p.y * before.height / canvas.height - 0.5, c));
+    residual += Math.hypot(observed[0] - stroke.color.red,
+      observed[1] - stroke.color.green, observed[2] - stroke.color.blue);
+  }
+  const startingResidual = strokes.length ? residual / strokes.length : 0;
+  return {
+    strokes,
+    summary: {
+      algorithm: 'bounded-narrow-light-field-sweeps',
+      contour_geometry: CONTOUR_GEOMETRY,
+      clip_exclusion_count: 0,
+      analysis_width: source.width,
+      analysis_height: source.height,
+      stroke_count: strokes.length,
+      levels: [{ radius, candidates: intervals * trackCount, generated: strokes.length,
+        deferred_candidates: intervals * trackCount - strokes.length }],
+      simulated_mean_error_before: startingResidual,
+      simulated_mean_error_after: startingResidual,
+      native_pixels_verified: false,
+      artistic_quality_verified: false,
+      next: 'Inspect native whole-frame pixels; continuous field sampling does not certify smooth Photoshop brush rendering.',
+    },
+  };
+}
+
 export function planPainterlyStrokes(
   source: Image,
   before: Image,
@@ -350,7 +488,10 @@ export function planPainterlyStrokes(
       return fail('painterly_clip_geometry_invalid', 'painterly', error.message);
     }
   };
-  const clipMask = geometry(() => compileContourMask(settings.clip_contour, exclusions));
+  const clipMask = geometry(() => {
+    const component = compileContourMask(settings.clip_contour, exclusions);
+    return source.source_mask ? intersectContourCoverage(component, source.source_mask) : component;
+  });
   const ratio = Math.min(1, settings.max_dimension / Math.max(source.width, source.height));
   const w = Math.max(2, Math.round(source.width * ratio)),
     h = Math.max(2, Math.round(source.height * ratio)),
@@ -714,12 +855,45 @@ export function expandPainterlyPass(
         'painterly.construction_ref.part_id',
         'Part not present in the current model'
       );
-    clip = part!.contour;
+    const owner = owners[0];
+    if (owner.construction_clip_alignment_unverified_after_move)
+      fail(
+        'painterly_construction_alignment_unverified',
+        'painterly.construction_ref',
+        'This owner changed after its model contour was captured. Rebuild/revalidate the construction on its current physical pixels before painting; an old contour is unsafe.'
+      );
+    const alignment = object(owner.construction_clip_alignment);
+    let translation = { x: 0, y: 0 };
+    if (Object.keys(alignment).length) {
+      const dx = alignment.translate_x, dy = alignment.translate_y;
+      if (alignment.model_id !== model!.model_id || alignment.revision !== model!.revision
+        || alignment.target_sha256 !== part!.target_sha256
+        || typeof dx !== 'number' || !Number.isFinite(dx)
+        || typeof dy !== 'number' || !Number.isFinite(dy)) {
+        fail(
+          'painterly_construction_alignment_unverified',
+          'painterly.construction_ref',
+          'The durable owner and resolved model do not share an exact current construction target; revalidate geometry before painting.'
+        );
+      }
+      translation = { x: dx as number, y: dy as number };
+    }
+    // Translate ONLY by accepted, per-owner native connected-move receipts.
+    // The historical construction model itself is never silently rewritten.
+    clip = part!.contour.map(point => ({
+      x: point.x + translation.x, y: point.y + translation.y,
+    }));
     constructionTarget = {
       model_id: model!.model_id,
       revision: model!.revision,
       part_id: ownerId,
-      target_sha256: part!.target_sha256,
+      target_sha256: sha(JSON.stringify(clip)),
+      source_target_sha256: part!.target_sha256,
+      ...(Object.keys(alignment).length ? {
+        model_source_operation_id: alignment.source_operation_id,
+        translated_by_accepted_connected_move: translation.x !== 0 || translation.y !== 0,
+        last_connected_move_operation_id: alignment.last_connected_move_operation_id ?? null,
+      } : {}),
     };
   }
   const settings = normalizePainterly({ ...request, clip_contour: clip }),
@@ -733,13 +907,124 @@ export function expandPainterlyPass(
       const field = authoredFormField(request.form_field, settings.reference_bounds, settings.max_dimension);
       source = field;
       authoredField = field.field;
+      if (authoredField.kind === 'cast-shadow') {
+        const caster = authoredField.caster as Record<string, any>, receiver = authoredField.receiver as Record<string, any>;
+        if (receiver.owner_id !== ownerId || !(context.logical_layer_owners ?? []).some(o => o.hypothesis_id === caster.owner_id))
+          fail('painterly_shadow_owner_conflict', 'painterly.form_field', 'Bind the receiver to this independently editable target owner and the caster to an existing owner; no inferred or foreign layer binding.');
+      }
     } catch (error) {
       if (error instanceof FormFieldError) fail('painterly_form_field_invalid', error.path, error.message);
       throw error;
     }
   } else source = readPainterlyJpeg(ref.path, ref.sha256);
   const before = readPainterlyJpeg(frame!.path, frame!.sha256, 'current_frame');
-  const generated = planPainterlyStrokes(
+  const layerId = owners[0].layer_id;
+  const supplied = object(raw.logical_layer);
+  const clipBounds = {
+    left: Math.min(...settings.clip_contour.map(p => p.x)),
+    top: Math.min(...settings.clip_contour.map(p => p.y)),
+    right: Math.max(...settings.clip_contour.map(p => p.x)),
+    bottom: Math.max(...settings.clip_contour.map(p => p.y)),
+  };
+  const nativeNarrowSurface = authoredField?.kind === 'light-field'
+    && (clipBounds.bottom - clipBounds.top) / (clipBounds.right - clipBounds.left) >= 3
+    && request.render_method !== 'brush-sweep';
+  if (nativeNarrowSurface) {
+    // The last two live E.7e studies demonstrated that discrete BRUSH
+    // footprints cannot approximate a narrow wall's continuous illumination.
+    // Use Photoshop's native smooth raster gradient, but ONLY with native
+    // transparent-pixel protection in an owned NORMAL layer and one History
+    // suspension. This never paints outside the existing opaque surface.
+    if (settings.clip_exclusions.length) fail('surface_gradient_exclusions_unavailable',
+      'painterly.clip_exclusions', 'Surface gradient requires pre-existing alpha holes; separate exclusions are not implemented');
+    if (supplied.hypothesis_id !== undefined && (supplied.hypothesis_id !== ownerId
+      || supplied.decision !== 'continue-logical-layer'
+      || (supplied.layer_id !== undefined && supplied.layer_id !== layerId))) {
+      fail('painterly_owner_conflict', 'next_pass.logical_layer', 'Continue the pinned physical surface owner');
+    }
+    const declared = object(raw.region_bounds);
+    if (raw.region_bounds !== undefined && (
+      !['left', 'top', 'right', 'bottom'].every(k => finite(declared[k]))
+      || Number(declared.left) > clipBounds.left || Number(declared.top) > clipBounds.top
+      || Number(declared.right) < clipBounds.right || Number(declared.bottom) < clipBounds.bottom)) {
+      fail('painterly_region_conflict', 'next_pass.region_bounds', 'Surface review region must contain the whole owner contour');
+    }
+    const lightDirection = authoredField!.light_direction as number[];
+    if (Math.abs(lightDirection[0]) < 0.15) fail('surface_gradient_direction_unresolved',
+      'painterly.form_field.light_direction', 'Choose a horizontal light-side direction for the narrow vertical surface');
+    // Native Photoshop can render at most four gradient color stops. Sample
+    // the *same authored directional light-field* used by the brush planner
+    // across the wall's middle cross-section; a fixed light/shadow pair loses
+    // its actual center, radius, ambient level, rotation and light strength.
+    // This is a 1D cross-section approximation, not a claim that a linear
+    // gradient reproduces the full 2D authored field or native pixel quality.
+    const reference = settings.reference_bounds;
+    const midY = (clipBounds.top + clipBounds.bottom) / 2;
+    const sampledStops = [0, 1 / 3, 2 / 3, 1].map(position => {
+      const x = clipBounds.left + position * (clipBounds.right - clipBounds.left);
+      const sourceX = ((x - reference.left) / (reference.right - reference.left)) * source.width - 0.5;
+      const sourceY = ((midY - reference.top) / (reference.bottom - reference.top)) * source.height - 0.5;
+      return {
+        position,
+        red: Math.round(sample(source, sourceX, sourceY, 0)),
+        green: Math.round(sample(source, sourceX, sourceY, 1)),
+        blue: Math.round(sample(source, sourceX, sourceY, 2)),
+      };
+    });
+    const gradient = {
+      document_id: raw.document_id,
+      layer_id: layerId,
+      preserve_transparency: true,
+      clip_contour: settings.clip_contour,
+      opacity: settings.opacity,
+      from: { x: clipBounds.left, y: (clipBounds.top + clipBounds.bottom) / 2 },
+      to: { x: clipBounds.right, y: (clipBounds.top + clipBounds.bottom) / 2 },
+      stops: sampledStops,
+    };
+    return {
+      pass: {
+        ...raw,
+        material_role: raw.material_role ?? 'continuous surface light/value turn',
+        actions: [{ id: 'surface_tone', tool: 'photoshop_paint_color_gradient',
+          method_id: 'continuous-color-field', args: gradient }],
+        region_bounds: raw.region_bounds ?? clipBounds,
+        logical_layer: {
+          decision: 'continue-logical-layer', hypothesis_id: ownerId,
+          hypothesis: owners[0].hypothesis ?? `Continuous surface tone ${ownerId}`,
+          layer_id: layerId,
+          expected_independent_rollback: owners[0].expected_independent_rollback === true
+            || owners[0].rollback_value !== 'low',
+          ...supplied,
+        },
+      },
+        provenance: {
+          algorithm: 'native-alpha-protected-surface-gradient',
+          field_projection: 'horizontal-middle-cross-section-four-stops',
+        stroke_count: 0,
+        native_pixels_verified: false,
+        artistic_quality_verified: false,
+        owner_id: ownerId,
+        layer_id: layerId,
+        source_kind: 'authored-form-field',
+        authored_form_field: authoredField,
+        form_field_sha256: source.sha256,
+        reference_bounds: settings.reference_bounds,
+        before_sha256: frame!.sha256,
+        before_operation_id: frame!.operation_id,
+        clip_sha256: sha(JSON.stringify({ contour: settings.clip_contour, exclusions: [] })),
+        plan_sha256: sha(JSON.stringify(gradient)),
+        settings,
+      },
+    };
+  }
+  const generated = (authoredField?.kind === 'light-field'
+    ? planNarrowLightFieldStrokes(
+        source,
+        before,
+        { width: frame!.canvas_width, height: frame!.canvas_height },
+        settings
+      )
+    : undefined) ?? planPainterlyStrokes(
     source,
     before,
     { width: frame!.canvas_width, height: frame!.canvas_height },
@@ -775,8 +1060,6 @@ export function expandPainterlyPass(
     level.generated = generated.strokes.filter((s) => s.size === 2 * Number(level.radius)).length;
     level.deferred_candidates = Number(level.candidates) - Number(level.generated);
   }
-  const layerId = owners[0].layer_id,
-    supplied = object(raw.logical_layer);
   if (
     raw.logical_layer !== undefined &&
     (supplied.hypothesis_id !== ownerId ||
@@ -788,13 +1071,7 @@ export function expandPainterlyPass(
       'next_pass.logical_layer',
       'Must continue the selected component on its exact physical layer'
     );
-  const b = settings.reference_bounds,
-    clipBounds = {
-      left: Math.min(...settings.clip_contour.map((p) => p.x)),
-      top: Math.min(...settings.clip_contour.map((p) => p.y)),
-      right: Math.max(...settings.clip_contour.map((p) => p.x)),
-      bottom: Math.max(...settings.clip_contour.map((p) => p.y)),
-    };
+  const b = settings.reference_bounds;
   if (raw.region_bounds !== undefined) {
     const declared = object(raw.region_bounds);
     if (
@@ -902,6 +1179,8 @@ export const PAINTERLY_PASS_SCHEMA = {
       additionalProperties: false,
     },
     form_field: FORM_FIELD_SCHEMA,
+    render_method: { type: 'string', enum: ['native-surface-gradient', 'brush-sweep'],
+      description: 'For tall narrow authored light-field owners, native-surface-gradient (default) protects existing opaque pixels and renders a true continuous gradient in one Photoshop History state. brush-sweep is legacy experimental mode; it failed live artistic review.' },
     reference_bounds: { ...boundsSchema, description: 'Aligned reference bounds OR canvas bounds of the authored analytic form/light field.' },
     clip_contour: {
       type: 'array',
@@ -909,7 +1188,7 @@ export const PAINTERLY_PASS_SCHEMA = {
       maxItems: 256,
       items: pointSchema,
       description:
-        'Ordered polygon of the selected component in canvas pixels; nominal round stroke footprint stays inside. Choose this OR construction_ref.',
+        'Ordered polygon of the selected component in canvas pixels; native surface gradients use an unfeathered polygon selection intersected with existing layer alpha, while brush planning bounds the nominal round footprint. Choose this OR construction_ref.',
     },
     construction_ref: {
       type: 'object',

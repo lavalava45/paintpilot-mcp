@@ -7,6 +7,8 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const ledgerPath = join(ROOT, 'docs', 'live-evidence-ledger.json');
 const ledger = JSON.parse(readFileSync(ledgerPath, 'utf8'));
 const problems = [];
+const unavailable = [];
+let locallyVerified = 0;
 
 if (ledger.schema !== 'photoshop-mcp.live-evidence-ledger.v1') {
   problems.push('unexpected or missing ledger schema');
@@ -50,7 +52,17 @@ for (const entry of ledger.entries ?? []) {
     if (sha256 !== entry.sha256) {
       problems.push(`local evidence SHA-256 changed for ${entry.path}: ${sha256} != ${entry.sha256}`);
     }
+    locallyVerified++;
+  } else {
+    // Evidence payloads are intentionally gitignored. Their absence on a
+    // different checkout is not data corruption, but is also NOT proof that
+    // the hashes were verified. CI checks ledger integrity; a local forensic
+    // review can request strict availability explicitly.
+    unavailable.push(entry.path);
   }
+}
+if (process.argv.includes('--require-all-local') && unavailable.length) {
+  problems.push(`strict local-evidence check: ${unavailable.length} files unavailable:\n${unavailable.map(path => `  ${path}`).join('\n')}`);
 }
 
 if (problems.length) {
@@ -58,5 +70,10 @@ if (problems.length) {
 }
 
 console.log(
-  `live evidence ledger ok — ${ledger.entries.length} hashed runtime/process artifacts accounted for`
+  `live evidence ledger STRUCTURE PASS — ${ledger.entries.length} entries; ` +
+  `${locallyVerified} locally present and hash-checked; ${unavailable.length} unavailable and NOT verified`
 );
+if (unavailable.length && !process.argv.includes('--require-all-local')) {
+  console.warn('Missing gitignored evidence (use --require-all-local to fail on this):\n' +
+    unavailable.map(path => `  ${path}`).join('\n'));
+}

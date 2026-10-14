@@ -46,6 +46,22 @@ export function compileVisualMicroPlan(input: Record<string, unknown>): Record<s
   if (typeof args.stage === 'string') args.stage = canonicalStage(args.stage);
   if (!Array.isArray(args.steps)) return args;
   const steps = args.steps as Array<Record<string, unknown>>;
+  // These setters depend on brush/color state, never on the active layer. Move
+  // only independent setters across layer setup, keeping their order and IDs.
+  // References, evidence boundaries and all other preparation remain barriers.
+  const setters = new Set(['photoshop_select_brush_preset', 'photoshop_set_brush', 'photoshop_set_foreground_color']);
+  const layerSetup = new Set(['photoshop_create_layer', 'photoshop_select_layer_by_name']);
+  const hasReference = (value: unknown): boolean => typeof value === 'string' ? value.includes('$steps.')
+    : Array.isArray(value) ? value.some(hasReference)
+    : !!value && typeof value === 'object' && Object.values(value).some(hasReference);
+  const firstMutation = steps.findIndex(step => VISUAL_MICROPLAN_MUTATION_TOOLS.has(String(step?.tool)));
+  for (let index = 0; index < firstMutation; index++) {
+    const step = steps[index]!;
+    if (!setters.has(String(step?.tool)) || hasReference(step.args)) continue;
+    let destination = index;
+    while (destination > 0 && layerSetup.has(String(steps[destination - 1]?.tool))) destination--;
+    if (destination < index) { steps.splice(index, 1); steps.splice(destination, 0, step); }
+  }
   for (const step of steps) {
     if (!step || typeof step !== 'object' || Array.isArray(step)) continue;
     // Legacy clients sometimes repeated the root artistic intent on each step.

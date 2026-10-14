@@ -61,6 +61,8 @@ and does not ship a substantive test command. No claim of independent anatomy/ar
 
 [Aaron Hertzmann, SIGGRAPH 1998: Painterly Rendering with Curved Brush Strokes of Multiple Sizes](https://mrl.cs.nyu.edu/publications/painterly98/) informs the project-authored bounded adapter in `src/core/painterly-strokes.ts`. No external implementation was copied.
 
+[Scott Schaefer, Travis McLean, and Scott Hoppe, *Image Deformation Using Moving Least Squares* (SIGGRAPH 2006)](https://people.engr.tamu.edu/schaefer/research/mls.pdf) informs the similarity-MLS mathematical draft in `src/core/local-warp-geometry.ts`. This is a fresh, project-authored **non-executable geometry candidate**; no original source code, paper figure, image or external library is included. It is intentionally not registered as a Photoshop capability or a Guard mutation. The paper is credited for the algorithmic formulation, not asserted to provide software or license coverage for the independent implementation. No new runtime dependency was added.
+
 IK.ts is integrated as `ikts@1.3.7` through the bounded object-construction adapter. Clipper2 is used through the separately credited TypeScript port `clipper2-ts`, not the original C++ binary or a WASM package. Poly2Tri benchmark assets are not used or included.
 
 This inventory covers all direct production dependencies, not all transitive or development dependencies. Dependency packages retain their own source notices. The JPEG package also carries decoder/encoder file-level licenses, reproduced above. Bezier.js publishes only an MIT declaration/header; its companion notice records that fact and supplies standard MIT text without claiming it is an upstream file.

@@ -186,6 +186,9 @@ async function scaleLayer(params = {}) {
 async function moveLayerPixels(params = {}) {
   const deltaX = requireFiniteNumber(params.deltaX, 'deltaX');
   const deltaY = requireFiniteNumber(params.deltaY, 'deltaY');
+  if (params.connected_move !== undefined) {
+    return moveConnectedLayerPixels(params, deltaX, deltaY);
+  }
 
   return core.executeAsModal(
     async () => {
@@ -197,6 +200,124 @@ async function moveLayerPixels(params = {}) {
     },
     { commandName: 'MCP Move Layer Pixels' }
   );
+}
+
+// One bounded, native, all-or-nothing translation. A semantic relationship
+// never implies that Photoshop automatically moves dependent raster layers.
+// The caller must pin every physical layer and its observed BEFORE bounds.
+async function moveConnectedLayerPixels(params, deltaX, deltaY) {
+  const request = params.connected_move;
+  if (!request || typeof request !== 'object' || Array.isArray(request)) {
+    throw new Error('connected_move_invalid: expected a pinned owner/physical-layer manifest');
+  }
+  if (Math.abs(deltaX) > 512 || Math.abs(deltaY) > 512 || (deltaX === 0 && deltaY === 0)) {
+    throw new Error('connected_move_delta_invalid: nonzero bounded translation required');
+  }
+  const parent = request.parent;
+  const children = request.children;
+  const entries = [parent, ...(Array.isArray(children) ? children : [])];
+  if (!parent || !Array.isArray(children) || children.length < 1 || children.length > 7
+      || entries.some(entry => !entry || typeof entry !== 'object' || Array.isArray(entry))) {
+    throw new Error('connected_move_manifest_invalid: one parent and 1–7 child layers are required');
+  }
+  const ids = new Set();
+  const owners = new Set();
+  for (const entry of entries) {
+    if (!Number.isSafeInteger(entry.layer_id) || entry.layer_id <= 0
+        || typeof entry.owner_id !== 'string' || !entry.owner_id.trim()
+        || ids.has(entry.layer_id) || owners.has(entry.owner_id)) {
+      throw new Error('connected_move_identity_invalid: distinct positive layer IDs and owner IDs required');
+    }
+    ids.add(entry.layer_id);
+    owners.add(entry.owner_id);
+    const b = entry.expected_bounds;
+    if (!b || !['left', 'top', 'right', 'bottom'].every(k => typeof b[k] === 'number' && Number.isFinite(b[k]))
+        || !(b.right > b.left && b.bottom > b.top)) {
+      throw new Error('connected_move_bounds_invalid: finite positive expected bounds required for every layer');
+    }
+  }
+  // A guard-owned call enters one modal Photoshop History suspension. If any
+  // native move/verification fails, abort the entire History suspension rather
+  // than offering a partial receipt or guessing multiple Undo operations.
+  return core.executeAsModal(async (executionContext) => {
+    const doc = requirePinnedActiveDocument(params);
+    const before = entries.map(entry => {
+      const found = findLayerEntry(doc, entry.layer_id);
+      const layer = found?.layer;
+      if (!layer || layer.isBackgroundLayer || layer.visible !== true
+          || String(layer.kind) !== String(constants.LayerKind.NORMAL)) {
+        throw new Error('connected_move_layer_unavailable: expected a visible native NORMAL layer with pinned ID');
+      }
+      const b = layer.bounds;
+      const actual = { left: b.left, top: b.top, right: b.right, bottom: b.bottom };
+      if (!Object.keys(actual).every(k => typeof actual[k] === 'number' && Number.isFinite(actual[k]))
+          || !Object.keys(actual).every(k => Math.abs(actual[k] - entry.expected_bounds[k]) <= 1)) {
+        throw new Error('connected_move_bounds_stale: native BEFORE bounds differ from the pinned owner manifest');
+      }
+      return { owner_id: entry.owner_id, layer_id: entry.layer_id, layer, source_bounds: actual };
+    });
+    let suspensionId;
+    try {
+      suspensionId = await executionContext.hostControl.suspendHistory({
+        documentID: doc.id, name: 'MCP Connected Move',
+      });
+      const initialActiveLayerId = Array.from(doc.activeLayers ?? [])[0]?.id ?? null;
+      // Photoshop Layer.translate can silently leave non-active layer pixels
+      // unchanged. Pin each target by an explicit selection *inside* the same
+      // History suspension, never via an independent preparation History step.
+      for (const row of before) {
+        if (Array.from(doc.activeLayers ?? [])[0]?.id !== row.layer_id) {
+          await selectOnlyLayer(row.layer_id);
+        }
+        const selected = requireActiveLayer(doc, 'connected_move');
+        if (selected.id !== row.layer_id) {
+          throw new Error('connected_move_selection_unverified: active Photoshop layer does not match pinned ID');
+        }
+        await selected.translate(deltaX, deltaY);
+      }
+      const receipts = [];
+      for (const row of before) {
+        // Reacquire the layer by its stable physical ID rather than trusting
+        // the pre-transform DOM proxy captured before suspendHistory.
+        const nativeLayer = findLayerEntry(doc, row.layer_id)?.layer;
+        if (!nativeLayer) throw new Error('connected_move_layer_missing_after_translation');
+        const b = nativeLayer.bounds;
+        const target = { left: b.left, top: b.top, right: b.right, bottom: b.bottom };
+        if (!Object.keys(target).every(k => typeof target[k] === 'number' && Number.isFinite(target[k]))
+            || !Object.keys(target).every(k =>
+              Math.abs(target[k] - (row.source_bounds[k] + (k === 'left' || k === 'right' ? deltaX : deltaY))) <= 1)) {
+          throw new Error('connected_move_target_unverified: ' + JSON.stringify({
+            owner_id: row.owner_id, layer_id: row.layer_id,
+            source_bounds: row.source_bounds, observed_bounds: target, deltaX, deltaY,
+          }));
+        }
+        receipts.push({ owner_id: row.owner_id, layer_id: row.layer_id,
+          source_bounds: row.source_bounds, target_bounds: target });
+      }
+      if (initialActiveLayerId != null
+          && Array.from(doc.activeLayers ?? [])[0]?.id !== initialActiveLayerId) {
+        await selectOnlyLayer(initialActiveLayerId);
+        if (Array.from(doc.activeLayers ?? [])[0]?.id !== initialActiveLayerId) {
+          throw new Error('connected_move_active_layer_restore_unverified');
+        }
+      }
+      await executionContext.hostControl.resumeHistory(suspensionId, true);
+      suspensionId = undefined;
+      return {
+        moved: true, connected: true, deltaX, deltaY,
+        parent_owner_id: parent.owner_id, layer_receipts: receipts,
+        history_steps: 1,
+      };
+    } catch (error) {
+      if (suspensionId !== undefined) {
+        try { await executionContext.hostControl.resumeHistory(suspensionId, false); }
+        catch (abortError) {
+          throw new Error(`connected_move_rollback_unconfirmed: ${String(abortError?.message ?? abortError)}; cause=${String(error?.message ?? error)}`);
+        }
+      }
+      throw error;
+    }
+  }, { commandName: 'MCP Connected Move' });
 }
 
 async function rotateLayer(params = {}) {

@@ -1,6 +1,8 @@
 import type { ToolResult } from '../core/tool-registry.js';
 import type { PhotoshopBackendRouter, PhotoshopPrimitive } from '../platform/photoshop-backend.js';
 import { invokeUxpOperation } from '../platform/uxp-bridge-client.js';
+import { atomicFailureFromError, atomicSuccess } from './atomic-shared.js';
+import { currentToolExecutionContext } from '../core/execution-context.js';
 import { documentId, errorMessage, textResult, type LayerArgs } from './layer-operation-shared.js';
 
 interface TransformSpec {
@@ -57,9 +59,39 @@ export function runScaleLayer(router: PhotoshopBackendRouter, args: LayerArgs): 
   });
 }
 
-export function runMoveLayerPixels(router: PhotoshopBackendRouter, args: LayerArgs): Promise<ToolResult> {
+export async function runMoveLayerPixels(router: PhotoshopBackendRouter, args: LayerArgs): Promise<ToolResult> {
   const deltaX = args.deltaX as number;
   const deltaY = args.deltaY as number;
+  if (args.connected_move !== undefined) {
+    try {
+      if (!currentToolExecutionContext()?.guardOperationId) {
+        throw new Error('connected_move_guard_dispatch_required: raw unguarded Photoshop mutations are prohibited');
+      }
+      if (typeof deltaX !== 'number' || !Number.isFinite(deltaX)
+          || typeof deltaY !== 'number' || !Number.isFinite(deltaY)
+          || (deltaX === 0 && deltaY === 0) || Math.abs(deltaX) > 512 || Math.abs(deltaY) > 512) {
+        throw new Error('connected_move_delta_invalid: finite nonzero offset within 512 px required');
+      }
+      if (!args.connected_move || typeof args.connected_move !== 'object' || Array.isArray(args.connected_move)) {
+        throw new Error('connected_move_manifest_invalid');
+      }
+      // No COM fallback: only the matching native UXP History transaction can
+      // certify the pixel-owner move as one reversible action.
+      const backend = await router.backendFor('layer.move_pixels');
+      if (backend.kind !== 'uxp') throw new Error('connected_move_requires_native_uxp');
+      const id = documentId(args);
+      if (id === undefined) throw new Error('connected_move_document_id_required');
+      const outcome = await invokeUxpOperation('move_layer_pixels', {
+        document_id: id, deltaX, deltaY, connected_move: args.connected_move,
+      }, 'uxp_connected_move_failed');
+      if (!outcome.ok || !outcome.data || outcome.data.connected !== true
+          || outcome.data.moved !== true || outcome.data.history_steps !== 1
+          || !Array.isArray(outcome.data.layer_receipts)) {
+        throw new Error(outcome.error ?? 'connected_move_native_receipt_unproven');
+      }
+      return atomicSuccess('Connected owner layers moved in one native History transaction', outcome.data);
+    } catch (error) { return atomicFailureFromError(error); }
+  }
   return executeTransform(router, args, {
     primitive: 'layer.move_pixels',
     action: 'move_layer_pixels',

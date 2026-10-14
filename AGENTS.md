@@ -1,5 +1,37 @@
 # AGENTS.md — Photoshop MCP Digital Painting Edition
 
+## Development priority and test budget (2026-10-11)
+
+**User outcome comes first: visible improvement in a real Photoshop image.**
+Do not mistake repeatedly expanding infrastructure coverage, telemetry counters,
+documentation or the number of passing tests for progress on painting quality.
+Start each engineering session by identifying one *still-open* user-facing
+roadmap outcome and the smallest concrete step toward accepting it on real pixels.
+If a live COS/Photoshop prerequisite is unavailable, report BLOCKED and choose
+another useful artistic or execution problem; do not fill an unattended session
+with speculative telemetry edge cases.
+
+**E.8a is maintenance-only unless a real failure is reproduced.** The existing
+archive/benchmark tests cover integer limits, sequence/checksum integrity,
+event attribution, incomplete journals and interrupted readers. Do not add
+further synthetic permutations, dedicated test files or multi-suite runs for
+merely theoretical counters, timestamps or event formats. An E.8a source change
+requires a real COS/Photoshop failure (or a genuinely new execution contract),
+observable user impact, a concise reproduction and one minimal owning test.
+Preserve distinct existing protections; avoid deletion solely to raise or lower
+test counts. Run only the directly affected owning tests once; expand on an
+actual regression and run verify:canonical only for integration/release gates.
+
+**Documentation is a task queue, not a session transcript.**
+PAINTING-ROADMAP.md is the short priority plan: outcome, next action and completion boundary.
+Task-specific requirements and conditional acceptance belong in docs/PAINTING-WORK-DETAILS.md;
+read only the owning section after selecting a roadmap outcome. Do not refill the main plan
+with test matrices or session reports. Implementation details, exact operation IDs, per-pass timings and test totals
+belong in CHANGELOG.md or a verified archive snapshot. On closing an item,
+remove its completed TODO only after preserving the original document and
+verifying the actual code/live evidence. One short, evidence-backed report per
+session; no repeated success reports for the same unchanged boundary.
+
 ## ChatGPT Critic role (2026-10-10 source)
 
 Keep the artistic evaluator as a distinct ROLE in the same ChatGPT conversation. At
@@ -12,6 +44,17 @@ Checkpoints: after three substantial visual passes, every six further visual pas
 and final completion. Unfinished initial masses may be kept; their scene findings persist through
 local successes and saves until the corresponding whole-scene criterion is actually reassessed pass.
 Unknown is not success. Small/detail does not require a second reviewer after every stroke.
+After save or closure, re-evaluate the exact current delivered frame via
+review_operation_id + previous_observation.critic_review (optional next_pass),
+without previous_operation_id or re-closing the old visual operation. Historical
+frames cannot authorize continuation; current-frame review preserves the original verdict.
+At the existing visual boundary inspect support, contact and plausible weight distribution of
+every relevant depicted object. Report concrete visible evidence in observed. A Critic
+contact_and_protection pass also needs one findings entry: visible names the support/contact/
+balance (or justified non-applicability), next_change says what to preserve. Respect suspension,
+leaning, motion, counterweights and brief-authorized stylization. Hidden/ambiguous support is
+unknown; a shadow or solved geometry is not visual proof. Fail needs a structural correction,
+and fail/unknown remains scene debt. Use the same delivered image and continuation.
 
 Optional delegation uses the real exposed Core agents API when the user authorized subagents:
 status once, message a suitable sleeping Critic or spawn once using optional_spawn. Send original
@@ -20,6 +63,25 @@ Do not change focus, paint, inspect source or alter model settings. A missing im
 unknown/pending; never fabricate a worker verdict or poll repeatedly. Without Core agents use the
 same-chat role. Neither role labels nor host-reported delegation grant calibrated critic authority.
 No local LM Studio model is automatically called or prepared by PaintPilot.
+
+## Editable semantic scope (E.7g, 2026-10-11)
+
+Declare every independently hideable/recolorable/movable/material/light/mask/rollback part
+as a semantic unit with edit_axes and its own owner/layer. This applies to arbitrary objects;
+subject_kind=single-component/continuous-field is a provisional classification, never proof
+of completeness. Inseparable accents and any number of marks can stay on their component.
+At artistic_review.editable_scope.required, compare the original brief, exact image, part
+inventory and actual owner/layer bindings. Return previous_observation.editable_scope_review:
+exact request_id; each required semantic_id/layer_id/status/visible; unmapped_parts names
+undeclared independently editable content and its current owner. Composite appearance alone
+cannot prove separation: use available read-only evidence or unknown. Unpainted declarations
+are missing with layer_id=null and remain creatable. Report discoveries during any review;
+unchanged same-part work reuses accepted inventory without an extra questionnaire or call.
+Combined owners are frozen for continuation/raw/keep. Preserve their pixels; add replacement
+units and new distinct layers. Confirm replacements in a whole-scene review; never clear debt
+by relabelling or saving old pixels. Request review_scope=whole-scene on the existing
+photoshop_guard_review_image when final/replacement metadata is needed; cached images are reused.
+The host judges meaning; the server enforces identity/topology/debt, not arbitrary object recognition.
 
 ## Ordinary same-chat pixel review
 
@@ -67,6 +129,12 @@ face/body, hair and garment; add separately editable hands/accessories when need
 and review one component per pass. single-component means one actual part, not a whole complex
 subject renamed as a silhouette; continuous-field means a continuous background field. Substantial
 temporary objects also require decomposition, and keep cannot bypass component validation.
+A scene unit with editability=temporary is a composition scaffold: after its initial pass it is
+frozen, including at GLOBAL_BLOCK_IN. No continue-logical-layer, adjust or keep/reclassification
+may turn it into the whole final scene. Extend the same plan with independent parts on new
+owners/layers; retain the scaffold as reference until authorized replacement. A reversible
+experiment on one real component uses editability=independent with temporary-hypothesis.
+substantial=false never exempts new temporary ownership from the component plan.
 Small inseparable accents remain on their component. A typed plan is an editing contract, not
 proof of pixel content or artistic quality. Existing flattened pixels are retained until explicit
 component extraction/reconstruction; never reassign old ownership labels as if pixels were split.
@@ -114,6 +182,22 @@ brush-scale marks inside the existing BRUSH executor budget. It does not invent 
 a textured block-in as finished form. Read the full public schema/corrections, not repository source. Inspect
 the native preview, including preset fringes outside the intended contour; the planner only bounds the nominal
 round footprint. Replan from the latest frame after observation; never replay the previous generated package.
+
+For an existing **tall narrow opaque NORMAL raster** owner with an authored
+light-field, the default is now `native-alpha-protected-surface-gradient`,
+**not** Hertzmann marks or the failed long-axis BRUSH sweep. The Guard binds
+one continuous `photoshop_paint_color_gradient` to the exact owner with
+`preserve_transparency=true`; UXP suspends one History state, temporarily
+protects transparent pixels, verifies the lock, renders a genuine linear
+pixel gradient across the short surface axis, restores the lock/active layer,
+verifies native bounds, and commits or aborts that state. A broad scene-wide
+gradient still requires E.19 scene-light/color preflight. This is *not*
+a claim that all paintings should use a linear gradient. Do not invoke
+`render_method=brush-sweep` merely to tune away the two previous live
+failure patterns. A source-only contract is never evidence of a native
+pixel/artistic-quality PASS: inspect the exact full-frame AFTER before
+continuing. Other references and form fields retain their existing BRUSH
+workflow.
 
 
 Smooth construction contours use Bezier.js with 0.25-pixel accuracy and a 256-point cap; a cap refusal
@@ -257,6 +341,14 @@ The model must construct compact `next_pass`; removed full-operation payloads ar
 and are not a model-facing recovery or compatibility path.
 
 ### Applying local server / UXP changes in the current CoS development setup
+
+Use [deployment health](docs/deployment-health.md) as the coordinated activation gate.
+`npm run build:server` publishes a fingerprinted build only after successful compilation
+and an unchanged-source check. Then, at an authorized artist pause, restart the one CoS
+plugin and reload the changed UXP companion. Confirm `npm run deployment:health` reports
+`current`; `--offline` cannot confirm loaded components. Do not label tested source as
+activated, rely on revision names alone, or run health checks before every paint pass.
+The build/health commands themselves never restart apps, paint or replay operations.
 
 After `npm run build:server`, restart only this repository's Photoshop MCP child process:
 
@@ -929,6 +1021,19 @@ More: [docs/development.md](docs/development.md#8-troubleshooting).
 | [src/tools/](src/tools/) | Tool implementations |
 | [src/prompts/](src/prompts/) | MCP prompt templates |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | PR and release workflow |
+
+## Critic correction and authored targets
+
+Use the existing Critic → Painter → Guard continuation. Rank visible deficits; optionally label
+their generic correction_kind. Address the selected original-task deficit with actual component,
+placement, form, light/material or contact work. Two unchanged no-gain attempts require changed
+construction/target/method, not a new label. Local gain does not close whole-scene debt.
+Read task_anchor in continuation; at whole-scene Critic or recovery use the restored full original
+brief. Do not reread sources or request unchanged images to reconstruct the assignment.
+For authored painterly targets, surface accepts triangles or corresponding sections with optional
+normals/material; cast-shadow requires caster, receiver owner/plane, contact and light. These are
+bounded orthographic 2.5D approximations, not inferred anatomy or a complete physical renderer.
+Preserve owner/protection masks and judge the executed pixels before claiming improvement.
 
 ## Contributing (agents editing this repo)
 

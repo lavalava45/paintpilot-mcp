@@ -15,7 +15,7 @@ const nativeFetch = globalThis.fetch;
 
 function pluginPoll(base: string, init?: RequestInit, includeMetadata = true): Promise<Response> {
   const suffix = includeMetadata
-    ? `?protocol=${encodeURIComponent(TEST_REGISTRATION_PROTOCOL)}&revision=${encodeURIComponent(TEST_BRIDGE_REVISION)}&photoshopVersion=27.0.1&documentCount=1&activeDocumentId=42&activeDocumentName=Parity.psd`
+    ? `?protocol=${encodeURIComponent(TEST_REGISTRATION_PROTOCOL)}&revision=${encodeURIComponent(TEST_BRIDGE_REVISION)}&deploymentSourceSha256=${'a'.repeat(64)}&photoshopVersion=27.0.1&documentCount=1&activeDocumentId=42&activeDocumentName=Parity.psd`
     : '';
   return fetch(`${base}/poll${suffix}`, init);
 }
@@ -190,6 +190,8 @@ describe('UXP bridge long-poll transport', () => {
       plugin_connected: true,
       transport: 'long-poll',
       bridge_revision: TEST_BRIDGE_REVISION,
+      uxp_source_sha256: 'a'.repeat(64),
+      server_deployment: { protocol: 'paintpilot.deployment.v1', pid: process.pid },
       active_document: { id: 42, name: 'Parity.psd' },
     });
     expect(bridge.isUxpPluginConnected(Date.now() + 30_000)).toBe(true);

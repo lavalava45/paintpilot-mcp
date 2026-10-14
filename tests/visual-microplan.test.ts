@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 import {
   normalizeToolResultForPlaceholders,
   parseVisualMicroPlan,
@@ -138,6 +139,7 @@ describe('parseVisualMicroPlan', () => {
       independent_region: true,
       addresses_primary_mismatch: false,
       addresses_problem_id: 'problem-green-mass',
+      addresses_problem_ids: ['critic-form', 'global-primitive', 'problem-green-mass'],
     }));
 
     expect(parsed.affectedRelations).toEqual(['green mass remains left of the focal accent']);
@@ -146,6 +148,8 @@ describe('parseVisualMicroPlan', () => {
     expect(parsed.independentRegion).toBe(true);
     expect(parsed.addressesPrimaryMismatch).toBe(false);
     expect(parsed.addressesProblemId).toBe('problem-green-mass');
+    expect(parsed.addressesProblemIds).toEqual(['problem-green-mass', 'critic-form', 'global-primitive']);
+    expect(() => parseVisualMicroPlan(basePlan({ addresses_problem_ids: [''] }))).toThrow(/addresses_problem_ids/);
   });
 
   it('accepts paint_regions as the single visual mutation', () => {
@@ -1625,7 +1629,94 @@ function knownGoodCreateNewRegionPlan(): Record<string, unknown> {
   };
 }
 
+it('rejects the retained crossing contour at the exact Guard pre-dispatch boundary', async () => {
+  const retained = JSON.parse(readFileSync(new URL('./fixtures/tiger-self-intersection-20261011.json', import.meta.url), 'utf8'));
+  const registry = new ToolRegistry();
+  let dispatched = 0;
+  const uncalled = async () => { dispatched++; return { content: [] }; };
+  for (const name of ['photoshop_create_layer', 'photoshop_get_preview'])
+    registry.register(name, definition(name, uncalled));
+  const region = createPaintingTools({} as any, {} as any).find(entry => entry.tool.name === 'photoshop_paint_regions')!;
+  registry.register(region.tool.name, { ...region, handler: uncalled });
+  const plan = knownGoodCreateNewRegionPlan();
+  plan.region_bounds = { left: 0, top: 0, right: 1000, bottom: 1400 };
+  const painting = (plan.steps as any[])[1].args.regions[0];
+  painting.id = retained.part_id;
+  painting.contours[0].points = retained.points;
+  const rejection = await preflightVisualMicroPlanForExecution(plan, registry,
+    { documentId: 42, width: 1000, height: 1400 });
+  const result = JSON.parse((rejection!.content[0] as { text: string }).text);
+  expect(result).toMatchObject({ execution: 'not-executed', visual_mutation_started: false });
+  expect(result.errors.filter((s: string) => s.includes('filled_contour_self_intersection'))).toHaveLength(2);
+  expect(dispatched).toBe(0);
+});
+
+it('preflights typed step-result references before creating a layer or painting', async () => {
+  const registry = new ToolRegistry();
+  let calls = 0;
+  const handler = async () => { calls++; return { content: [] }; };
+  for (const tool of ['photoshop_create_layer', 'photoshop_get_preview'])
+    registry.register(tool, definition(tool, handler));
+  const regionTool = createPaintingTools({} as any, {} as any)
+    .find(row => row.tool.name === 'photoshop_paint_regions')!;
+  registry.register(regionTool.tool.name, { ...regionTool, handler });
+  const run = async (modify: (plan: any) => void) => {
+    const plan: any = knownGoodCreateNewRegionPlan();
+    modify(plan);
+    return preflightVisualMicroPlanForExecution(plan, registry,
+      { documentId: 42, width: 100, height: 100 });
+  };
+  expect(await run(() => {})).toBeUndefined();
+  for (const [description, setRef] of [
+    ['nonexistent result field', (p: any) => { p.steps[1].args.regions[0].opacity = '$steps.layer.details.missingField'; }],
+    ['wrong numeric target', (p: any) => { p.steps[1].args.regions[0].opacity = '$steps.layer.details.layerId'; }],
+    ['later step', (p: any) => { p.steps[1].args.regions[0].layer_id = '$steps.preview.details.layerId'; }],
+    ['unknown source', (p: any) => { p.steps[1].args.regions[0].layer_id = '$steps.nope.details.layerId'; }],
+    ['wrong producer', (p: any) => { p.steps[0].tool = 'photoshop_get_preview'; }],
+  ] as Array<[string, (plan: any) => void]>) {
+    const rejected = await run(setRef);
+    expect(rejected, description).toBeDefined();
+    const body = JSON.parse((rejected!.content[0] as { text: string }).text);
+    expect(body, description).toMatchObject({ execution: 'not-executed', visual_mutation_started: false });
+    expect(JSON.stringify(body), description).toMatch(/reference|earlier step|guaranteed compatible/);
+  }
+  expect(calls).toBe(0);
+});
+
 describe('photoshop_execute_visual_microplan', () => {
+  it.each([true, false])('accounts for a native compact Undo only with an authenticated step receipt (%s)', async authenticated => {
+    const registry = new ToolRegistry();
+    registry.register('photoshop_undo', definition('photoshop_undo', async () => ({
+      content: [
+        { type: 'text', text: 'Undo successful (1 step)\nResult: {"undone":true,"steps":1}' },
+        ...(authenticated ? [{ type: 'text' as const, text: JSON.stringify({
+          undone: true, steps: 1, undo_history_states_consumed: 1, evidence: 'uxp_native_undo_receipt',
+        }) }] : []),
+      ],
+    }), true));
+    registry.register('photoshop_get_preview', definition('photoshop_get_preview', async () => ({
+      content: [{ type: 'text', text: JSON.stringify({ ok: true, sha256: 'undo-after' }) }],
+    }), true));
+    const result = await createVisualMicroPlanTools(registry)[0]!.handler(basePlan({
+      plan_id: `bounded-rollback-${authenticated}`, method_class: 'rollback', scale: 'global', region: 'whole frame',
+      action_class: 'ROLLBACK', protected_regions: [],
+      steps: [
+        { id: 'undo-native', tool: 'photoshop_undo', args: { document_id: 42, steps: 1 } },
+        { id: 'after', tool: 'photoshop_get_preview', args: {} },
+      ],
+    }));
+    expect(result.isError).not.toBe(true);
+    const text = result.content.find(item => item.type === 'text');
+    const body = JSON.parse(text?.type === 'text' ? text.text : '{}');
+    expect(body.pass_execution.history_ownership.status).toBe(authenticated ? 'exact' : 'unproven');
+    if (authenticated) {
+      expect(body.pass_execution.history_ownership).toMatchObject({
+        owned_history_steps: 1, actions: [{ step_id: 'undo-native', history_steps: 1 }],
+      });
+      expect(body.mutation_results['undo-native']).toMatchObject({ undone: true, undo_history_states_consumed: 1 });
+    }
+  });
+
   it.each([0, 1, undefined])('accounts for selection preparation history (%s) before one mask and one final preview', async history => {
     const registry = new ToolRegistry();
     const calls: string[] = [];
@@ -1776,7 +1867,9 @@ describe('photoshop_execute_visual_microplan', () => {
       if (mode === 'valid-absolute') {
         expect(result).toBeUndefined();
         paint.regions[0].contours[0].points = [
-          { x:5,y:5,right:[-5,10] }, { x:5,y:15,left:[15,10] }, { x:8,y:15 },
+          // Outlying handles still keep the cubic inside the clip. Close on
+          // the right, so this extent fixture does not self-intersect.
+          { x:5,y:5,right:[-5,10] }, { x:5,y:15,left:[15,10] }, { x:15,y:15 }, { x:15,y:5 },
         ];
         paint.clip_bounds = { left:0,top:0,right:20,bottom:20 };
         expect(await preflightVisualMicroPlanForExecution(plan,registry,{documentId:42,width:100,height:100}))
@@ -1842,6 +1935,24 @@ describe('photoshop_execute_visual_microplan', () => {
     expect(previewCalls).toBe(0);
   });
 
+  it('fails independent brush preparation before creating a layer or dispatching paint', async () => {
+    const registry = new ToolRegistry();
+    const called: string[] = [];
+    for (const tool of ['photoshop_create_layer', 'photoshop_paint_regions', 'photoshop_get_preview'])
+      registry.register(tool, definition(tool, async () => { called.push(tool); return { content: [{ type: 'text', text: '{"ok":true}' }] }; }, true));
+    registry.register('photoshop_select_brush_preset', definition('photoshop_select_brush_preset', async () => {
+      called.push('preset'); return { isError: true, content: [{ type: 'text', text: '{"ok":false,"code":"brush_setter_unverified"}' }] };
+    }, true));
+    const plan = knownGoodCreateNewRegionPlan() as any;
+    plan.steps.splice(1, 0, { id: 'preset', tool: 'photoshop_select_brush_preset', args: { name: 'Installed Dry Brush' } });
+    const result = await createVisualMicroPlanTools(registry)[0]!.handler(plan);
+    const text = result.content.find(item => item.type === 'text');
+    const body = JSON.parse(text && 'text' in text ? text.text : '{}');
+    expect(body).toMatchObject({ code: 'microplan_prepare_failed', failure_category: 'brush_setter_unverified', failed_step: 'preset',
+      preparation_execution: { prior_side_effecting_preparation_completed: false } });
+    expect(called).toEqual(['preset']);
+  });
+
   it('keeps the pass uncertain when an earlier state-changing preparation succeeded before a later exact rejection', async () => {
     const registry = new ToolRegistry();
     let paintCalls = 0;
@@ -1867,12 +1978,14 @@ describe('photoshop_execute_visual_microplan', () => {
 
     const plan = structuredClone(knownGoodCreateNewRegionPlan()) as any;
     plan.plan_id = 'prepare-partial-side-effect';
-    plan.steps.splice(1, 0, { id: 'foreground', tool: 'photoshop_set_foreground_color', args: {} });
+    registry.register('photoshop_get_brush_settings', definition('photoshop_get_brush_settings', async () => ({ content: [{ type: 'text', text: '{"ok":true,"settings":{}}' }] })));
+    plan.steps.splice(1, 0, { id: 'settings', tool: 'photoshop_get_brush_settings', args: {} },
+      { id: 'foreground', tool: 'photoshop_set_foreground_color', args: {} });
     const result = await createVisualMicroPlanTools(registry)[0]!.handler(plan);
     const text = result.content.find(item => item.type === 'text');
     const body = JSON.parse(text && 'text' in text ? text.text : '{}');
     expect(result.isError).toBe(true);
-    expect(body.code).toBe('microplan_prepare_failed');
+    expect(body.code, JSON.stringify(body.errors)).toBe('microplan_prepare_failed');
     expect(body.execution).toBeUndefined();
     expect(body.preparation_execution).toMatchObject({
       prior_side_effecting_preparation_completed: true,

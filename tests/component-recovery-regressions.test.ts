@@ -113,7 +113,24 @@ it('requires component declarations for a new committed nontrivial owner before 
   expect(f.runtime.store.records()).toEqual([]);
 });
 
-it('refuses promoting a whole person as a single component without rewriting journals', () => {
+it('rejects raw painting and keep relabelling of the observed cafe scaffold without altering journals', () => {
+  const f = fixture();
+  const plan = normalizeSceneOwnershipPlan({ plan_id: 'cafe',
+    units: [{ semantic_id: 'study', owner_id: 'cafe_underpainting', role: 'Composition study', editability: 'temporary' }],
+    objects: [{ object_id: 'study', kind: 'single-part', subject_kind: 'single-component', component_semantic_ids: ['study'] }],
+  });
+  vi.spyOn(f.runtime.store, 'sceneOwnershipPlan').mockReturnValue(plan);
+  vi.spyOn(f.runtime.store, 'semanticLayerOwners').mockReturnValue([{ hypothesis_id: 'cafe_underpainting', layer_id: 2, temporary: true }]);
+  const before = f.runtime.store.records();
+  const paint = { id: 'cafe-windows', tool: 'photoshop_paint_regions', args: { document_id: 42, regions: [{ layer_id: 2 }] }, summary: 'Windows', purpose: 'Add new windows', stage: 'GLOBAL_BLOCK_IN', scale: 'medium' };
+  expect(f.runtime.store.collectPreflightErrors(paint).some(error => error.startsWith('scene_scaffold_frozen:'))).toBe(true);
+  const relabelled = { ...plan, units: plan.units.map(row => ({ ...row, editability: 'independent' })) };
+  expect(() => f.runtime.store.keepSemanticLayerOwner({ document_id: 42, request_key: 'keep-study', hypothesis_id: 'cafe_underpainting', layer_id: 2, scene_ownership_plan: relabelled })).toThrow(/scene_scaffold_frozen/);
+  expect(f.runtime.store.records()).toEqual(before);
+  expect(f.preview).not.toHaveBeenCalled();
+});
+
+it('refuses promoting a whole person as a single component without rewriting journals' , () => {
   const f = fixture();
   const plan = { plan_id: 'woman-plan', units: [{ semantic_id: 'woman-whole', owner_id: 'woman', role: 'Body hair and garment', editability: 'independent' }],
     objects: [{ object_id: 'woman', subject_kind: 'person', kind: 'single-part', component_semantic_ids: ['woman-whole'] }] };

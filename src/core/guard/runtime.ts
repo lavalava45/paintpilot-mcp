@@ -1,4 +1,6 @@
 import { documentArtisticDebt } from './document-artistic-debt.js';
+import { deploymentHealth, RUNNING_DEPLOYMENT } from '../deployment-health.js';
+import { getUxpBridgeHealthSnapshot } from '../../platform/uxp-bridge-server.js';
 import fs from 'node:fs';
 import { artisticEvaluationFingerprint, type ArtisticEvaluator, type ArtisticEvaluation } from './artistic-evaluator.js';
 import path from 'node:path';
@@ -36,6 +38,7 @@ import {
   type GuardCompilerTelemetry,
 } from './cycle-compiler.js';
 import { observedLayerBoundsIssue, type ExecutableGeometryProvenance } from '../executable-geometry-validation.js';
+import { connectedMoveOwnerIssues, hasConnectedMove } from '../connected-move-guard.js';
 import { guardCapabilities } from './guard-capabilities.js';
 import type { GuardProjectionContext } from './projection-context.js';
 import {
@@ -54,6 +57,7 @@ import {
 } from './async-job.js';
 import { operationNarrative, shouldUseAsyncJob } from './operation-narrative.js';
 import { paintingMethodCapabilities } from '../painting-method-palette.js';
+import { isRegionBlockInStage } from '../visual-microplan.js';
 import { prepareProcessVideoCapture, stopProcessVideoCapture } from '../process-video-trace.js';
 import {
   COMPACT_GUARD_PROTOCOL_VERSION,
@@ -72,6 +76,8 @@ type GuardExecutionRun = {
   replay?: boolean;
   timing?: {
     photoshop_dispatch_wall_ms?: number | null;
+    photoshop_started_at?: string | null;
+    photoshop_operation_end_at?: string | null;
     recorder_prepare_ms?: number | null;
     recorder_finalize_ms?: number | null;
     recorder_settle_ms?: number | null;
@@ -109,7 +115,8 @@ function cycleInputDocumentId(store: SessionStore, input: Record<string, unknown
     : undefined;
   const nextDocumentId = Number(nextPass?.document_id);
   if (Number.isSafeInteger(nextDocumentId) && nextDocumentId > 0) return nextDocumentId;
-  const previousOperationId = typeof input.previous_operation_id === 'string' ? input.previous_operation_id : undefined;
+  const previousOperationId = typeof input.previous_operation_id === 'string' ? input.previous_operation_id
+    : typeof input.review_operation_id === 'string' ? input.review_operation_id : undefined;
   const previousRecord = previousOperationId ? store.read(previousOperationId) : undefined;
   const previousDocumentId = Number(previousRecord?.args?.document_id);
   return Number.isSafeInteger(previousDocumentId) && previousDocumentId > 0 ? previousDocumentId : undefined;
@@ -506,7 +513,12 @@ export class EmbeddedGuardRuntime {
       compact_guard_protocol_version: COMPACT_GUARD_PROTOCOL_VERSION,
       runtime_state_version: RUNTIME_STATE_VERSION,
       expected_uxp_bridge_revision: UXP_BRIDGE_REVISION,
+      running_deployment: RUNNING_DEPLOYMENT,
     };
+  }
+
+  deploymentHealth(): Record<string, unknown> {
+    return deploymentHealth(undefined, RUNNING_DEPLOYMENT, getUxpBridgeHealthSnapshot());
   }
 
   toolContract(toolName: string): Record<string, unknown> {
@@ -612,6 +624,7 @@ export class EmbeddedGuardRuntime {
           },
           PENCIL: {
             settings_source: 'current_photoshop_tool_settings',
+            native_readiness: 'positive observed diameter and opacity required; prefer controlled BRUSH for pencil appearance',
             per_stroke_size_opacity_flow: false,
             per_stroke_dynamics: false,
             color_override: true,
@@ -1232,7 +1245,7 @@ export class EmbeddedGuardRuntime {
         projectionContext: projection,
       };
       const compiled = await compileGuardCycle(
-        { previous_operation_id: closure.previous_operation_id, previous_observation: closure.previous_observation, next_pass: nextPass },
+        { previous_operation_id: closure.previous_operation_id, review_operation_id: closure.review_operation_id, previous_observation: closure.previous_observation, next_pass: nextPass },
         this.store,
         this.registry,
         compilerOptions
@@ -1252,7 +1265,7 @@ export class EmbeddedGuardRuntime {
         violations: compiled.violations,
         error_codes: [...new Set(compiled.violations.map(item => item.code))],
         normalizations: compiled.normalizations,
-        continuation: 'Lint is optional and never closes the previous operation. Reuse this SAME previous_operation_id + previous_observation + next_pass in cycle_auto once. Do not add a close-only call or repeat lint after success.',
+        continuation: 'Lint is optional and never closes an operation or persists a review. Reuse this SAME closure or review_operation_id + previous_observation + next_pass in cycle_auto once. Do not add a close-only call or repeat lint after success.',
         compiled_operation: compiled.nextOperation ?? null,
         rejection,
       };
@@ -1845,6 +1858,15 @@ export class EmbeddedGuardRuntime {
               execution_tools: capability.executionTools ?? [],
               visual_intents: capability.visualIntents,
               impact_classes: capability.impactClasses,
+              ...(capability.methodClass === 'region' && typeof args.stage === 'string'
+                && !isRegionBlockInStage(args.stage) ? {
+                required_execution_contract: {
+                  action_classes: ['REPLACE', 'ERASE'],
+                  exact_layer_id_required: true,
+                  clip_bounds_required_on_each_region_mutation: true,
+                  applies_at_stage: args.stage,
+                },
+              } : {}),
             }));
           const distinctClasses = [...new Set(alternatives.map(item => item.method_class))];
           if (alternatives.length) {
@@ -2001,6 +2023,18 @@ export class EmbeddedGuardRuntime {
     const logicalLayer = operationArgs.logical_layer && typeof operationArgs.logical_layer === 'object'
       && !Array.isArray(operationArgs.logical_layer)
       ? operationArgs.logical_layer as Record<string, unknown> : {};
+    if (hasConnectedMove(operation)) {
+      const connectedOwnerIssues = connectedMoveOwnerIssues(
+        operation, this.store.semanticLayerOwners(documentId),
+        this.store.sceneGeometryModel(documentId)
+      );
+      if (connectedOwnerIssues.length) {
+        return connectedOwnerIssues.map(code => ({
+          scope: 'next_operation' as const, code,
+          message: `${code}: connected native mutation requires all durable current parent/descendant owners and their physical layer IDs. No mutation was dispatched.`,
+        }));
+      }
+    }
     const layerBoundsIssue = observedLayerBoundsIssue(executableGeometry, activeLayer, logicalLayer.layer_id);
     if (layerBoundsIssue) {
       return [{
@@ -2121,6 +2155,7 @@ export class EmbeddedGuardRuntime {
     let compilerTelemetry = options.prepared?.compilerTelemetry;
     let compilerRepairAudit = options.prepared?.compilerRepairAudit;
     let compilerDeferredFromOperationId = options.prepared?.compilerDeferredFromOperationId;
+    let guardAcceptedAt: string | undefined;
 
     const releaseController = this.store.lock();
     let releaseExecution: (() => void) | undefined;
@@ -2183,6 +2218,12 @@ export class EmbeddedGuardRuntime {
           const rejectedDeliveryDebt = rejectedPreviousRecord?.visual && !rejectedPreviousRecord?.verdict
             ? this.store.visualDeliveryDebt(rejectedPreviousRecord)
             : null;
+          const rejectedReviewId = typeof cycleInput.review_operation_id === 'string' ? cycleInput.review_operation_id : undefined;
+          if (rejectedReviewId && !compiledCycle.violations.some(item => item.scope !== 'next_operation')) {
+            const snapshot = this.store.snapshotClosureState(rejectedReviewId);
+            try { rejectedCycleClosedPrevious = this.store.closePreviousCycle(cycleInput); }
+            catch { this.store.restoreClosureState(snapshot); }
+          }
           if (rejectedPreviousOperationId) {
             if (rejectedPreviousRecord && !rejectedDeliveryDebt) {
               const rejectedClosureSnapshot = this.store.snapshotClosureState(rejectedPreviousOperationId);
@@ -2372,8 +2413,10 @@ export class EmbeddedGuardRuntime {
             guard_transport: 'embedded_mcp',
           };
         }
-        const closureSnapshot = previousOperationId
-          ? this.store.snapshotClosureState(previousOperationId)
+        const reviewOperationId = typeof cycleInput.review_operation_id === 'string' ? cycleInput.review_operation_id : undefined;
+        const transactionOperationId = previousOperationId ?? reviewOperationId;
+        const closureSnapshot = transactionOperationId
+          ? this.store.snapshotClosureState(transactionOperationId)
           : undefined;
         const closureStartedAt = Date.now();
         try {
@@ -2401,7 +2444,7 @@ export class EmbeddedGuardRuntime {
         }
         closureGuardMs = Date.now() - closureStartedAt;
 
-        if (nextOperation && closedPrevious.closed && closureSnapshot) {
+        if (nextOperation && (closedPrevious.closed || closedPrevious.reviewed_current_frame) && closureSnapshot) {
           const refreshedPrevious = previousOperationId ? this.store.read(previousOperationId) : undefined;
           const restoredSource = refreshedPrevious?.verdict?.recovery?.semantic_state_restored && refreshedPrevious.undo_source_operation_id
             ? this.store.read(refreshedPrevious.undo_source_operation_id) : undefined;
@@ -2471,7 +2514,8 @@ export class EmbeddedGuardRuntime {
             const previousRecord = previousOperationId ? this.store.read(previousOperationId) : undefined;
             const restoredSource = previousRecord?.verdict?.recovery?.semantic_state_restored && previousRecord.undo_source_operation_id
               ? this.store.read(previousRecord.undo_source_operation_id) : undefined;
-            const documentId = previousRecordBeforeClosure?.args?.document_id;
+            const documentId = previousRecordBeforeClosure?.args?.document_id
+              ?? (reviewOperationId ? this.store.read(reviewOperationId)?.args?.document_id : undefined);
             const finalizationProjection = this.store.captureProjectionContext({
               records: previousRecord
                 ? cycleProjection.records.map(record => record.id === previousOperationId ? previousRecord
@@ -2520,6 +2564,7 @@ export class EmbeddedGuardRuntime {
         throw new Error('Guard compiler invariant violated: executable cycle has no next operation');
       }
 
+      guardAcceptedAt = new Date().toISOString();
       const newAutomaticCheckpoint = await this.ensureAutomaticCheckpointBeforeVisualMutation(nextOperation, cycleProjection);
       const automaticCheckpoint = newAutomaticCheckpoint ?? options.prepared?.automaticCheckpoint;
       if (newAutomaticCheckpoint) {
@@ -2594,9 +2639,12 @@ export class EmbeddedGuardRuntime {
           : [];
         this.store.recordLatency(run.record.id, {
           cycle_received_at: cycleReceivedAt,
+          guard_accepted_at: guardAcceptedAt ?? null,
           guard_preflight_ms: guardPreflightMs,
           ...(compilerTelemetry ?? {}),
           dispatch_started_at: dispatchStartedAt,
+          photoshop_started_at: run.timing?.photoshop_started_at ?? null,
+          photoshop_operation_end_at: run.timing?.photoshop_operation_end_at ?? null,
           ...(compilerRepairAudit ? { compiler_repair_audit: compilerRepairAudit } : {}),
           photoshop_dispatch_wall_ms: run.timing?.photoshop_dispatch_wall_ms ?? null,
           recorder_prepare_ms: run.timing?.recorder_prepare_ms ?? null,
@@ -2746,7 +2794,7 @@ export class EmbeddedGuardRuntime {
     if (
       documentId
       && hasSemanticRequest
-      && !hasPreviousOperation
+      && !hasPreviousOperation && !input.review_operation_id
       && !(typeof requestKey === 'string' && requestKey.trim() && this.store.read(requestKey))
     ) {
       try {

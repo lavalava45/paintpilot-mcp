@@ -147,10 +147,18 @@ export function deriveExecutionOutcome(record: Record<string, unknown>): Executi
   if ((record.resolved as Record<string, unknown> | undefined)?.outcome === 'partial' || record.execution === 'partial') {
     return 'uncertain';
   }
-  if (record.phase === 'uncertain') return 'uncertain';
-  if (record.failed === true) return 'failed';
+  if (record.phase === 'uncertain' || record.execution === 'uncertain') return 'uncertain';
+  if (record.failed === true || record.execution === 'failed') return 'failed';
   if (record.phase === 'completed') return 'completed';
   return 'uncertain';
+}
+
+/** Transport/preparation failures are not evidence that an artistic strategy failed.
+ * A reconciled partial/uncertain run stays technical; this never authorizes replay. */
+export function completedArtisticExecution(record: Record<string, unknown>): boolean {
+  return deriveExecutionOutcome(record) === 'completed' && record.failed !== true
+    && !record.error && record.dispatched !== false
+    && (record.resolved as Record<string, unknown> | undefined)?.outcome !== 'abandoned';
 }
 
 export function deriveArtisticOutcome(input: Record<string, unknown>): ArtisticOutcome {

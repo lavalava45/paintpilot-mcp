@@ -95,13 +95,37 @@ journals are repository evidence, not proof of the current live process.
 
 ## 5. Diagnostic continuation-phase instrumentation
 
-Normal painting keeps the compact hot loop unchanged. For a timing benchmark only, PaintPilot now records
-the server-side boundaries of explicit `photoshop_guard_review_image` delivery and accepts two opt-in
-diagnostic markers through `photoshop_guard_status`:
+Normal painting keeps the compact hot loop unchanged. The durable
+`continuation_timeline_exports[document_id]` projection in Guard status now
+exposes `operations[].milestones` with these server-side boundaries:
+
+- `guard_accepted` — compilation and state preflight accepted the new operation
+  (an automatic checkpoint may still run before the pass);
+- `photoshop_start` — immediately before the Photoshop call, **after** recorder
+  preparation; `operation_end` — return from the Photoshop invocation **before**
+  recorder finalization. `journal_completed` is separately the later durable
+  record completion time. Older journals with no measured dispatch return keep
+  `operation_end=null` rather than inventing a timestamp;
+- `preview_ready` — durable preview archived and attached to that operation;
+- `critic_complete` — optional **explicit** host marker after the Critic finished;
+  this cannot be inferred from model-side activity by Guard;
+- `next_pass_ready` — optional **explicit** host marker when the next pass is
+  ready to submit. Both host-only milestones are `null` when not supplied.
+
+`critic_review_received` is automatically recorded when a `critic_review`
+arrives with the next Guard closure request; it is **not** substituted for
+`critic_complete`, because receipt time is later than the model's review.
+`milestone_intervals_ms` contains durations only when both actual boundaries
+exist; unknown durations stay `null`.
+
+The server records explicit `photoshop_guard_review_image` delivery boundaries
+and accepts opt-in diagnostic markers via `photoshop_guard_status`:
 
 1. call `photoshop_guard_review_image`; Guard records review-image request/result-ready boundaries;
 2. after the image has actually been inspected, call `photoshop_guard_status` with
-   `diagnostic_timing_marker={operation_id, phase:"review_finished"}`;
+   `diagnostic_timing_marker={operation_id, phase:"review_finished"}`; when the
+   Critic role has *actually* finished, use `phase:"critic_complete"` instead
+   (also establishes the review-finished boundary);
 3. after the next bounded pass is prepared, call the same status marker with `phase:"next_pass_ready"`;
 4. immediately continue with the ordinary `photoshop_guard_cycle_auto`.
 
@@ -114,6 +138,16 @@ The durable latency record can then partition the old opaque interval into:
 These markers are server-observed benchmark boundaries. They include host/tool transport around the marker
 call and therefore are **not** pure model-reasoning measurements. They are diagnostic-only precisely so
 ordinary painting does not gain two mandatory round trips.
+
+The same projection now includes `compiler_attempts` and `guard_rejections`:
+`total_rejected_attempts`, `recent_reason_counts`, successful correction
+links and `correction_wall_ms`. Rejections are joined to later attempts **only**
+when a stable `request_key` or `problem_id` matches; the first rejection and
+subsequent correction define wall time, not pure agent/Guard compute time.
+Unmatched attempts remain visible without a fabricated correction duration.
+The recent detailed attempt list is bounded (last 64); cumulative rejection
+counts are preserved separately. No change to rejection enforcement or
+Photoshop mutation semantics is involved.
 
 ## 6. Hot-loop orchestration compiler
 
@@ -155,7 +189,8 @@ time.
 ### 6.1 Fresh hot-loop acceptance: `hotloop-final5-20261002`
 
 The final scoped live run used a new 1200x800 Photoshop document and eight meaningful VisualMicroPlan passes.
-Its generated report is `docs/hotloop-final5-20261002-benchmark.md`.
+Its historical generated report is preserved in
+[`evidence/historical/hotloop-final5-20261002-benchmark.md`](../evidence/historical/hotloop-final5-20261002-benchmark.md).
 
 | metric | observed | target |
 |---|---:|---:|
@@ -182,6 +217,59 @@ The run also confirmed **zero recovery-only turns**. Its sole predispatch reject
 `structured_mass_iconic_primitive_compound`, the historical vertex-count heuristic retired on 2026-10-04 because
 extra contour points do not prove form quality; the revised contour pass then dispatched normally. Full repository acceptance after the
 implementation changes completed at **93/93 test files and 939/939 tests**.
+
+### 6.2 Tiger continuation forensics (2026-10-11)
+
+Seven retained tiger visual operation journals were examined read-only. Their
+median `inter_call_unattributed_gap_ms` is **107,805 ms**. Breaking the same
+sample at the separately called `photoshop_guard_review_image` boundary yields
+the following *individual medians* (they must not be added):
+
+| Boundary | Median |
+| --- | ---: |
+| Guard response ready → explicit review-image request | 11,867 ms |
+| Server review-image request → result ready | 30 ms |
+| Review-image result ready → next Guard call | 86,751 ms |
+
+Two review-result boundary receipts were interrupted, so their 4–7 ms service
+prefixes are not proof of full response delivery. No server timestamp can
+separate model deliberation from host scheduling, visual inspection, user time
+or prompt generation in the 86,751 ms interval.
+
+The seven historical samples all used a separate review-image tool call.
+Current `cycle_auto` supports inline exact review images. The inline success
+path now avoids the intermediate reference-only projection/receipt and reports
+`visual_review.delivery.transport=mcp_image_content_inline_cycle` in the
+ordinary cycle response. If images cannot be delivered inline, the original
+reference-only response and explicit review-image tool remain available.
+Only the directly owning offline regression has been exercised; no timing or
+quality improvement is claimed until a new actual painting run confirms
+inline delivery, fewer model-visible calls, the new inter-call distribution
+and unchanged exact-image review and artistic result.
+
+**Next measured acceptance:** take one short real sequence with the freshly
+restarted dedicated COS plugin child; confirm inline vs explicit transport in
+the operation receipts, inspect actual pixels and compare guard/server vs
+post-image unattributed gaps with the historical seven. Do not add routine
+status or timing-marker calls to the painting hot loop.
+
+### 6.3 Mykonos compiler rejection reduction (offline, 2026-10-11)
+
+Document 102's retained Mýkonos hot loop exposed repeated never-dispatched
+attempts: 3 before the left facade, 2 before the right facade, 2 before sky,
+and 2 before the first cobblestone-street dispatch. The causes included a
+technical layer-name mismatch and redundant ownership redeclaration, alongside
+real unresolved perspective, component decomposition, Critic and material
+decisions. Local normalization now resolves the *technical* new-layer name
+from its authoritative semantic layer declaration, and sparse ownership
+continuations inherit the durable plan without a repeated full payload.
+Existing committed owner identities and explicit conflicting ownership or
+scene-type changes still fail closed. These changes do not solve the real
+artistic decisions and do not explain the full host/model inter-call gap.
+
+Acceptance must compare the next real run's **rejected requests per useful
+visual mutation**, model-visible elapsed time and whole-frame quality with
+the retained Mykonos journals. No improvement is inferred from offline tests.
 
 ## 7. Generated representative painting-cycle benchmark
 

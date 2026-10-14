@@ -38,14 +38,23 @@ try {
     return definition.inputSchema;
   };
   const sceneObjects = (plan) => plan?.properties?.objects?.items;
-  for (const plan of [
-    published('photoshop_guard_cycle_auto').properties?.next_pass?.properties?.scene_ownership_plan,
-    published('photoshop_guard_keep_logical_layer').properties?.scene_ownership_plan,
-  ]) {
-    assert.ok(sceneObjects(plan)?.properties?.subject_kind, 'published scene ownership objects must expose subject_kind');
-    assert.ok(sceneObjects(plan)?.required?.includes('subject_kind'), 'published scene ownership objects must require subject_kind');
-    assert.ok(sceneObjects(plan)?.properties?.subject_kind?.enum?.includes('person'), 'person subject kind must be publicly expressible');
+  const continuationObjects = sceneObjects(
+    published('photoshop_guard_cycle_auto').properties?.next_pass?.properties?.scene_ownership_plan
+  );
+  const firstDeclarationObjects = sceneObjects(
+    published('photoshop_guard_keep_logical_layer').properties?.scene_ownership_plan
+  );
+  for (const objects of [continuationObjects, firstDeclarationObjects]) {
+    assert.ok(objects?.properties?.subject_kind, 'published scene ownership objects must expose subject_kind');
+    assert.ok(objects?.properties?.subject_kind?.enum?.includes('person'), 'person subject kind must be publicly expressible');
   }
+  // A continuation may identify an already saved object by object_id alone.
+  // Guard enforces complete subject kind on the initial declaration; forcing
+  // it on every public continuation would make safe reuse unnecessarily fail.
+  assert.deepEqual(continuationObjects?.required, ['object_id'],
+    'continuation must support an object-id-only reference to the retained scene plan');
+  assert.ok(firstDeclarationObjects?.required?.includes('subject_kind'),
+    'a fresh scene ownership declaration must require subject_kind');
   const nextPass = published('photoshop_guard_cycle_auto').properties?.next_pass?.properties;
   assert.ok(nextPass?.scene_camera_imaging_model, 'camera imaging model required by Guard must be publicly expressible');
   assert.ok(nextPass?.imaging_preflight, 'blur imaging preflight required by Guard must be publicly expressible');

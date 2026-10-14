@@ -9,7 +9,7 @@ afterEach(() => {
   for (const root of temporaryRoots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-function benchmarkWithActions(actions: unknown[]) {
+function benchmarkWithActions(actions: unknown[], autoRepairs: unknown[] = []) {
   const root = mkdtempSync(path.join(tmpdir(), 'painting-semantic-actions-'));
   temporaryRoots.push(root);
   const operationsDir = path.join(root, '.photoshop-runtime', 'controller', 'operations');
@@ -18,6 +18,7 @@ function benchmarkWithActions(actions: unknown[]) {
   mkdirSync(runDir, { recursive: true });
   writeFileSync(path.join(operationsDir, 'run-a-create.json'), JSON.stringify({
     id: 'run-a-create', args: { document_id: 42, path: path.join(runDir, 'painting.psd') },
+    phase: 'completed',
     created_at: '2026-10-02T10:00:00.000Z', completed_at: '2026-10-02T10:00:10.000Z',
     latency: { cycle_received_at: '2026-10-02T10:00:00.000Z', response_ready_at: '2026-10-02T10:00:10.000Z' },
   }));
@@ -30,6 +31,7 @@ function benchmarkWithActions(actions: unknown[]) {
         at: `2026-10-02T10:00:0${index + 1}.000Z`,
         kind: 'semantic-dispatch', operation_id: 'run-a-create', model_visible: true,
         ...(semantic_actions === undefined ? {} : { semantic_actions }),
+        ...(autoRepairs[index] === undefined ? {} : { auto_repair_count: autoRepairs[index] }),
       })),
     },
   }));
@@ -63,4 +65,13 @@ it.each([['textual', '2'], ['negative', -1], ['fractional', 1.5], ['nonfinite', 
 it('does not report an unsafe aggregate as an exact semantic action count', () => {
   const result = benchmarkWithActions([Number.MAX_SAFE_INTEGER, 1]);
   expect(result).toMatchObject({ complete: true, semantic_artistic_actions_dispatched: null });
+});
+
+it('does not promote overflowed legacy optional repair totals to exact counters', () => {
+  const result = benchmarkWithActions([0, 0], [Number.MAX_SAFE_INTEGER, 1]);
+  expect(result).toMatchObject({ complete: true, auto_repair_count: null });
+  expect(result?.warning).toContain('auto_repair_count');
+
+  const exactBoundary = benchmarkWithActions([0, 0], [Number.MAX_SAFE_INTEGER, 0]);
+  expect(exactBoundary).toMatchObject({ complete: true, auto_repair_count: Number.MAX_SAFE_INTEGER });
 });

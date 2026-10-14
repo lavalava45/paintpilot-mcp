@@ -97,6 +97,7 @@ function confirmedTargets(record) {
               ...(typeof layer.decision === 'string' ? { decision: layer.decision } : {}),
               ...(typeof layer.physical_role === 'string' ? { physical_role: layer.physical_role } : {}),
               ...(typeof layer.opacity_role === 'string' ? { opacity_role: layer.opacity_role } : {}),
+              ...(typeof layer.component_space === 'string' ? { component_space: layer.component_space } : {}),
               ...(typeof layer.construction_tier === 'string' ? { construction_tier: layer.construction_tier } : {}),
               ...(typeof layer.parent_hypothesis_id === 'string' ? { parent_hypothesis_id: layer.parent_hypothesis_id } : {}),
               ...(typeof layer.parent_construction_revision === 'string' ? { parent_construction_revision: layer.parent_construction_revision } : {}),
@@ -129,7 +130,8 @@ function confirmedTargets(record) {
 }
 
 export function compactClosedPrevious(value) {
-  if (!value?.closed) return value?.closed === false ? { closed: false } : undefined;
+  if (!value?.closed) return value?.closed === false ? { closed: false,
+    ...(value.reviewed_current_frame ? { reviewed_current_frame: true, operation_id: value.operation_id } : {}) } : undefined;
   return {
     closed: true,
     operation_id: value.operation_id,
@@ -449,6 +451,8 @@ export async function executeLogicalOperation({
   const timing = {
     before_preview_ms: null,
     photoshop_dispatch_wall_ms: null,
+    photoshop_started_at: null,
+    photoshop_operation_end_at: null,
     recorder_prepare_ms: null,
     recorder_finalize_ms: null,
     recorder_settle_ms: null,
@@ -533,6 +537,9 @@ export async function executeLogicalOperation({
       if (mutationLifecycle?.beforeMutation) timing.recorder_prepare_ms = Date.now() - recorderPrepareStartedAt;
     }
     const mutationStartedAt = Date.now();
+    // Exact controller-side boundary immediately before the Photoshop invocation.
+    // Do not treat the earlier recorder preparation as Photoshop execution.
+    timing.photoshop_started_at = new Date().toISOString();
     let result;
     let mutationError;
     try {
@@ -542,6 +549,7 @@ export async function executeLogicalOperation({
       throw error;
     } finally {
       // End the dispatch clock before any recorder wait, including failed dispatches.
+      timing.photoshop_operation_end_at = new Date().toISOString();
       timing.photoshop_dispatch_wall_ms = Date.now() - mutationStartedAt;
       const recorderFinalizeStartedAt = Date.now();
       try {

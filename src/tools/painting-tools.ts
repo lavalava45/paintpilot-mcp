@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { paintRegionTopologyIssues } from '../core/filled-contour-topology.js';
 import { exactNotExecutedError, exactNotExecutedResultFields } from '../core/execution-outcome.js';
 import { ToolDefinition, ToolResult } from '../core/tool-registry.js';
 import { PhotoshopBackendRouter } from '../platform/photoshop-backend.js';
@@ -21,6 +22,25 @@ import {
   atomicFailureFromError,
   atomicSuccess,
 } from './atomic-shared.js';
+
+/** Transport success/readback completion does not imply effective brush
+ * settings changed. Preserve the readback for diagnosis, but stop any Guard
+ * pass that would paint with a different preset or brush than requested.
+ */
+function brushSetterNotApplied(
+  message: string,
+  details: Record<string, unknown>
+): ToolResult {
+  return {
+    isError: true,
+    content: [{ type: 'text', text: JSON.stringify({
+      ok: false,
+      code: 'brush_setter_unverified',
+      message,
+      details,
+    }) }],
+  };
+}
 
 const PAINT_TOOLS = ['BRUSH', 'PENCIL', 'ERASER', 'SMUDGE'] as const;
 type PaintTool = (typeof PAINT_TOOLS)[number];
@@ -86,6 +106,9 @@ interface PaintRegion {
   contours: PaintRegionContour[];
   color: { red: number; green: number; blue: number };
   opacity: number;
+  render_mode?: 'outline';
+  stroke_size?: number;
+  stroke_flow?: number;
   layerId?: number;
 }
 
@@ -370,7 +393,7 @@ function parseRegion(value: unknown, regionIndex: number): PaintRegion {
   if (!Array.isArray(rec.contours) || rec.contours.length < 1 || rec.contours.length > 16) {
     throw new Error(`regions[${regionIndex}].contours must contain 1-16 closed contours`);
   }
-  const contours = rec.contours.map((rawContour, contourIndex): PaintRegionContour => {
+    const contours = rec.contours.map((rawContour, contourIndex): PaintRegionContour => {
     if (!rawContour || typeof rawContour !== 'object' || Array.isArray(rawContour)) {
       throw new Error(`regions[${regionIndex}].contours[${contourIndex}] must be an object`);
     }
@@ -416,7 +439,13 @@ function parseRegion(value: unknown, regionIndex: number): PaintRegion {
     layerId = value;
   }
   const id = typeof rec.id === 'string' && rec.id.trim() ? rec.id.trim() : undefined;
-  return { id, contours, color, opacity, layerId };
+  if (rec.render_mode !== undefined && !['fill', 'outline'].includes(String(rec.render_mode))) throw new Error('region.render_mode must be fill or outline');
+  const outline = rec.render_mode === 'outline';
+  const size = optionalNumber(rec.stroke_size, `regions[${regionIndex}].stroke_size`, 0.01, 5000);
+  if (outline && size === undefined) throw new Error('outline region needs explicit stroke_size');
+  const flow = optionalNumber(rec.stroke_flow, `regions[${regionIndex}].stroke_flow`, 0.01, 100) ?? 100;
+  return { id, contours, color, opacity, layerId,
+    ...(outline ? { render_mode: 'outline' as const, stroke_size: size, stroke_flow: flow } : {}) };
 }
 
 function parseClipBounds(value: unknown): PaintClipBounds | undefined {
@@ -903,7 +932,7 @@ export function createPaintingTools(
       tool: {
         name: 'photoshop_paint_strokes',
         description:
-          'Paint one or many raster strokes on the active layer using Photoshop path stroking. BRUSH supports optional Bezier handles, closed paths, simulated pressure, per-stroke color/size/opacity/flow overrides and interpolated dynamics. Omitted size/opacity/flow use the prepared brush baseline, not the preceding stroke; local overrides are restored after each internal batch. Persistent settings belong to photoshop_set_brush. PENCIL, SMUDGE and ERASER use their current Photoshop tool settings; explicit size/opacity/flow/dynamics overrides are fail-closed until live-proven for those mechanisms, and SMUDGE/ERASER do not accept color overrides. AUTO batching proactively splits expensive mixed batches into short UXP commands; small batches remain one history step.',
+          'Paint one or many raster strokes on the active layer using Photoshop path stroking. BRUSH supports optional Bezier handles, closed paths, simulated pressure, per-stroke color/size/opacity/flow overrides and interpolated dynamics. Omitted size/opacity/flow use the prepared brush baseline, not the preceding stroke; local overrides are restored after each internal batch. Persistent settings belong to photoshop_set_brush. For a pencil drawing, prefer controlled BRUSH lines; the artistic medium does not require native PENCIL. PENCIL, SMUDGE and ERASER use their current Photoshop tool settings; explicit size/opacity/flow/dynamics overrides are fail-closed until live-proven for those mechanisms, and SMUDGE/ERASER do not accept color overrides. AUTO batching proactively splits expensive mixed batches into short UXP commands; small batches remain one history step.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -1025,7 +1054,7 @@ export function createPaintingTools(
       tool: {
         name: 'photoshop_paint_regions',
         description:
-          'Fill ordered raster color regions from closed Bezier contours. Each region may target layer_id; array order determines overlap. clip_bounds constrains the actual curve, not control handles. Coordinates are canvas pixels independent of DPI.',
+          'Render ordered raster regions from closed Bezier contours: filled masses by default, or BRUSH outlines with render_mode=outline and explicit stroke_size. Each region may target layer_id; array order determines overlap. clip_bounds constrains the actual curve and outline width, not control handles. Coordinates are canvas pixels independent of DPI.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -1053,6 +1082,9 @@ export function createPaintingTools(
                     required: ['red', 'green', 'blue'],
                   },
                   opacity: { type: 'number', minimum: 0, maximum: 100, default: 100 },
+                  render_mode: { type: 'string', enum: ['fill', 'outline'], description: 'outline strokes the computed closed contours with BRUSH instead of filling them, including exact owned replacement in the same History transaction.' },
+                  stroke_size: { type: 'number', exclusiveMinimum: 0, maximum: 5000 },
+                  stroke_flow: { type: 'number', exclusiveMinimum: 0, maximum: 100 },
                   contours: {
                     type: 'array',
                     minItems: 1,
@@ -1062,6 +1094,8 @@ export function createPaintingTools(
                       type: 'object',
                       properties: {
                         operation: { type: 'string', enum: ['ADD', 'SUBTRACT'], default: 'ADD' },
+                        intersection_policy: { type: 'string', enum: ['simple', 'intentional'],
+                          description: 'Default simple closed boundary: reject self-crossings. Intentional explicitly authorizes crossings within THIS contour; separate ADD/SUBTRACT paths may overlap. Degenerate segments remain invalid.' },
                         points: {
                           type: 'array',
                           minItems: 3,
@@ -1242,21 +1276,24 @@ async function selectBrushPreset(
     const parsed = result.data;
     const effectivePreset = typeof parsed.preset === 'string' ? parsed.preset.trim() : '';
     const setterOutcome = effectivePreset === name ? 'applied' : effectivePreset ? 'not-applied' : 'uncertain';
-    return atomicSuccess(
-      setterOutcome === 'applied'
+    const message = setterOutcome === 'applied'
         ? `Brush preset selected: ${name}`
         : setterOutcome === 'not-applied'
           ? `Brush preset setter completed but effective preset is ${effectivePreset}`
-          : `Brush preset setter outcome is uncertain`,
-      {
+          : `Brush preset setter outcome is uncertain`;
+    const details = {
       setter_outcome: setterOutcome,
       requested_preset: name,
       effective_preset: effectivePreset || null,
       preset: parsed.preset,
       settings: parsed.settings,
+      ...(parsed.preset_verification ? { preset_verification: parsed.preset_verification } : {}),
       ...(parsed.setter_recovery ? { setter_recovery: parsed.setter_recovery } : {}),
       ...(stableCommandId ? { stable_command_id: stableCommandId } : {}),
-    });
+    };
+    return setterOutcome === 'applied'
+      ? atomicSuccess(message, details)
+      : brushSetterNotApplied(message, details);
   } catch (error) {
     return atomicFailureFromError(error);
   }
@@ -1306,30 +1343,55 @@ async function setBrush(
     const requested = Object.fromEntries(
       Object.entries(values).filter(([, value]) => value !== undefined)
     );
+    const observedFields = new Set(
+      Array.isArray(parsed.observed_fields)
+        ? parsed.observed_fields.filter((field): field is string => typeof field === 'string')
+        : []
+    );
+    // The native UXP setter rounds these Photoshop tool-option percentages to
+    // integers before writing them. Compare against that actual write contract,
+    // while retaining the caller's unrounded request in the diagnostic receipt.
+    const nativeExpected = Object.fromEntries(Object.entries(requested).map(([key, value]) => [
+      key,
+      typeof value === 'number' && (key === 'opacity' || key === 'flow' || key === 'smoothing')
+        ? Math.round(value)
+        : value,
+    ]));
     const mismatches = Object.entries(requested).flatMap(([key, expected]) => {
       const actual = effective[key];
+      if (!observedFields.has(key)) {
+        return [{ key, expected, actual: null, reason: 'native_readback_missing' }];
+      }
       if (typeof expected === 'number' && typeof actual === 'number') {
-        return Math.abs(expected - actual) <= 1e-6
+        return Math.abs((nativeExpected[key] as number) - actual) <= 1e-6
           ? []
-          : [{ key, expected, actual }];
+          : [{ key, expected, native_expected: nativeExpected[key], actual }];
       }
       return expected === actual ? [] : [{ key, expected, actual }];
     });
-    const setterOutcome = mismatches.length === 0 ? 'applied' : 'not-applied';
-    return atomicSuccess(
-      setterOutcome === 'applied'
-        ? 'Brush settings updated and verified'
-        : 'Brush settings completed but effective readback does not match every requested field',
-      {
+    const setterOutcome = Object.keys(requested).length === 0
+      ? 'uncertain'
+      : mismatches.some(mismatch => !('reason' in mismatch)) ? 'not-applied'
+      : mismatches.length > 0 ? 'uncertain' : 'applied';
+    const message = setterOutcome === 'applied'
+      ? 'Brush settings updated and verified'
+        : setterOutcome === 'uncertain'
+          ? 'Brush setter has no fully observed native readback for the requested fields'
+          : 'Brush settings completed but effective readback does not match every requested field';
+    const details = {
         setter_outcome: setterOutcome,
         requested_settings: requested,
+        native_expected_settings: nativeExpected,
         effective_settings: effective,
+        observed_fields: [...observedFields],
         mismatches,
         settings: effective,
         ...(parsed.setter_recovery ? { setter_recovery: parsed.setter_recovery } : {}),
         ...(stableCommandId ? { stable_command_id: stableCommandId } : {}),
-      }
-    );
+    };
+    return setterOutcome === 'applied'
+      ? atomicSuccess(message, details)
+      : brushSetterNotApplied(message, details);
   } catch (error) {
     return atomicFailureFromError(error);
   }
@@ -1495,6 +1557,8 @@ async function paintRegions(
       throw new Error('regions must be a non-empty array');
     }
     if (args.regions.length > 32) throw new Error('regions may contain at most 32 entries per call');
+    const topology = paintRegionTopologyIssues(args.regions);
+    if (topology.length) throw new Error(topology.map(issue => `${issue.code}: ${issue.message}`).join('; '));
     const regions = args.regions.map((region, index) => parseRegion(region, index));
     const clipBounds = parseClipBounds(args.clip_bounds);
     const startedAt = Date.now();
@@ -1658,6 +1722,7 @@ async function paintStampInstances(
     const result = await invokeUxpPaintStampInstances({
       ...(documentId ? { document_id: documentId } : {}),
       layer_id: layerId,
+      preset_name: presetName,
       instances,
     }, stableCommandId);
     if (!result.ok || !result.data) throw new Error(result.error ?? 'uxp_paint_stamp_instances_failed');

@@ -107,7 +107,7 @@ describe('painting method capability map', () => {
 
   it('routes different artistic tasks to different executable methods', () => {
     const registry = registryWithRuntimePalette();
-    expect(selectPaintingMethod(registry, 'line', 'construct').selected.id).toBe('pencil-line');
+    expect(selectPaintingMethod(registry, 'line', 'construct').selected.id).toBe('hard-brush-line');
     expect(selectPaintingMethod(registry, 'mass', 'construct').selected.id).toBe('installed-brush-preset');
     expect(selectPaintingMethod(registry, 'mass', 'construct', [], { stage: 'RECOGNITION_BLOCK_IN' }).selected.id).toBe('installed-brush-preset');
     expect(selectPaintingMethod(registry, 'painted-mass', 'construct').selected.id).toBe('installed-brush-preset');
@@ -251,7 +251,7 @@ describe('painting method capability map', () => {
       selectPaintingMethod(registry, 'move-scale-rotate', 'transform'),
     ];
     expect(selections.map(value => value.selected.id)).toEqual([
-      'pencil-line',
+      'hard-brush-line',
       'installed-brush-preset',
       'gradient-mask',
       'curves-tone',
@@ -312,9 +312,9 @@ describe('painting method capability map', () => {
     const text = selected.content.find(item => item.type === 'text');
     const body = JSON.parse(text && 'text' in text ? text.text : '{}');
     expect(body.ok).toBe(true);
-    expect(body.selection.selected.id).toBe('pencil-line');
+    expect(body.selection.selected.id).toBe('hard-brush-line');
     expect(body.selection.selected.primaryTool).toBe('photoshop_paint_strokes');
-    expect(body.selection.selected.executionHints.stroke_tool).toBe('PENCIL');
+    expect(body.selection.selected.executionHints.stroke_tool).toBe('BRUSH');
     expect(body.selection.selected.verificationExpectation.evidence).toBe('before-after-preview');
   });
 });

@@ -59,9 +59,15 @@ export function readThroughputArchivePage(
   const events: Array<{ sequence: number; document_incarnation: string | null; event: Record<string, unknown> }> = [];
   const reasons: string[] = [];
   if (!fs.existsSync(file)) return { events, has_more: false, last_sequence: 0, integrity: 'unverified', reasons: ['archive_missing'] };
-  const fd = fs.openSync(file, 'r');
+  // A concurrent process can rotate/remove the file after existsSync. Treat
+  // that race (or a transient open failure) as missing evidence, not a crash.
+  let fd: number;
+  try { fd = fs.openSync(file, 'r'); }
+  catch { return { events, has_more: false, last_sequence: 0,
+    integrity: 'unverified', reasons: ['archive_open_failed'] }; }
   let previousSequence = 0;
   let hasMore = false;
+  let totalBytesRead = 0;
   let remaining = Buffer.alloc(0);
   const chunk = Buffer.allocUnsafe(READ_CHUNK_BYTES);
   const inspect = (line: Buffer) => {
@@ -89,8 +95,10 @@ export function readThroughputArchivePage(
     else hasMore = true;
   };
   try {
+    const before = fs.fstatSync(fd);
     let bytesRead: number;
     while ((bytesRead = fs.readSync(fd, chunk, 0, chunk.length, null)) > 0) {
+      totalBytesRead += bytesRead;
       const buffer = Buffer.concat([remaining, chunk.subarray(0, bytesRead)]);
       let start = 0;
       for (let end = buffer.indexOf(10, start); end !== -1; end = buffer.indexOf(10, start)) {
@@ -101,7 +109,31 @@ export function readThroughputArchivePage(
       if (remaining.length > MAX_LINE_BYTES) { reasons.push('entry_too_large'); break; }
     }
     if (remaining.length) reasons.push('truncated_final_entry');
-  } finally { fs.closeSync(fd); }
+    // A successful EOF is not proof that the archive stayed unchanged while
+    // reading: a concurrent host may append immediately after the final read.
+    // The named path must also still identify the same file (not a replacement).
+    if (totalBytesRead === 0) reasons.push('archive_empty');
+    try {
+      const after = fs.fstatSync(fd);
+      const named = fs.statSync(file);
+      if (totalBytesRead !== before.size || before.size !== after.size || before.size !== named.size
+        || before.mtimeMs !== after.mtimeMs || before.mtimeMs !== named.mtimeMs
+        || before.ctimeMs !== after.ctimeMs || before.ctimeMs !== named.ctimeMs
+        || before.dev !== named.dev || before.ino !== named.ino) {
+        reasons.push('archive_changed_during_read');
+      }
+    } catch { reasons.push('archive_changed_during_read'); }
+  } catch {
+    // An interrupted read or fstat failure cannot certify a complete page.
+    reasons.push('archive_read_failed');
+  } finally {
+    try { fs.closeSync(fd); }
+    catch { reasons.push('archive_close_failed'); }
+  }
+  // A cursor from a newer, replaced or unrelated archive is not proof that
+  // this page contains zero later events. Only the observed final sequence
+  // can justify a successful empty continuation page.
+  if (afterSequence > previousSequence) reasons.push('cursor_beyond_archive');
   return { events, has_more: hasMore, last_sequence: previousSequence,
     integrity: reasons.length ? 'unverified' : 'consistent', reasons: [...new Set(reasons)] };
 }

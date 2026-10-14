@@ -18,12 +18,13 @@ capability information—not by a manually maintained Markdown list.
 | Question | Authority |
 | --- | --- |
 | How the painting agent should work | [`digital-painting-agent-skill.md`](digital-painting-agent-skill.md) and [`painting-policy/`](painting-policy/) |
-| What to implement next | [`PAINTING-ROADMAP.md`](PAINTING-ROADMAP.md) |
+| What to implement next | [`PAINTING-ROADMAP.md`](PAINTING-ROADMAP.md) — short priority plan |
+| Requirements for the selected task | [`PAINTING-WORK-DETAILS.md`](PAINTING-WORK-DETAILS.md) — existing task IDs and acceptance |
 | Which tools exist in the current build | Runtime tool catalog and [`available-tools.md`](available-tools.md) |
 | Which semantic painting methods are currently executable | Runtime method-capability snapshot produced from registered tools |
 | Which backend/access mode each tool currently uses | [`available-tools.md`](available-tools.md#generated-backend-and-access-inventory) |
 | Exact accepted fields and result shapes | Current public JSON schema and TypeScript compiler/runtime validators |
-| Protocol conformance examples | [`visual-microplan-contract-fixtures.md`](visual-microplan-contract-fixtures.md); fixtures are tests, never artistic recipes |
+| Protocol conformance examples | [`tests/fixtures/visual-microplan-contract-fixtures.md`](../tests/fixtures/visual-microplan-contract-fixtures.md); executable test fixtures, never artistic recipes |
 
 Do not infer a closed painting palette from examples in documentation. General Photoshop
 capabilities—documents, layers, selections, masks, transforms, adjustments, filters, blending,

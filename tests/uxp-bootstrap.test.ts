@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 const source = readFileSync(new URL('../uxp-plugin/main.js', import.meta.url), 'utf8')
   .replace(/\npollLoop\(\);\s*$/, '\n');
 
-function bootstrapHarness(options: { dropModalReturn?: boolean; dropDocumentReturn?: boolean } = {}) {
+function bootstrapHarness(options: { deploymentMarker?: { source_sha256: string }; fetch?: (url: string) => Promise<any>; dropModalReturn?: boolean; dropDocumentReturn?: boolean; batchPlay?: (descriptors: any[]) => Promise<any[]>; notifications?: { add: (events: string[], callback: (event: string, descriptor: any) => void) => Promise<void>; remove: (events: string[], callback: (event: string, descriptor: any) => void) => Promise<void> } } = {}) {
   const calls: Array<{ kind: string; value?: unknown }> = [];
   let modalDepth = 0;
   const inertDispatcher = async () => ({ handled: false });
@@ -73,9 +73,10 @@ function bootstrapHarness(options: { dropModalReturn?: boolean; dropDocumentRetu
     },
   };
   const functions = runInNewContext(
-    source + '\n({ createDocumentMutation, openImageMutation })',
+    source + '\n({ createDocumentMutation, openImageMutation, selectBrushPreset, normalizeBrushSettingsDescriptor, pollOnce })',
     {
       require: (name: string) => {
+        if (name === './deployment-build' && options.deploymentMarker) return options.deploymentMarker;
         if (name === 'uxp') {
           return {
             entrypoints: { setup() {} },
@@ -84,7 +85,8 @@ function bootstrapHarness(options: { dropModalReturn?: boolean; dropDocumentRetu
         }
         if (name === 'photoshop') {
           return {
-            action: { batchPlay: async () => [] },
+            action: { batchPlay: options.batchPlay ?? (async () => []),
+              addNotificationListener: options.notifications?.add, removeNotificationListener: options.notifications?.remove },
             core,
             app,
             constants: {
@@ -100,18 +102,162 @@ function bootstrapHarness(options: { dropModalReturn?: boolean; dropDocumentRetu
         if (phaseDispatchers[name]) return phaseDispatchers[name];
         throw new Error(`Unexpected require: ${name}`);
       },
-      fetch: async () => ({ ok: true, status: 204 }),
+      fetch: options.fetch ?? (async () => ({ ok: true, status: 204 })),
       setTimeout,
       clearTimeout,
     }
   ) as {
+    selectBrushPreset(params: Record<string, unknown>): Promise<Record<string, any>>;
+    normalizeBrushSettingsDescriptor(descriptor: Record<string, unknown>): Record<string, any>;
     createDocumentMutation(params: Record<string, unknown>): Promise<Record<string, any>>;
     openImageMutation(params: Record<string, unknown>): Promise<Record<string, any>>;
+    pollOnce(): Promise<boolean>;
   };
   return { ...functions, calls };
 }
 
 describe('UXP bootstrap mutations', () => {
+  it('announces the loaded build identity without relabelling running UXP after a rebuild', async () => {
+    const marker = { source_sha256: 'a'.repeat(64) };
+    const urls: string[] = [];
+    const harness = bootstrapHarness({ deploymentMarker: marker, fetch: async url => {
+      urls.push(url); return { ok: true, status: 204 };
+    } });
+    marker.source_sha256 = 'b'.repeat(64);
+    expect(await harness.pollOnce()).toBe(true);
+    const poll = urls.find(url => url.includes('/poll?'))!;
+    expect(new URL(poll).searchParams.get('deploymentSourceSha256')).toBe('a'.repeat(64));
+  });
+  it('does not certify absent native brush settings merely because their defaults match', () => {
+    const harness = bootstrapHarness();
+    const snapshot = harness.normalizeBrushSettingsDescriptor({
+      currentToolOptions: { brush: { diameter: { _unit: 'pixelsUnit', _value: 16 } } },
+    });
+    expect(snapshot.settings).toMatchObject({ size: 16, hardness: 100, opacity: 100 });
+    expect(snapshot.observed_fields).toContain('size');
+    expect(snapshot.observed_fields).not.toContain('hardness');
+    expect(snapshot.observed_fields).not.toContain('opacity');
+    const nullReadback = harness.normalizeBrushSettingsDescriptor({
+      currentToolOptions: { brush: { diameter: 16, hardness: null }, opacity: null },
+    });
+    expect(nullReadback.settings).toMatchObject({ hardness: 100, opacity: 100 });
+    expect(nullReadback.observed_fields).not.toContain('hardness');
+    expect(nullReadback.observed_fields).not.toContain('opacity');
+    const complete = harness.normalizeBrushSettingsDescriptor({
+      currentToolOptions: { brush: { diameter: 16, hardness: 100 }, opacity: 100 },
+    });
+    expect(complete.observed_fields).toEqual(expect.arrayContaining(['size', 'hardness', 'opacity']));
+  });
+  it('retains a confirmed brush-select event when a delayed tool-select event arrives afterwards', async () => {
+    let listener: ((event: string, descriptor: any) => void) | undefined;
+    const harness = bootstrapHarness({
+      dropModalReturn: true,
+      notifications: {
+        add: async (_events, callback) => { listener = callback; },
+        remove: async () => { listener = undefined; },
+      },
+      batchPlay: async descriptors => descriptors.map(descriptor => {
+        if (descriptor._obj === 'select' && descriptor._target[0]._ref === 'brush') {
+          listener?.('select', { _target: [{ _ref: 'brush', _name: 'Installed Dry Brush' }] });
+          // Host notification callbacks need not arrive in the same order as
+          // the tool-activation and preset-selection batch descriptors.
+          listener?.('select', { _target: [{ _ref: 'paintbrushTool' }] });
+        }
+        return descriptor._obj === 'get'
+          ? { currentToolOptions: { brush: { diameter: 16 } } }
+          : {};
+      }),
+    });
+    expect((await harness.selectBrushPreset({ name: 'Installed Dry Brush' })).preset)
+      .toBe('Installed Dry Brush');
+  });
+
+  it('waits for a native brush-select notification delayed beyond the first 100ms after modal exit', async () => {
+    let listener: ((event: string, descriptor: any) => void) | undefined;
+    const harness = bootstrapHarness({
+      notifications: {
+        add: async (_events, callback) => { listener = callback; },
+        remove: async () => { listener = undefined; },
+      },
+      batchPlay: async descriptors => descriptors.map(descriptor => {
+        if (descriptor._obj === 'select' && descriptor._target[0]._ref === 'brush') {
+          setTimeout(() => listener?.('select', {
+            _target: [{ _ref: 'brush', _name: 'Installed Dry Brush' }],
+          }), 150);
+        }
+        return descriptor._obj === 'get'
+          ? { currentToolOptions: { brush: { diameter: 16 } } }
+          : {};
+      }),
+    });
+    expect(await harness.selectBrushPreset({ name: 'Installed Dry Brush' })).toMatchObject({
+      preset: 'Installed Dry Brush',
+      preset_verification: { source: 'photoshop_select_notification' },
+    });
+  });
+
+  it('rejects contradictory current-tool readback and native selection event', async () => {
+    let listener: ((event: string, descriptor: any) => void) | undefined;
+    const harness = bootstrapHarness({
+      notifications: {
+        add: async (_events, callback) => { listener = callback; },
+        remove: async () => { listener = undefined; },
+      },
+      batchPlay: async descriptors => descriptors.map(descriptor => {
+        if (descriptor._obj === 'select' && descriptor._target[0]._ref === 'brush') {
+          listener?.('select', { _target: [{ _ref: 'brush', _name: 'Different Brush' }] });
+        }
+        return descriptor._obj === 'get'
+          ? { currentToolOptions: { brush: { name: 'Installed Dry Brush', diameter: 16 } } }
+          : {};
+      }),
+    });
+    const result = await harness.selectBrushPreset({ name: 'Installed Dry Brush' });
+    expect(result.preset).toBeNull();
+    expect(result.preset_verification.source).toBe('conflicting_evidence');
+  });
+
+  it('verifies nameless preset readback through a real Photoshop select event, preserving conflict, missing events and errors', async () => {
+    let listener: ((event: string, descriptor: any) => void) | undefined;
+    let notificationName: string | undefined = 'Installed Dry Brush';
+    let failed = false;
+    let removed = 0;
+    const harness = bootstrapHarness({ dropModalReturn: true, notifications: {
+      add: async (_events, callback) => { listener = callback; },
+      remove: async () => { listener = undefined; removed++; },
+    }, batchPlay: async descriptors => descriptors.map(descriptor => {
+      if (descriptor._obj === 'select' && descriptor._target[0]._ref === 'brush') {
+        if (failed) return { _obj: 'error', message: 'Preset unavailable' };
+        if (notificationName) listener?.('select', { _target: [{ _ref: 'brush', _name: notificationName }] });
+      }
+      return descriptor._obj === 'get' ? { currentToolOptions: { brush: { diameter: 16, spacing: 2 } } } : {};
+    }) });
+    expect(await harness.selectBrushPreset({ name: 'Installed Dry Brush' })).toMatchObject({
+      preset: 'Installed Dry Brush', preset_verification: { source: 'photoshop_select_notification' } });
+    notificationName = 'Different Brush';
+    expect((await harness.selectBrushPreset({ name: 'Installed Dry Brush' })).preset).toBe('Different Brush');
+    notificationName = undefined;
+    expect((await harness.selectBrushPreset({ name: 'Installed Dry Brush' })).preset).toBeNull();
+    failed = true;
+    await expect(harness.selectBrushPreset({ name: 'Installed Dry Brush' })).rejects.toThrow('Preset unavailable');
+    expect(removed).toBe(4);
+  });
+  it('selects the paint tool before the preset, verifies actual readback and preserves unknown', async () => {
+    let selected = 'previous-tool-brush';
+    let readable = true;
+    const f = bootstrapHarness({ batchPlay: async descriptors => descriptors.map(descriptor => {
+      const target = descriptor._target?.[0]?._ref;
+      if (descriptor._obj === 'select' && target === 'paintbrushTool') selected = 'default-brush';
+      if (descriptor._obj === 'select' && target === 'brush') selected = descriptor._target[0]._name;
+      if (descriptor._obj === 'get') return { currentToolOptions: { brush: {
+        ...(readable ? { name: selected } : {}), diameter: 20 } } };
+      return {};
+    }) });
+    expect((await f.selectBrushPreset({ name: 'Installed Dry Brush' })).preset).toBe('Installed Dry Brush');
+    readable = false;
+    expect((await f.selectBrushPreset({ name: 'Installed Dry Brush' })).preset).toBeNull();
+  });
+
   it('captures the uniquely created identity even when modal/add return values are absent', async () => {
     const harness = bootstrapHarness({ dropModalReturn: true, dropDocumentReturn: true });
     const result = await harness.createDocumentMutation({ width: 640, height: 360 });

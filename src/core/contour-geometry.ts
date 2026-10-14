@@ -1,6 +1,7 @@
 import { Bezier } from 'bezier-js';
 import {
   difference,
+  intersect,
   union,
   inflatePaths,
   pointInPolygon,
@@ -122,6 +123,14 @@ export function compileContourMask(
     paths = difference(paths, union(subtract, FillRule.NonZero), FillRule.EvenOdd);
   }
   return { paths: bounded(paths) };
+}
+
+/** Intersect a component/protection mask with authored surface/shadow coverage.
+ * Union is nonzero with coherent winding; triangle overlaps must not create false holes. */
+export function intersectContourCoverage(mask: ContourMask, polygons: ContourPoint[][]): ContourMask {
+  if (!polygons.length || polygons.length > 128) throw new ContourGeometryError('Use 1..128 source coverage polygons');
+  const coverage = polygons.map(p => { const q = quantize(p); return area(q) < 0 ? q.reverse() : q; });
+  return { paths: bounded(intersect(mask.paths, union(coverage, FillRule.NonZero), FillRule.NonZero)) };
 }
 
 /** Offset once per brush scale, retaining disconnected islands and holes. */

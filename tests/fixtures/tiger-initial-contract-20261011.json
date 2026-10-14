@@ -1,0 +1,275 @@
+{
+  "request_key": "tiger_core_silhouette_v01",
+  "problem_id": "tiger-subject-recognition",
+  "document_id": 60,
+  "goal": "Заложить выразительный силуэт корпуса, выгнутой шеи и рычащей поднятой головы сибирского тигра.",
+  "artistic_commentary": "Начинаю с главного героя: крупная тёплая фигура тигра, поднявшего морду к будущей луне; отдельные слои для лап, полос и окружения.",
+  "stage": "GLOBAL_BLOCK_IN",
+  "scale": "global",
+  "visual_intent": "mass",
+  "impact_class": "construct",
+  "construction_role": "structured-mass",
+  "scene_ownership_plan": {
+    "plan_id": "moonlit_tiger_components_v1",
+    "objects": [
+      {
+        "object_id": "tiger",
+        "kind": "compound-object",
+        "subject_kind": "animal",
+        "component_semantic_ids": [
+          "tiger-core",
+          "tiger-head",
+          "tiger-front-legs",
+          "tiger-hind-legs",
+          "tiger-tail",
+          "tiger-fur-stripes",
+          "tiger-mouth"
+        ]
+      }
+    ],
+    "units": [
+      {
+        "semantic_id": "tiger-core",
+        "owner_id": "tiger-core",
+        "role": "Общая масса корпуса, плеч, шеи и профиль головы на стадии силуэта",
+        "editability": "independent"
+      },
+      {
+        "semantic_id": "tiger-head",
+        "owner_id": "tiger-face",
+        "role": "Анатомические детали морды тигра и уши",
+        "editability": "independent"
+      },
+      {
+        "semantic_id": "tiger-front-legs",
+        "owner_id": "tiger-front-legs",
+        "role": "Передние лапы и контакт со скалой",
+        "editability": "independent"
+      },
+      {
+        "semantic_id": "tiger-hind-legs",
+        "owner_id": "tiger-hind-legs",
+        "role": "Задние лапы и контакт с камнем",
+        "editability": "independent"
+      },
+      {
+        "semantic_id": "tiger-tail",
+        "owner_id": "tiger-tail",
+        "role": "Длинный изогнутый хвост тигра",
+        "editability": "independent"
+      },
+      {
+        "semantic_id": "tiger-fur-stripes",
+        "owner_id": "tiger-stripes",
+        "role": "Полосы и акцентные мазки шерсти",
+        "editability": "independent"
+      },
+      {
+        "semantic_id": "tiger-mouth",
+        "owner_id": "tiger-mouth",
+        "role": "Раскрытая пасть и зубы",
+        "editability": "independent"
+      }
+    ]
+  },
+  "logical_layer": {
+    "decision": "create-new",
+    "hypothesis_id": "tiger-core",
+    "hypothesis": "Оранжево-охристый главный силуэт тела и шеи",
+    "rollback_value": "high",
+    "expected_independent_rollback": true,
+    "layer_name": "Tiger — core silhouette",
+    "physical_role": "opaque-mass",
+    "opacity_role": "opaque",
+    "construction_tier": "primary"
+  },
+  "layer_separation_check": {
+    "change_kind": "new-object",
+    "substantial": true,
+    "rollback_value": "high",
+    "independent_adjustment_expected": true
+  },
+  "actions": [
+    {
+      "tool": "photoshop_create_layer",
+      "args": {
+        "name": "Tiger — core silhouette",
+        "document_id": 60
+      }
+    },
+    {
+      "tool": "photoshop_paint_regions",
+      "args": {
+        "document_id": 60,
+        "regions": [
+          {
+            "id": "tiger-core-ochre",
+            "color": {
+              "red": 155,
+              "green": 83,
+              "blue": 38
+            },
+            "contours": [
+              {
+                "points": [
+                  {
+                    "x": 202,
+                    "y": 893
+                  },
+                  {
+                    "x": 211,
+                    "y": 862
+                  },
+                  {
+                    "x": 247,
+                    "y": 825
+                  },
+                  {
+                    "x": 298,
+                    "y": 798
+                  },
+                  {
+                    "x": 356,
+                    "y": 786
+                  },
+                  {
+                    "x": 413,
+                    "y": 756
+                  },
+                  {
+                    "x": 473,
+                    "y": 736
+                  },
+                  {
+                    "x": 515,
+                    "y": 710
+                  },
+                  {
+                    "x": 546,
+                    "y": 642
+                  },
+                  {
+                    "x": 557,
+                    "y": 580
+                  },
+                  {
+                    "x": 545,
+                    "y": 551
+                  },
+                  {
+                    "x": 550,
+                    "y": 520
+                  },
+                  {
+                    "x": 576,
+                    "y": 509
+                  },
+                  {
+                    "x": 597,
+                    "y": 490
+                  },
+                  {
+                    "x": 623,
+                    "y": 483
+                  },
+                  {
+                    "x": 639,
+                    "y": 465
+                  },
+                  {
+                    "x": 659,
+                    "y": 454
+                  },
+                  {
+                    "x": 678,
+                    "y": 455
+                  },
+                  {
+                    "x": 691,
+                    "y": 472
+                  },
+                  {
+                    "x": 680,
+                    "y": 490
+                  },
+                  {
+                    "x": 647,
+                    "y": 519
+                  },
+                  {
+                    "x": 662,
+                    "y": 554
+                  },
+                  {
+                    "x": 677,
+                    "y": 574
+                  },
+                  {
+                    "x": 655,
+                    "y": 600
+                  },
+                  {
+                    "x": 634,
+                    "y": 603
+                  },
+                  {
+                    "x": 615,
+                    "y": 630
+                  },
+                  {
+                    "x": 607,
+                    "y": 700
+                  },
+                  {
+                    "x": 600,
+                    "y": 768
+                  },
+                  {
+                    "x": 624,
+                    "y": 851
+                  },
+                  {
+                    "x": 619,
+                    "y": 941
+                  },
+                  {
+                    "x": 593,
+                    "y": 991
+                  },
+                  {
+                    "x": 546,
+                    "y": 1000
+                  },
+                  {
+                    "x": 495,
+                    "y": 979
+                  },
+                  {
+                    "x": 420,
+                    "y": 1006
+                  },
+                  {
+                    "x": 349,
+                    "y": 994
+                  },
+                  {
+                    "x": 278,
+                    "y": 984
+                  },
+                  {
+                    "x": 225,
+                    "y": 969
+                  },
+                  {
+                    "x": 195,
+                    "y": 927
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

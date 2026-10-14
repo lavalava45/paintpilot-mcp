@@ -9,6 +9,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { sceneOwnershipPlanSchema } from '../../dist/core/scene-ownership-plan.js';
+import { PAINTING_INTENT_CONTRACT_FIELDS } from '../../dist/core/guard/painting-intent.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const args = process.argv.slice(2);
@@ -24,6 +26,11 @@ if (diagnosticAt >= 0 && (!diagnosticPath || diagnosticPath.startsWith('--'))) {
 // tests and, when available, the --diagnostics reachability check below.
 const requiredPaths = {
   photoshop_guard_cycle_auto: [
+    'review_operation_id',
+    'next_pass.addresses_problem_ids',
+    'painting_intent.brush_use_reason',
+    'previous_observation.critic_review.obligations[].parent_problem_id',
+    'previous_observation.critic_review.obligations[].correction_kind',
     'next_pass.request_key',
     'next_pass.document_id',
     'next_pass.goal',
@@ -32,6 +39,10 @@ const requiredPaths = {
     'next_pass.scene_ownership_plan.objects[].kind',
     'next_pass.scene_ownership_plan.objects[].component_semantic_ids',
     'next_pass.scene_ownership_plan.units[].owner_id',
+    'next_pass.scene_ownership_plan.units[].edit_axes',
+    'previous_observation.editable_scope_review.request_id',
+    'previous_observation.editable_scope_review.parts[].semantic_id',
+    'previous_observation.editable_scope_review.unmapped_parts[].owner_id',
     'next_pass.scene_geometry_model.source_frame.document_incarnation',
     'next_pass.scene_geometry_model.projection.kind',
     'next_pass.logical_layer.geometry_binding.support_plane_id',
@@ -44,18 +55,30 @@ const requiredPaths = {
     'next_pass.distribution_intent',
     'next_pass.edges',
     'previous_observation.edge_observations',
+    'previous_observation.critic_review.findings[].correction_kind',
+    'next_pass.painterly.form_field.surfaces[].vertices',
+    'next_pass.painterly.form_field.sections[].points',
+    'next_pass.painterly.form_field.material.roughness',
+    'next_pass.painterly.form_field.caster.owner_id',
+    'next_pass.painterly.form_field.receiver.owner_id',
     'painting_intent.deferred_from_operation_id',
+    'painting_intent.scene_ownership_plan.units[].edit_axes',
+    'painting_intent.construction.model',
+    'painting_intent.painterly.form_field',
+    'painting_intent.scene_geometry_model',
   ],
+  photoshop_guard_review_image: ['review_scope', 'operation_id'],
   photoshop_guard_status: ['next_pass.scene_ownership_plan.objects[].subject_kind'],
-  photoshop_guard_lint_next_pass: ['next_pass.scene_ownership_plan.objects[].subject_kind'],
+  photoshop_guard_lint_next_pass: ['review_operation_id', 'next_pass.scene_ownership_plan.objects[].subject_kind'],
   photoshop_guard_keep_logical_layer: [
     'scene_ownership_plan.objects[].subject_kind',
     'scene_ownership_plan.units[].owner_id',
   ],
   photoshop_guard_set_priorities: ['problems[].depends_on_problem_ids'],
-  photoshop_guard_art_director: ['directive.refinement_check.material_response'],
+  photoshop_guard_art_director: ['directive.refinement_check.material_response',
+    'directive.tasks[].correction_target.problem_id',
+    'directive.tasks[].correction_target.region_bounds.left'],
   photoshop_guard_resume: ['same_document_confirmed', 'document_id', 'projection'],
-  photoshop_guard_review_image: ['operation_id'],
   photoshop_guard_job_poll: ['job_id'],
   photoshop_guard_set_art_run: ['document_id', 'process_dir', 'brush_preflight.roles[]'],
 };
@@ -145,7 +168,8 @@ function requiredPathErrors(schemas) {
     if (!subject.enum?.includes('person')) errors.push('subject_kind cannot classify a person');
     for (const name of ['photoshop_guard_cycle_auto', 'photoshop_guard_status', 'photoshop_guard_lint_next_pass']) {
       const objects = locate(schemas[name], 'next_pass.scene_ownership_plan.objects[]');
-      if (!objects?.__opaque && !objects?.required?.includes('subject_kind')) errors.push(name + ': subject_kind must be required for new objects');
+      // Sparse continuations inherit existing classification; new objects are validated after that merge.
+      if (!objects?.__opaque && !objects?.properties?.subject_kind) errors.push(name + ': subject_kind must be expressible for new objects');
     }
     const keepObjects = locate(schemas.photoshop_guard_keep_logical_layer, 'scene_ownership_plan.objects[]');
     if (!keepObjects?.required?.includes('subject_kind')) errors.push('photoshop_guard_keep_logical_layer: subject_kind must be required');
@@ -155,6 +179,12 @@ function requiredPathErrors(schemas) {
 
 function driftErrors(schemas) {
   const errors = [];
+  for (const field of PAINTING_INTENT_CONTRACT_FIELDS) {
+    const compact = locate(schemas.photoshop_guard_cycle_auto, 'painting_intent.' + field);
+    const complete = locate(schemas.photoshop_guard_cycle_auto, 'next_pass.' + field);
+    if (!compact || !complete || compact.__opaque || JSON.stringify(structural(compact)) !== JSON.stringify(structural(complete)))
+      errors.push('painting_intent.' + field + ': missing or drifted from canonical next_pass contract');
+  }
   const first = locate(schemas.photoshop_guard_cycle_auto, 'next_pass');
   for (const name of ['photoshop_guard_status', 'photoshop_guard_lint_next_pass']) {
     const other = locate(schemas[name], 'next_pass');
@@ -171,7 +201,8 @@ function driftErrors(schemas) {
   ]) {
     const target = locate(schemas[name], p);
     if (target?.__opaque) continue;
-    if (JSON.stringify(structural(canonical)) !== JSON.stringify(structural(target))) {
+    const expected = name === 'photoshop_guard_keep_logical_layer' ? sceneOwnershipPlanSchema() : canonical;
+    if (JSON.stringify(structural(expected)) !== JSON.stringify(structural(target))) {
       errors.push(name + '.' + p + ': duplicate ownership schema differs');
     }
   }
@@ -250,13 +281,17 @@ try {
     const negative = audit(copy);
     assert.equal(negative.ok, false);
     assert.ok(negative.errors.some(e => e.includes('unexpressible required Guard field next_pass.scene_ownership_plan.objects[].subject_kind')));
+    const drifted = structuredClone(tools);
+    const compact = drifted.find(t => t.name === 'photoshop_guard_cycle_auto').inputSchema.properties.painting_intent;
+    delete compact.properties.scene_ownership_plan.properties.units.items.properties.edit_axes;
+    assert.ok(audit(drifted).errors.some(e => e.includes('painting_intent.scene_ownership_plan: missing or drifted')));
     const example = { violations: [{
       code: 'invented_guard_required_field',
       details: { path: 'next_pass.scene_ownership_plan.objects[0].new_guard_field' },
     }] };
     assert.ok(diagnosticsErrors(Object.fromEntries(tools.map(t => [t.name, t.inputSchema])), example)
       .some(e => e.includes('new_guard_field')));
-    result.negative_controls = 'PASS (omitted subject_kind and newly required Guard field both detected)';
+    result.negative_controls = 'PASS (omitted subject_kind, compact edit_axes drift and newly required Guard field detected)';
   }
   console.log(JSON.stringify(result, null, 2));
   if (!result.ok) process.exitCode = 1;

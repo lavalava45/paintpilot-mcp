@@ -24,7 +24,8 @@
   "scripts": {
     "dev": "tsc --watch",
     "build": "npm run build:server",
-    "build:server": "node scripts/clean-dist.mjs && tsc",
+    "build:server": "tsx scripts/build-server.ts",
+    "deployment:health": "tsx scripts/dev/deployment-health.ts",
     "start": "node dist/index.js",
     "lint": "eslint src --ext .ts",
     "format": "prettier --write \"src/**/*.ts\"",

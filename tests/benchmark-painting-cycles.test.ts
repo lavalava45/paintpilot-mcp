@@ -30,7 +30,9 @@ function fixtureRoot() {
 function writeOperation(operationsDir: string, record: Record<string, unknown>) {
   writeFileSync(
     path.join(operationsDir, `${record.id}.json`),
-    JSON.stringify(record, null, 2),
+    // Ordinary fixture journals are terminal; omit this default only when a
+    // test deliberately exercises an interrupted/nonterminal operation.
+    JSON.stringify({ phase: 'completed', ...record }, null, 2),
     'utf8',
   );
 }
@@ -111,7 +113,9 @@ describe('painting-cycle run-scoped benchmark', () => {
     pass.latency.auto_repair_count = 99; // A visual-pass receipt cannot measure an earlier rejected call.
     writeOperation(operationsDir, pass);
     const events: Record<string, unknown>[] = [
-      { at: '2026-10-02T09:59:59.000Z', kind: 'bookkeeping', model_visible: true, operation_id: 'run-a-create' },
+      // A foreign pre-start event proves the bounded mirror covers the run
+      // boundary without introducing a contradictory journal-owned timestamp.
+      { at: '2026-10-02T09:59:59.000Z', kind: 'bookkeeping', model_visible: true, operation_id: 'foreign-before-start' },
       { at: '2026-10-02T10:00:02.100Z', kind: 'semantic-dispatch', model_visible: true,
         operation_id: 'run-a-pass01', auto_repair_count: 2, auto_split_count: 1 },
       { at: '2026-10-02T10:00:03.100Z', kind: 'rejected', model_visible: true,
@@ -241,7 +245,10 @@ describe('painting-cycle run-scoped benchmark', () => {
           { at: '2026-10-02T10:00:39.000Z', kind: 'semantic-dispatch', model_visible: true, semantic_actions: 1, operation_id: 'run-a-pass02' },
           { at: '2026-10-02T10:00:45.000Z', kind: 'bookkeeping', model_visible: true, semantic_actions: 0, operation_id: 'run-a-final-save' },
           { at: '2026-10-02T10:00:50.850Z', kind: 'semantic-dispatch', model_visible: true, semantic_actions: 0, operation_id: 'run-a-final-save' },
-          { at: '2026-10-02T10:01:00.000Z', kind: 'rejected', model_visible: true, semantic_actions: 0, operation_id: 'run-a-later-unrelated' },
+          // Only a foreign prefix proves this later event belongs to another
+          // run. A run-a-* rejection without a journal is ambiguous, not safe
+          // to discard solely because its timestamp is beyond the tail.
+          { at: '2026-10-02T10:01:00.000Z', kind: 'rejected', model_visible: true, semantic_actions: 0, operation_id: 'run-b-later-unrelated' },
         ],
       },
     }, null, 2), 'utf8');

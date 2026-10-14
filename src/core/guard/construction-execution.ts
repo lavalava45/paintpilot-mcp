@@ -1,3 +1,4 @@
+import { canvasComponent, componentSpaceIssue } from '../component-space.js';
 import type { ConstructionModel } from '../object-construction.js';
 
 const TRANSFORMS = new Set([
@@ -8,6 +9,9 @@ const TRANSFORMS = new Set([
   'photoshop_free_transform',
 ]);
 export function constructionExecutionIssue(raw: any, context: any, generated?: ConstructionModel) {
+  const spaceIssue = componentSpaceIssue(raw, context);
+  if (spaceIssue) return spaceIssue;
+  if (canvasComponent(raw, context)) return undefined;
   const owner = raw.logical_layer?.hypothesis_id;
   const actions = Array.isArray(raw.actions)
     ? raw.actions.filter((a: any) => a && typeof a === 'object')
@@ -86,7 +90,7 @@ export function constructionExecutionIssue(raw: any, context: any, generated?: C
 }
 
 export function unexpandedConstructionPrerequisites(raw: any, context: any) {
-  if (context.painting_profile !== 'nontrivial_painting') return [];
+  if (context.painting_profile !== 'nontrivial_painting' || canvasComponent(raw, context)) return [];
   const issues: Array<{ code: string; path: string; message: string; residual?: number }> = [];
   const model = raw.construction?.model;
   const part = (Array.isArray(model?.parts) ? model.parts : []).find((p: any) => p?.id === raw.construction?.part_id);

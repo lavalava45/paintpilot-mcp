@@ -103,6 +103,7 @@ describe('P0-E.4 bounded stamp-instance placement', () => {
     expect(result.isError).not.toBe(true);
     expect(spy).toHaveBeenCalledTimes(1);
     expect(spy.mock.calls[0]?.[0].instances).toEqual(args.instances);
+    expect(spy.mock.calls[0]?.[0]).toMatchObject({ preset_name: presetName });
     const parsed = body(result);
     expect(parsed.details.motif_instances).toEqual([
       expect.objectContaining({ id: 'motif-a', category: 'organic-motif', stamp_profile_id: profile.profile_id, region_bounds: { left: 75, top: 75, right: 125, bottom: 125 } }),

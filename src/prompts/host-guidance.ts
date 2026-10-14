@@ -2,16 +2,33 @@
  * Server-level guidance for MCP host LLMs (Chat On Steroids, Cursor, Claude Desktop, and peers).
  * Advertised on MCP `initialize` via ServerOptions.instructions.
  */
+/** Visible in tools/list as well as initialize: hosts may omit server instructions. */
+export const PHOTOSHOP_DRAWING_ROUTE = 'When the user requests Photoshop/COS/MCP drawing or forbids imagegen/image_gen, use only the Chat On Steroids Plugins Photoshop tools for that task. Start with photoshop_get_state to establish the document, or photoshop_guard_resume for an interrupted run; reuse an already confirmed target. Draw through photoshop_guard_cycle_auto. If the intended open document is inactive, discover photoshop_set_active_document via photoshop_guard_capabilities(tool_names) even when no standalone tool appears. With explicit authorization to switch focus, activate its exact document_id through photoshop_guard_cycle_auto, then verify photoshop_get_state before painting. Without focus permission ask permission to activate through MCP, not for a manual tab click. Never switch silently or remove document_id pinning. A decision-loop stall is advisory, not a mutation blocker: dispatch the next meaningful visual pass or one bounded diagnostic. Do not call built-in/external image generation, even for a reference, preview or fallback. If the selected tools are unavailable, report the exact blocker and stop; only an explicit later user change authorizes another execution mode.';
+
 export const PHOTOSHOP_MCP_INSTRUCTIONS = `
+EXECUTION ROUTE — apply before choosing any image tool:
+${PHOTOSHOP_DRAWING_ROUTE}
+Pencil is an artistic appearance: prefer BRUSH with explicit width/opacity/flow, not unverified native PENCIL. Calculated form preserves that medium: use construction.rendering={mode:'outline',size:<chosen width>,opacity:<chosen opacity>,flow:<chosen flow>,preset_name:<chosen installed preset>} for lines, fill for masses. Abbreviated owned rebuilds inherit the last confirmed rendering. Paper/flat canvas fields use logical_layer.component_space='canvas', without spatial construction/parent metadata; depicted objects remain world components with separate semantic owners. Never flatten the subject to satisfy a guard.
+This applies from the first request, not only after Photoshop drawing has started.
+A scene description, the words draw/render/image, repeated technical refusal, or imagegen
+availability does not override the user's selected execution method.
+
 - Fresh enforced art runs finish only after the existing exact whole-frame review supplies painting_completion against original_brief (brief_fidelity, form_proportions, light_material, composition_context, editable_parts, contact_and_protection: pass|fail|unknown). Guard binds that assessment to the frame SHA and original brief; all criteria must pass and other debts must be closed. Saves preserve it, later pixels/brief invalidate it. This is Painter self-assessment, not independent quality certification; explicit user pause/stop remains valid. No extra review call or compulsory painting when only final review metadata is missing.
 - Timing discipline (2026-10-10): inspect the exact inline images once, then combine previous_operation_id + previous_observation + next_pass in ONE cycle_auto call. Lint is optional for a new risky draft; include the same previous observation when linting a continuation, then reuse the complete validated request without a separate closure or repeated successful lint. Do not use lint as a mandatory ritual for ordinary model_id/part_id continuation. First construction declares all editable parts once plus selected part, chosen proportions/IK lengths, material role, authorized scene projection and owner geometry relation; declared support/contact requires numeric boundary witnesses. Reuse model_id/part_id and stable scene/ownership ids afterwards. Capabilities/methods/brush inventory/settings are setup reads once per art run; batch missing exact contracts (tool_names), retain discovery_revision and use if_revision only for an actual recheck. Successful inline delivery needs no review_image follow-up; request missing roles only. force_redelivery requires images-unavailable|delivery-failed, never routine confirmation; an availability blocker is not permission to invent review or read source.
 - Record the ORIGINAL user task once as original_brief in photoshop_guard_set_art_run; never replace it with a success summary. Existing runs may add it without a new run or Photoshop mutation.
 - At the existing inline/review_image boundary, YOU inspect the actual delivered AFTER and BEFORE in this chat against original_brief and intended style. When artistic_review.critic_role.required=true, switch explicitly to Critic: assess the WHOLE scene before returning to Painter, including context/space/light rather than just the last component. Return previous_observation.critic_review with the exact request_id, reviewer=same-chat-role and honest criteria/findings. Submit this with the ordinary observation and next pass in ONE cycle_auto; no separate close-only/readiness/source call. A role change is a separate reasoning task, not proof of independent calibration. If the user authorized delegation and Core agents is actually exposed, use optional_spawn: status once, reuse a sleeping Critic via message or spawn once with only the brief and exact registered image paths; collect its report and use reviewer=spawned-reviewer. Missing images/report means unknown/pending, never an invented result. Keep saved model settings. Default to the same-chat Critic without external inference. Follow artistic_review: describe visible form/proportions/perspective/light in previous_observation.observed, name the largest remaining defect in primary_mismatch, and judge target honestly. Executed tools, stage labels and filled fields prove no artistic quality; this is not an independent assessment.
+- At the existing visual review check every relevant object's support, contact and plausible weight distribution. Describe concrete visible support/contact/balance in observed; a shadow or solved geometry alone proves none of these. Respect brief-authorized floating, motion, suspension and stylization; hidden/ambiguous support is unknown. For critic_review contact_and_protection=pass, include one findings entry of that criterion with visible evidence (or justified non-applicability) and next_change describing what to preserve. A failed support check needs a structural correction; unknown/fail remains scene debt. No additional images or reviewer calls.
+- After save/closure, re-evaluate the exact current delivered frame through cycle_auto(review_operation_id, previous_observation.critic_review, optional next_pass), omitting previous_operation_id. Never re-close the old pass or substitute a historical frame. This preserves its original verdict and current component ownership.
 - If the target remains unmet, the next painting_intent/next_pass must address that defect with a concrete construction change. After repeated failure change construction, not merely texture/highlights. Distinguish pass improvement, task completion, stage readiness and whole-image finish; state uncertainty rather than inventing success. Retain useful unfinished pixels when safe. No local-model request, separate reviewer call or additional Guard cycle is required.
 Photoshop MCP — Digital Painting Edition
 ========================================
 
 Session bootstrap
+- painting_intent supports initial scene_ownership_plan, scene models, logical_layer and exactly
+  one of actions/construction/painterly using the same contracts as next_pass. Declare independent
+  unit owner/edit_axes and object membership once, with target_owner_id matching the chosen part.
+  A rejected pass did not register its plan: retain and correct the whole declaration in the next
+  attempt. Never remove the owner or switch request forms while dropping required declarations.
 - PAINTING IS NOT REPOSITORY DEVELOPMENT: during drawing, setup, deterministic rejection or
   recovery, never inspect src/, tests/, dist/, tool implementations or schemas through Core,
   shell, grep or imports; never import SessionStore or manufacture evidence/journal records.
@@ -82,11 +99,16 @@ State before action
 - Saving A/B or exporting closes only bookkeeping. Continue while the original brief, form/light,
   contact or primitive-footprint debt remains; fix structure before accents and before presenting a
   supposedly whole first variant. User pause/stop or a concrete blocker can end work honestly.
-- Query capabilities once; use command_sets exact names. Fetch needed atomic schemas together with
-  tool_names (max eight), not serial guessed aliases. Compose generated passes directly in cycle_auto;
-  a separate solve/status call is optional, not setup. Apply returned payload corrections without
-  source/shell/schema investigation. The Guard repairs known pins/final preview; never repeat identical
-  technical refusals or add a new review/model loop.
+- Select the painting method once when needed: photoshop_select_painting_method includes its
+  execution_contract.allowed_commands, exact action_contracts input schemas and a minimal
+  next_pass skeleton in that SAME answer. Use those exact names and argument shapes in cycle_auto;
+  never invent tools such as photoshop_fill_polygon or infer an alias. When the contract is genuinely
+  absent, request exact schemas ONCE with photoshop_guard_capabilities(tool_names=[...]) using known
+  command_sets (up to eight), not serial guessed aliases. A separate solve/status/preview is NOT
+  required to repair a rejected input shape. Preserve valid owner/proportion/lighting declarations
+  and correct ALL field_correction_packet entries in one resubmission. Guard fills only unique
+  document/owner/revision/layer pins, rejects explicit conflicts, and never invents geometry or art.
+  Do not repeat unchanged status/previews, read source/shell or add a new review/model loop.
 - Choose the public bounded construction path when a brief requires stable proportions, jointed reach,
   contact, or a later pose edit. Use next_pass.construction with model.ik_chains for articulated targets;
   retain authored lengths/root anchors and let relative part contours follow solved joints. Smooth
@@ -109,6 +131,18 @@ State before action
   \`document_id\` pins the operation to that file and successful calls report
   \`document_target: { id, pinned: true }\`. Invalid ids fail closed: do not remove the id
   and retry against whichever tab happens to be active.
+- DOCUMENT TAB MISMATCH: when the intended open document is inactive, call
+  \`photoshop_list_documents\` to resolve its unique id. The exact supported navigation tool
+  is \`photoshop_set_active_document\` (not select_document/activate_document). If it is
+  absent from the visible connector list, discover its executable contract through
+  \`photoshop_guard_capabilities({tool_names:['photoshop_set_active_document']})\`.
+  With previously granted explicit user permission to switch Photoshop focus, use ONE
+  nonvisual \`photoshop_guard_cycle_auto\` action with tool=photoshop_set_active_document
+  and args={document_id:<intended id>}, then verify \`photoshop_get_state.document.id\`
+  matches before any paint. Navigation may foreground Photoshop. Without permission,
+  ask to activate the tab THROUGH MCP, not for the user to click the tab manually.
+  On failed/mismatched activation stop safely; never draw in the active foreign tab or
+  remove document_id pinning. If the intended id is already active, just continue.
 - For visual confirmation after meaningful edits, call
   \`photoshop_get_preview\` (cheap, side-effect free JPEG snapshot). In Guard-required
   model-facing use it is reference-only by default; pass \`include_image=true\`
@@ -268,6 +302,10 @@ Multi-step etiquette
   choosing the next component. Keep dependent placement/occlusion in existing construction bindings.
   Tiny inseparable accents stay on their component; do not create a layer for every stroke.
   Extend the same durable plan additively when a new object/part is needed; preserve old bindings.
+  editability=temporary is a composition scaffold, frozen after its initial pass: no continue, adjust
+  or keep, even at GLOBAL_BLOCK_IN. Build subsequent scene parts on independent units/new layers.
+  A reversible experiment on one actual component uses editability=independent with
+  logical_layer.decision=temporary-hypothesis. Never change a rejected new part into scaffold continuation.
 - Expanded brush dynamics must fit the returned AUTO-batch budget, including final-preview reserve.
   Split at original stroke boundaries; never drop dynamics or use SINGLE_HISTORY to bypass limits.
 - Non-trivial logical layers declare 'physical_role' + 'opacity_role' and optionally one
@@ -304,6 +342,13 @@ Multi-step etiquette
 - Art Director's one/two-preview strategy cadence is advisory. Its cadence/initial pending fields are
   optional runtime defaults; do not call the Director merely because that count was reached. Existing
   observed-defect, uncertainty, protected-quality and task/whole-frame review boundaries remain authoritative.
+ - ART DIRECTOR TARGET RECLASSIFICATION: correction_target is a narrowly bounded
+   global-must-fix to medium-component correction waiver, NOT a generic reference
+   to any active problem. If exact-frame review downscopes a formerly global
+   problem to medium, omit correction_target on the revised task and retain the
+   same problem in addresses_problem_ids on the Painter pass. The Guard retires
+   inherited global-only targets when safe, but never clears the medium defect,
+   waives strategy exhaustion, or admits small/detail changes across medium debt.
 - SUBJECT-FIRST START: the first meaningful visual pass must contain the requested main subject
   and its discriminative recognition cues. Establish its relationship to the setting/path/large
   scene masses in the next bounded construction passes before polishing any one component.
@@ -406,9 +451,11 @@ Multi-step etiquette
   a genuine new execution attempt gets a fresh request_key; reconcile is reserved for uncertain
   or actually dispatched work.
 - If status/resume reports \`decision_loop_stall\` (roughly 90s without a new visual pass and no
-  blocking safety/recovery obligation), follow its prescriptive \`next_required_action\`: dispatch
-  the next meaningful visual pass or explicitly enter the bounded diagnostic exception. The cadence
-  signal never weakens the preview, acknowledgement, uncertainty or checkpoint barriers.
+  blocking safety/recovery obligation), this is an ADVISORY, not a Photoshop failure or a
+  Guard prohibition. Do not wait, ask for a manual tab switch or repeatedly poll status.
+  Choose the largest remaining defect from the retained review and dispatch the next
+  meaningful bounded visual pass, or enter one explicit bounded diagnostic when necessary.
+  The cadence signal never weakens preview, acknowledgement, uncertainty or checkpoint barriers.
 - Treat \`silent_stall\` as a separate continuation failure: roughly 90s with a known next required
   action and no active durable job. Pending report/ack/verdict/reconcile/checkpoint explains rather
   than suppresses it; read-only status/state/schema/preview churn does not reset its clock. Follow the

@@ -7,6 +7,8 @@ export const SCENE_OWNERSHIP_EDITABILITY = [
   'temporary',
 ] as const;
 
+export const SCENE_EDIT_AXES = ['visibility', 'color', 'material', 'lighting', 'position', 'mask', 'rollback'] as const;
+
 export type SceneOwnershipEditability = (typeof SCENE_OWNERSHIP_EDITABILITY)[number];
 
 export const SCENE_SUBJECT_KINDS = [
@@ -21,6 +23,8 @@ export interface SceneOwnershipUnit {
   role: string;
   editability: SceneOwnershipEditability;
   rationale?: string;
+  /** Absent only in retained historical plans/scaffolds. */
+  edit_axes?: string[];
 }
 
 export interface SceneOwnershipSharedOwnerJustification {
@@ -98,6 +102,9 @@ export function normalizeSceneOwnershipPlan(value: unknown): SceneOwnershipPlan 
         `scene_ownership_plan.units[${index}].editability must be one of ${SCENE_OWNERSHIP_EDITABILITY.join('|')}`
       );
     }
+    if (unit.edit_axes !== undefined && (!Array.isArray(unit.edit_axes) || !unit.edit_axes.length
+      || unit.edit_axes.some(axis => !SCENE_EDIT_AXES.includes(axis)) || new Set(unit.edit_axes).size !== unit.edit_axes.length))
+      throw new Error(`scene_ownership_plan.units[${index}].edit_axes requires unique visibility|color|material|lighting|position|mask|rollback values`);
     const rationale = unit.rationale === undefined
       ? undefined
       : requiredString(unit.rationale, `scene_ownership_plan.units[${index}].rationale`);
@@ -106,6 +113,7 @@ export function normalizeSceneOwnershipPlan(value: unknown): SceneOwnershipPlan 
       owner_id: ownerId,
       role,
       editability,
+      ...(unit.edit_axes !== undefined ? { edit_axes: [...unit.edit_axes].sort() } : {}),
       ...(rationale ? { rationale } : {}),
     };
   });
@@ -243,7 +251,7 @@ export function sceneOwnershipUnitsForOwner(plan: SceneOwnershipPlan, ownerId: s
   return plan.units.filter(unit => unit.owner_id === ownerId);
 }
 
-/** Enforce editing scope at creation/promotion, independent of the rendering profile.
+/** Enforce editing scope at creation, continuation and promotion, independent of the rendering profile.
  * Subject classification is a host artistic declaration, never inferred from prose/IDs.
  * Historical plans remain readable; this function does not reassign their pixels.
  */
@@ -287,45 +295,117 @@ export function sceneComponentScopeIssue(plan: SceneOwnershipPlan, ownerId: stri
       message: `continuous-field ${object.object_id} requires one continuous-field unit; subject parts cannot be relabelled as a background field.`, details,
     };
   }
+  const incomplete = units.filter(unit => unit.editability !== 'temporary' && !unit.edit_axes?.length);
+  if (incomplete.length) return { code: 'scene_editable_inventory_required',
+    message: `Declare edit_axes for ${incomplete.map(unit => unit.semantic_id).join(', ')}: which visibility/color/material/lighting/position/mask/rollback edits must be independent? List every separately editable visible part as its own unit and owner, including arbitrary custom subjects. single-component is a hypothesis checked against pixels, not an exemption. Existing bindings may be enriched, never reassigned.`,
+    details: { path: 'scene_ownership_plan.units[].edit_axes', allowed: [...SCENE_EDIT_AXES] } };
   return undefined;
 }
 
 /** Add declarations without reassigning, deleting or flattening existing semantic owners. */
 export function extendSceneOwnershipPlan(durable: SceneOwnershipPlan, supplied?: SceneOwnershipPlan): SceneOwnershipPlan {
   if (!supplied) return durable;
-  const conflict = () => { throw new Error('scene_ownership_plan_conflict: preserve plan_id and every existing unit/object/shared-owner binding; only additive declarations are allowed'); };
-  if (durable.plan_id !== supplied.plan_id) conflict();
+  const conflict = (field: string, previous: unknown, incoming: unknown): never => {
+    throw new Error(`scene_ownership_plan_conflict: ${field}: saved=${JSON.stringify(previous)}, supplied=${JSON.stringify(incoming)}; existing ownership must remain unchanged`);
+  };
+  if (durable.plan_id !== supplied.plan_id) conflict('plan_id', durable.plan_id, supplied.plan_id);
   for (const unit of durable.units) {
-    if (JSON.stringify(unit) !== JSON.stringify(supplied.units.find(row => row.semantic_id === unit.semantic_id))) conflict();
+    const next = supplied.units.find(row => row.semantic_id === unit.semantic_id);
+    if (!next) conflict(`units[${unit.semantic_id}]`, unit, undefined);
+    for (const field of Object.keys(unit) as (keyof SceneOwnershipUnit)[]) {
+      if (JSON.stringify(unit[field]) !== JSON.stringify(next![field]))
+        conflict(`units[${unit.semantic_id}].${field}`, unit[field], next![field]);
+    }
   }
   for (const row of durable.shared_owner_justifications) {
-    if (JSON.stringify(row) !== JSON.stringify(supplied.shared_owner_justifications.find(item => item.owner_id === row.owner_id))) conflict();
+    const next = supplied.shared_owner_justifications.find(item => item.owner_id === row.owner_id);
+    if (JSON.stringify(row) !== JSON.stringify(next))
+      conflict(`shared_owner_justifications[${row.owner_id}]`, row, next);
   }
   for (const object of durable.objects ?? []) {
     const next = supplied.objects?.find(row => row.object_id === object.object_id);
-    if (!next || next.kind !== object.kind || (object.subject_kind && next.subject_kind !== object.subject_kind)
-      || object.component_semantic_ids.some(id => !next.component_semantic_ids.includes(id))) conflict();
+    if (!next) conflict(`objects[${object.object_id}]`, object, undefined);
+    if (next!.kind !== object.kind) conflict(`objects[${object.object_id}].kind`, object.kind, next!.kind);
+    if (object.subject_kind && next!.subject_kind !== object.subject_kind)
+      conflict(`objects[${object.object_id}].subject_kind`, object.subject_kind, next!.subject_kind);
+    for (const id of object.component_semantic_ids)
+      if (!next!.component_semantic_ids.includes(id))
+        conflict(`objects[${object.object_id}].component_semantic_ids`, object.component_semantic_ids, next!.component_semantic_ids);
   }
   const oldOwners = new Set(durable.units.map(row => row.owner_id));
   const oldIds = new Set(durable.units.map(row => row.semantic_id));
-  if (supplied.units.some(row => !oldIds.has(row.semantic_id) && oldOwners.has(row.owner_id))) conflict();
+  for (const row of supplied.units)
+    if (!oldIds.has(row.semantic_id) && oldOwners.has(row.owner_id))
+      conflict(`units[${row.semantic_id}].owner_id`, 'new unique owner', row.owner_id);
   return supplied;
 }
 
-/** Explicitly promote one temporary component without changing its semantic identity or owner. */
-export function promoteTemporarySceneOwnershipUnit(durable: SceneOwnershipPlan, supplied: SceneOwnershipPlan, ownerId: string): SceneOwnershipPlan {
-  const conflict = () => { throw new Error('scene_ownership_plan_conflict: temporary keep may only change the exact existing unit to independent'); };
-  if (durable.plan_id !== supplied.plan_id || durable.units.length !== supplied.units.length
-      || JSON.stringify(durable.objects ?? []) !== JSON.stringify(supplied.objects ?? [])
-      || JSON.stringify(durable.shared_owner_justifications) !== JSON.stringify(supplied.shared_owner_justifications)) conflict();
-  const candidates = durable.units.filter(unit => unit.owner_id === ownerId && unit.editability === 'temporary');
-  if (candidates.length !== 1 || durable.units.some(unit => unit.owner_id === ownerId && unit !== candidates[0])) conflict();
-  for (const unit of durable.units) {
-    const updated = supplied.units.find(row => row.semantic_id === unit.semantic_id);
-    const expected = unit === candidates[0] ? { ...unit, editability: 'independent' } : unit;
-    if (JSON.stringify(updated) !== JSON.stringify(expected)) conflict();
+/** Complete an abbreviated continuation with durable declarations, but never
+ * manufacture a new owner, component, editable axis or object classification.
+ * Explicit changes to existing fields remain visible to extendSceneOwnershipPlan,
+ * which rejects reassignment and relabelling. */
+export function completeSceneOwnershipContinuation(
+  durable: SceneOwnershipPlan,
+  incoming: unknown,
+): SceneOwnershipPlan {
+  if (!incoming || typeof incoming !== 'object' || Array.isArray(incoming))
+    throw new Error('scene_ownership_plan continuation must be an object');
+  const raw = structuredClone(incoming) as Record<string, unknown>;
+  const rows = (name: string): Array<Record<string, unknown>> => {
+    const value = raw[name];
+    if (value === undefined) return [];
+    if (!Array.isArray(value) || value.some(row => !row || typeof row !== 'object' || Array.isArray(row)))
+      throw new Error(`scene_ownership_plan.${name} must be an array of objects`);
+    return value as Array<Record<string, unknown>>;
+  };
+  const suppliedUnits = rows('units');
+  const suppliedObjects = rows('objects');
+  const suppliedShared = rows('shared_owner_justifications');
+  const complete = <T extends Record<string, unknown>>(saved: T[], submitted: T[], id: string): T[] => [
+    ...saved.map(row => {
+      const patch = submitted.find(candidate => candidate[id] === row[id]);
+      return patch ? { ...structuredClone(row), ...patch } : structuredClone(row);
+    }),
+    ...submitted.filter(row => !saved.some(previous => previous[id] === row[id])),
+  ];
+  const objects = complete(
+    (durable.objects ?? []) as unknown as Array<Record<string, unknown>>,
+    suppliedObjects,
+    'object_id',
+  );
+  for (const saved of durable.objects ?? []) {
+    const explicit = suppliedObjects.find(row => row.object_id === saved.object_id);
+    if (explicit?.component_semantic_ids !== undefined) {
+      const claimed = explicit.component_semantic_ids;
+      if (!Array.isArray(claimed)
+        || saved.component_semantic_ids.some(id => !claimed.includes(id)))
+        throw new Error(`scene_ownership_plan_conflict: objects[${saved.object_id}].component_semantic_ids: existing members must not be removed`);
+    }
   }
-  return supplied;
+  return normalizeSceneOwnershipPlan({
+    ...raw,
+    plan_id: raw.plan_id ?? durable.plan_id,
+    units: complete(durable.units as unknown as Array<Record<string, unknown>>, suppliedUnits, 'semantic_id'),
+    ...(objects.length ? { objects } : {}),
+    shared_owner_justifications: complete(durable.shared_owner_justifications as unknown as Array<Record<string, unknown>>,
+      suppliedShared, 'owner_id'),
+  });
+}
+
+/** Temporary semantic units are composition scaffolds, not editable component authority.
+ * A real component hypothesis declares independent editability from its first pass;
+ * logical_layer.temporary still records its reversible experimental lifecycle.
+ * Never infer scope from object names, mark counts, stage labels or prose.
+ */
+export function sceneScaffoldScopeIssue(plan: SceneOwnershipPlan, ownerId: string) {
+  if (!sceneOwnershipUnitsForOwner(plan, ownerId).some(unit => unit.editability === 'temporary')) return undefined;
+  return {
+    code: 'scene_scaffold_frozen',
+    message: `Temporary composition scaffold ${ownerId} is frozen after its initial pass. Do not continue, adjust or keep it as an editable component. Extend the same ownership plan with independently editable parts on distinct new owners/layers; retain existing scaffold pixels as reference until authorized replacement.`,
+    details: { owner_id: ownerId, path: 'next_pass.scene_ownership_plan.units',
+      preserved: 'Existing scaffold pixels and bindings; no relabelling, replay or automatic split.',
+      next: 'Add independent units and objects for the actual parts; create one component on a new layer. A temporary component experiment uses independent editability plus logical_layer.decision=temporary-hypothesis.' },
+  };
 }
 
 export const SCENE_OWNERSHIP_OBJECTS_SCHEMA = {
@@ -356,7 +436,8 @@ export function sceneOwnershipPlanSchema(description?: string): Record<string, u
             semantic_id: { type: 'string' },
             owner_id: { type: 'string' },
             role: { type: 'string', minLength: 4 },
-            editability: { type: 'string', enum: [...SCENE_OWNERSHIP_EDITABILITY] },
+            editability: { type: 'string', enum: [...SCENE_OWNERSHIP_EDITABILITY], description: 'independent denotes one genuinely editable component, including temporary component experiments. temporary is a composition scaffold: initial pass only, then frozen; no continuation, adjust or keep. Extend the plan with independent component owners instead.' },
+            edit_axes: { type: 'array', minItems: 1, maxItems: 7, uniqueItems: true, items: { type: 'string', enum: [...SCENE_EDIT_AXES] }, description: 'Required for editable component creation/continuation. Identify edits that must remain independent. Add a separate unit/owner for each independently hideable/recolorable/movable/material/light/mask/rollback part. Inseparable accents may share their component regardless of mark count. Historical bindings may be enriched without changing ownership.' },
             rationale: { type: 'string', description: 'Optional audit/artistic guidance for this semantic ownership assignment.' },
           },
           required: ['semantic_id', 'owner_id', 'role', 'editability'],
@@ -381,4 +462,15 @@ export function sceneOwnershipPlanSchema(description?: string): Record<string, u
     required: ['plan_id', 'units'],
     additionalProperties: false,
   };
+}
+
+/** Public next-pass only: established records may be omitted or represented
+ * by their identity. The Guard completes those from durable state, and still
+ * requires a complete plan when no durable plan exists. */
+export function sceneOwnershipContinuationSchema(description?: string): Record<string, unknown> {
+  const schema = structuredClone(sceneOwnershipPlanSchema(description)) as any;
+  delete schema.required;
+  schema.properties.units.items.required = ['semantic_id'];
+  schema.properties.objects.items.required = ['object_id'];
+  return schema;
 }

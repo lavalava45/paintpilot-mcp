@@ -2,6 +2,10 @@
 
 [Русский](../ru/painting-method.md) · [English contents](README.md)
 
+**Not yet executable:** the optional E.27 local-warp geometry prototype is
+[documented separately](e27-local-warp-design.md). It is untested, not
+registered as a Painting Method Palette capability, and cannot alter Photoshop.
+
 ## Feedback in the current implementation
 
 After a pass, inspect the exact BEFORE/AFTER in the same conversation.

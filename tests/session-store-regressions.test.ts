@@ -251,7 +251,8 @@ describe('E.8b continuation checkpoint', () => {
       hash: 'op-instrumented-hash',
       sequence: 1,
       created_at: '2026-10-01T00:00:00.000Z',
-      completed_at: '2026-10-01T00:00:01.000Z',
+      completed_at: '2026-10-01T00:00:00.300Z',
+      preview_attached_at: '2026-10-01T00:00:00.400Z',
       phase: 'completed',
       visual: true,
       failed: false,
@@ -263,6 +264,9 @@ describe('E.8b continuation checkpoint', () => {
     });
     s.recordLatency('op-instrumented', {
       cycle_received_at: '2026-10-01T00:00:00.000Z',
+      guard_accepted_at: '2026-10-01T00:00:00.050Z',
+      photoshop_started_at: '2026-10-01T00:00:00.100Z',
+      photoshop_operation_end_at: '2026-10-01T00:00:00.300Z',
       response_ready_at: '2026-10-01T00:00:01.000Z',
     });
     s.recordVisualDeliveryReceipt('op-instrumented', {
@@ -274,7 +278,7 @@ describe('E.8b continuation checkpoint', () => {
         result_ready_at: '2026-10-01T00:00:06.000Z',
       },
     });
-    s.recordContinuationMarker('op-instrumented', 'review_finished', '2026-10-01T00:00:10.000Z');
+    s.recordContinuationMarker('op-instrumented', 'critic_complete', '2026-10-01T00:00:10.000Z');
     s.recordContinuationMarker('op-instrumented', 'next_pass_ready', '2026-10-01T00:00:20.000Z');
     s.closeLatency('op-instrumented', '2026-10-01T00:00:21.000Z', 7, 128);
 
@@ -287,14 +291,33 @@ describe('E.8b continuation checkpoint', () => {
       next_pass_ready_marker_to_guard_ms: 1000,
       review_delivery_to_next_guard_ms: 15000,
     });
-    expect(s.continuationTimelineExport(42)).toMatchObject({
-      operations: [expect.objectContaining({
+    expect(s.continuationTimelineExport(42).operations[0]).toMatchObject({
         operation_id: 'op-instrumented',
+        milestones: {
+          guard_accepted: '2026-10-01T00:00:00.050Z',
+          photoshop_start: '2026-10-01T00:00:00.100Z',
+          operation_end: '2026-10-01T00:00:00.300Z',
+          preview_ready: '2026-10-01T00:00:00.400Z',
+          critic_complete: '2026-10-01T00:00:10.000Z',
+          next_pass_ready: '2026-10-01T00:00:20.000Z',
+        },
+        milestone_intervals_ms: {
+          guard_accepted_to_photoshop_start: 50,
+          photoshop_start_to_operation_end: 200,
+          operation_end_to_preview_ready: 100,
+          preview_ready_to_critic_complete: 9600,
+          critic_complete_to_next_pass_ready: 10000,
+        },
         boundary_events: [
+          { kind: 'guard_accepted', at: '2026-10-01T00:00:00.050Z' },
+          { kind: 'photoshop_start', at: '2026-10-01T00:00:00.100Z' },
+          { kind: 'operation_end', at: '2026-10-01T00:00:00.300Z' },
+          { kind: 'preview_ready', at: '2026-10-01T00:00:00.400Z' },
           { kind: 'guard_response_ready', at: '2026-10-01T00:00:01.000Z' },
           { kind: 'review_image_request_received', at: '2026-10-01T00:00:05.000Z' },
           { kind: 'review_image_result_ready', at: '2026-10-01T00:00:06.000Z' },
           { kind: 'review_finished_marker_received', at: '2026-10-01T00:00:10.000Z' },
+          { kind: 'critic_complete_marker_received', at: '2026-10-01T00:00:10.000Z' },
           { kind: 'next_pass_ready_marker_received', at: '2026-10-01T00:00:20.000Z' },
           { kind: 'next_guard_continuation_received', at: '2026-10-01T00:00:21.000Z' },
         ],
@@ -307,7 +330,6 @@ describe('E.8b continuation checkpoint', () => {
           next_pass_ready_marker_to_guard_ms: 1000,
           review_delivery_to_next_guard_ms: 15000,
         },
-      })],
     });
   });
 
@@ -756,6 +778,7 @@ describe('Guard session-store regressions', () => {
           owner_id: 'primaryOwner-temp',
           role: 'Accepted independently editable character component',
           editability: 'independent',
+          edit_axes: ['visibility', 'color', 'position', 'rollback'],
           rationale: 'Promote the accepted temporary component into durable independently correctable scene ownership.',
         }],
         // A kept owner is one editable component, not a whole character
@@ -1392,6 +1415,7 @@ describe('Guard session-store regressions', () => {
       replan: 'parameter or wording changes still do not make a distinct strategy',
     });
     expect(exhaustedSame.join('\n')).toMatch(/artistic_recovery:.*distinct structural strategy/);
+    expect(exhaustedSame.join('\n')).toMatch(/workflow_stall:.*causally distinct executable strategy/);
 
     const changedArgs = structuredClone(prior.args);
     changedArgs.method_class = 'region';
@@ -1406,6 +1430,33 @@ describe('Guard session-store regressions', () => {
       scale: 'medium',
     });
     expect(changed.join('\n')).not.toMatch(/artistic_recovery/);
+    expect(changed.join('\n')).not.toMatch(/workflow_stall/);
+
+    const readErrors = s.collectPreflightErrors(request('stall-recovery-read', 'photoshop_get_preview', {
+      document_id: 42,
+    }));
+    expect(readErrors.join('\n')).not.toMatch(/workflow_stall/);
+    const statusErrors = s.collectPreflightErrors(request('stall-status-read', 'photoshop_get_state', {
+      document_id: 42,
+    }));
+    expect(statusErrors.join('\n')).not.toMatch(/workflow_stall/);
+
+    const rollbackArgs = {
+      document_id: 42,
+      problem_id: 'form-problem',
+      region: 'form',
+      stage: 'FORM',
+      scale: 'medium',
+      action_class: 'ROLLBACK',
+      steps: [{ id: 'undo', tool: 'photoshop_undo', args: { steps: 1 } }],
+    };
+    const rollbackErrors = s.collectPreflightErrors({
+      ...request('stall-rollback', 'photoshop_execute_visual_microplan', rollbackArgs),
+      problem_id: 'form-problem',
+      stage: 'FORM',
+      scale: 'medium',
+    });
+    expect(rollbackErrors.join('\n')).not.toMatch(/workflow_stall/);
   });
 
   it('recovers a completed document bootstrap from an exact command receipt and preserves the returned document id', () => {
@@ -1872,7 +1923,43 @@ describe('Guard session-store regressions', () => {
     });
   });
 
-  it('reprojects connected descendant geometry when a parent construction revision moves/scales', () => {
+  it('attributes repeated Guard rejection reasons and measured correction time only to matching semantic requests', () => {
+    const s = store() as any;
+    vi.useFakeTimers();
+    try {
+      const setTime = (seconds: number) => vi.setSystemTime(new Date(Date.UTC(2026, 9, 1, 0, 0, seconds)));
+      setTime(0);
+      s.recordCompilerAttemptAudit(42, { outcome: 'rejected', request_key: 'scene-window', error_codes: ['invalid-geometry'],
+        rejection_fingerprint: 'fingerprint-a' });
+      setTime(5);
+      s.recordCompilerAttemptAudit(42, { outcome: 'rejected', request_key: 'unrelated', error_codes: ['missing-layer'] });
+      setTime(10);
+      s.recordCompilerAttemptAudit(42, { outcome: 'rejected', request_key: 'scene-window', error_codes: ['owner-mismatch'],
+        rejection_fingerprint: 'fingerprint-b' });
+      setTime(25);
+      s.recordCompilerAttemptAudit(42, { outcome: 'dispatched', request_key: 'scene-window', operation_id: 'window-01' });
+      const attempts = s.paintingState().documents['42'].compiler_attempt_audit.recent_attempts;
+      expect(attempts.at(-1)).toMatchObject({
+        operation_id: 'window-01', rejected_attempts_before_correction: 2,
+        correction_wall_ms: 25000, first_rejection_at: '2026-10-01T00:00:00.000Z',
+        corrects_rejection_fingerprint: 'fingerprint-b',
+        rejection_error_codes: ['invalid-geometry', 'owner-mismatch'],
+      });
+      expect(s.continuationTimelineExport(42).guard_rejections).toMatchObject({
+        total_rejected_attempts: 3,
+        recent_reason_counts: { 'invalid-geometry': 1, 'missing-layer': 1, 'owner-mismatch': 1 },
+        corrections_with_measured_wall_time: 1,
+        correction_wall_ms_total_observed: 25000,
+      });
+      setTime(30);
+      s.recordCompilerAttemptAudit(42, { outcome: 'dispatched', request_key: 'another-unrelated-request' });
+      expect(s.paintingState().documents['42'].compiler_attempt_audit.recent_attempts.at(-1).correction_wall_ms).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps dependent-owner geometry and revision stale after an unproven physical parent-only move/scale', () => {
     const s = store();
     const binding = {
       protocol: 'photoshop.guard.geometry_binding.v1', owner_id: 'child',
@@ -1894,7 +1981,7 @@ describe('Guard session-store regressions', () => {
     writeProjectionRecord(s, { id: 'parent-r2', documentId: 42, sequence: 2, visual: true, report: true, ack: true, verdict: true });
     const moved = s.read('parent-r2')! as any;
     moved.geometry_preflight = { executable_geometry: {
-      mode: 'validated-landmark-transform', owner_id: 'parent',
+      mode: 'validated-landmark-transform', owner_id: 'parent', tolerance_px: 2,
       source_bounds: { left: 10, top: 20, right: 110, bottom: 120 },
       target_bounds: { left: 90, top: 50, right: 290, bottom: 100 },
     } };
@@ -1905,22 +1992,95 @@ describe('Guard session-store regressions', () => {
 
     const owners = s.semanticLayerOwners(42);
     const child = owners.find((owner: any) => owner.hypothesis_id === 'child') as any;
-    expect(child.parent_construction_revision).toBe('parent-r2');
-    expect(child.geometry_binding.anchors.near_contact).toEqual({ x: 110, y: 55 });
-    expect(child.geometry_binding.anchors.far_extent).toEqual({ x: 150, y: 65 });
+    // E.25 live proof: native move_layer updates only the selected parent's
+    // pixels. A mathematical parent transform is NOT a descendant pixel
+    // receipt. Leave these anchors and parent revision explicitly stale.
+    expect(child.parent_construction_revision).toBe('parent-r1');
+    expect(child.geometry_binding.anchors.near_contact).toEqual({ x: 20, y: 30 });
+    expect(child.geometry_binding.anchors.far_extent).toEqual({ x: 40, y: 50 });
     expect(child.geometry_binding.control_sections[0]).toMatchObject({
-      at: { x: 110, y: 55 }, expected_bounds: { left: 106, top: 54, right: 114, bottom: 56 },
+      at: { x: 20, y: 30 }, expected_bounds: { left: 18, top: 28, right: 22, bottom: 32 },
     });
+  });
+
+  it('advances both dependent owner revisions/anchors only after an accepted atomic native connected-move receipt', () => {
+    const s = store();
+    const original = {
+      protocol: 'photoshop.guard.geometry_binding.v1', owner_id: 'child',
+      scene_geometry_model_id: 'scene', scene_geometry_revision: 1,
+      vanishing_family_ids: [], dependencies: ['parent'],
+      anchors: { near_contact: { x: 145, y: 115 } },
+      control_sections: [], constraints: [], exact_geometry_completion_relevant: false,
+      exact_evidence: [], local_exceptions: [],
+    };
+    writeProjectionRecord(s, { id: 'connected-first', documentId: 42, sequence: 1,
+      visual: true, report: true, ack: true, verdict: true });
+    const first = s.read('connected-first') as any;
+    first.result = { content: [{ type: 'text', text: JSON.stringify({ continuation_layers: [
+      { layer_id: 2, hypothesis_id: 'parent', construction_tier: 'primary', construction_change: true },
+      { layer_id: 3, hypothesis_id: 'child', construction_tier: 'secondary', construction_change: true,
+        parent_hypothesis_id: 'parent', parent_construction_revision: 'connected-first', geometry_binding: original },
+    ] }) }] };
+    s.write(first);
+    const panel = { owner_id: 'parent', layer_id: 2,
+      expected_bounds: { left: 50, top: 70, right: 145, bottom: 160 } };
+    const tab = { owner_id: 'child', layer_id: 3,
+      expected_bounds: { left: 140, top: 100, right: 186, bottom: 135 } };
+    writeProjectionRecord(s, { id: 'connected-native', documentId: 42, sequence: 2,
+      visual: true, report: true, ack: true, verdict: true });
+    const native = s.read('connected-native') as any;
+    native.tool = 'photoshop_execute_visual_microplan';
+    native.args = { document_id: 42, steps: [{ id: 'one-linked-move', tool: 'photoshop_move_layer',
+      args: { deltaX: 20, deltaY: 0, connected_move: { parent: panel, children: [tab] } } }] };
+    native.result = { content: [{ type: 'text', text: JSON.stringify({
+      pass_execution: { history_ownership: { status: 'exact', total_history_steps: 1 } },
+      mutation_results: { 'one-linked-move': { ok: true, details: {
+        moved: true, connected: true, parent_owner_id: 'parent',
+        deltaX: 20, deltaY: 0, history_steps: 1, layer_receipts: [
+          { owner_id: 'parent', layer_id: 2, source_bounds: panel.expected_bounds,
+            target_bounds: { left: 70, top: 70, right: 165, bottom: 160 } },
+          { owner_id: 'child', layer_id: 3, source_bounds: tab.expected_bounds,
+            target_bounds: { left: 160, top: 100, right: 206, bottom: 135 } },
+        ],
+      } } },
+    }) }] };
+    s.write(native);
+    const beforeAcceptance = s.semanticLayerOwners(42).find((v: any) => v.hypothesis_id === 'child') as any;
+    // Frame status alone never permits a silent advance without a full accepted
+    // verdict, recorded operation ack, and authentic per-layer native bounds.
+    expect(beforeAcceptance.parent_construction_revision).toBe('connected-native');
+    expect(beforeAcceptance.geometry_binding.anchors.near_contact).toEqual({ x: 165, y: 115 });
+    const tampered = s.read('connected-native') as any;
+    tampered.verdict.target_resolved = 'no';
+    s.write(tampered);
+    const afterRejection = s.semanticLayerOwners(42).find((v: any) => v.hypothesis_id === 'child') as any;
+    expect(afterRejection.parent_construction_revision).toBe('connected-first');
+    expect(afterRejection.geometry_binding.anchors.near_contact).toEqual({ x: 145, y: 115 });
   });
 
   it('does not propagate malformed persisted parent-transform bounds into descendant geometry', () => {
     const validSource = { left: 10, top: 20, right: 110, bottom: 120 };
     const validTarget = { left: 90, top: 50, right: 290, bottom: 100 };
-    const malformed = [
+    const malformed: Array<{ source: Record<string, unknown>; target: Record<string, unknown>; tolerance?: unknown }> = [
       { source: { ...validSource, left: null }, target: validTarget },
       { source: { ...validSource, left: false }, target: validTarget },
       { source: validSource, target: { ...validTarget, left: '90' } },
       { source: validSource, target: { ...validTarget, left: null } },
+      // A syntactically numeric provenance value is not necessarily a valid
+      // transform: zero/negative extents must never silently move descendants.
+      { source: { ...validSource, right: validSource.left }, target: validTarget },
+      { source: { ...validSource, right: validSource.left - 1 }, target: validTarget },
+      { source: validSource, target: { ...validTarget, bottom: validTarget.top } },
+      { source: validSource, target: { ...validTarget, bottom: validTarget.top - 1 } },
+      { source: validSource, target: { ...validTarget, top: NaN } },
+      { source: validSource, target: { ...validTarget, right: Infinity } },
+      { source: validSource, target: validTarget, tolerance: null },
+      { source: validSource, target: validTarget, tolerance: '2' },
+      { source: validSource, target: validTarget, tolerance: -1 },
+      { source: validSource, target: validTarget, tolerance: 2.01 },
+      { source: validSource, target: validTarget, tolerance: 1000 },
+      { source: validSource, target: validTarget, tolerance: NaN },
+      { source: validSource, target: validTarget, tolerance: Infinity },
     ];
     for (const [index, sample] of malformed.entries()) {
       const s = store();
@@ -1944,6 +2104,7 @@ describe('Guard session-store regressions', () => {
       const moved = s.read(`malformed-parent-r2-${index}`)! as any;
       moved.geometry_preflight = { executable_geometry: {
         mode: 'validated-landmark-transform', owner_id: 'parent',
+        tolerance_px: sample.tolerance === undefined ? 2 : sample.tolerance,
         source_bounds: sample.source, target_bounds: sample.target,
       } };
       moved.result = { content: [{ type: 'text', text: JSON.stringify({ ok: true, continuation_layers: [
@@ -1956,7 +2117,7 @@ describe('Guard session-store regressions', () => {
     }
   });
 
-  it('keeps focus-crop construction in document coordinates through later parent revision propagation', () => {
+  it('preserves focus-crop document coordinates without phantom descendant pixel propagation', () => {
     const s = store();
     const previewLocal = {
       protocol: 'photoshop.guard.geometry_binding.v1', owner_id: 'child',
@@ -1985,7 +2146,7 @@ describe('Guard session-store regressions', () => {
     writeProjectionRecord(s, { id: 'parent-r2', documentId: 42, sequence: 2, visual: true, report: true, ack: true, verdict: true });
     const moved = s.read('parent-r2')! as any;
     moved.geometry_preflight = { executable_geometry: {
-      mode: 'validated-landmark-transform', owner_id: 'parent',
+      mode: 'validated-landmark-transform', owner_id: 'parent', tolerance_px: 2,
       source_bounds: { left: 200, top: 100, right: 1000, bottom: 700 },
       target_bounds: { left: 280, top: 130, right: 1880, bottom: 430 },
     } };
@@ -1995,11 +2156,11 @@ describe('Guard session-store regressions', () => {
     s.write(moved);
 
     const child = s.semanticLayerOwners(42).find((owner: any) => owner.hypothesis_id === 'child') as any;
-    expect(child.parent_construction_revision).toBe('parent-r2');
-    expect(child.geometry_binding.anchors.near_contact).toEqual({ x: 360, y: 160 });
-    expect(child.geometry_binding.anchors.far_extent).toEqual({ x: 440, y: 180 });
+    expect(child.parent_construction_revision).toBe('parent-r1');
+    expect(child.geometry_binding.anchors.near_contact).toEqual({ x: 240, y: 160 });
+    expect(child.geometry_binding.anchors.far_extent).toEqual({ x: 280, y: 200 });
     expect(child.geometry_binding.control_sections[0]).toMatchObject({
-      at: { x: 360, y: 160 }, expected_bounds: { left: 352, top: 158, right: 368, bottom: 162 },
+      at: { x: 240, y: 160 }, expected_bounds: { left: 236, top: 156, right: 244, bottom: 164 },
     });
   });
 
@@ -3471,6 +3632,91 @@ describe('Guard session-store regressions', () => {
     expect(watch.next_required_action).toBe(
       'Painter: execute bounded task organicInstances-light under directive nonvisual-stall-regression'
     );
+  });
+
+  it('turns workflow stall into an actionable next step instead of falling through to the active Director task', () => {
+    const s = store();
+    writeProjectionRecord(s, {
+      id: 'workflow-stall-anchor', documentId: 78, sequence: 1,
+      visual: true, report: true, ack: true, verdict: true,
+    });
+    const anchor = s.read('workflow-stall-anchor')!;
+    anchor.verdict.significance.global.mean_abs_rgb_delta = 0.02;
+    s.write(anchor);
+    for (let sequence = 2; sequence <= 9; sequence++) {
+      writeProjectionRecord(s, {
+        id: `workflow-stall-churn-${sequence}`, documentId: 78, sequence,
+        report: true, ack: true,
+      });
+    }
+    s.updatePaintingState(78, current => ({
+      ...current,
+      document_id: 78,
+      workflow_lifecycle: { status: 'active', reason: 'operation_dispatched' },
+      visual_problems: {
+        'architecture-perspective': {
+          problem_id: 'architecture-perspective', status: 'open', severity: 'must-fix', scale: 'global',
+        },
+      },
+      active_problem: { problem_id: 'decorative-sky', scale: 'small' },
+      art_director: {
+        directive_id: 'workflow-stall-directive',
+        status: 'active',
+        review_due: false,
+        current_task_id: 'decorative-sky',
+        tasks: [{ task_id: 'decorative-sky', status: 'active' }],
+      },
+    }));
+
+    const metrics = s.workflowMetrics(78);
+    expect(metrics).toMatchObject({
+      workflow_stall: true,
+      external_actions_since_last_meaningful_visual_change: 8,
+    });
+    expect(s.workflowStallStrategyContext(78).latest_ineffective_visual).toBeNull();
+    expect(s.documentNextRequiredAction(78)).toMatch(
+      /^workflow stall after nonvisual\/protocol churn: dispatch one real visual pass for architecture-perspective;/
+    );
+    expect(s.documentNextRequiredAction(78)).not.toContain('Painter: execute bounded task decorative-sky');
+  });
+
+  it('does not count an undone or nonauthoritative accepted visual as the last meaningful gain', () => {
+    const s = store();
+    writeProjectionRecord(s, {
+      id: 'retained-early-gain', documentId: 79, sequence: 1,
+      visual: true, report: true, ack: true, verdict: true,
+    });
+    writeProjectionRecord(s, {
+      id: 'undone-late-gain', documentId: 79, sequence: 2,
+      visual: true, report: true, ack: true, verdict: true,
+    });
+    const retained = s.read('retained-early-gain')!;
+    retained.verdict.significance.global.mean_abs_rgb_delta = 0.02;
+    s.write(retained);
+    const undone = s.read('undone-late-gain')!;
+    undone.verdict.significance.global.mean_abs_rgb_delta = 0.02;
+    undone.rolled_back = true;
+    undone.current_frame_authority = false;
+    s.write(undone);
+    for (let sequence = 3; sequence <= 10; sequence++) {
+      writeProjectionRecord(s, {
+        id: `no-visual-progress-${sequence}`, documentId: 79, sequence,
+        report: true, ack: true,
+      });
+    }
+    const metrics = s.workflowMetrics(79);
+    expect(metrics).toMatchObject({
+      workflow_stall: true,
+      meaningful_visual_passes: 1,
+      last_meaningful_visual_operation_id: 'retained-early-gain',
+      external_actions_since_last_meaningful_visual_change: 9,
+    });
+    expect(s.workflowStallStrategyContext(79).latest_ineffective_visual).toBeNull();
+    // A second invalidated frame cannot clear the stall merely by retaining
+    // an earlier positive self-review verdict without its pixels.
+    undone.rolled_back = false;
+    s.write(undone);
+    expect(s.workflowMetrics(79).last_meaningful_visual_operation_id).toBe('retained-early-gain');
   });
 
   it('does not infer legacy workflow completion from a mid-run PSD checkpoint save', () => {

@@ -42,6 +42,7 @@ import { createLayerTools } from '../src/tools/layer-tools.js';
 import { createLayerPropertiesTools } from '../src/tools/layer-properties-tools.js';
 import { createLayerTransformTools } from '../src/tools/layer-transform-tools.js';
 import { createLayerOrderingTools } from '../src/tools/layer-ordering-tools.js';
+import { withToolExecutionContext } from '../src/core/execution-context.js';
 
 function textOf(result: { content?: Array<{ type: string; text?: string }> }): string {
   return result.content?.find((item) => item.type === 'text')?.text ?? '';
@@ -83,6 +84,31 @@ beforeEach(() => {
 });
 
 describe('full layer-domain public contract', () => {
+  it('executes connected move only under a real Guard operation context with structured native History receipt', async () => {
+    const { connection, router } = fixture();
+    const move = createLayerTransformTools(connection, router)
+      .find(tool => tool.tool.name === 'photoshop_move_layer')!;
+    const connected_move = {
+      parent: { owner_id: 'parent', layer_id: 2, expected_bounds: { left: 50, top: 70, right: 145, bottom: 160 } },
+      children: [{ owner_id: 'child', layer_id: 3, expected_bounds: { left: 140, top: 100, right: 186, bottom: 135 } }],
+    };
+    const args = { document_id: 91, deltaX: 20, deltaY: 0, connected_move };
+    const raw = jsonOf(await move.handler(args));
+    expect(raw.ok).toBe(false);
+    expect(bridge.operation).not.toHaveBeenCalled();
+    bridge.operation.mockResolvedValueOnce({ ok: true, data: {
+      moved: true, connected: true, history_steps: 1, deltaX: 20, deltaY: 0,
+      parent_owner_id: 'parent', layer_receipts: [
+        { owner_id: 'parent', layer_id: 2 }, { owner_id: 'child', layer_id: 3 },
+      ],
+    } });
+    const guarded = await withToolExecutionContext({ guardOperationId: 'e25-connected-root' },
+      () => move.handler(args));
+    expect(jsonOf(guarded)).toMatchObject({ ok: true, details: { connected: true, history_steps: 1 } });
+    expect(bridge.operation).toHaveBeenCalledWith(
+      'move_layer_pixels', args, 'uxp_connected_move_failed'
+    );
+  });
   it('keeps the exact tool families and order', () => {
     const { connection, router } = fixture();
     expect(createLayerTools(connection, router).map((item) => item.tool.name)).toEqual([
@@ -172,6 +198,29 @@ describe('full layer-domain public contract', () => {
     expect(result.isError).toBe(true);
     expect(textOf(result)).toMatch(/strictly ordered/i);
     expect(bridge.gradient).not.toHaveBeenCalled();
+  });
+
+  it('rejects a stale UXP surface-gradient success receipt that silently omits alpha and History proof', async () => {
+    const { connection, router } = fixture();
+    const gradient = createLayerTools(connection, router).find(item => item.tool.name === 'photoshop_paint_color_gradient')!;
+    const args = { document_id: 91, layer_id: 77, preserve_transparency: true,
+      from: { x: 211, y: 272 }, to: { x: 253, y: 272 },
+      stops: [{ position: 0, red: 66, green: 83, blue: 104 },
+        { position: 1, red: 20, green: 30, blue: 47 }] };
+    const stale = await gradient.handler(args);
+    expect(stale.isError).toBe(true);
+    expect(textOf(stale)).toContain('surface_gradient_native_receipt_unproven');
+    expect(bridge.gradient).toHaveBeenLastCalledWith(expect.objectContaining({
+      document_id: 91, layer_id: 77, preserve_transparency: true,
+    }));
+    bridge.gradient.mockResolvedValueOnce({ ok: true, data: {
+      applied: true, layer_id: 77, surface_alpha_preserved: true,
+      history_steps: 1, history_name: 'MCP Continuous Surface Tone',
+      gradient_kind: 'raster-color-linear',
+    } });
+    expect(jsonOf(await gradient.handler(args))).toMatchObject({ ok: true, details: {
+      surface_alpha_preserved: true, history_steps: 1,
+    } });
   });
 
   it('preserves logical merge and text-layer UXP operation contracts', async () => {
@@ -277,4 +326,23 @@ describe('full layer-domain public contract', () => {
     ]);
     expect(executeScript).not.toHaveBeenCalled();
   });
+});
+
+it('forwards native gradient clip/strength and rejects an old receipt that ignores them', async () => {
+  const { connection, router } = fixture();
+  const gradient = createLayerTools(connection, router).find(item => item.tool.name === 'photoshop_paint_color_gradient')!;
+  const contour = [{ x: 211, y: 155 }, { x: 253, y: 155 }, { x: 253, y: 389 }];
+  const args = { document_id: 91, layer_id: 77, preserve_transparency: true, clip_contour: contour, opacity: 1,
+    from: { x: 211, y: 272 }, to: { x: 253, y: 272 },
+    stops: [{ position: 0, red: 66, green: 83, blue: 104 }, { position: 1, red: 20, green: 30, blue: 47 }] };
+  const receipt = { applied: true, layer_id: 77, surface_alpha_preserved: true, history_steps: 1, history_name: 'MCP Continuous Surface Tone' };
+  bridge.gradient.mockResolvedValueOnce({ ok: true, data: receipt });
+  expect((await gradient.handler(args)).isError).toBe(true);
+  expect(bridge.gradient).toHaveBeenLastCalledWith(expect.objectContaining({ clip_contour: contour, opacity: 1 }));
+  bridge.gradient.mockResolvedValueOnce({ ok: true, data: { ...receipt, clip_contour: contour, clip_contour_applied: true, selection_restored: true, opacity: 1 } });
+  expect((await gradient.handler(args)).isError).not.toBe(true);
+  const count = bridge.gradient.mock.calls.length;
+  expect((await gradient.handler({ ...args, opacity: 0 })).isError).toBe(true);
+  expect((await gradient.handler({ ...args, clip_contour: [{ x: 0, y: 0 }, { x: 1, y: 1 }, { x: 2, y: 2 }] })).isError).toBe(true);
+  expect(bridge.gradient.mock.calls).toHaveLength(count);
 });

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { boundedBrushTrial } from '../src/core/guard/brush-role-extension.js';
 import {
   BrushMethodEvidenceCache,
   HISTORICAL_ROUND_BLUNT_2026_09_20,
@@ -138,5 +139,20 @@ describe('brush/method evidence cache', () => {
     expect(cache.recommend(base).probe_needed).toBe(true);
     expect(cache.recommend(base).probe_needed).toBe(false);
     expect(cache.recommend({ ...base, effective_settings: { size: 60, flow: 40 } }).probe_needed).toBe(true);
+  });
+});
+
+describe('novel-purpose brush trial bounds', () => {
+  it('refuses a mixed paint/fill visual pass instead of certifying its stroke subset as bounded', () => {
+    // The retained Mykonos cobblestone incident uses a 128px-or-smaller dry-brush
+    // trial; any additional visual mutation must not inherit that trial authority.
+    const trial = { brush_trial_bounds: { left: 512, top: 1185, right: 612, bottom: 1260 } };
+    const strokes = { tool: 'photoshop_paint_strokes', args: { strokes: [
+      { size: 16, points: [{ x: 530, y: 1206 }, { x: 541, y: 1201 }] },
+    ] } };
+    expect(boundedBrushTrial(trial, [strokes], 'medium')).toBeUndefined();
+    expect(boundedBrushTrial(trial, [strokes, {
+      tool: 'photoshop_fill_layer', args: { color: { red: 255, green: 255, blue: 255 } },
+    }], 'medium')).toMatch(/only.*strokes.*dabs|strokes.*dabs.*only/i);
   });
 });

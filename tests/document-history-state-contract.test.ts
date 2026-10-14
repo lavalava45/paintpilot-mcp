@@ -228,6 +228,10 @@ describe('document/history/state public contract', () => {
     expect(textOf(await byName('photoshop_undo').handler({ steps: 2, document_id: 42 })))
       .toContain('Undo successful (2 steps)');
     expect(bridge.undo).toHaveBeenCalledWith({ document_id: 42, steps: 2 });
+    bridge.undo.mockResolvedValueOnce({ ok: true, data: { undone: true, steps: 1 } });
+    const nativeUndo = await byName('photoshop_undo').handler({ steps: 1, document_id: 42 });
+    expect(JSON.parse(nativeUndo.content[1]?.type === 'text' ? nativeUndo.content[1].text : '{}'))
+      .toMatchObject({ evidence: 'uxp_native_undo_receipt', undo_history_states_consumed: 1, steps: 1 });
 
     bridge.operation.mockResolvedValueOnce({ ok: true, data: { ok: true, redone: 2 } });
     expect(textOf(await byName('photoshop_redo').handler({ steps: 2, document_id: 42 })))
@@ -237,7 +241,7 @@ describe('document/history/state public contract', () => {
     );
 
     expect(textOf(await byName('photoshop_get_history').handler({}))).toContain('History States:\n');
-    expect(backendFor.mock.calls.map(([primitive]) => primitive)).toEqual(['history.undo', 'history.redo']);
+    expect(backendFor.mock.calls.map(([primitive]) => primitive)).toEqual(['history.undo', 'history.undo', 'history.redo']);
   });
 
   it('keeps state and capability reads free of legacy dispatch', async () => {

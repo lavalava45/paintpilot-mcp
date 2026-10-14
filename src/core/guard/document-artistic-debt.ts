@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { CONTACT_REVIEW_DESCRIPTION } from './chat-critic.js';
 
 export const COMPLETION_CRITERIA = [
   'brief_fidelity',
@@ -20,7 +21,9 @@ export const PAINTING_COMPLETION_SCHEMA = {
       properties: Object.fromEntries(
         COMPLETION_CRITERIA.map((key) => [
           key,
-          { type: 'string', enum: ['pass', 'fail', 'unknown'] },
+          { type: 'string', enum: ['pass', 'fail', 'unknown'],
+            ...(key === 'contact_and_protection' ? { description: CONTACT_REVIEW_DESCRIPTION }
+              : key === 'editable_parts' ? { description: 'pass requires the same exact whole-scene editable_scope_review: independently editable visible parts match the inventory and actual layers, with no unresolved missing/combined/unknown/unmapped parts. Saved files and labels are not proof.' } : {}) },
         ])
       ),
       required: [...COMPLETION_CRITERIA],
@@ -69,6 +72,8 @@ export function bindPaintingCompletion(value: any, state: any, frameSha: string)
 /** Saving/exporting closes a technical operation, never the unfinished painting. */
 export function documentArtisticDebt(state: any, lastRecord?: any): string[] {
   const reasons: string[] = [];
+  if (Object.values(state?.editable_scope_debt ?? {}).some((row: any) => row.status !== 'replaced'))
+    reasons.push('editable_scope_unresolved');
   if (Object.values(state?.visual_problems ?? {}).some((p: any) => p?.status !== 'resolved'))
     reasons.push('unresolved_visual_problem');
   const critique = state?.last_critique ?? (lastRecord?.visual ? lastRecord.verdict : undefined);

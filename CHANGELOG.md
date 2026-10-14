@@ -1,47 +1,1675 @@
 # Changelog
 
-- 2026-10-14 — **P0 bounded extraction complete: fourteenth compact-change-domains helper integrated on isolated branch.**
-  Added `compact-change-domains.ts` and its four focused tests; wired the
-  validator into direct compact actions and VisualMicroPlan before dispatch.
-  Retains independently valid explicitly declared domains beside derived
-  execution-method domains; unknown declarations fail closed with
-  `compact_change_domains_invalid`. This is a **separate semantic Guard admission
-  change**, not a pure move of code from the baseline commit; do not claim
-  byte-for-byte equivalence to `3151952`. Added two end-to-end contract cases
-  requiring a pre-dispatch refusal without Photoshop tool execution.
-  `npx tsc --noEmit` PASS; focused tests **4 files / 114 tests PASS**;
-  `npm run verify:canonical` **PASS** on the isolated 14-module worktree
-  (150 acceptance test files; lint 0 errors, 84 warnings; build, pack, Guard
-  public contract, policy, provenance, evidence ledger, docs PASS).
-  No existing runtime session/UXP was modified. The P0 goal of extracting
-  14 bounded helper responsibilities is complete at source/offline level;
-  `compileCompactPass()` still contains stateful logic and Beta/live artistic
-  acceptance is not established. P1 SessionStore and P2/P3 inventories remain.
+- 2026-10-14 — **Consolidated project source snapshot for GitHub synchronization (not a Beta release).**
+  Preserved the two isolated P0 Guard refactoring commits (13 pure helper extractions
+  and the separately reviewed `compact-change-domains` admission fix) alongside
+  the newer remote documentation/engineering illustrations. Prepared the
+  current local painting-process, recovery/History, semantic component ownership,
+  layer/geometry, UXP, Guard, scene qualification, tests and bilingual-doc changes
+  as one source snapshot. The existing remote README artwork is byte-identical
+  to the corresponding local material. Local rollback source backups and ignored
+  runtime/process logs remain local rather than becoming public source files.
+  **Current workspace verification:** `npm run verify:canonical` PASS,
+  **174/174 test files and 1906/1906 tests**, build and all policy/contract/docs
+  gates PASS, ESLint 0 errors/173 warnings. `npm run test:embedded-guard-mcp`
+  PASS with 38 public tools/15 Guard tools, catalog within COS budget and
+  `guard_required` for raw mutations. Ledger structural verification: 21/23
+  evidence entries locally hash-verified, 2 gitignored artifacts unavailable;
+  not a complete native/live-evidence proof. No running MCP/UXP instance was
+  reloaded and no live Photoshop acceptance or six-scene artistic qualification
+  was performed. This is Git source synchronization, **not** a tag, installer,
+  MCPB/npm release or declaration of Beta artistic readiness.
 
 
-- 2026-10-14 — **Isolated compact compiler refactor commit (13 independent helpers).**
-  Extracted edge bindings, stroke/batch budgets, initial-layer tone,
-  action-class/replace admission, method/tool admissibility, physical stack,
-  concrete layer targets, semantic owner metadata, envelope/document gates,
-  mutation budgets, review-region requirements, construction-role admission,
-  and brush-material preflight into 13 `src/core/guard/compact-*.ts` helpers,
-  with 13 focused owning test files. Built on clean `53dd8e9`, not on the
-  large uncommitted feature/hardening worktree. Preserved the **HEAD**
-  caller's scale restriction when extracting concrete layer targets; kept
-  unrelated Guard policy, owner/revision, runtime, and dispatch changes out.
-  **Separate worktree proof:** `npx tsc --noEmit` PASS; 17 focused test files
-  **192/192 PASS**; full `npm run verify:canonical` **PASS** with 149 files,
-  **1588/1588 tests**, lint 0 errors (84 warnings), Guard contract, packaging,
-  policies, provenance, evidence ledger and documentation gates PASS. Five
-  Windows-checkout CRLF-transformed retained license notices were restored
-  byte-for-byte from the same HEAD in the temporary verification worktree;
-  none are part of this commit. The fourteenth `compact-change-domains` helper
-  and its current-tree compiler admission changes are **not included**:
-  the matching old HEAD had no equivalent inline validation, so committing
-  them as a pure refactor would alter behavior. The larger working tree's
-  14-module/1906-test integration gate is a different, still-uncommitted state.
-  No Photoshop/UXP mutation, reset, live acceptance or publication.
+- 2026-10-14 — **P0 scoped compiler extraction complete on isolated technical branch.**
+  Verified follow-up commit `c98fda14714370d70d5641826d7ba101dca66cbc`
+  on top of `3151952`: `compact-change-domains.ts` is the 14th module,
+  with four focused cases and two direct/VisualMicroPlan public Guard tests
+  requiring fail-closed refusal without Photoshop mutation. Explicitly
+  recorded **semantic** `raw.change_domains` admission, not an unchanged
+  extraction relative to original HEAD. Isolated TypeScript PASS,
+  focused **114/114 PASS**, full `verify:canonical` **PASS** (150 acceptance
+  files, lint 0 errors/84 warnings); retained license notices restored
+  byte-for-byte after Windows checkout CRLF drift for verification only.
+  Original `digital-painting` worktree and unrelated changes preserved;
+  no merge, publishing, live Photoshop or UXP mutations. Agreed P0 14-module
+  source-level scope finished; larger stateful compiler work, independent
+  policy/live admission, P1 SessionStore and P2/P3 remain future tasks.
 
+
+- 2026-10-14 — **Refactoring isolation: verified 13-module commit on separate branch.**
+  Created Git commit `3151952ec226c6c2e8f43d1d693b7f083eb1fa59`
+  on `integration/night-refactor-20261014` with 29 scoped files: 13 compact
+  compiler helper modules, 13 owning tests, compiler hookups and isolated
+  changelog/report. Isolated on clean original HEAD `53dd8e9` rather than
+  committing earlier unrelated Guard/Photoshop work. Separate worktree
+  `npm run verify:canonical` **PASS** (149 files / 1588 tests), TypeScript
+  **PASS**, focused 192/192 tests **PASS**, `verify:docs` and staged diff
+  checks PASS. Five retained-license bytes were restored from HEAD only for
+  isolated Windows checkout SHA verification; not included in commit.
+  The 14th `compact-change-domains` remains uncommitted because its caller
+  changes Guard semantics relative to old HEAD; current dirty-tree 14-module
+  integration had independently passed 1906/1906 tests. Original
+  `digital-painting` branch and unrelated uncommitted work untouched, no
+  merge/cherry-pick, publication, runtime restart or Photoshop/UXP mutation.
+  See `docs/REFACTORING-INTEGRATION-ACCEPTANCE-2026-10-14.md`.
+
+
+- 2026-10-14 — **Night refactoring integration acceptance (offline, full gate PASS).**
+  Audited the 14 extracted `compact-*.ts` Guard compiler helpers and their 14
+  owning test files against the actual dirty Windows repository. Verified the
+  compiler call sites, type-only violation imports and preserved authority for
+  session mutations, geometry, owner/revision policy and native dispatch.
+  **Executed** `npm run verify:canonical`: **PASS, exit 0**, acceptance Vitest
+  **174/174 files, 1906/1906 tests**; TypeScript/build, public Guard contract,
+  packaging, lint (0 errors, 173 warnings), policies, identity, provenance,
+  ledger structure and bilingual docs PASS. Separate 212/212 compact/next-pass/
+  geometry integration tests PASS; targeted module lint 0 errors/1 warning;
+  `git diff --check` PASS. Of 23 ledger entries, 21 present/hash-checked and
+  two missing (not native evidence). No production change, deployment,
+  Photoshop/UXP operation or live Beta acceptance. Commit deliberately withheld:
+  `cycle-compiler.ts` and `CHANGELOG.md` contain intermixed earlier uncommitted
+  work; staging them whole would absorb unrelated changes, while staging only
+  the new helper files would omit actual compiler integration. See
+  `docs/REFACTORING-INTEGRATION-ACCEPTANCE-2026-10-14.md` for boundaries and
+  required follow-up. P0/P1/P2/P3 remain open.
+
+- 2026-10-14 — **Night refactoring / Agent 3: pure compact brush material-preflight extracted (source-only).**
+  Rechecked the real Windows repository, current AGENTS.md, night plan,
+  Release Hardening, dirty Git tree, compiler and existing owning tests
+  (`digital-painting`, HEAD `53dd8e9`). Moved the ordered substantial-brush
+  material-role inference and two admission gates from `compileCompactPass()`
+  to `src/core/guard/compact-brush-material-preflight.ts`. The helper accepts
+  explicit typed context and returns the material, exact normalization and
+  diagnostics without modifying durable state. It preserves scale/intent/role
+  filtering, ambiguous-inventory fail-closed behavior, existing error order
+  (`brush_material_role_required` before `brush_inventory_scope_insufficient`),
+  messages and pre-dispatch authority. Brush candidate selection, presets,
+  stage classification and Photoshop/UXP dispatch remain in the compiler.
+  Added eight focused tests in `tests/compact-brush-material-preflight.test.ts`.
+  **Executed baseline before edit:** compact-contract 106/106, next-pass
+  compiler 13/13 (**119/119 PASS**). **After edit:** new tests **8/8 PASS**;
+  compact-contract 106/106, next-pass 13/13, new tests 8/8
+  (**127/127 PASS**, three files); `npx tsc --noEmit --pretty false` **PASS**;
+  targeted ESLint `--quiet` **PASS**; compiler `git diff --check` **PASS**.
+  Worker-status query listed no workers for this caller, which does not
+  establish absence of independent agent sessions. No subagents, commit,
+  reset, deployment or live Photoshop/UXP operations. Full canonical release
+  verification not run. P0 remaining compiler decomposition, conditional P1
+  SessionStore mapping and P2/P3 inventories remain open; Beta qualification
+  is not established.
+
+- 2026-10-14 — **Night refactoring / Agent 1, sixth hourly cycle: broad-region construction metadata gates extracted (source-only).**
+  Independently reread AGENTS.md, the current night plan, Release Hardening,
+  compiler, existing owning tests and dirty Git tree in the Windows repository
+  (`digital-painting`, HEAD `53dd8e9`). Preserved all existing changes. Moved
+  only the two pure broad nontrivial region ADD admission diagnostics from
+  `compileCompactPass()` into `src/core/guard/compact-construction-role-gates.ts`;
+  kept broad-region classification, construction-role derivation, geometry
+  binding, method selection and all dispatch authority in the compiler.
+  Preserved exact `broad_region_construction_role_required` and
+  `construction_role_material_role_required` messages, mutual exclusion and
+  their original position after geometry checks. Added five focused tests in
+  `tests/compact-construction-role-gates.test.ts`.
+  **Executed baseline:** compact-contract 106/106 and next-pass 13/13
+  (**119/119 PASS**). **After extraction:** the same 119 plus five new
+  construction-role tests (**124/124 PASS**); `npx tsc --noEmit --pretty false`
+  **PASS**, targeted ESLint `--quiet` **PASS**, compiler `git diff --check`
+  **PASS**. Core worker-status query was blocked by tool safety checks;
+  independent agents' activity remains unverified. No subagents, reset,
+  commit, deployment or live Photoshop/UXP changes. Canonical release gate
+  not run. Further P0 compiler decomposition, conditional P1 SessionStore
+  mapping and P2/P3 inventories remain open; no Beta readiness claimed.
+
+- 2026-10-14 — **Night refactoring / Agent 3, sixth scheduled cycle: compact review-region admission gates extracted (source-only).**
+  Independently read the actual Windows repository AGENTS.md, night plan,
+  Release Hardening, compiler, review-profile policy, existing owning tests,
+  Git status/diff and Core worker status (branch `digital-painting`, HEAD
+  `53dd8e9`, dirty worktree preserved). Moved only the two pure missing-focus-
+  region diagnostics from `compileCompactPass()` into
+  `src/core/guard/compact-review-region-gates.ts`; the compiler retains the
+  exact review-profile resolution, local-inspection determination and
+  BEFORE/AFTER preview insertion positions. The new helper preserves the
+  local-inspection diagnostic's precedence over profile-region diagnostics,
+  exact messages/codes and pre-dispatch refusal. Added six regression tests
+  in `tests/compact-review-region-gates.test.ts`.
+  **Executed baseline:** compact-contract 106/106 and next-pass 13/13
+  (**119/119 PASS**). **After extraction:** compact-contract 106/106,
+  next-pass 13/13, new region-gates 6/6 (**125/125 PASS**);
+  `npx tsc --noEmit --pretty false` **PASS**, targeted ESLint `--quiet`
+  **PASS**, full tracked `git diff --check` **PASS** (pre-existing
+  LF/CRLF warnings only). No canonical/release or Photoshop/UXP live testing, commit,
+  reset or deployment. No subagents; Core worker status returned none for
+  this caller, not evidence about independent sessions. Remaining P0
+  compiler decomposition, conditional P1 SessionStore work and P2/P3
+  inventories are open; live Beta acceptance is not established.
+
+- 2026-10-14 — **Night refactoring / Agent 1, next hourly cycle: compact count-budget gates extracted (source-only).**
+  Independently reread AGENTS.md, the night plan, Release Hardening,
+  compiler, existing compact helpers and owning tests in the actual Windows
+  repository through Chat On Steroids Core (`digital-painting`, HEAD `53dd8e9`,
+  pre-existing dirty worktree). Extracted three pure count checks to
+  `src/core/guard/compact-pass-budget-gates.ts`: hard visual mutation cap,
+  adaptive mutation cap and single physical-layer creation cap. Calls remain
+  at their original compiler positions, after their original dependencies;
+  simultaneous hard/adaptive violations, exact codes/messages/details and
+  pre-dispatch fail-closed semantics are preserved. Added five focused tests
+  in `tests/compact-pass-budget-gates.test.ts`.
+  **Executed before edits:** compact-contract 106/106, next-pass 13/13,
+  compact-stroke-budget 5/5 (**124/124 PASS**).
+  **After edits:** compact-contract 106/106, next-pass 13/13,
+  compact-stroke-budget 5/5, preflight-repair 10/10 and new budget gates 5/5
+  (**139/139 PASS**); focused new tests also **5/5 PASS** separately.
+  `npx tsc --noEmit --pretty false` **PASS**, targeted ESLint `--quiet`
+  **PASS**, full `git diff --check` **PASS**. No subagents, reset, commit,
+  deployment or Photoshop/UXP mutation. Core worker status lists none for
+  this caller, not proof that independent sessions are inactive. Remaining
+  P0 compiler extraction, conditional SessionStore map and P2/P3 inventory
+  stay open. `verify:canonical` and live Beta acceptance **not run**.
+
+- 2026-10-14 — **Night refactoring / Agent 3, fifth scheduled cycle: compact envelope admission gates extracted (source-only).**
+  Independently reread AGENTS.md, the night plan, Release Hardening,
+  current compiler/helpers/tests and the real dirty Git tree on
+  `digital-painting` at `53dd8e9` through Chat On Steroids Core. Extracted
+  three pure admission checks into
+  `src/core/guard/compact-envelope-gates.ts`: required
+  `request_key`/`goal`/actions with accepted-anchor restore exception,
+  strict bootstrap versus existing-document identity, and rejection of
+  multiple direct operations without a VisualMicroPlan mutation.
+  `cycle-compiler.ts` invokes each helper at its original position;
+  early-return boundaries, nonterminal bootstrap error, diagnostic
+  order/codes/messages, action inspection and Guard dispatch authority
+  remain unchanged. Added seven tests in
+  `tests/compact-envelope-gates.test.ts`.
+  **Executed before edits:** compact-contract 106/106 and next-pass 13/13
+  (**119/119 PASS**). **After edits:** those 119 plus new 7/7
+  (**126/126 PASS**); first-pass-contract-recovery **3/3 PASS**;
+  two focused embedded-guard admission cases **2/2 PASS** (102 skipped
+  by test-name filter). Initial TypeScript check found lost control-flow
+  narrowing after helper extraction; fixed with a local type assertion
+  after the terminal envelope gate, with no runtime change.
+  Repeated `npx tsc --noEmit --pretty false` **PASS** and targeted
+  ESLint `--quiet` **PASS**. Canonical verification and Photoshop/UXP
+  live tests **not run**. The Core agents status call was blocked by
+  tool safety checks, so other sessions' activity is unverified; no
+  subagents, reset, commit, deployment or runtime mutation. P0 further
+  extraction, conditional SessionStore mapping and P2/P3 inventory
+  remain open; no Beta acceptance is claimed.
+
+- 2026-10-14 — **Night refactoring / Agent 1, fifth scheduled pass: temporary-owner stage gate moved into existing physical-stack preflight (source-only).**
+  Independently reread the live Windows repository's AGENTS.md, night plan,
+  Release Hardening, current compiler, nine existing compact helpers, Git HEAD
+  (`53dd8e9`, `digital-painting`) and dirty worktree through Chat On Steroids
+  Core. Kept all pre-existing edits. Moved only the pure committed-refinement
+  temporary-owner gate from `compileCompactPass()` into the existing
+  `collectCompactPhysicalStackViolations()` (no new subsystem), preserving its
+  position **after** physical-role/depth checks, exact
+  `semantic_layer_stage_gate` diagnostic, owner order, strict temporary flag,
+  and low rollback-value exemption. Added four focused cases to
+  `tests/compact-physical-stack.test.ts`. The first focused test run exposed
+  three incorrect fixture expectations: the pre-existing late-structural-owner
+  gate correctly fires for an opaque new owner at VALUE/MATERIAL. Corrected
+  only those fixtures to use a nonstructural role; no production gate relaxed.
+  **Executed:** existing compact/next-pass tests 119/119 PASS (started before
+  source edit); after final fixture correction, combined Vitest 129/129 PASS
+  (10 physical-stack, 106 compact-contract, 13 next-pass),
+  `npx tsc --noEmit --pretty false` PASS, targeted ESLint `--quiet` PASS,
+  compiler `git diff --check` PASS (existing LF/CRLF warning only).
+  P0 extraction, conditional SessionStore map and P2/P3 inventory remain open.
+  No canonical gate, Photoshop/UXP runtime mutation, commit, deployment or
+  Beta acceptance. No subagents; Core status lists no workers for this caller,
+  not evidence about independent sessions.
+
+- 2026-10-14 — **Night refactoring / Agent 3, fourth hourly cycle: compact semantic-owner metadata preflight (source-only).**
+  Re-read the live Windows repository through Chat On Steroids Core, AGENTS.md,
+  night plan, Release Hardening, dirty Git state, existing compiler and owning
+  tests. Extracted the three existing `semantic_layer_owner_missing` envelope
+  checks (creation separation, isolated-owner identity, explicit-owner separation)
+  from `compileCompactPass()` into the pure
+  `src/core/guard/compact-owner-metadata.ts`, keeping the same check position,
+  duplicate error codes, exact messages and ordering; no owner inheritance,
+  rollback, admission or runtime behavior was intentionally changed. Added five
+  focused cases in `tests/compact-owner-metadata.test.ts`. **Executed before
+  change:** compact-contract-regressions 106/106 and next-pass-compiler 13/13
+  (119/119 PASS). **After change:** the same 119 and new tests 5/5 (124/124
+  PASS), `npx tsc --noEmit --pretty false` PASS, targeted ESLint `--quiet` PASS,
+  compiler `git diff --check` PASS (only existing CRLF warning). P0 further
+  extraction, conditional SessionStore mapping and P2/P3 inventory remain open.
+  No canonical gate, live Photoshop/UXP mutation, commit or Beta acceptance.
+  No subagents; Core agents status lists no workers belonging to this caller,
+  which does not establish the state of independent sessions.
+
+- 2026-10-14 — **Night refactoring / Agent 1, subsequent hourly cycle: compact layer-target projections (source-only).**
+  Re-read the actual Windows repository, AGENTS.md, night plan and Release
+  Hardening through Chat On Steroids Core, checked the seven previous
+  extractions, dirty Git tree and current owning tests. Extracted two pure
+  projections from `compileCompactPass()` into
+  `src/core/guard/compact-layer-targets.ts`: durable physical-layer owner
+  indexing and recursive concrete mutation layer-id collection. Kept their
+  original positions relative to the semantic owner/cross-layer checks;
+  retained projected-stack precedence, numeric coercion, last-owner-wins
+  map behavior, nested snake/camel target detection and deferred-reference
+  exclusion. No change to admission, errors, cross-layer authority or
+  Photoshop dispatch. Added five focused tests in
+  `tests/compact-layer-targets.test.ts`. **Executed:** before change
+  `compact-contract-regressions` 106/106 and `next-pass-compiler` 13/13
+  (**119/119 PASS**); after change those 119 plus new tests 5/5
+  (**124/124 PASS**); `npx tsc --noEmit --pretty false` PASS;
+  targeted ESLint `--quiet` PASS; compiler `git diff --check` PASS.
+  P0 further extraction, conditional SessionStore mapping and P2/P3
+  inventory remain open. No canonical gate, live Photoshop/UXP mutation,
+  deployment, commit or Beta acceptance claim. No subagents were used;
+  Core status showed no workers owned by this caller, not proof that
+  independent sessions are inactive.
+
+- 2026-10-14 — **Night refactoring / Agent 3, subsequent hourly cycle: compact physical-stack preflight (source-only).**
+  Independently reread the live repository, AGENTS.md, night plan, Release
+  Hardening and actual compiler imports through Chat On Steroids Core. Verified
+  the six preceding extractions and existing dirty Git state. Extracted the
+  existing physical-role/opacity-role and depth-order preflight checks from
+  `compileCompactPass()` into pure
+  `src/core/guard/compact-physical-stack.ts`, preserving the original check
+  position, four diagnostic codes/messages, ordering and exact create-layer
+  above/below target matching. Kept temporary-owner stage gate and all
+  ownership/recovery mutation boundaries in the compiler. Added six focused
+  tests in `tests/compact-physical-stack.test.ts` for metadata, late
+  structural introduction, missing owners, ordering, continuation and
+  simultaneous violations. **Executed:** pre-change Vitest
+  `compact-contract-regressions` 106/106 and `next-pass-compiler` 13/13
+  (119/119 PASS); post-change combined Vitest 6/6 new, 106/106 compact and
+  13/13 next-pass (**125/125 PASS**). Initial TypeScript run found an
+  optional stage type mismatch; corrected the helper type, then
+  `npx tsc --noEmit --pretty false` PASS, targeted ESLint `--quiet` PASS,
+  compiler `git diff --check` PASS. Remaining P0 extraction, conditional
+  SessionStore mapping and P2/P3 inventory remain open. No canonical
+  integration gate, live Photoshop/UXP mutation, deployment or Beta
+  acceptance claim. No subagents; Core status found no workers belonging
+  to this caller, not proof that independent sessions are inactive.
+
+- 2026-10-14 - **Night refactoring / Agent 1: compact method admissibility (source-only).**
+  Re-read the live repository, current refactoring plan, AGENTS.md and release
+  freeze through Chat On Steroids Core; confirmed five previous extractions.
+  Extracted method_id exclusions, method-to-tool compatibility and mixed
+  method-class checks into src/core/guard/compact-method-admissibility.ts,
+  preserving the original validation position, codes, messages, order and
+  continuous-color-field fill exception. Added six focused cases in
+  tests/compact-method-admissibility.test.ts. Executed combined Vitest before
+  the final typing-only correction: new tests 5/5, compact-contract-regressions
+  106/106, next-pass-compiler 13/13 (124/124 PASS). An initial TypeScript check
+  identified an optional primaryTool mismatch; fixed it and added a sixth
+  test. Rechecked focused Vitest 6/6, TypeScript noEmit PASS, targeted ESLint
+  PASS, whitespace checks PASS. No canonical gate or live Photoshop mutation.
+  P0 further extraction, conditional SessionStore and P2/P3 inventory remain
+  open; existing uncommitted work was preserved. Core agents status showed no
+  workers owned by this caller, not proof of no independent sessions.
+
+- 2026-10-14 — **Night refactoring / Agent 3, subsequent hourly cycle: compact action-class and replace-target preflight (source-only).**
+  Re-read current `AGENTS.md`, night plan, Release Hardening, compiler and dirty
+  Git state through Chat On Steroids Core; prior extraction claims were checked
+  against actual imports and source. Extracted the existing action-class
+  normalization, explicit protected-replacement gate and `replace_contents`
+  same-layer validation from `compileCompactPass()` into the pure
+  `src/core/guard/compact-action-class.ts`. The helper is called at the same
+  validation position; invalid authored classes remain invalid, and
+  `component_rebuild_target_required` retains its exact message and scope.
+  Added `tests/compact-action-class.test.ts` with five focused tests for
+  explicit/inferred classes, protected replacement and fail-closed region pins.
+  **Executed:** Vitest `compact-action-class` **5/5**, `compact-contract-regressions`
+  **106/106**, `next-pass-compiler` **13/13** (**124/124** total) PASS;
+  `npx tsc --noEmit --pretty false` PASS; targeted ESLint `--quiet` PASS;
+  `git diff --check` on compiler PASS. Existing dirty changes were preserved.
+  Core agent-status inspection was blocked by tool safety checks; no
+  subagents were launched. Remaining P0 extraction, conditional SessionStore
+  decomposition and P2/P3 inventory remain open. No canonical gate, live
+  Photoshop/UXP mutation, reload or Beta acceptance claim.
+
+- 2026-10-14 — **Night refactoring / Agent 1, subsequent hourly cycle: initial-layer tone geometry predicate (source-only).**
+  Independently reread `AGENTS.md`, the live night plan, Release Hardening
+  restrictions, compiler and dirty Git state. Moved the exact pure
+  first-unpainted-document uniform-fill geometry exemption predicate from
+  `compileCompactPass()` to `src/core/guard/compact-initial-layer-tone.ts`;
+  its call remains at the same position, preserving the
+  `initial_layer_tone_geometry_deferred` normalization, downstream geometry
+  admission and all pre-existing diagnostic order. Added five focused
+  positive/fail-closed cases in `tests/compact-initial-layer-tone.test.ts`
+  (later frame, non-new layer, non-fill/multiple actions, structural
+  construction, geometry/parent/depth/surface bindings). **Executed:**
+  pre-change `next-pass-compiler` 13/13 PASS; post-change Vitest
+  `compact-initial-layer-tone` 5/5, `compact-contract-regressions` 106/106,
+  `next-pass-compiler` 13/13 (**124/124** combined) PASS; TypeScript
+  `npx tsc --noEmit --pretty false` PASS; targeted ESLint `--quiet` PASS;
+  compiler `git diff --check` PASS. Remaining P0 extraction, conditional
+  SessionStore mapping and P2/P3 inventory stay open. No canonical gate,
+  Photoshop/UXP mutation, deployment/reload or Beta acceptance claim.
+
+- 2026-10-14 — **Night refactoring / Agent 3: compact stroke-budget preflight extraction (source-only).**
+  Re-read the real repository, night plan and Release Hardening freeze; preserved
+  pre-existing dirty changes and the two earlier compiler extractions. Moved the
+  existing atomic and cumulative `photoshop_paint_strokes` AUTO-batch checks from
+  `compileCompactPass()` into `src/core/guard/compact-stroke-budget.ts`, retaining
+  the exact diagnostic code, messages, details, pre-existing-error deduplication,
+  exception handling and validation position. Added five focused tests in
+  `tests/compact-stroke-budget.test.ts`. **Executed:** Vitest 5/5 new tests,
+  `compact-contract-regressions` 106/106, `next-pass-compiler` 13/13 (**124/124**
+  combined); `npx tsc --noEmit --pretty false` PASS; targeted ESLint `--quiet`
+  PASS; compiler `git diff --check` PASS. P0 further extraction, conditional
+  SessionStore map and P2/P3 inventory remain open. No canonical gate, native
+  Photoshop mutation or deployment/reload; no Beta acceptance claim.
+
+- 2026-10-14 — **Night refactoring / Agent 2: shared compact change-domain validator (source-only).**
+  Rechecked the real dirty repository, current `AGENTS.md`, the night plan and
+  Release Hardening freeze rather than relying on Agent 1's handoff. Extracted
+  the identical `change_domains` validation from both direct-operation and
+  VisualMicroPlan branches of `compileCompactPass()` into the pure
+  `src/core/guard/compact-change-domains.ts`. The helper preserves the exact
+  `compact_change_domains_invalid` payload, one diagnostic per invalid
+  declaration, accepted-domain ordering and partial-valid filtering; neither
+  branch changes the ordering of its surrounding checks. Added four focused
+  cases in `tests/compact-change-domains.test.ts`. **Actual checks:** Vitest
+  `compact-change-domains` **4/4**, `next-pass-compiler` **13/13** and
+  `compact-contract-regressions` **106/106** (**123/123** together);
+  `npx tsc --noEmit --pretty false` **PASS**, targeted ESLint `--quiet`
+  **PASS**, `git diff --check` on modified compiler **PASS**. No canonical
+  integration gate or live Photoshop/UXP changes. Remaining P0 extractions,
+  conditional SessionStore mapping and P2/P3 inventory stay open; pre-existing
+  uncommitted changes are preserved.
+
+- 2026-10-14 — **Night refactoring / Agent 1: first isolated compiler extraction (source-only).**
+  Moved authored edge-intent parsing and action-to-boundary validation out of
+  `compileCompactPass()` into `src/core/guard/compact-edge-bindings.ts`,
+  preserving the existing normalized edge intents for the final operation,
+  validation order, violation codes/messages/details, and fail-closed behavior.
+  Added four focused regression cases in `tests/compact-edge-bindings.test.ts`.
+  Actual post-change checks: `compact-edge-bindings` **4/4**,
+  `edge-control` **10/10**, `compact-contract-regressions` **106/106**,
+  `npx tsc --noEmit --pretty false` **PASS** and targeted ESLint
+  `--quiet` **PASS**. The pre-change `edge-control` baseline was **10/10**.
+  No canonical integration gate, deployment/reload or real Photoshop run was
+  performed. Other dirty working-tree changes remain untouched; remaining
+  compiler extraction and optional SessionStore decomposition stay open.
+
+- 2026-10-13 — **Release Hardening machine gate accepted; Beta deployment and artistic gates still open.**
+  The canonical offline check `npm run verify:canonical` passed with **160/160
+  Vitest files and 1826/1826 tests**, zero lint errors, and successful package,
+  source/provenance, tool, prompt, policy and bilingual documentation checks.
+  Separately `npm run test:embedded-guard-mcp` launched the built standalone
+  child and passed public schema, Guard-required raw-mutation refusal and CoS
+  budget checks: **38 exposed tools / 15 Guard tools / 228,409 of 250,000 bytes**.
+  The final test corrections preserved strict semantic `edit_axes`, confirmed
+  owner/History rules and post-rollback stall accounting, retained authorized
+  historical-layer correction, and updated bounded status projection, geometry
+  diagnostics and exact-frame continuation fixtures. The smoke check now
+  distinguishes first-declaration `subject_kind` requirements from valid
+  identity-only continuation of already retained objects. **No real Photoshop
+  mutation, 6-scene trial, plugin restart, tagged release or Git commit was
+  performed.** This workspace is dirty and CoS continues to load a different
+  checkout; Beta safety and artistic qualification remain pending.
+
+- 2026-10-13 — **Release Hardening, initial source-only qualification.**
+  RH-01 priority rejection guidance now derives its suggested scales from
+  the actual active Director task and priority-correction admission checks,
+  rather than recommending a scale that the same Guard rejects; the owning
+  `planner-painter` suite passed 105/105. RH-06 oversized Guard status now
+  archives bulky historical Critic/Director details while preserving current
+  operation identity, highest-priority defect, owner/rollback and recovery
+  facts; the `guard-response-budget` suite passed 12/12. The long painting
+  control prompt was compacted without changing document-switch consent,
+  no-replay or visual-review rules (`verify:painting-policy` and
+  `commentary-mode-contract` pass). Build `622f342c3336` matched local
+  source/dist at check time; running MCP still came from a foreign checkout.
+  **Do not claim live or artistic acceptance.** The broader three-suite
+  compiler gate failed 42/125 tests, largely around missing editable-axis
+  declarations; this must be resolved causally before a release candidate.
+
+- 2026-10-13 — **Release Hardening RH-02: causal recovery from artistic workflow stall (source-only).**
+  The Guard now detects a stalled succession of ineffective visual passes,
+  disallows a further equivalent artistic strategy before mutation while
+  permitting rollback and read-only recovery, and supplies a next action that
+  prioritizes the largest still-open scene defect. Two consecutive insufficient
+  passes flag the active Director for whole-scene review instead of silently
+  repeating its task. Simple protocol churn without failed visual attempts
+  does not block the next meaningful pass. The owning Planner suite passes
+  **106/106**; the full SessionStore suite is **99/100** with an unrelated
+  stale editable-axis fixture remaining. No loaded-CoS or artistic acceptance
+  is claimed.
+
+- 2026-10-13 — **Release qualification protocol and narrow machine gate validation.**
+  Created a six-scene preregistered evaluation protocol with the exact retained
+  pagoda, cabin and Mykonos briefs, three new non-exceptional scene prompts,
+  fixed canvas conditions and unchanged independent scoring. Updated
+  `RELEASE_CHECKLIST.md` for the actual CoS Plugins → embedded Guard → UXP route,
+  source/dist/runtime identity parity, safe restart and Beta-vs-1.0 claims.
+  After updating obsolete test fixtures rather than inferring artist edit axes
+  in production, `session-store-regressions` passes **100/100** and combined
+  `planner-painter`/`artistic-recovery-production`/`guard-response-budget`
+  passes **136/136**. `npm run lint` now reports **0 errors** (173 existing
+  warnings); product identity, provenance, tool counts, bilingual docs and
+  acceptance-matrix link checks pass. Rebuilt `dist` as `04a96f4b1f90`, but
+  runtime activation remains unverified; broader compact/geometry regressions
+  and independent live artistic qualification are still open.
+
+- 2026-10-13 — **Release Hardening safety follow-up (offline only).**
+  Independent review reproduced oversized status losing an active Director
+  `whole_image_glance` barrier and silently truncating authoritative owner and
+  identity-recovery arrays. Status now preserves the exact active review route
+  and fails closed when complete identity/ownership will not fit. Stall metrics
+  discard rolled-back/non-authoritative visual verdicts as meaningful progress;
+  a new regression proves an undone accepted pass cannot hide a stall. The
+  aggregated geometry correction now references full canonical geometry issues
+  instead of duplicating identical packet corrections, while preserving all
+  violations and specific spatial options. Direct owning suites pass:
+  Guard budget **14/14**, geometry **6/6**, SessionStore **101/101**. Build
+  `f041d8274d38` published locally; do not confuse it with the foreign loaded
+  CoS plugin or claim live artistic acceptance.
+
+- 2026-10-13 — **P0 deterministic Guard preflight normalization (source + active-checkout build).**
+  Added strict elimination of a redundant `photoshop_create_layer` paired with
+  `construction`, across both PaintingIntent and direct `next_pass`, only when
+  the authored action has no independent placement, metadata or differing name.
+  New construction-object aliases inherit the saved object ID only when every
+  referenced component has unique unchanged ownership in that same object;
+  explicit scene ownership redeclarations, mixed/unplanned owners and genuine
+  migrations remain rejected. A malformed scene lighting/color model now
+  suppresses only the dependent `color_gradient_preflight_scene_model_missing`
+  diagnostic, preserving the primary invalid-model error. Positive/negative
+  tests pass (**23/23** owning tests; TypeScript PASS) in both the development
+  repo and the isolated active CoS checkout. The active checkout was backed up
+  under `.source-fix-backups/auto-repair-p0-20261013-1325/` and built as
+  `6726ab21f1bf`; the CoS plugin still needs its own Restart to load the bundle.
+
+- 2026-10-13 — **Active CoS workspace ownership hotfix prepared.** The running
+  Photoshop plugin was traced to the isolated
+  `paintpilot-selective-rollback-v18` checkout, *not* this development
+  repository. In that active checkout, the pre-fix window-frame and floor
+  tests both reproduced the exact `construction_model_invalid` multiple-unit
+  message. The owner→semantic alignment fix and three regression tests were
+  transferred there without overwriting unrelated source; original files
+  were backed up. After the fix, the owning construction suite passed 30/30
+  and `tsc --noEmit` passed. Nine unrelated expectations in the isolated
+  checkout's larger four-suite run still fail (65/74 pass); no baseline
+  attribution was made for those. Its corrected server bundle was published
+  with build ID `3bef3fb84554`, but the existing CoS process still has the
+  previous bundle loaded. Public deployment health correctly returns
+  `deployment_mcp_restart_required`. No Photoshop painting, MCP restart,
+  UXP reload or change to the open document was performed.
+
+- 2026-10-13 — **Construction part IDs no longer duplicate independently owned semantic components (offline).**
+  Reproduced the live bistro rejection: the durable scene plan assigns
+  semantic `window-frame` to owner `window-frame-owner`, while the solved
+  construction model names its part `window-frame-owner`. During expansion
+  the generated default `semantic_id=part_id` was incorrectly appended as
+  a second unit on the existing owner, causing `construction_model_invalid`
+  with a misleading multiple-unit ownership diagnosis.
+  `expandConstructionPass` now aligns construction parts to the existing
+  **owner** first, inherits that owner's authorized semantic identity, and
+  rewrites generated object component lists accordingly; genuinely new parts
+  still require unique owners. The original saved plan is retained, including
+  its editable axes, role and object membership. Ambiguous shared owners,
+  existing semantic IDs assigned to other owners and cross-object remapping
+  remain hard errors. Regression coverage includes compound window frame/view,
+  independent single-part floor and three real ownership conflict modes.
+  **Checks:** construction + scene-ownership + component-scope +
+  visual-microplan-compiler suites **74/74 PASS**, TypeScript `tsc --noEmit`
+  PASS, whitespace check PASS. Running Photoshop and MCP were not modified,
+  rebuilt, or restarted; the source fix requires a later authorized deployment.
+
+- 2026-10-13 — **Critic-bound medium→small priority repair (source only; no live Photoshop activation).**
+  The existing `plannedComponentCorrection`/priority gate now distinguishes
+  an unrelated small pass from a bounded, causally identified partial repair
+  of an open medium must-fix. For a nonstructural reviewed finding, the active
+  Director task must explicitly target its problem and a region inside the
+  Critic-reviewed bounds; the Painter pass must link that problem, use a
+  distinct component problem ID, match the reviewed `source_review_kind` in
+  `affected_qualities`, declare change domains, and provide compiled, nominally
+  bounded pixel actions. For named structural Critic defects, the existing
+  `structural_correction` part/relation/execution validation is reused instead.
+  A focus-crop rectangle or `addresses_problem_ids` label alone never grants
+  the small-scale exception; unsupported/unbounded pixel actions fail closed.
+  The parent must-fix is not marked resolved by component passes. Existing
+  global→medium authorization, ownership, protection, geometric preflights,
+  and exact-image Critic review remain separate requirements. Priority errors
+  identify missing links, source review bounds, geometric footprints, plans,
+  or invalid `scale=local` without asking to change already-correct IDs.
+  The public Director target schema now documents the medium→small route.
+  **Checks:** Planner/Painter + component-scope + structural-defect suites
+  121/121 PASS; TypeScript `tsc --noEmit` PASS; targeted diff whitespace
+  check PASS. A broader five-suite Guard run had 4 FAIL/320 PASS before
+  the component-scope multi-link test expectation was corrected; the other
+  three failures in unrelated existing tests remain unverified (public schema
+  expectation for `review_operation_id`, an embedded previous-operation
+  closure assertion, and semantic owner `edit_axes` fixture). Additional
+  compiler/preflight suites: 86 PASS/40 FAIL, with the shown compact-contract
+  failures caused by pre-existing hot-loop owner fixtures lacking required
+  `edit_axes`. Public-contract self-test could not complete: its temporary
+  stdio MCP client received `Connection closed` (not a PASS). These broader
+  failures were not attributed to this change by a clean-baseline comparison.
+  No live Photoshop session or installed MCP connection was restarted.
+
+- 2026-10-12 — **Per-pass latency boundaries and linked Guard rejection diagnostics (source only).**
+  Extended the existing continuation timeline with observed `guard_accepted`,
+  `photoshop_start`, `operation_end` and `preview_ready` timestamps. Host-only
+  `critic_complete` and `next_pass_ready` remain optional explicit markers;
+  a received Critic review is labelled separately to avoid falsely measuring
+  model reasoning. Compiler attempt audit retains rejection codes and links
+  keyed retries to measured correction wall time. Exposed aggregates in the
+  existing Guard timeline without introducing a second journal or new mandatory
+  host calls. No running Photoshop/CoS session was restarted or modified.
+
+- 2026-10-12 — **Preserve line-first rendering through construction and Critic repair (offline).**
+  Explicit canvas-space owners allow paper and flat fields without spatial geometry,
+  while depicted objects retain world-space, semantic-part and visual-review checks.
+  Construction can execute closed contours as native BRUSH outlines with chosen
+  width/opacity/flow and optional preset; confirmed continuations inherit that
+  renderer instead of silently reverting to fills. Owned replacement includes
+  old/new outline bounds, exact target-layer readback and transactional rollback.
+  Critic preflight now receives durable semantic owners and admits actual structural
+  brush geometry for an existing component; cosmetic passes still cannot close form
+  debt. Controlled BRUSH is the default for pencil-like lines. Native PENCIL requires
+  observed positive diameter/opacity and mixed-tool strokes explicitly switch tools.
+  Public contracts and host guidance expose these choices without source inspection.
+  Paired source revision: `compact-v2-20261012-component-outline-v18`.
+  **Checks:** seven focused regressions and 53 owning palette/native-paint tests
+  passed (overlapping native cases). TypeScript build, UXP syntax, package import
+  integrity and scoped whitespace checks passed. Offline deployment health confirms
+  matching source/dist fingerprints and paired v18 source revisions; loaded runtime
+  identities were not queried. Live pixels and same-prompt artistic quality remain
+  unverified; no running component was restarted and no painting was dispatched.
+
+- 2026-10-12 — **Detect unapplied builds before another stale plugin restart.**
+  `build:server` stages TypeScript output, checks unchanged server/UXP inputs and
+  publishes source/output fingerprints plus a paired UXP build marker. Failed
+  compilation preserves the prior build. Production startup rejects stale,
+  incomplete or unmanifested output. `deployment:health` and the existing Guard
+  capabilities compare source, disk build, immutable loaded MCP identity and UXP
+  revision/build announcement, including changes without a revision bump. A
+  missing or foreign process is not accepted as current. Documented coordinated
+  activation; no automatic restart, painting, or historical-operation replay.
+  **Checks:** six deployment regressions and two targeted UXP announcement/health
+  regressions passed; TypeScript build, package import integrity, UXP syntax and
+  scoped whitespace checks passed. Offline health confirms current source/dist
+  fingerprints. The running CoS/Photoshop pair was not restarted or tested live.
+
+- 2026-10-12 — **Agent 3: verify the actual target layer before native stroke/dab/stamp pixels (offline).**
+  Read the retained operation records `mykonos_20261011_cobble_street_01`
+  (successful) and `mykonos_cobble_v5_first_stone_strokes_20261011_01` /
+  `mykonos_cobble_v6_brush_tool_before_preset_proof_20261012_01` (both
+  `microplan_prepare_failed`, `brush_setter_unverified` before visual mutation),
+  without replaying them. Priority audit found that `paintStrokesBatch`,
+  `paintDabsBatch` and `paintStampInstancesBatch` awaited native layer `select`
+  but neither inspected an Action Manager error response nor verified the
+  resulting active layer. A rejected or silently ignored selection could
+  therefore draw on the previously active layer while reporting the pinned
+  target layer ID. Four stroke/dab regressions (native error and silent no-op)
+  failed before the fix; two stamp tests initially had a harness setup error
+  and were verified passing only after the fix. The shared
+  `selectVerifiedPaintLayerModal` now checks the batchPlay result and the
+  exact `doc.activeLayers` ID before any path stroke. Three success controls
+  verify that legitimate layer switching still paints. Owning suites:
+  **56/56 PASS**; TypeScript, UXP JavaScript syntax and scoped
+  `git diff --check` PASS. Source revision:
+  `compact-v2-20261012-paint-layer-readback-v17`.
+  **Limits:** simulated UXP host responses only; no live Photoshop pixels,
+  Undo or layer-selection readback tested. Read-only COS ping confirmed the
+  connected but still old running `brush-tool-before-preset-v1` bridge on
+  document 102; runtime MCP/UXP activation was not performed. **Handoff:**
+  coordinate artist-free paired activation and verify
+  matching running revision; on a disposable document test a nonactive pinned
+  target layer, rejected selection with unchanged pixels/Undo, correct active
+  layer restoration, brush identity and color readback. Do not replay v5/v6.
+
+- 2026-10-12 — **Agent 2: verify native foreground-color writes before painting (offline).**
+  Continued the original successful Mykonos paving and both failed Square
+  Charcoal retries (`v5`/`v6`); both stopped at `brush_setter_unverified`
+  before any visual mutation and were not replayed. A separate user-visible
+  failure path was reproduced: `setForegroundColorModal` treated a resolved
+  UXP assignment as proof of native color change, so a silently ignored setter
+  could let stroke/dab/stamp painting proceed with the previous foreground
+  color. A focused VM regression failed before the change (**18/19 PASS**).
+  The shared setter now reads native RGB back and fails closed with
+  `paint_color_unverified` when a channel is missing or differs beyond
+  native 8-bit rounding (0.51). Its painting, mask and restoration callers
+  inherit this check. Source revision:
+  `compact-v2-20261012-foreground-color-readback-v16`.
+  **Checks:** owning stamp/foreground suite **19/19 PASS**; TypeScript,
+  UXP JavaScript syntax and scoped `git diff --check` PASS.
+  **Limits:** the native silent no-op was simulated in the VM, not observed
+  in live Photoshop; pixel changes, color management and Undo were not tested.
+  Read-only COS ping still reported the old running
+  `brush-tool-before-preset-v1` on document 102; no UXP reload, MCP restart or
+  image mutation occurred. **Handoff:** coordinate artist-free paired MCP/UXP
+  activation, verify matching runtime revisions, and test a fresh bounded
+  color-changing stroke/stamp on a disposable document with pixel, Undo and
+  foreground-color restoration checks. Do not replay historical v5/v6.
+
+- 2026-10-12 — **Agent 1: do not commit empty stamp History after pre-stroke rejection (offline).**
+  Rechecked the original successful Mykonos paving and both retained Square
+  Charcoal failures (`v5`/`v6`): the retries failed at `brush_setter_unverified`
+  before any visual strokes, and were not replayed. A separate confirmed UXP
+  failure-path bug was reproduced in `paintStampInstancesBatch`: a native style
+  readback mismatch before stroke dispatch set `failed`, and the executor used
+  `Boolean(failed)` to **commit** suspended History even though no stamp pixels
+  could have been written. The new regression failed before the change (15/16
+  PASS; `history:true` instead of `history:false`). The executor now tracks
+  whether a native stroke was actually dispatched: pre-stroke rejection aborts
+  empty History, while an attempted stroke that throws remains uncertain and
+  commits History for Guard reconciliation. Brush/layer restoration still runs
+  before History closure. A second regression protects the uncertain-stroke
+  path. Owning suite **16/16 PASS** before a concurrent Agent 3 edit and
+  **17/17 PASS** after reconciliation; TypeScript, UXP JS syntax and scoped
+  diff check PASS. This was source revision `stamp-empty-history-v14`, now
+  included in Agent 3's `stamp-preset-preserve-v15`; its independent preset
+  fix was retained, not overwritten.
+  **Limits:** VM-only behavior, not a live Photoshop Undo/pixel result; no
+  MCP restart or UXP reload. Read-only COS ping still reports running
+  `brush-tool-before-preset-v1` on document 102. Historical v5/v6 preset
+  identity failure is not explained by this History fix. **Handoff:** coordinate
+  artist-free paired runtime activation; on a disposable document check both
+  a rejected pre-stroke stamp (no empty Undo) and a failed dispatched stroke
+  (uncertain History preserved), plus verified preset, pixels and restoration.
+  Preserve all existing uncommitted work; do not replay v5/v6.
+
+- 2026-10-12 — **Agent 3: preserve a verified stamp preset across native style writes (offline).**
+  Continued the retained Mykonos baseline and both failed Square Charcoal
+  attempts (`v5`/`v6`): the retries stopped at `brush_setter_unverified`
+  before any strokes; neither was replayed. After the stamp executor verified
+  its preset, it unconditionally selected `paintbrushTool` again, both before
+  reading the initial brush and inside every style write/restore. On hosts where
+  tool activation restores the tool's saved older preset, nameless native brush
+  readback cannot detect this substitution and stamps can use the wrong brush.
+  One focused VM regression simulated that host behavior and reproduced
+  `paint:Old Brush` despite a verified `Organic Motif Stamp` receipt (16/17
+  passing before fix). Stamp placement now reuses the already selected tool,
+  and its style writes/restoration explicitly skip redundant tool activation;
+  other callers retain the original activation behavior. The owning suite
+  **17/17 PASS**, `npx tsc --noEmit -p tsconfig.json`, `node --check
+  uxp-plugin/main.js`, and scoped `git diff --check` PASS. Paired source
+  revision: `compact-v2-20261012-stamp-preset-preserve-v15` (includes concurrent
+  v14 stamp-History edits without rewriting them).
+  **Limits:** synthetic UXP host regression only; this is not proof of the
+  historical `v5`/`v6` cause or live brush/pixel/Undo behavior. A concurrent
+  agent edited the same stamp files during this cycle; its separate History
+  changes were preserved and should be reviewed before any release. Read-only
+  COS ping still reports the old running `brush-tool-before-preset-v1` on
+  document 102; no UXP reload, MCP restart or image mutation occurred.
+  **Handoff:** reconcile concurrent v14 History changes and source revisions,
+  then coordinate an artist-free paired activation and fresh disposable-document
+  test of preset identity, stamp pixels, Undo and state restoration. Do not
+  replay uncertain Mykonos v5/v6 operations.
+
+- 2026-10-12 — **Agent 2: verify stamp brush restoration against native readback (offline).**
+  Continued the retained Mykonos paving investigation: the original paving
+  operation succeeded, whereas both Square Charcoal retries (`v5` and `v6`)
+  stopped at `brush_setter_unverified` before strokes. Neither was replayed;
+  this change does not establish the cause of those historical refusals.
+  Auditing the still-open native stamp cleanup boundary found that
+  `paintStampInstancesBatch` checked native style before drawing, but accepted
+  the *return* of `applyBrushSettingsModal(initialBrush.settings)` as proof of
+  restoration. A silently ignored restoration could leave the stamp's size,
+  opacity, flow, angle or flips active while returning `placement_status=complete`.
+  Two focused VM regressions reproduced false success before the fix (13/15
+  PASS; wrong and missing restoration readback). Cleanup now checks native
+  readback of the six stamp-adjustable fields, normalizes integer opacity/flow
+  to the actual Photoshop setter precision, attempts remaining cleanup and
+  releases suspended History, then reports `stamp_state_restore_failed` when
+  restoration is unverified. The owning stamp suite passes **15/15**;
+  `npx tsc --noEmit -p tsconfig.json`, `node --check uxp-plugin/main.js`,
+  and scoped `git diff --check` PASS. Source revision:
+  `compact-v2-20261012-stamp-restore-readback-v13`.
+  **Limits:** offline VM evidence only; no Photoshop pixels, Undo, UXP reload
+  or MCP restart. Read-only COS ping at 08:00 local still reports running
+  `compact-v2-20261012-brush-tool-before-preset-v1` on document 102; v13 is
+  not active. The separate stamp preset-selection baseline/restore policy was
+  not changed by this narrow fix. **Handoff:** coordinate artist-free paired
+  MCP/UXP activation, confirm matching running revision and document incarnation,
+  then test fresh bounded stamp pixels, brush/style restoration and one-step
+  Undo on a disposable document. Do not replay v5/v6; retain other agents'
+  uncommitted work.
+
+- 2026-10-12 — **Agent 1: verify native brush restoration for stroke/dab batches (offline).**
+  Reviewed the original successful Mykonos paving and both failed Square Charcoal
+  attempts v5/v6. Both retries stopped at `brush_setter_unverified` before any
+  strokes; neither was replayed. Separate confirmed defect: after drawing,
+  `restoreBatchBrushStyle` trusted the setter's success without verifying native
+  size/opacity/flow readback. Photoshop could silently retain the last override
+  while `paintStrokesBatch` or `paintDabsBatch` returned success. Restoration now
+  reuses `applyVerifiedBatchBrushStyle` and fails closed if native evidence is
+  absent or mismatched. Two VM regressions failed before the fix (2/28), then
+  **28/28 PASS**; TypeScript, JS syntax and scoped diff check PASS. Source
+  revision `compact-v2-20261012-batch-restore-readback-v12`.
+  **Limits:** offline only; no live Photoshop pixels, History, reload or restart.
+  COS ping still reports running `brush-tool-before-preset-v1` on document 102.
+  **Handoff:** coordinate an artist-free paired MCP/UXP activation and check
+  fresh bounded brush identity, pixels, Undo and restoration on a test document.
+  Historical v5/v6 must not be replayed; their root cause remains unproven.
+
+- 2026-10-12 — **Agent 3: failed stroke/dab batches restore Photoshop state before History abort (offline).**
+  Continued after Agent 2's v10 brush-style readback fix. Checked the retained
+  original Mykonos paving and **both** failed `v5`/`v6` Square Charcoal
+  operations in `.photoshop-runtime/controller/operations`: each retry created
+  a layer but stopped at `brush_setter_unverified` (`effective_preset=null`),
+  before any strokes. No uncertain operation was replayed. A separate, more
+  general failure-path defect was reproduced in `paintStrokesBatch` and
+  `paintDabsBatch`: on a failed native stroke the executors called
+  `resumeHistory(id, false)` **before** restoring the original brush/layer
+  (and mask color/channels), allowing cleanup outside the suspended History
+  and silently discarding restoration errors. Four focused regression cases
+  failed before the change. A shared `abortFailedPaintBatch` now attempts all
+  relevant restorations **inside** suspended History, then aborts it; native
+  restore/History-abort failures are reported with the original drawing error.
+  The successful drawing path and COS tool routing are unchanged. Owning UXP
+  tests **26/26 PASS**; TypeScript and JS syntax PASS. Source Bridge revision:
+  `compact-v2-20261012-batch-failure-history-v11`.
+  **Limits:** offline VM tests only; actual Photoshop Undo/History and pixel
+  effects have not been exercised. Read-only COS ping at 07:25 local still
+  reports the running/expected `brush-tool-before-preset-v1` for document 102;
+  v11 is **not** active. This fix does not explain historical v5/v6 brush
+  identity failures. **Handoff:** arrange an artist-free paired MCP rebuild/
+  restart and UXP reload, reconcile the document incarnation, then verify
+  fresh bounded Square Charcoal selection, stroke/pixel evidence and Undo;
+  separately test a deliberate failed batch on a disposable document to
+  confirm state restoration/History behavior. Never replay v5/v6.
+
+- 2026-10-12 — **Agent 2: native brush-style evidence before stroke/dab pixels (offline).**
+  Continued from Agent 1's v9 brush-select notification fix and the retained
+  Mykonos paving baseline plus failed `v5`/`v6` Square Charcoal attempts: both
+  retries stopped at `brush_setter_unverified` before drawing; neither was
+  replayed. Auditing the next execution boundary revealed a separate confirmed
+  user-facing defect: `paintStrokesBatch` and `paintDabsBatch` trusted a resolved
+  `applyBrushSettingsModal` call even if Photoshop silently retained the previous
+  brush size/opacity/flow. Both could return success and draw the wrong marks.
+  A VM regression for each route reproduced false success before the fix (2/18
+  failed). Both now compare all three fields against **observed** native readback
+  before path creation/stroking, with Photoshop's integer opacity/flow write
+  precision; absent or mismatched evidence raises `paint_style_unverified` and
+  aborts the batch instead of claiming successful pixels. Added narrow cases
+  for missing evidence and fractional opacity. Owning suite **22/22 PASS**;
+  TypeScript, UXP JavaScript syntax and scoped diff checks PASS. Source Bridge
+  revision: `compact-v2-20261012-paint-style-readback-v10`.
+  **Limits:** only offline VM tests; no Photoshop stroke, pixel comparison,
+  Undo, UXP reload or MCP restart. Read-only COS ping at 07:00 local still
+  reports running/expected `brush-tool-before-preset-v1` on document 102;
+  v10 is not active. This fix does not prove the root cause of `v5`/`v6`.
+  **Handoff:** coordinate artist-free paired rebuild/restart and UXP reload;
+  confirm the new running revision and document identity, then perform a fresh
+  authorized bounded Square Charcoal stroke/dab with native style evidence,
+  before/after pixels and Undo. Do not replay uncertain v5/v6 operations.
+
+- 2026-10-12 — **Agent 1: delayed native brush-selection evidence (offline).**
+  Examined original Mykonos paving and both failed v5/v6 stone-stroke attempts.
+  Each retry created an empty layer, then failed `brush_setter_unverified` with
+  `effective_preset=null` before any strokes. The compiler already reorders
+  independent preset selection ahead of layer creation; no repeat fix needed.
+  A separate UXP race was reproduced: the old 100 ms post-modal wait discarded
+  a valid brush-select event delivered at 150 ms when currentToolOptions omitted
+  the preset name. New regression failed before the fix (1/10 failed).
+  UXP now waits for the actual select event, with a 500 ms deadline; absent or
+  conflicting evidence remains unverified. Targeted UXP tests **13/13 PASS**;
+  TypeScript, JavaScript syntax and scoped diff checks PASS. Source revision:
+  `compact-v2-20261012-brush-event-wait-v9`.
+  **Limits:** VM timing race is confirmed, but it is not proven to explain
+  either historical Mykonos failure. No live Photoshop painting, UXP reload or
+  MCP restart. Read-only COS ping still reports old running bridge revision
+  `brush-tool-before-preset-v1` on document 102 with an empty active layer.
+  **Handoff:** coordinate artist-free paired runtime activation, reconcile
+  document identity after UXP reload, then verify fresh bounded preset selection,
+  pixels and Undo. Do not replay v5/v6 or accept unknown preset identity.
+
+- 2026-10-12 — **Agent 3: stamp target preflight before brush selection (offline).**
+  Continued Mykonos cobblestone v5/v6 journals: both failed with
+  `brush_setter_unverified` before strokes; neither was replayed. The earlier
+  paving mass succeeded. Separate confirmed stamp bug: `paintStampInstancesBatch`
+  selected a global Photoshop brush preset before checking the pinned document
+  and target layer, so an invalid target could still change the user's brush.
+  Reordered `preparePaintTarget` before `selectBrushPreset` without weakening
+  preset verification. Regression reproduced before fix (1/13 failed), then
+  passed; stamp suites **16/16 PASS**, TypeScript, JS syntax and scoped diff
+  checks PASS. Source Bridge revision `compact-v2-20261012-stamp-target-preflight-v8`.
+  **Limits:** offline only; no live Photoshop mutation, pixel/Undo test or reload.
+  Read-only ping still reports old running `brush-tool-before-preset-v1` on
+  document 102. **Handoff:** coordinate safe paired MCP/UXP activation, confirm
+  revisions, then verify fresh bounded preset/stamp/pixels/Undo and an invalid
+  target with unchanged active brush. Do not replay uncertain v5/v6 operations.
+
+- 2026-10-12 — **Agent 2: fractional stamp opacity no longer causes false native-style rejection (offline).**
+  Continued the retained Mykonos cobblestone attempts (`mykonos_cobble_v5_first_stone_strokes_20261011_01`,
+  `mykonos_cobble_v6_brush_tool_before_preset_proof_20261012_01`): both selected
+  Square Charcoal, created a layer, and failed at brush preset verification before
+  painting. Neither was replayed, and this change does **not** establish their
+  root cause. Auditing the separate stamp placement executor found a confirmed
+  mismatch: `applyBrushSettingsModal` writes opacity as a rounded integer, but
+  `paintStampInstancesBatch` compared its readback to a fractional instance
+  request. A correctly applied 37.5% → 38% native opacity was therefore reported
+  as `stamp_style_unverified`, leaving the motif unpainted. The stamp executor now
+  normalizes explicit opacity to the native integer before state comparison and
+  write; missing or genuinely mismatched readback still fails closed. One VM
+  regression failed before the fix (11/12) and passed afterward; owning stamp
+  suites **15/15 PASS**, TypeScript, UXP syntax and scoped diff checks PASS.
+  Paired source Bridge revision: `compact-v2-20261012-stamp-opacity-quantization-v7`.
+  **Limits:** no live stamp, pixels, Undo, MCP restart or UXP reload. Read-only
+  COS `photoshop_ping` still reports running/expected `brush-tool-before-preset-v1`
+  for document 102; this is a runtime/source divergence, not a live acceptance.
+  **Handoff:** prioritize a coordinated artist-free paired MCP rebuild/restart
+  and UXP reload, then fresh authorized bounded preset/stamp/pixel/Undo checks;
+  do not replay the uncertain Mykonos v5/v6 operations or bypass native identity.
+
+- 2026-10-12 — **Agent 1: brush percentage readback matches native integer precision (offline).**
+  Rechecked both retained Mykonos v5/v6 operation journals: each failed at
+  `photoshop_select_brush_preset` for Square Charcoal with `effective_preset=null`
+  before strokes; this fix does **not** claim to resolve that live preset-identity
+  blocker. A separate reproducible setter defect was found: UXP rounds opacity,
+  flow and smoothing to integers when writing `currentToolOptions`, but the
+  server compared native readback against the unrounded floating-point request.
+  Thus a successful native write (e.g. opacity 37.5 → 38) was falsely rejected
+  as `brush_setter_unverified`, preventing subsequent painting. The server now
+  compares those three fields against their actual UXP integer write values,
+  retains the original request, and reports `native_expected_settings` alongside
+  observed settings; genuinely mismatched or unobserved native values still
+  fail closed. New `tests/brush-setter-quantization.test.ts` reproduced the false
+  rejection before the fix (1/2 failed), then passed with the existing readback
+  regression (**3/3 PASS**); `npx tsc --noEmit -p tsconfig.json` and scoped
+  `git diff --check` passed. **Limits:** offline server tests, no Photoshop
+  write/reload/pixel test. Server-side change requires a safe MCP child rebuild
+  and restart; no UXP source change or protocol revision bump was needed.
+  **Handoff:** prioritize safe paired runtime activation and a fresh bounded
+  native preset-selection/pixel test; do not replay Mykonos v5/v6. If preset
+  identity is still missing, collect actual Photoshop select/readback evidence
+  rather than bypassing the verification gate.
+
+- 2026-10-12 — **Agent 3: stamp cleanup failures no longer masquerade as completed painting (offline).**
+  Continued from Agents 1/2 and compared the retained Mykonos cobblestone v5/v6
+  frame records and earlier handoffs: both passes attempted Square Charcoal,
+  and the first explicitly records unchanged BEFORE/AFTER; prior journals
+  identify `brush_setter_unverified` before any strokes. Those operations were
+  not replayed. Auditing the distinct native stamp path found a concrete
+  safety failure: `paintStampInstancesBatch` swallowed exceptions when restoring
+  the original brush, foreground color or active layer in `finally`, then
+  returned `placement_status=complete` after drawn pixels even though the
+  Photoshop editing state might remain altered. A focused VM test reproduced
+  this false success before the fix (1 failing of 11). Cleanup now attempts
+  each restoration independently, resumes suspended History, and raises
+  `stamp_state_restore_failed` with the affected state and native error instead
+  of claiming success. The original History-resume error remains unsuppressed.
+  Owning UXP stamp tests pass **11/11** after the fix; TypeScript, JavaScript
+  syntax and scoped diff checks passed. Paired source revision:
+  `compact-v2-20261012-stamp-restore-evidence-v6`.
+  **Limits:** offline VM reproduction only; no Photoshop pixels, Undo, UXP
+  reload or MCP restart. Live bridge still reported
+  `compact-v2-20261012-brush-tool-before-preset-v1` at this check, and the
+  Mykonos `brush_setter_unverified` blocker remains unaccepted on live pixels.
+  **Handoff:** at an artist-free boundary coordinate paired MCP rebuild/UXP
+  reload, confirm source/runtime revisions, then perform a new bounded stamp
+  and verify brush/color/layer restoration plus one-step Undo. Do not replay
+  v5/v6 or edit the active artist document without explicit safe ownership.
+
+- 2026-10-12 — **Agent 2: stamp History now encloses brush/color/layer restoration (offline).**
+  Continued the Mykonos v5/v6 investigation from both retained operation
+  journals: each created a layer and failed at `guard_action_2` with
+  `brush_setter_unverified`; neither reached the visual stroke. The native
+  stamp executor had a separate reproducible undo-safety defect: it committed
+  `resumeHistory(..., true)` **before** restoring the brush, foreground color
+  and active layer in `finally`. A successful stamp could therefore leave
+  setup/restoration outside its one intended History state, so the user's next
+  Undo could target setup rather than the stamp pixels. The same ordering
+  affected a partial style-verification failure. The executor now restores
+  inside the suspended state, then resumes History exactly once; resume
+  failures are surfaced instead of swallowed. The owning VM regression failed
+  before the fix (1/8) and passes after; additional partial-failure and
+  resume-error cases now pass (**10/10**). TypeScript, UXP syntax and scoped
+  diff checks passed. Paired Bridge source revision:
+  `compact-v2-20261012-stamp-history-restore-v5`.
+  **Limits:** offline UXP harness, not a real Photoshop Undo or pixel test;
+  Mykonos brush-selection blocker is still awaiting live acceptance. The
+  installed bridge remained at `brush-tool-before-preset-v1` when checked;
+  no restart, reload or document mutation was performed.
+  **Handoff:** at a safe artist-free boundary reload paired MCP/UXP revisions,
+  then verify a bounded stamp, one-step Undo and restored brush/color/layer
+  against real Photoshop History and pixels. Do not replay Mykonos v5/v6.
+
+- 2026-10-12 — **Agent 1: stamp instance brush-style readback gate (offline).**
+  Reviewed the full retained Mykonos cobblestone attempts v5 and v6 (both
+  created a layer and stopped at `brush_setter_unverified`, without strokes),
+  earlier artist failures and the Agent 1/2/3 brush-selector fixes. The original
+  Mykonos failure remains open for live acceptance; no old command was replayed.
+  A separate concrete stamp-executor defect was reproduced: after
+  `applyBrushSettingsModal`, `paintStampInstancesBatch` accepted a returned
+  settings object without checking whether Photoshop had actually observed the
+  requested size/opacity/flow/angle/flip values. A native no-op or missing
+  readback could therefore draw a motif with the wrong style and still report
+  `placement_status=complete`. The executor now checks the native
+  `observed_fields` and effective values before each stamp, including the
+  unchanged baseline; missing or mismatched evidence yields
+  `stamp_style_unverified` and a partial/uncertain receipt without drawing that
+  instance. A later preset-name mismatch also fails before the stroke. The two
+  focused regression cases failed before the fix (2/7) and passed after (7/7);
+  JavaScript syntax and TypeScript checks passed. Paired UXP/server source
+  revision: `compact-v2-20261012-stamp-style-readback-v4`.
+  **Limits:** VM tests, not live Photoshop; no document pixels, UXP reload or
+  MCP restart. This does not establish the cause of Mykonos v5/v6.
+  **Handoff:** at a safe artist-free boundary rebuild the MCP child and reload
+  the UXP companion together, verify matching revisions and a fresh bounded
+  brush/stamp operation with exact before/after evidence. If Photoshop omits
+  required native stamp-style fields, capture their real descriptor and repair
+  the owning readback mapping rather than weakening verification.
+
+- 2026-10-12 — **Agent 3: stamp-profile preset identity bound to native placement (offline).**
+  Continued the retained Mykonos v5/v6 brush-failure review and prior Agent 1/2
+  UXP fixes; neither old attempt is replayed. Audited the separate E.4 stamp
+  executor and found a concrete identity gap: the Guard validated
+  `stamp_profile_id`/`preset_name`, but `paintStampInstances` sent only layer and
+  instances to UXP; native `paintStampInstancesBatch` stamped with whichever
+  brush Photoshop already had active, yet reported the requested motif profile
+  as completed. The server now forwards `preset_name`; UXP selects the exact
+  preset and requires native identity evidence **before** starting stamp History
+  or drawing. If the tool's later native readback names a different brush,
+  the suspended History is aborted before any stamp. Nameless readback is not
+  invented: only the separately verified selector result permits continuation.
+  Regression tests reproduced four failures before the fix (including missing
+  preset propagation and wrong/missing native identity); focused server/UXP
+  tests now pass. Bridge source revision is
+  `compact-v2-20261012-stamp-preset-verified-v3` to require a paired reload.
+  **Limitations:** no live stamp, no Photoshop pixel change and no runtime
+  reload; this is a reproduced source/VM defect, not a proven explanation of
+  Mykonos v5/v6 (`brush_setter_unverified`). **Handoff:** only at a safe
+  boundary rebuild the MCP child and reload UXP together, confirm matching
+  revision, then test a fresh bounded profile stamp on a disposable/authorized
+  target with exact before/after pixels; never replay uncertain old commands.
+
+- 2026-10-12 — **Agent 2: stamp-placement brush activation and suspended-History cleanup (offline).**
+  Continued the retained Mykonos v5/v6 investigation and reviewed the prior
+  brush-selection/readback fixes; those failures remain awaiting a live bounded
+  stroke, not a replay of the old operations. A separate priority UXP audit
+  found that `paintStampInstancesBatch` suspended Photoshop History and then
+  read `currentToolOptions.brush` *before* its `try/finally` and without first
+  activating the Brush Tool. A preceding transform/region tool could make that
+  read throw `brush_settings_unavailable_for_current_tool`, leaving the History
+  suspension without a matching `resumeHistory` and preventing stamp pixels.
+  The stamp executor now activates the brush before the native snapshot, and
+  performs all initialization inside the existing History `try/finally`;
+  restoration handles a partially initialized brush/color baseline safely.
+  New `tests/uxp-stamp-history.test.ts` reproduced both failures before the fix
+  (2/2 red), then passed; owning UXP painting tests passed **18/18** combined.
+  `npx tsc --noEmit -p tsconfig.json`, `node --check uxp-plugin/main.js`,
+  and scoped `git diff --check` passed. **Limits:** this is a VM reproduction
+  of a concrete code path, not a recorded live stamp incident or proof of a
+  Mykonos v5/v6 root cause; no Photoshop pixels, UXP reload or MCP restart.
+  The running bridge reported `compact-v2-20261012-brush-tool-before-preset-v1`
+  while this checkout still declares `compact-v2-20261012-brush-readback-evidence-v2`;
+  do not assume these runtimes match or hot-reload amid another artist's work.
+  **Handoff:** reconcile source/runtime revisions at a safe boundary, verify
+  native brush selection and a fresh bounded Mykonos stroke with exact AFTER
+  pixels; separately live-check stamp placement after a non-brush active tool
+  and History restoration without replaying an uncertain operation.
+
+- 2026-10-12 — **Agent 1, next pass: native brush-setting readback provenance (offline).**
+  Continued the retained Mykonos v5/v6 brush-preparation investigation and
+  reviewed the Agent 2/3 preset-identity fixes. A separate reproducible
+  setter-verification defect was found: UXP `normalizeBrushSettingsDescriptor`
+  substituted defaults (e.g. hardness/opacity `100`) when Photoshop omitted
+  those fields, while the server accepted equality with a requested default as
+  proof that `photoshop_set_brush` had actually applied it. Missing/null native
+  values could therefore falsely certify a brush configuration before painting.
+  UXP now reports `observed_fields` independently of its backward-compatible
+  painting-state defaults, excluding absent/null/invalid numeric values; the
+  server verifies only explicitly observed requested fields. Missing evidence
+  returns `brush_setter_unverified` with `setter_outcome=uncertain`, while an
+  observed mismatch remains `not-applied`. Bumped the paired bridge revision to
+  `compact-v2-20261012-brush-readback-evidence-v2` to require a matching reload.
+  Regression tests cover missing/default/null and confirmed native values:
+  focused UXP bootstrap, setter and bridge-version suites **16/16 PASS**;
+  `npx tsc --noEmit -p tsconfig.json` and scoped `git diff --check` passed
+  after the revision bump.
+  **Limits:** no live brush write, Photoshop stroke, companion reload or
+  end-to-end pixel acceptance; this is independent of the earlier preset-name
+  failure, whose live status remains open. **Handoff:** rebuild/restart the MCP
+  child and reload the UXP companion at a user-authorized safe boundary, verify
+  a real default-valued brush setter and a bounded stroke with exact AFTER
+  evidence. Never replay the old Mykonos v5/v6 mutations.
+
+- 2026-10-12 — **Agent 3: native brush-selection notification ordering and conflicting identity (offline).**
+  Continued Agent 1/2's retained Mykonos v5/v6 failure investigation: both
+  passes created an empty layer, then stopped at `brush_setter_unverified`
+  before strokes. Audited the current UXP selector (not the older loaded
+  runtime). Found two independently reproducible identity defects: a delayed
+  `paintbrushTool` select notification erased an already observed brush-select
+  name, making a valid nameless readback appear unverified; contradictory
+  `currentToolOptions` and native select-event preset names silently preferred
+  the former and could certify the wrong preset. The selector now ignores
+  tool-select events for preset identity, retains the brush notification and
+  returns `preset=null`/`conflicting_evidence` when native identity sources
+  disagree. Existing Guard setter verification rejects such conflicts before
+  strokes. Two new regression cases in `tests/uxp-bootstrap.test.ts` failed
+  before the fix (2/8) and passed afterwards; the focused bootstrap + probe
+  suites passed (11/11), TypeScript `--noEmit` and diff whitespace checks passed.
+  **Limits:** event reordering is reproduced in a UXP VM harness, not proven to
+  be the cause of the actual v5/v6 failures; the installed UXP plugin has not
+  been reloaded and no Photoshop artwork or layers were modified. **Handoff:**
+  at a user-authorized safe boundary, reload only the UXP companion, verify
+  exact native preset identity and one bounded real stroke with a fresh Guard
+  operation (do not replay v5/v6), inspect the exact AFTER and preserve the
+  partial layers/ownership. If the event remains absent, capture the actual
+  native select notification/readback shape rather than assuming success.
+
+- 2026-10-12 — **Agent 2: native brush-probe identity fail-closed (offline).**
+  Audited the previous Agent 1 brush-trial fix and the retained Mykonos paving
+  v5/v6 attempts (both stopped before strokes on unverified native brush
+  selection). Found an independent user-facing audit defect in the UXP
+  `probe_media_brush` route: after `selectBrushPreset`, the probe rendered dabs
+  and strokes and returned a successful preview even if Photoshop's actual
+  preset identity was missing or different from the requested brush. This could
+  mislabel a sample and lead to selecting the wrong media brush for later work.
+  `uxp-plugin/main.js` now requires exact observed preset identity and a
+  successful selector result **before any probe marks**; otherwise the probe
+  fails closed and its disposable document is closed by the existing `finally`.
+  New `tests/uxp-brush-probe-selection.test.ts` reproduced both missing and
+  mismatched identity as red tests (2 failures before fix), then passed all
+  three cases (unknown/mismatch/confirmed). The owning UXP bootstrap suite
+  also passed (6/6), `npx tsc --noEmit -p tsconfig.json` and
+  `git diff --check -- uxp-plugin/main.js` passed. **Limitations:** this is an
+  offline VM reproduction; no live Photoshop brush probe or painting was run,
+  and the installed UXP plugin has not been reloaded. It does not by itself
+  repair the original Mykonos v5/v6 preset-selection failure. **Handoff:** at
+  a safe user-authorized live boundary, verify actual brush selection and
+  strokes on the retained Mykonos scene; preserve all existing layers and
+  compare exact AFTER pixels. Continue auditing remaining visible blockers.
+
+- 2026-10-12 — **Agent 1: bounded novel-purpose brush trial validation (offline).**
+  Audited the retained Mykonos paving brush attempts (including the failed v5
+  and v6 native preset preparation) alongside both tiger studies, cafe and
+  pagoda attempt histories. A reproducible helper-level admission defect was
+  found: `boundedBrushTrial` checked the bounds of stroke/dab steps but accepted
+  an additional `photoshop_fill_layer` visual mutation in the same purported
+  trial. The helper now requires *all* supplied visual-mutation steps to be
+  strokes/dabs; ordinary preparation and preview are still excluded by callers.
+  Red-before/green-after regression: `tests/brush-method-evidence.test.ts`
+  (11/11), plus the owning real-Guard novel-purpose trial test (1/1) and
+  `npx tsc --noEmit -p tsconfig.json` passed. This hardens the helper; the
+  existing compact mixed-method gate already rejects stroke+fill in the normal
+  compiler path, so no production exploit or visible image improvement is
+  claimed. **Handoff:** prioritize a real, safely authorized Mykonos brush
+  selection→stroke→exact-AFTER acceptance after the latest bridge/Guard reload;
+  v5/v6 each created a layer but stopped before strokes on `brush_setter_unverified`.
+
+- 2026-10-12 — **Brush selection and partial-pass ownership review (offline).**
+  Nameless `currentToolOptions` can use a matching native Photoshop brush-select
+  notification as identity evidence; missing/conflicting evidence and native
+  action errors remain blocked. No requested name is substituted for observation.
+  Independent brush/color setters precede layer creation without crossing step
+  dependencies or preview boundaries. A reconciled partial pass retains its
+  uniquely confirmed native creation receipt for remaining work on that owner;
+  creation does not certify painted pixels or authorize replay. Exact expanded
+  whole-scene editability reviews are accepted at touched-owner checkpoints;
+  stale bindings and attempts to downgrade a required whole-scene review fail.
+  Bridge: `compact-v2-20261012-brush-selection-evidence-v1`; Guard:
+  `2026-10-12-brush-scope-recovery-v1`. Targeted offline regressions and the saved
+  incident validate execution/review boundaries; live painting was not run.
+
+- 2026-10-12 — **General painting admission and technical recovery (offline).**
+  Painter, compiler and method checks use the same ranked Critic correction and
+  prerequisite route. A current whole-scene review supersedes old local mismatch
+  prose; component and Director parent links coexist. Exact owner-bound links and
+  a unique active-task scale inherit without inventing artistic choices. Ambiguous
+  scale remains an explicit field correction. Brush material inference respects
+  scale and permits an explicitly selected role to reach the existing bounded
+  novel-purpose trial. Structural/cosmetic admission uses typed intent before
+  descriptive strategy names. Failed, partial, uncertain and never-executed runs
+  cannot exhaust artistic strategies; legacy penalties with known technical
+  sources are retired without resolving defects or authorizing replay. The UXP
+  bridge selects the paint tool before its preset and still verifies readback;
+  unknown readback stays blocked. Bridge revision is now
+  `compact-v2-20261012-brush-tool-before-preset-v1`; Guard implementation is
+  `2026-10-12-unified-admission-technical-recovery-v1`. Full public offline cycles
+  cover owned roof/background/cloud corrections through actual admissions with
+  a stub Photoshop executor. Live image quality and loaded runtime need user
+  verification; no live painting or restart was performed.
+
+- 2026-10-12 — **Critic urgency and component dependency consistency (offline).**
+  Guard no longer promotes every generic form/composition criterion ahead of
+  material work regardless of the whole-frame Critic's ranked findings and
+  explicit component prerequisites. The retained ground-before-facade incident
+  now selects the ready ground obligation; later facade findings remain open.
+  Named structural part/relation defects retain exact geometry/recheck gates
+  and the existing native disjoint-clip exception. An explicitly requested
+  blocked obligation selects its actual unresolved prerequisite rather than
+  an unrelated ready sibling. Compiler context, durable preflight and repair
+  attempt accounting use the same selector and exact source frame. Live
+  painting is not executed by this change.
+
+- 2026-10-12 — **Retained-frame review across closure and save (offline).**
+  `cycle_auto` and lint accept `review_operation_id + previous_observation`
+  for a new whole-frame Critic/editable-scope assessment of the current closed
+  visual operation, optionally combined with the next pass. No original verdict,
+  receipt, report, paint or history is replayed. Save-bound observations and
+  already-closed visual observations use the same validator, projection and
+  persistence. `correct` pixels can be reassessed, but whole-painting completion
+  still requires an accepted retained frame. Stale/undelivered/superseded/rolled-back
+  evidence, pending rollback, abandoned documents and newer visual or uncertain
+  work remain blocked. A valid review survives an unrelated deterministic refusal
+  of the next pass. Same-frame prerequisite reviews no longer invalidate themselves;
+  unchanged optional obligation metadata inherits its durable meaning. Critic and
+  editable-scope requests exclude reverted frames. Stale evidence is a state blocker,
+  while conflicting review/closure fields receive contract correction, not another
+  artistic planning retry. Fixed the duplicated audit key
+  which silently dropped the `review_scope` schema check. Live artistic acceptance
+  remains pending; the running plugin is not restarted by this change.
+
+- 2026-10-11 — **Retained compound Critic continuation (offline).** Exact-frame review now exposes retained finding IDs and the obligation contract. Authored subrequirements retain their own correction kind; reviewed parent decomposition does not revive an obsolete compound finding after its obligations pass, while unrelated and named structural debt remains. Method refusals explain the same-cycle migration without inferring completion. Public-contract audit distinguishes sparse continuations from full ownership declarations. Live artistic acceptance remains pending.
+
+- 2026-10-11 — **Purpose-flexible installed brushes and frame-bound compound Critic obligations (offline).**
+  The brush compiler and durable preflight previously treated advisory
+  `visual_intents` as hard technical eligibility, rejecting an already
+  material/scale-compatible installed dry role used for `mass`. Explicit
+  `brush_use_reason` now authorizes only a <=128px bounded stroke/dab trial;
+  preset availability, scale, material, pack, pressure, owner and pixel guards
+  remain strict. `previous_observation.brush_use_review` must assess the exact
+  delivered trial as pass/fail/unknown; only a retained accepted pass caches
+  fitness under role, material, intent, scale, preset, profile, settings and
+  pack identity. No new global brush intent is declared or silently approved;
+  changed settings require another trial. Artistic method routing can use the
+  installed-brush-preset method for the explicit trial instead of choosing
+  incompatible region-block-in solely from the `mass` label. Missing inputs
+  receive a concrete field correction and compatible role alternatives.
+  The Critic schema now optionally carries stable `obligations` with component
+  IDs, dependency IDs, explicit pass/fail/unknown and exact-frame evidence.
+  The shared obligation state selects the earliest ready correction for Painter,
+  Director and stage priority, rather than perpetually binding to an old
+  compound `last_critique` label; an unmet prerequisite blocks dependent work.
+  Painting does not close an obligation: Critic must explicitly verify the
+  corresponding pixels. Later edits to referenced owners stale prior passes
+  and their dependent approvals; old unsplit remarks remain fail-closed until
+  an artist supplies unambiguous obligations during ordinary review. Scope
+  and incarnation protections are retained. Focused parser/compiler/real-Guard
+  stub-dispatch tests confirm trial admission, durable fit, incompatible scale
+  or settings rejection, partial Critic advancement and stale rechecks. Actual
+  artistic suitability and visible scene quality remain unverified.
+
+- 2026-10-11 — **Offline reject → correction → execution-boundary Guard contradiction checks.**
+  Extended the existing compact-Guard fixture (real parser/compiler,
+  finalization, semantic ownership, strategy/Director/priority gates and
+  durable state; Photoshop-only handlers stubbed). Three targeted tests replay
+  four incident families: a newly created layer's typed `$steps` target;
+  continuation of its durable owner without resending the full ownership
+  plan, including a refused foreign layer; a Mykonos component correction
+  addressing both Critic and active Director/global debt; and an exhausted
+  line method repaired through a causally different region method. Corrections
+  use IDs and method alternatives from actual rejection packets; explicit
+  geometric/visual judgments remain authored. Prior visual work is closed
+  through the ordinary exact-image-review contract, including required
+  editable-scope checks, not inserted as a completed synthetic journal.
+  The returned alternatives now expose the late-stage region REPLACE/ERASE,
+  exact-target and clip requirements, and deferred-step errors enumerate
+  earlier legal create-layer producer IDs. No strategy-history reset, owner
+  reassignment, global-debt closure or fabricated image-quality pass. The
+  three owning offline tests and TypeScript build passed; production pixels,
+  artistic relevance and real continuation latency remain unverified.
+
+- 2026-10-11 — **Mykonos Art Director relationship-audit recovery (offline).**
+  Reproduced the document-102 cobblestone continuation blocker: active
+  `global_change` whole-frame review was bound to the accepted mid-left-house
+  frame and required `negative-space/composition` plus `occlusion/depth`.
+  The retained Art Director requests provided the exact operation/frame but
+  omitted `whole_image_glance.relationship_audit`; the runtime classified that
+  missing field as terminal `guard_art_director_rejected`. The public handler
+  now returns `guard_art_director_contract_invalid` before any mutation with
+  exact required/received relation IDs, trigger, operation and SHA, and
+  instructions for a corrected evidence-based review. No audit result is
+  invented, no required relation is waived and the pending debt is unchanged.
+  Owning offline test and TypeScript check passed. No live Photoshop call or
+  COS child restart; a real whole-frame visual review is still required.
+
+- 2026-10-11 — **Painter / Critic / Art Director multi-defect links (offline).**
+  Reproduced the document-102 Mykonos refusal from the retained CoS call at
+  19:50:39: Painter `problem_id=mykonos_midleft_structural_component` carried
+  `addresses_problem_id=cumulative-trend-primitive-footprint-repeating`, which
+  satisfied Director's bounded global correction but not `last_critique` for the
+  preceding unresolved `mykonos_distant_architecture_missing`. The single
+  reference was treated as mutually exclusive by independently implemented
+  `plannerGate` and `stage_priority_gate`. A shared `addresses_problem_ids`
+  normalization now carries multiple explicit defect IDs across public MCP
+  schemas, PaintingIntent, next-pass compilation, VisualMicroPlan and durable
+  request context; the legacy single ID is unioned with the array. Critic
+  selection, Painter mismatch admission, stage priority, planned-component
+  correction and failed-strategy grouping consume the same set. Eligible
+  bounded medium work may inherit *only* the matching active Director
+  correction_target from its approved region/task; no guessed Critic relevance
+  and no implicit `addresses_primary_mismatch=true`. Missing-link refusals
+  identify required/received IDs and the corrective field. Links do not alter
+  operation problem identity, close debt or bypass structural/protection gates.
+  Focused offline compiler/Guard/VisualMicroPlan/structural-critic tests and
+  server typecheck passed; no Photoshop call, subagent or runtime restart.
+
+- 2026-10-11 — **Compact compiler: avoidable pre-dispatch contract rejections (offline).**
+  New-layer `photoshop_create_layer.args.name` is now normalized to the explicitly
+  declared `logical_layer.layer_name` with an auditable repair, rather than
+  rejecting an otherwise identical owner/layer. Existing durable owner names,
+  ids and targets are not rewritten. A continuation may supply a sparse
+  `scene_ownership_plan`: the compiler restores omitted saved units, objects,
+  justifications and exact fields, while requiring all new component/owner
+  declarations and rejecting explicit reassignment, scope changes or removal.
+  The public `next_pass` schema accepts sparse continuations; first-time plans
+  remain fully validated and complete. Previously implemented inheritance of
+  durable layer, geometry, camera and attention bindings is retained.
+  Focused schema/helper/real-compiler and ownership tests passed. No live
+  Photoshop mutation, running COS process restart or quality/latency claim.
+
+- 2026-10-11 — **Tiger review-to-next-pass latency / inline fast-path.**
+  For seven retained tiger visual cycles, median inter-call gap was 107,805 ms:
+  Guard response → explicit review request 11,867 ms, review-service prefix
+  30 ms, review result → next Guard call 86,751 ms (separate marginal medians;
+  two review boundaries are incomplete). The gap includes host/model/user work,
+  not measured pure reasoning. Removed the redundant reference-only delivery
+  projection/receipt before successful inline image delivery; the single
+  committed receipt now identifies `mcp_image_content_inline_cycle` separately
+  from an explicit recovery review. Fallback still returns reference-only
+  metadata; safe explicit re-delivery is unchanged. A focused existing inline
+  and redelivery regression passed with exactly one first-cycle receipt.
+  No live Photoshop mutation, host-thinking speedup claim, or plugin restart.
+
+- 2026-10-11 — **Structural Critic priority and deferred-result preflight (offline).**
+  Explicit material/surface target IDs can no longer outrank an open structural
+  Critic finding by renaming the correction goal. Independent work is admitted
+  only when actual `photoshop_paint_regions.clip_bounds` lie outside every
+  bounded structural finding and preservation facts are present; unknown
+  structural extent is not treated as safe separation. Unified the compact
+  compiler and VisualMicroPlan's `$steps.*` checks with one guaranteed
+  producer/path/target contract: an earlier `photoshop_create_layer` provides
+  positive numeric `details.layerId` to `layer_id`. Unsupported/missing/forward
+  references now fail before preparation; runtime still resolves the original
+  token and verifies actual numeric tool arguments. Two focused offline tests
+  and server build passed. No Photoshop execution, live art acceptance or
+  plugin restart; concurrent changes retained.
+
+- 2026-10-11 — **Construction continuation preserves durable ownership (offline).**
+  Abbreviated construction passes inherit the entire saved scene ownership plan,
+  including existing unit roles, edit axes, shared-owner metadata and object inventory.
+  A new model revision changes geometry, not semantic layer ownership; only newly
+  introduced part IDs add owner units. Explicit reassignment still fails closed,
+  now with the exact conflicting unit/object field and saved/supplied values.
+  Focused Guard compiler regression covers reconstruction without resending the
+  plan and rejects explicit owner substitution. Live Photoshop not exercised.
+
+- 2026-10-11 — **Region reconstruction recovery conflict (offline fix).**
+  Guard recovery strategy fingerprints now distinguish genuinely changed region
+  contours and layer transforms while ignoring paint color, labels and brush
+  repetition jitter. Reusing the region *tool* to rebuild a new shape no longer
+  appears identical to an earlier unsuccessful contour. Owned construction
+  replacement now generates explicit old/new union clip_bounds, satisfying
+  late-stage REPLACE safety without allowing unrestricted region ADD. Focused
+  offline tests and server build passed; live Photoshop verification pending.
+
+- 2026-10-11 — **Generic structural-defect correction loop (offline).** Extended
+  existing Critic findings/visual_problems with stable relation-level IDs, visible
+  defects, semantic parts, relation IDs, original-brief relevance and an exact-pixel
+  recheck criterion. Compact Painter/VisualMicroPlan requests can now carry an
+  authored structural_correction bound to that defect. Guard checks that the
+  compiled operation contains a real geometric brush/region/transform/construction
+  effect, addresses the declared parts/relations and does not masquerade as cosmetic
+  work or a mere model revision. Partial reconstructions retain progress and open
+  debt; final dependency coverage and existing owner/protection gates remain in
+  force. Multiple same-criterion defects survive task/priority changes and old-frame
+  evidence invalidation. Only an exact-current Critic recheck of the same defect
+  may mark it resolved; generic pass or Photoshop execution is not visual evidence.
+  A bounded medium correction of a global defect can use existing priority rules
+  without an extra Director call when the Critic supplied authoritative bounds.
+  Narrow three-relation offline regression and build are the engineering gate;
+  **no live Photoshop or independently proven artistic-quality result**.
+
+- 2026-10-11 — **Generated layer ID reference preflight (offline hotfix).** Guard now
+  distinguishes an earlier `photoshop_create_layer` step's deferred
+  `$steps.<id>.details.layerId` from a concrete numeric `layer_id` during compact
+  action schema validation. It validates producer ordering, path and argument use,
+  retaining the original reference for runtime resolution and numeric validation
+  after creation. Invalid/forward references remain rejected before mutation.
+  Focused positive/negative compilation test and server build passed; live Photoshop
+  validation remains pending. No unrelated parallel changes were reverted.
+
+- 2026-10-11 — **Final contour topology and structural Critic continuation (offline).**
+  Filled region paths now receive final-coordinate topology preflight before any Photoshop
+  mutation, including generated/projected construction outlines and curved paths.
+  Nonadjacent self-crossings, collapsed edges, zero-area paths and reversals identify
+  the component and offending segment indices without rewriting the artist's geometry.
+  Independent ADD/SUBTRACT paths, concave outlines and explicitly intentional crossings
+  remain supported. Optional artist-authored `spatial_checks` cover projected component
+  attachments, relative sizes, placement and support, including `fixed=true` landmarks;
+  no species-specific proportions are inferred. Existing Critic correction selection
+  prioritizes unresolved structure over surface detail, requires structural mutation
+  methods and refuses unchanged filled geometry masquerading as correction. No extra
+  mandatory Critic call. Four narrowly selected offline checks passed, including the
+  retained 37-point tiger contour, legitimate holes/concavity, spatial constraints and
+  cosmetic-vs-reconstruction continuation. **Live Photoshop execution and visual
+  artistic acceptance remain untested.** Concurrent unrelated changes were retained.
+
+- 2026-10-11 — **First-pass executable contract and bundled corrections (offline).** CoS
+  session `2026-10-11-84f77595` attempted the nonexistent `photoshop_fill_polygon`
+  before painting. Method selection now returns its exact executable command schemas,
+  supported alternatives and a small non-executable request skeleton in the same
+  response. Guard collects unknown-command and independent nested/envelope failures
+  before Photoshop dispatch, with field paths, allowed values and one correction packet.
+  Unambiguous owner/layer names, target IDs, scene-camera/lighting source pins and
+  selected model revisions are derived only from existing declarations/context;
+  conflicting explicit targets and names still fail closed. Typed camera/surface-frame
+  public schemas and artist instructions now discourage guessed tools and unchanged
+  status/preview loops. Recorded request, bundled rejection and repaired owner-safe
+  pass checked with three narrowly scoped offline tests. Type-check/build
+  are offline; **no live artist speed/quality validation, Photoshop call or restart**.
+  Existing Guard protections and independent layer ownership are retained.
+
+- 2026-10-11 — **PaintingIntent bootstrap and method-contract preservation (offline).** The saved
+  tiger run lost its rejected ownership declaration when switching to compact input, then removed
+  target_owner_id. A shared field list now publishes canonical next_pass schemas and preserves
+  ownership, scene models, logical-layer/preflight and construction/painterly declarations through
+  parsing and compilation. Proposed plans participate in owner resolution without being persisted
+  before successful validation; existing bindings cannot be remapped. Generated methods no longer
+  require dummy raw actions. Unknown fields, mixed methods and conflicting owner labels fail
+  explicitly instead of losing data; recovery messages explain how to declare the new owner in
+  the same call. Public audit checks both schema paths for drift, including a missing compact
+  edit_axes negative control. Eleven owning tests (three new scenarios), build and tools/list audit;
+  no Photoshop execution, PSD mutation or restart. Revision: `2026-10-11-intent-contract-bootstrap-v1`.
+
+- 2026-10-11 — **Explicit Photoshop execution route before initial tool selection.** The selected
+  Photoshop/CoS MCP route and explicit imagegen prohibition now lead server guidance and the
+  painting-control template, and are published in tools/list for get_state and cycle_auto.
+  This covers the first drawing request, reference/preview generation and unavailable-tool
+  recovery: report a concrete blocker rather than changing engines. Public metadata/build
+  checked offline. PaintPilot cannot intercept a host's external imagegen call; this strengthens
+  advertised routing and does not claim a host-level exclusion or a live reproduction fix.
+  Revision: `2026-10-11-explicit-photoshop-route-v1`. No Photoshop execution or plugin restart.
+
+- 2026-10-11 — **E.7f executed Critic correction, authored surfaces/shadows and original-task anchors (offline).**
+  Ranked generic deficits now constrain actual correction methods and propagate to the next
+  intent in the same cycle. Two no-gain observations of unchanged construction require changed
+  geometry/illumination/material target or method; a renamed strategy does not clear debt.
+  Local gain does not replace whole-scene Critic acceptance. Artist-authored 2.5D triangles or
+  corresponding sections, interpolated normals and oriented material response produce targets;
+  explicit caster/receiver/contact/light produce owner-bound cast-shadow targets. Coverage
+  intersects component/protection masks and feeds the existing bounded brush executor.
+  Compact continuation anchors retain the original task; whole-scene Critic and recovery restore
+  its full text even after an earlier receipt, including continuation checkpoints, without new
+  calls or repeated images. Seven new focused scenarios plus 18 owning Critic checks; TypeScript
+  and published-schema validation. No live Photoshop, PSD mutation or plugin restart.
+  Revision: `2026-10-11-critic-surface-brief-v1`. These are bounded orthographic approximations;
+  real visual acceptance and broader physical rendering remain pending.
+
+- 2026-10-11 — **E.7g semantic editability and combined-owner repair (offline).** Independent
+  editing rights (`scene_ownership_plan.units[].edit_axes`) enrich historical declarations
+  without remapping them. Exact-image `editable_scope_review` compares arbitrary visible parts,
+  owner/layer bindings and undeclared content at scope changes and whole/final checkpoints;
+  unchanged component work reuses accepted scope. Layer targets are checked at every scale,
+  including small passes and cross-object collisions. Combined owners freeze through continuation,
+  raw operations and keep; previous-review debt also gates the next operation in the same cycle.
+  Missing/unknown dedicated parts retain completion debt but remain repairable. Confirm additive
+  replacement components on distinct new layers; old combined pixels stay frozen references.
+  Final editable_parts=pass needs whole-scene proof, not a save/label. Whole-scene metadata is
+  available on the existing review tool with cached images. Host judges semantics; Guard checks
+  identity/topology/debt. Four new focused scenarios plus directly affected existing checks,
+  TypeScript build and public-contract audit; no live Photoshop execution, PSD mutation or restart.
+  Managed revision: `2026-10-11-editable-scope-v1`. Live artistic acceptance remains pending.
+
+- 2026-10-11 — **Bounded structural correction survives compact compilation (offline).** The real
+  cafe chair request `cafe_left_leg_correction_v10` linked the active task, global primitive debt
+  and correct medium review region, but the compiler replaced declared `depth-structure` with
+  polygon-derived `local-shape`. Preserve validated semantic domains alongside method effects
+  on bundled and direct routes. Eligible medium PaintingIntent construction now inherits the
+  active task's bounded correction target and authorized structural domains; explicit parent/
+  domain overrides remain visible to final validation. Public PaintingIntent exposes both optional
+  choices. Keep impact_class through bundled compilation so texture cannot masquerade as structural
+  work. Existing scale, region, task, strategy, owner, scaffold and whole-frame debt gates remain;
+  no automatic global-debt closure. Focused compiler/admission regressions and in-place TypeScript
+  build; no Photoshop execution, PSD changes or plugin restart. Managed Guard revision:
+  `2026-10-11-bounded-correction-semantics`. Live artistic acceptance remains pending.
+
+- 2026-10-11 — **General visual support/contact/weight review (offline).** Ordinary Painter review,
+  same-chat Critic and the optional authorized delegation template now assess plausible support,
+  contact and weight balance across arbitrary depicted objects, respecting suspension, movement
+  and brief-authorized stylization. Critic `contact_and_protection=pass` requires a concrete
+  positive `findings` observation; hidden/ambiguous support remains unknown and unresolved debt
+  persists. The public contract and compact responses retain the rule; policy-versioned frame
+  binding prevents old approvals from skipping the new check. Existing five criteria and review
+  cadence stay intact, with no added image/reviewer call or physical simulation. Focused owning
+  tests and in-place TypeScript build; live visual acceptance remains open. Managed Guard revision:
+  `2026-10-11-support-contact-weight-review`. No Photoshop execution or current PSD changes.
+
+- 2026-10-11 — **Freeze composition scaffolds instead of refining the whole scene on one layer (offline).** The cafe journal confirms windows, balcony, patio objects, maple and wet-street reflections all continued `cafe_underpainting` / layer 2 at GLOBAL_BLOCK_IN. A focused compiler reproduction was accepted before correction. A scene unit with `editability=temporary` now authorizes its initial composition study only; subsequent continuation/adjust or raw targeted painting fails before dispatch with `scene_scaffold_frozen`. Keep cannot relabel that unit independent. New temporary ownership requires component scope even with `substantial=false`; continuing owners retain scope validation. The public schema and host guidance explain the actionable alternative: extend the same plan with genuine independent units/new owners/layers, retaining the scaffold as reference. A reversible single-component hypothesis uses independent editability with temporary-hypothesis and remains editable. Focused offline regressions cover the bypass, relabelling, raw/keep refusal and legal new-component/multi-mark continuation; TypeScript in-place build passed. Managed Guard revision is `2026-10-11-frozen-composition-scaffold`. No live Photoshop execution, reload, PSD split, erasure or reconstruction; broader E.7g semantic honesty and actual layer-content acceptance remain open.
+
+- 2026-10-11 — **Roadmap split into a short work plan and task reference (documentation only).**
+  PAINTING-ROADMAP now lists five user-facing priorities, their next action, completion boundary
+  and current status. Existing E.*, AUD-* and Task requirements remain in
+  [PAINTING-WORK-DETAILS](docs/PAINTING-WORK-DETAILS.md), including conditional/live/human gates.
+  Completed receipt summaries were relocated below; no feature, live or artistic acceptance
+  was newly closed. The exact pre-edit roadmap is preserved in
+  [the snapshot](processes/documentation-maintenance-process/pre-roadmap-split-20261011/docs/PAINTING-ROADMAP.md).
+  Documentation navigation and contributor guidance now distinguish priorities from details.
+  Preservation and changed-link checks only; no code tests, runtime restart or Photoshop mutation.
+
+<details>
+<summary>Historical summaries relocated from the roadmap (original wording)</summary>
+
+**E.26 host continuation**
+
+**Conditional on a user-authorized unattended Goal/Loop run.** The COS host-side
+Guard continuation fix was implemented and packaged offline on 2026-10-10.
+A loaded Windows host package was observed, but no actual enabled-Goal
+final-answer-to-next-turn continuation was validated. The observed local
+configuration had Goal/Loop off: this is **not** a blocker for normal Photoshop
+painting, nor permission to change the user's preferences.
+
+**E.25 connected construction**
+
+**Bounded LIVE PASS already recorded (2026-10-10):** real curved/cutout
+geometry, owner-pinned connected translation of two and three generations,
+single native History step and exact Undo restoration. An E.11 same-cycle
+accepted connected move followed by Undo also passed live. Do **not** repeat
+these narrow demonstrations merely to vary layer colors, hierarchy or timing.
+The detailed operation IDs, native receipts, artifact hashes, offline repairs
+and prior failed attempts are in CHANGELOG and the preserved roadmap snapshot.
+
+**E.25 retained contour alignment**
+
+**Offline fix (2026-10-11):** accepted connected translations now carry the
+model-part contour into later painterly construction_ref work; missing or
+changed model-to-pixel evidence blocks painting. Real-pixel follow-up after
+move/Undo remains part of the open E.25 acceptance, not a claimed live pass.
+
+**E.24 same-chat live slice**
+
+**Live slice (2026-10-10):** a new isolated 640×480 RGB document (id 795)
+successfully completed a Guard-owned create-layer + painted-region pass;
+exact BEFORE/AFTER were delivered for same-chat review, a separate layer
+was verified, and the preceding nonvisual document-create receipt closed
+within the next cycle. This is a *partial* E.24 acceptance only: meaningful
+scene critique, technical review-debt recovery, Director evidence and
+artistic correction remain open; see CHANGELOG for the reproducible trace.
+
+**E.11 native history**
+
+**Narrow LIVE PASS (2026-10-10):** connected-move and Undo on two/three
+generation owners, same-cycle acceptance→Undo, protected Smart Filter
+rollback, and prepared fill/one-step Undo were separately evidenced.
+Retain these passes; do not repeatedly re-prove one-step Undo with new
+disposable documents. Technical operation IDs and regressions are in
+CHANGELOG and the preserved roadmap snapshot.
+
+**E.7e form/material probes**
+
+**Still OPEN: artistic quality of a real complete scene.** Earlier
+one-scene architecture probes failed artistically: schematic wall planes,
+separate blotchy or streaked brush lighting and inadequate form. A later
+native alpha-protected continuous surface-tone operation **passed a narrow
+live pixel/owner/History test**; that does not prove convincing material or
+lighting in a finished picture. Failure history, exact process artifacts and
+renderer revisions belong to CHANGELOG and the preserved snapshot.
+Directional light-field source rendering and four-stop native projection now
+have offline regression coverage; real-pixel directional fidelity and whole-scene
+artistic improvement are **not yet accepted**.
+
+**E.7e brush setter**
+
+**Brush setter guard (2026-10-11, offline fixed):** a mismatched/uncertain
+effective preset or settings now stops VisualMicroPlan before painting and
+invalidates preparation cache. Live Photoshop brush/readback verification remains open.
+
+**E.7f uncertain relations**
+
+**Offline fix (2026-10-11):** a whole-image relation marked uncertain no
+longer clears the exact-frame review gate or permits Art Director completion.
+Only unresolved relations remain due, without forcing rechecks of passed
+relations. Real Photoshop whole-scene artistic acceptance remains open.
+
+**E.7h offline correction-target fix**
+
+No live painting or active-state migration was performed while developing this fix.
+Offline: before-fix rejection reproduced; 11 new regressions and all 78 Director/Painter
+tests passed; TypeScript in-place server build passed. E.7g remains planned, not implemented.
+
+**E.8a accounting status**
+
+**PROGRAMMATIC ACCOUNTING HARDENED; REAL COS ACCEPTANCE OPEN.**
+The archive now has checksums/sequence/incarnation, bounded-memory stream
+aggregation beyond 50,000 events / 16 MiB, conservative classification,
+journal-clock and ownership checks, interrupted-reader handling, and
+independent Node-process race controls. The overnight defects, regression
+reproductions, exact test results and limitations are documented in
+[CHANGELOG](CHANGELOG.md) and the
+[2026-10-11 preserved full roadmap](processes/documentation-maintenance-process/pre-lean-roadmap-telemetry-20261011T093639/docs/PAINTING-ROADMAP.md).
+These are **offline** assurances, not end-to-end COS/Photoshop acceptance.
+
+**Earlier roadmap snapshots**
+
+Full sources: [2026-10-03 cleanup](processes/documentation-maintenance-process/pre-roadmap-cleanup-20261003T201104Z/PAINTING-ROADMAP.md),
+[before implementation instructions](processes/documentation-maintenance-process/pre-implementation-roadmap-20261003T213054Z/PAINTING-ROADMAP.md),
+[2026-10-04 compaction snapshot](processes/documentation-maintenance-process/pre-roadmap-compaction-20261004T080229Z/docs/PAINTING-ROADMAP.md).
+
+**Overview: verification and hot-path reduction**
+
+**Machine checks are not painting-quality acceptance.** The last full
+canonical verification (2026-10-10: 1512/1512 PASS) and later targeted
+checks are recorded in CHANGELOG. E.11 exact single-step Undo and E.25
+connected translation/Undo have narrow live passes; full-scene artistic
+quality, genuine host continuation and some transform/recovery gates
+remain open. The full pre-compaction roadmap is preserved in
+[the verified snapshot](processes/documentation-maintenance-process/pre-lean-roadmap-telemetry-20261011T093639/docs/PAINTING-ROADMAP.md).
+
+2026-10-11: redundant UXP dab color/style writes, successful layer restore
+and path-name lookups were reduced offline. Live wall-time/pixel parity remains
+unverified; leave durable Guard journal/telemetry writes unchanged until a
+measured real pass shows material delay (see CHANGELOG).
+
+</details>
+
+- 2026-10-11 — **Surface gradient clip and opacity corrections (offline).** The narrow authored light-field adapter now passes its exact polygon and requested strength through the public tool schema and UXP client. UXP intersects an unfeathered temporary path selection with the existing alpha lock, removes the selection/path before committing the same History state, and applies strength through uniform gradient transparency stops without altering layer opacity. Existing selections are preserved by refusing clipped execution before mutation; clip creation/cleanup failures abort the transaction. The tool rejects malformed clips/opacity and receipts that omit the exact clip, restored selection or requested strength. Server/UXP revision advances together to `compact-v2-20261011-surface-clip-opacity-v1`, so older companions cannot silently ignore the new contract. Twelve focused existing-file tests, TypeScript build, UXP syntax and public-schema audit PASS. No live Photoshop mutation, runtime reload or pixel-quality acceptance; native boundary/strength fidelity remains an artwork-driven E.7e acceptance.
+
+- 2026-10-11 — **Targeted Photoshop hot-path reduction (#5–8):** The actual UXP `paintDabsBatch` previously repeated foreground-color changes and consequent brush-settings writes for each same-color group. A 12-group regression reproduced 12 writes before the fix; it now performs one color write and one brush-settings write, preserving all 12 draws and one native History transaction. Both `paintStrokesBatch` and `paintDabsBatch` also avoid selecting the original layer a second time in successful `finally` cleanup (2 → 1 restore calls), while keeping failure restoration. When `pathItems.add()` yields a usable native PathItem, both paths stroke it directly instead of looking it up again by name; unsupported UXP return shapes retain the lookup fallback and per-mark path cleanup. Changes: `uxp-plugin/main.js` and focused existing `tests/uxp-paint-opacity.test.ts`; 16/16 tests PASS. **No stroke merging**: it could change alpha accumulation and the artwork. Read-only synthetic Guard measurements with 120 operation journals gave `statusCompact`: 120 reads / 25 ms, `resume`: 120 reads / 15 ms (one journal snapshot each), and a single throughput event: 2 synchronous fsyncs / 8 ms without project mirror. The existing Guard projection already prevents repeated reads in these entrypoints; durable telemetry commits were deliberately not weakened for an unproven latency gain. These timings are local probes, not Photoshop end-to-end speedups. UXP live timing/pixel parity remains to be verified. No commit/push or PSD changes.
+
+- 2026-10-11 — **P0 artistic review correctness: uncertain whole-image relationships remain unresolved.** Reproduced two defects in the actual SessionStore source using the existing Planner/Painter fixture: Art Director action=review cleared whole_image_glance.due after a required relation returned uncertain, and action=complete rejected defect but silently accepted uncertain. src/core/guard/session-store.ts now preserves the original frame/reason and only still-uncertain relations for the next meaningful review; passed checks and the entire audit remain in bounded history. action=complete fails with an actionable whole_image_glance_uncertain message until those relations are passed. The Painter gate reports outstanding relations and recommends stopping with an actionable blocker when evidence is insufficient; no automatic Photoshop pass or additional Critic loop. Two regression scenarios in tests/planner-painter.test.ts failed before the fix, covering fail-closed review, retained exact-frame debt, independently passed relations, successful resolution, and rejection of premature completion. Live Photoshop whole-scene quality acceptance remains open. No commit, push or PSD mutation.
+
+- 2026-10-11 — **P0 painting correctness: brush preparation fails closed instead of painting with an unapplied preset/settings.** Reproduced in `tests/preparation-cache.test.ts`: a tool reporting `setter_outcome=not-applied` or `uncertain` under a nominal `ok:true` wrapper previously let VisualMicroPlan run paint and cache the preparation (2 FAIL before fix). Now `src/tools/visual-microplan-tools.ts` classifies explicitly unverified brush outcomes as pre-mutation failures, records `brush_setter_unverified`, invalidates cache, and preserves possible preparation side effects without replay. `src/tools/painting-tools.ts` returns `isError:true`, `ok:false` and full requested/effective readback on both preset and settings mismatch (or empty/unknown brush setter); successful verified setters remain reusable. Found an additional false-acknowledgment in `uxp-plugin/main.js`: preset selection returned the *requested name*, not the observed one. It now returns `snapshotBrushSettings().preset` or unknown, tested against a native-readback fixture in `tests/uxp-paint-opacity.test.ts`. Focused preparation/UXP/VisualMicroPlan suites 101/101 PASS, followed by final targeted Guard regression 6/6 PASS, TypeScript and UXP JS syntax checks PASS. Real Photoshop pixel/brush acceptance and host plugin reload remain open. No PSD mutation, Git commit or push.
+
+- 2026-10-11 — **P0-quality correction: connected native move no longer leaves painterly construction_ref at old coordinates (offline).** Reproduced through real SessionStore owner projection and painterly compilation for two modeled, separate physical owners: an accepted +10 px linked move left both computed clip contours unchanged. src/core/guard/session-store.ts now pins the accepted model/part contour SHA and owner provenance, and accumulates only exact accepted per-layer native connected translations; structural changes invalidate historical alignment and missing source provenance fails closed. src/core/painterly-strokes.ts applies the verified offset or blocks stale/mismatched references before mutation. tests/painterly-strokes.test.ts now checks parent/child offsets, two moves, native rollback/rejected receipt, and missing construction provenance. The owning test failed before the correction and passed after; full Photoshop pixel/Undo acceptance remains OPEN. No PSD mutation, commit or push.
+
+- 2026-10-11 — **P0 painting-quality fix: authored light-field now respects `light_direction`.** `src/core/authored-form-field.ts` shifts the continuous Gaussian hotspot along the normalized, rotated in-plane lighting vector; front-facing light remains centered. Previously opposite directions yielded identical RGBA pixels (only provenance SHA changed). The existing narrow-wall native route in `src/core/painterly-strokes.ts` now samples four Photoshop-supported color stops from that same authored field rather than discarding center/radius/ambient/rotation and choosing two hardcoded shadow/light endpoints. This remains a documented **one-dimensional horizontal cross-section approximation**, not a full two-dimensional native rendering or artistic acceptance. Updated only `tests/painterly-strokes.test.ts` with regression controls for opposite light direction and native stop dependence on direction/center/ambient. Focused renderer suites **18/18 PASS**, TypeScript and diff checks PASS; Photoshop/UXP live pixels were not mutated or accepted. No commit or push.
+
+- 2026-10-11 — **Roadmap restored as an acceptance queue; E.8a synthetic-test treadmill stopped.** Audited the live worktree and re-ran the existing telemetry/SessionStore battery (17 files, 200/200 PASS before cleanup). Compacted historical E.25, E.11, E.7e, E.8a, E.26 and deferred E.27 narratives in docs/PAINTING-ROADMAP.md to distinct accepted bounds, still-open user-facing tasks and blockers. E.8a has three remaining real COS/Photoshop acceptance gates: concurrency/interruption, durable run attribution, and independently reviewed time-to-useful-art. Added strict priority, test-budget and documentation hygiene guidance in AGENTS.md: do not invent synthetic telemetry variants or run cumulative benchmark suites without a new reproduced real failure. This cleanup did not alter existing telemetry source code or its regression tests. Verbatim verified SHA-256 copies of the original roadmap, changelog, AGENTS and 16 E.8a benchmark/archive test files (19 files) are retained in processes/documentation-maintenance-process/pre-lean-roadmap-telemetry-20261011T093639/; the full historical accounts also remain in older changelog entries. Offline test success is not real COS recovery or artistic acceptance. No Photoshop mutations, commit, push, reset or clean.
+
+- 2026-10-11 — **E.8a journal start-marker chronology fails closed (offline).** `runBoundaries` checked a journal's completion and response-ready timestamps only against the earliest of `cycle_received_at` and `created_at`. When creation was later than reception, a completion marker before creation could pass that check, and the `created_at` fallback could inflate the apparent run wall. Added six archive/mirror tests in `tests/benchmark-journal-start-marker-order.test.ts`: **4 FAIL / 2 PASS before fix**, **6/6 PASS after fix**. `scripts/dev/benchmark-painting-cycles.mjs` now compares each available end marker against both start markers and leaves exact run counters/wall unknown on contradiction. Seventeen focused suites **200/200 PASS**. Full pre-edit roadmap/changelog copies verified by length and SHA-256 in `processes/documentation-maintenance-process/pre-e8a-start-marker-20261011T042427Z/`. This does not establish real COS concurrency, PSD recovery or independent image-quality/time acceptance; E.8a #1–#3 remain OPEN. No commit, push, reset or clean.
+
+- 2026-10-11 — **E.8a inverted selected-journal chronology fails closed (offline).** A selected operation journal with `phase=completed` could record `completed_at` or `latency.response_ready_at` earlier than its own start. `runBoundaries` previously aggregated global earliest/latest timestamps from other selected journals and certified exact archive or mirror counts despite the impossible local ordering. Added `tests/benchmark-inverted-journal-boundary.test.ts` with four red-before-fix regressions and two valid-chronology controls (**4 FAIL / 2 PASS before fix**). `scripts/dev/benchmark-painting-cycles.mjs` now checks both available completion markers against each journal's start and returns unknown run boundaries and exact totals when chronology is inverted. Sixteen focused benchmark/archive/SessionStore suites **194/194 PASS**, `node_modules/.bin/tsc.cmd --noEmit`, `node --check` and scoped diff checks PASS. Full pre-edit roadmap/changelog snapshots verified by SHA-256 and length in `processes/documentation-maintenance-process/pre-e8a-inverted-journal-20261011T070956/`. No live concurrent COS, Photoshop/PSD recovery or independent image-quality/time acceptance; E.8a #1–#3 remain OPEN. No commit, push, reset or clean.
+
+- 2026-10-11 — **E.8a interrupted/incomplete selected operation journals cannot certify exact run counts (offline).** `runBoundaries` previously derived a seemingly complete interval from the earliest/latest *available* journal timestamps, including falling back to `created_at` when a selected journal lacked a completion marker. Both verified-stream and bounded-mirror benchmarks could then report `complete=true` despite a selected journal with no start, no completion timestamp or a nonterminal phase. New `tests/benchmark-incomplete-journal-boundary.test.ts` reproduced six false-complete cases before the fix (**6 FAIL / 2 PASS**) and verifies completed-journal controls. `scripts/dev/benchmark-painting-cycles.mjs` now requires a provable start, explicit completion timestamp and completed phase for **every** selected journal before certifying the run window, wall time or exact counters; missing evidence yields an explicit journal-boundary warning. Updated legacy fixture journals in `tests/benchmark-painting-cycles.test.ts`, `tests/benchmark-event-classification.test.ts` and `tests/benchmark-semantic-action-integrity.test.ts` to identify completed operations, and strengthened `tests/benchmark-archive-integration.test.ts` to expect unknown run-wide and per-pass counts when a visual journal has no completion marker. Fifteen targeted suites **188/188 PASS**, `npx tsc --noEmit`, Node syntax and scoped whitespace checks PASS. Full pre-edit roadmap/changelog snapshots verified by size and SHA-256 in `processes/documentation-maintenance-process/pre-e8a-journal-boundary-20261011T034933Z/`. This is not live concurrent COS, Photoshop recovery or independent image-quality/time evidence; E.8a #1–#3 remain OPEN. No commit, push, reset or clean.
+
+- 2026-10-11 — **E.8a unjournaled run-prefix events outside their attributable time bounds no longer vanish from exact counts (offline).** Both verified-stream and bounded-mirror benchmark paths previously excluded a run-prefixed rejection/recovery without a selected operation journal when its timestamp preceded the run, exceeded the journal end, or fell inside the one-second persistence tail (which only a journal-selected operation may use), yet certified exact counters. Added ten archive/mirror regression and control cases in `tests/benchmark-unjournaled-prefix-window.test.ts`: **6 FAIL / 4 PASS before fix**; after correction all ten PASS. `scripts/dev/benchmark-painting-cycles.mjs` now reports these ambiguous prefix events and returns unknown exact totals; genuinely foreign late events and in-window unjournaled prefixed calls retain their intended handling. Updated two older test fixtures to use demonstrably foreign prefix events as their pre-start/late coverage witnesses. Fourteen focused archive/benchmark/SessionStore suites **180/180 PASS**, `npx tsc --noEmit` and `node --check` PASS. Full pre-edit roadmap/changelog snapshots verified by size and SHA-256 in `processes/documentation-maintenance-process/pre-e8a-unjournaled-prefix-20261011T032724Z/`. No real COS concurrency, PSD recovery, Photoshop mutation or independent E.8 time-to-quality assessment; E.8a #1–#3 remain OPEN. No commit, push, reset or clean.
+
+- 2026-10-11 — **E.8a journal-owned events outside the measured run window no longer disappear from exact throughput accounting (offline).** Both `createStreamedThroughput` and the bounded `scopedThroughput` mirror previously excluded an event with an operation ID proven by a selected journal when its timestamp was before the run start or beyond the journal end + 1-second persistence tail, then reported exact counters. `tests/benchmark-owned-event-window.test.ts` reproduced four false-complete results before correction (**4 FAIL / 4 PASS**) and verifies foreign late events and valid owned tail events remain accepted. Both paths now mark exact run totals unknown and diagnose out-of-window journal-owned events; the legacy optional-counter test fixture now uses a genuinely foreign pre-start event as its coverage witness. Thirteen focused archive/benchmark/SessionStore suites **170/170 PASS**. Full pre-edit roadmap/changelog copies verified by size and SHA-256 in `processes/documentation-maintenance-process/pre-e8a-owned-window-20261011T030447Z/`. This is source/offline attribution correctness, **not** live concurrent COS, PSD recovery or independent time-to-quality acceptance; E.8a #1–#3 remain OPEN. No Photoshop mutation, commit, push, reset or clean.
+
+- 2026-10-11 — **E.8a persisted archive legacy-coverage verdict cannot be laundered by the next write (offline).** `SessionStore.throughputArchivePage` already failed closed when `archive_legacy_history_unverified` was missing/malformed, but `recordArtisticThroughputEvent` silently changed such a verdict to explicit `false` on a subsequent append if `archive_sequence` was present. This made both state-backed and streaming readers certify an archive whose pre-archive coverage was never proven. New `tests/throughput-legacy-coverage-write.test.ts` reproduced three failures (undefined/null/string verdict; **3 FAIL, 1 PASS before fix**) and includes a clean new-archive control. The writer now retains uncertainty as `true` instead of manufacturing verified coverage; twelve archive/benchmark and SessionStore suites **162/162 PASS**, `npx tsc --noEmit` PASS. Full pre-edit roadmap/changelog backups verified by SHA-256 and size in `processes/documentation-maintenance-process/pre-e8a-coverage-write-20261011T055257/`. This is source/offline evidence only: live COS concurrency, recovery, attribution and E.8 image-quality/time remain OPEN. No Photoshop mutation, commit, push, reset or clean.
+
+- 2026-10-11 — **E.8a malformed source classification no longer silently normalized (offline).** `SessionStore.recordArtisticThroughputEvent` previously converted explicit `model_visible: 'false'` to `true` and an explicitly present `kind: undefined` to `bookkeeping` before persisting the checksummed archive event. The run benchmark's classification validator could not detect those source errors once normalized. Added `tests/throughput-source-classification.test.ts`: two cases reproduced the loss before the fix (2 FAIL / 2 PASS). The writer now preserves explicitly supplied classification values in the durable event; only omitted fields receive legacy defaults. Existing stream/mirror classification checks can therefore mark malformed selected events' exact counts unknown. Focused archive/source/benchmark suites **36/36 PASS** across five files, owning SessionStore suite **98/98 PASS**, `npx tsc --noEmit` and scoped `git diff --check` PASS. This is source/offline validation, not real COS concurrency, PSD recovery or E.8 image-quality/time acceptance; E.8a #1–#3 remain OPEN. Verified full pre-edit roadmap/changelog backups in `processes/documentation-maintenance-process/pre-e8a-source-classification-20261011T022741Z/` (SHA-256 and sizes). No commit, push, reset, clean or Photoshop mutation.
+
+- 2026-10-11 — **E.8a state-backed archive legacy-coverage proof (offline fail-closed).** `SessionStore.throughputArchivePage` previously returned `integrity=consistent` for a fully checksummed, sequence-matched archive when `archive_legacy_history_unverified` was missing from the persisted state. Unlike the streaming benchmark, the state-backed reader accepted an absent verdict as if it were explicit `false`, so older unarchived calls could not be excluded. A new regression in `tests/throughput-event-archive.test.ts` reproduced the defect before the fix (**1 FAIL / 11 PASS**). The reader now requires explicit `false` and otherwise reports `archive_legacy_coverage_unproven` (while preserving `legacy_history_not_archived` for explicit `true`). Nine archive/benchmark suites **56/56 PASS**; `npx tsc --noEmit` PASS. Verified full pre-edit roadmap/changelog backups by SHA-256 and size: `processes/documentation-maintenance-process/pre-e8a-legacy-coverage-20261011T020309Z/`. No real COS concurrency, Photoshop mutation, PSD recovery or independent E.8 time-to-quality acceptance; E.8a #1–#3 remain OPEN. No commit, push, reset or clean.
+
+- 2026-10-11 — **E.8a archive pagination cursor beyond verified tail (offline fail-closed).** A caller supplying `afterSequence` greater than the actual archive's final sequence received `integrity=consistent`, `events=[]`, falsely certifying an empty continuation despite an invalid cursor. Added a regression to `tests/throughput-event-archive.test.ts` that failed before the fix (1 FAIL; received `consistent` instead of `unverified`). `readThroughputArchivePage` now reports `cursor_beyond_archive`; a cursor exactly at the tail remains a valid empty page. Owning archive-reader suite **11/11 PASS** and `npx tsc --noEmit` PASS. Full pre-edit roadmap/changelog copies verified by size and SHA-256 in `processes/documentation-maintenance-process/pre-e8a-cursor-20261011T014834Z/`. This is an offline reader-contract fix, not real concurrent COS, PSD recovery, event attribution or independent time-to-artistic-quality acceptance; E.8a #1–#3 remain OPEN. No commit, push, reset, clean or Photoshop mutation.
+
+- 2026-10-11 — **E.8a benchmark verifier close-error fail-closed (offline only).** The read-only `benchmarkArchiveEvidence` path still propagated a `closeSync` I/O error from `finally`, even after fully reading a checksum-valid archive, unlike the Guard archive-page reader. A new isolated `tests/benchmark-archive-close-failure.test.ts` reproduced the uncaught exception before the fix (**1/1 FAIL**), with a normal verified-archive control. `scripts/dev/benchmark-throughput-archive.mjs` now returns `integrity=unverified`, `events=[]` and an explicit `archive close failed` warning when the descriptor cannot be safely closed. The existing eight suites plus the new test **9/9 files, 54/54 tests PASS**; `node --check` and `npx tsc --noEmit` PASS. Full pre-edit roadmap/changelog backups verified by size and SHA-256: `processes/documentation-maintenance-process/pre-e8a-benchmark-close-20261011T012239Z/`. No real COS concurrency, Photoshop mutation, checkpoint/recovery or E.8 independent quality/time measurement; E.8a #1–#3 remain OPEN. No commit, push, reset or clean.
+
+- 2026-10-11 — **E.8a interrupted archive open/read fail-closed fix (offline only).** Two new deterministic tests in `tests/throughput-event-archive.test.ts` reproduced a reader exception when a concurrent file rotation occurred between existence check and open, and an exception when an opened archive returned an I/O error (**2 FAIL / 8 PASS before fix**). `src/core/guard/throughput-event-archive.ts` now returns `integrity=unverified` with `archive_open_failed` or `archive_read_failed`; a failed descriptor close also invalidates integrity. Eight targeted suites **53/53 PASS**, `npx tsc --noEmit` and scoped `git diff --check` PASS. Verified full roadmap/changelog backups: `processes/documentation-maintenance-process/pre-e8a-read-failure-20261011T010837Z/` (sizes and SHA-256). Real COS concurrency, PSD checkpoint/recovery, event attribution and E.8 time-to-artistic-quality remain untested; E.8a #1–#3 OPEN. No commit, push, reset, clean or Photoshop mutation.
+
+- 2026-10-11 — **E.8a paginated throughput archive read stability: offline fail-closed fix; live COS acceptance OPEN.** `readThroughputArchivePage` previously certified `integrity=consistent` for an existing empty archive and for a stale page when a separate append completed immediately after the reader's EOF. Two new tests in `tests/throughput-event-archive.test.ts` reproduced both defects before the change (**2 FAIL / 6 PASS**). `src/core/guard/throughput-event-archive.ts` now treats an empty archive as unverified and compares bytes read, file size, modification/change timestamps and named-file identity across the read; a concurrent append/replacement returns `archive_changed_during_read`, never a falsely complete page. Eight focused archive/benchmark suites **51/51 PASS**, `npx tsc --noEmit` and scoped `git diff --check` PASS. Full pre-edit SHA-256-verified roadmap/changelog backups: `processes/documentation-maintenance-process/pre-e8a-page-reader-20261011T005038Z/`. No real concurrent COS hosts, Photoshop mutation, checkpoint/recovery or E.8 image-quality/time comparison was performed; E.8a #1–#3 remain OPEN. No commit, push, reset or clean.
+
+- 2026-10-11 — **E.8a actual child-process archive-race negative controls (offline/OS-process PASS; COS live OPEN).** Added `tests/throughput-archive-process-races.test.ts` with two simultaneously released independent Node writer processes targeting the same document and sequence (must fail closed), parallel writers targeting separate documents (both consistent), a deterministic checksum-valid duplicate-sequence diagnostic control, and a child that exits with code 23 after leaving a partial append followed by a valid next event (archive remains unverified). The checksum-valid duplicate case already failed closed in the public reader, but the benchmark verifier reported the ambiguous diagnostic `sequence gap or invalid entry`; the new assertion failed before the change (1 FAIL, 2 PASS in the initial three-case suite). `scripts/dev/benchmark-throughput-archive.mjs` now reports `sequence gap or duplicate` explicitly after checksum validation. Eight focused suites **49/49 PASS** after adding the deterministic control; `npx tsc --noEmit`, `node --check`, scoped `git diff --check` PASS. Verified full pre-edit roadmap/changelog backups: `processes/documentation-maintenance-process/pre-e8a-process-race-20261011T002944Z/` (SHA-256 manifest). This does **not** demonstrate safe serialization of concurrent writers, real COS host multi-process/restart, PSD checkpoint/recovery, or E.8 image-quality/time acceptance. No commit, push, reset, clean or Photoshop mutation; E.8a remains OPEN.
+
+- 2026-10-11 — **E.8a overlapping visual-pass accounting fixed (offline PASS; live OPEN).** A completed visual pass whose response-ready timestamp was later than the next pass's start produced an inverted per-pass time interval. Both verified-stream and legacy-mirror benchmark paths silently returned exact zero rejected/recovery calls for that impossible interval. Added a regression in `tests/benchmark-archive-integration.test.ts` covering both archive and mirror paths; it failed before the fix (`0/0` instead of `null/null`). `scripts/dev/benchmark-painting-cycles.mjs` now marks reversed windows unknown without invalidating separately verified run-wide totals. Six focused benchmark suites **39/39 PASS**, `node --check`, `npx tsc --noEmit`, and scoped `git diff --check` PASS. Full pre-edit roadmap/changelog copies verified by SHA-256: `processes/documentation-maintenance-process/pre-e8a-overlap-window-20261011T030730/`. No live concurrent/interrupted host runs, Photoshop mutations, commit, reset, clean or push; E.8a remains OPEN.
+
+- 2026-10-11 — **E.8a malformed event-classification fail-closed (offline PASS; live OPEN).** A checksum-valid selected throughput event with an unknown `kind` or string-valued `model_visible` was previously treated as an exact model-visible call, while category counts could falsely report zero. New `tests/benchmark-event-classification.test.ts` reproduced all four archive/mirror failures before the fix (4/4 FAIL). `scripts/dev/benchmark-painting-cycles.mjs` now requires a known Guard kind (`semantic-dispatch`, `bookkeeping`, `recovery`, `rejected`) and an explicit boolean `model_visible` for every attributable selected event; otherwise run-scoped exact counters and per-pass derived counts remain unknown, with an explicit classification warning. Missing fields and valid `model_visible=false` controls are covered. Six focused benchmark suites **38/38 PASS**; `npx tsc --noEmit`, `node --check` and scoped `git diff --check` PASS. This does not prove concurrent/interrupted host telemetry or E.8 artistic speed/quality. Full SHA-256-verified pre-edit copies of roadmap/changelog: `processes/documentation-maintenance-process/pre-e8a-classification-20261010T234910Z/`. No commit, push, reset, clean or Photoshop mutation.
+
+- 2026-10-11 — **E.8a deterministic-repair aggregate overflow fixed (offline PASS; live OPEN).** `scopedDeterministicRepairAccounting` previously added individually valid `next_operation` violation rows without checking the aggregate's safe-integer range: `Number.MAX_SAFE_INTEGER + 1` was returned as an exact `encountered`/`repaired` count with `complete=true` and a misleading 100% repair rate. The new `tests/benchmark-repair-overflow.test.ts` reproduced the defect before the fix (1 FAIL / 1 PASS) and verifies that overflowing totals are now `null`, `complete=false`, and `percent=null`; the exact safe boundary remains accepted. `scripts/dev/benchmark-painting-cycles.mjs` now validates each accumulated repair counter and propagates uncertainty into the existing stream/mirror consumers. Five focused benchmark suites **30/30 PASS**, `node --check` and scoped `git diff --check` PASS. This is not live concurrency/interruption, independent image-quality, or speed acceptance; E.8a remains OPEN. Full pre-edit SHA-256-verified roadmap/changelog copies: `processes/documentation-maintenance-process/pre-e8a-repair-overflow-20261010T232604Z/`. No commit, push, reset, clean or Photoshop mutation.
+
+- 2026-10-11 — **E.8a foreign-only archive/mirror attribution fixed (offline PASS; live OPEN).** Reproduced two fail-open cases in `tests/benchmark-archive-integration.test.ts`: a checksum-verified archive with 75 same-incarnation but foreign-operation events and a bounded legacy `recent_events` mirror containing only foreign operations both returned `complete=true` and fabricated exact zero selected-run Guard calls. `scripts/dev/benchmark-painting-cycles.mjs` now requires at least one attributable selected-run event before certifying streamed totals and refuses exact zero for a foreign-only legacy mirror. Both regressions were red before correction (2/2 FAIL) and pass afterward; four targeted benchmark suites **28/28 PASS**, `node --check` and scoped `git diff --check` PASS. Existing owned-event positive controls remain green. This does not establish real multi-process/interruption ownership or image-quality/time acceptance; E.8a stays OPEN. Full SHA-256-verified pre-edit snapshots of roadmap and changelog: `processes/documentation-maintenance-process/pre-e8a-foreign-only-20261011T020433/`. No commit, push, reset or clean.
+
+- 2026-10-11 — **E.8a unkeyed persistence-tail ambiguity fixed (offline PASS; live OPEN).** Verified-stream attribution previously allowed selected keyed operation events through a 1-second post-journal persistence tail, but silently excluded an unkeyed event in the same interval and reported exact run totals. Reproduced red-before-fix in `tests/benchmark-archive-integration.test.ts` (incorrect `complete=true`, 75 exact round trips, zero unkeyed events); updated `scripts/dev/benchmark-painting-cycles.mjs` so both streamed archive and pre-archive bounded mirror treat unkeyed events in that same tail as unknown run ownership. Added positive control for a provably foreign keyed event and mirror parity. This is an accounting correction, not proof of real concurrent host event attribution, Photoshop artistic quality or faster wall time. Full SHA-256-verified pre-edit copies of both documents: `processes/documentation-maintenance-process/pre-e8a-unkeyed-tail-20261011T014301/`. No commit, push, reset or clean.
+
+- 2026-10-11 — **E.8a streamed per-pass unknown-boundary accounting corrected (offline PASS; live OPEN).** Found a real fail-open discrepancy between verified-archive streaming and the legacy mirror: when a preceding completed visual journal lacks both `completed_at` and `latency.response_ready_at`, the next pass has no provable start for its rejection/recovery window, but `createStreamedThroughput` initialized both counters to exact `0`. Added a red-before-fix integration test in `tests/benchmark-archive-integration.test.ts` (received `0/0`, expected `null/null`) and fixed `scripts/dev/benchmark-painting-cycles.mjs` to initialize unbounded per-pass buckets as `null`, without weakening independently complete run-wide archive totals. Targeted `vitest` benchmark suites **4/4 files, 24/24 tests PASS**, `node --check` and scoped `git diff --check` PASS. Existing source and tests from other agents retained; no real host concurrency/interruption, unkeyed event attribution or E.8 independent image-quality acceptance claimed. Full SHA-256-verified pre-edit snapshots of both docs: `processes/documentation-maintenance-process/pre-e8a-pass-window-20261011T012333/`. No commit, push, reset, clean or Photoshop mutation.
+
+- 2026-10-11 — **E.8a legacy `recent_events` fallback overflow fixed (offline regression PASS; live acceptance OPEN).** Reproduced red-before-fix: two individually safe `auto_repair_count` values (`Number.MAX_SAFE_INTEGER` + `1`) were summed by `scopedThroughput` into an unsafe JavaScript integer and reported as an exact optional count. `scripts/dev/benchmark-painting-cycles.mjs` now rejects unsafe aggregate sums for every legacy optional field, caches the validated totals and includes overflow in its explicit incomplete-measurement warning. `tests/benchmark-semantic-action-integrity.test.ts` adds the failing overflow regression and the exact safe-boundary control. Targeted `vitest` (benchmark semantic integrity, cycle benchmark, archive integration, large archive) **4/4 files, 23/23 tests PASS**; `node --check` and `git diff --check` PASS. The verified archive's earlier streaming aggregation remains intact; no real concurrent/interrupted host-run evidence, Photoshop mutation, COS reload, or human image-quality assessment was performed. The three E.8a live acceptance items remain open. Full pre-edit SHA-256-verified copies of both documents: `processes/documentation-maintenance-process/pre-e8a-legacy-overflow-20261011T010925/`.
+
+- 2026-10-11 — **E.8a selected-stream aggregation: bounded-memory source/offline PASS, live host acceptance remains OPEN.** In `scripts/dev/benchmark-throughput-archive.mjs`, added an incremental selected-event consumer while retaining the old bounded diagnostic-return contract for legacy callers. The benchmark in `scripts/dev/benchmark-painting-cycles.mjs` now accumulates exact run-scoped counts, optional-measurement completeness, typed next-operation repair accounting and per-visual-pass rejection/recovery buckets as archive entries are checksum/sequence/incarnation-verified; it retains at most 16 MiB / 50,000 diagnostic events and then exposes **no truncated event prefix** (`events=[]`, `events_retained=false`) while preserving full exact totals. Late checksum/sequence/truncation/stable-read/legacy-history failures still invalidate the whole run rather than promoting previously streamed counters. `tests/benchmark-archive-large.test.ts` checks direct legacy retention refusal versus streamed success for >16 MiB; `tests/benchmark-archive-integration.test.ts` proves **50,085 selected owned events**, >16 MiB archive, exact **50,085** model-visible rejections and pass-level rejection count, zero optional/semantic totals, no partial event array, and complete invalidation after late archive corruption. Additional streaming regression verifies typed next-operation repair accounting and fail-closed unsafe integer overflow. Focused benchmark suites **3/3 files, 16/16 tests PASS**, Node syntax checks, bilingual docs verification and targeted `git diff --check` PASS. The removed E.8a selected-stream TODO is preserved verbatim in the verified pre-edit snapshot `processes/documentation-maintenance-process/pre-e8a-stream-20261011T005021/` (SHA-256 verified for both roadmap and changelog). **Not proven:** real concurrent/interrupted COS/Photoshop host event ownership, unkeyed catch paths, measured artistic speed/quality. No Photoshop mutation, plugin restart, commit, reset, clean or push.
+
+- 2026-10-10 — **Documentation hygiene: distinguish maintained guides, executable fixtures and historical evidence.** Moved the byte-identical `visual-microplan-contract-fixtures.md` from `docs/` into `tests/fixtures/`, updated both compiler-test reads and the implementation-index link; **19/19 focused compiler tests PASS**. Moved `task19-cache-live-vmp-evidence.json` and `hotloop-final5-20261002-benchmark.md` from active `docs/` into tracked `evidence/historical/` without changing bytes; updated the Task 19 evidence generator path, acceptance-matrix claim and performance guide. Also retired the dated `COS-GUARD-SCHEMA-SYNC.md` incident snapshot (including superseded 2026-10-09 test counts) to that tracked historical evidence directory; `docs/development.md` now points to the current Guard public-contract audit and archived diagnostic, and explains file placement. Retained active `compact-v2-contract-audit.md`, `live-evidence-ledger.json`, the current tooling/architecture/painting policy and the bilingual docs; did **not** move the intentionally ignored local `youtube-channel-plan.md`. Changed the live-evidence verifier's misleading blanket success wording: normal CI still validates ledger structure/hashes of available gitignored artifacts, but now explicitly reports **23 entries / 21 locally hash-verified / 2 unavailable**; optional `--require-all-local` fails and identifies the two unavailable 2026-09-24 multiscale operation journals. Cross-document scan: **47 Markdown files, 356 local relative links, zero broken**. Focused tests, compact-v2 contract, acceptance matrix, bilingual documentation, ledger verification and `git diff --check` PASS. No art mutations, commits, unrelated working-tree cleanup or new historical copies.
+
+- 2026-10-10 — **E.7e continuous surface tone: LIVE LOCAL PASS, alpha-safe and exact native History.** Following user plugin-only restart, verified managed MCP child **PID 29836** launched **23:19:38** after revised `dist` build **23:10:18**; UXP ready with exact identical `compact-v2-20261010-native-surface-alpha-v1` revision and new runtime witness. On the **only** disposable Photoshop RGB 768×512 document **1820**, created a separately owned NORMAL raster wall on physical layer **2** at `(211,155)-(253,389)`, with white outside background and initial JPEG SHA-256 `6ea5c6290feffeb38aa2ac028a7fb127a9ca2bdf93c949794c36993f56af652e`. The **one** actual compiled Guard `painterly.form_field(kind=light-field)` pass `e7e_surface_alpha_final_gradient_20261010_c` executed `photoshop_paint_color_gradient(preserve_transparency=true)` with native receipt `surface_alpha_preserved=true`, `history_steps=1`, layer 2, `history_name=MCP Continuous Surface Tone`. Durable Guard History receipt: `status=exact`, `owned_history_steps=1`. Photoshop History changed **4/index3→5/index4** by precisely one `MCP Continuous Surface Tone`; original active layer/unlocked state and exact native layer bounds `(211,155)-(253,389)` were preserved. Full-frame and object-crop visual review confirmed a **smooth, continuous transverse tonal gradient** without isolated BRUSH spots or streaks; background points outside wall at x198 and x270 remained **#FFFFFF**, interior x216/x232/x249 varied from `#3F4F64` via `#2B394C` to `#172232`. Guard **accepted the local target** and saved `processes/e7e-native-surface-alpha-final-process/run-01/export/before.jpg`, `after.jpg` (SHA-256 `48c60bef96f1f8bd36ff20ba655a2528ccab288c9be43288b5bd78657e9a1644`) and editable `surface-alpha-gradient-accepted.psd`. Closed only disposable document **1820** without extra save; **no additional native passes, user-art changes, Undo guesses or code/Guard model rework**. **Local alpha-safe renderer contract LIVE PASS; whole-scene E.7e photorealistic/artistic quality remains OPEN.** No Git commit/reset/clean.
+
+- 2026-10-10 — **E.7e native surface gradient live attempt FAILED SAFETY; stale UXP silent-argument fallback eliminated by bridge revision gate.** After user restarted the managed MCP child (**PID 25344**, 23:04, later than dist 22:33), a single linted Guard painterly pass `e7e_surface_gradient_live_20261010_d` dispatched `preserve_transparency=true` on disposable Photoshop doc **1810** / physical NORMAL layer 2. UXP answered with **old** unprotected gradient receipt (no `surface_alpha_preserved`, no `history_steps`); Photoshop painted across the full 768×512 canvas, expanded layer pixel bounds from `(211,155)-(253,389)` to `(0,0)-(768,512)` and added `Draw classic gradient` History **4/index3→5/index4** instead of the promised `MCP Continuous Surface Tone`. Whole-frame pixels and sample colors outside the wall corroborated the violation. Guard recorded **`target=unresolved`**, and closed **only the temporary doc 1810 without saving**, using no speculative Undo; checkpoint `processes/e7e-native-surface-tone-process/run-01/export/surface-tone-before.psd` remains intact. Root cause was **UXP revision not bumped** when native request semantics changed; a prior attempted UXP Reload left the old revision/witness and silently ignored the new field. Fixed `UXP_BRIDGE_REVISION` in `src/core/guard/protocol-version.ts` and `BRIDGE_REVISION` in `uxp-plugin/main.js` to identical new `compact-v2-20261010-native-surface-alpha-v1`; older bridge now fails revision checks before mutation. Also fail closed in `src/tools/layer-operations.ts` unless alpha protection, exact one-step History, matching owner and history name are present in the returned native receipt. Regression in `tests/layer-domain-contract.test.ts` rejects the stale successful receipt and accepts proven new receipt; **26/26 targeted tests PASS**, `npx tsc`, UXP JS syntax and diff check PASS. UXP Developer Tool Reload now confirmed by server observing `uxp_bridge_revision_mismatch` / `ready=false` against the **old still-running managed COS child**. **One plugin-only COS restart is required** to activate rebuilt expected revision, then one genuinely protected native pass remains untested. **Do not claim artistic or native-safety PASS before that test.** No commits/reset/clean or edits to user documents.
+
+- 2026-10-10 — **E.7e native continuous surface-tone renderer SOURCE/OFFLINE PASS; one live pixel acceptance staged.** Replaced the failed narrow `painterly.form_field(light-field)` BRUSH default (detached circular blobs, then long-axis haze) with the **existing Photoshop native `photoshop_paint_color_gradient`** on its exact separately owned NORMAL raster layer, across its short surface axis. Extended `src/tools/layer-tools.ts`, `layer-operations.ts`, `src/platform/uxp-bridge-client.ts` and `uxp-plugin/main.js` with optional `preserve_transparency=true`: UXP verifies a real unlocked NORMAL pixel layer; suspends one `MCP Continuous Surface Tone` History transaction; selects exact layer and verifies transparent-pixel lock, performs a genuine RGB gradient, restores original lock and previously active layer, verifies native bounds unchanged, and commits **one** History unit or aborts atomically on error. Unprotected existing gradients remain unchanged. `src/core/painterly-strokes.ts` now compiles a **tall narrow** authored `light-field` to this native continuous operation by default, mapping the authored horizontal light direction and light/shadow colors to native gradient stops. Other references/form fields continue on original BRUSH; explicit legacy `render_method=brush-sweep` remains for comparison only. `src/core/guard/cycle-compiler.ts` preserves broad E.19 color-model preflight; only one local exact owner-pinned alpha-protected surface-tone pass avoids an unrelated scene-wide relighting preflight. Added `tests/native-surface-gradient.test.ts` for success/abort/bounds/lock and Guard planner coverage in `tests/painterly-strokes.test.ts`; **33/33 PASS across three owning suites**, TypeScript build, UXP JS syntax, public Guard audit and targeted diff check PASS. UXP Developer Tool Reload action issued; Bridge currently ready. **Not yet live accepted:** the managed COS Photoshop child **PID 24524** predates the rebuilt `dist` (22:28:50–51) and must be restarted through Plugins → Digital Painting Edition → Restart. Prepared and accepted a single separate baseline on Photoshop document **1810**, physical owner layer 2, exact slim wall coordinates; saved `processes/e7e-native-surface-tone-process/run-01/export/surface-tone-before.psd` and `surface-tone-before.jpg` (SHA-256 `6ea5c6290feffeb38aa2ac028a7fb127a9ca2bdf93c949794c36993f56af652e`). Left only this disposable document **open** to perform **one** native continuous-gradient artistic review after plugin restart. Do not treat source success as rendered-art PASS or start another parameter sweep. No commits, Git resets/clean, or mutations of user artworks.
+
+- 2026-10-10 — **E.7e narrow authored light-field LONG-AXIS SWEEP: LIVE EXECUTION PASS, ARTISTIC QUALITY STILL FAIL.** At user request performed **one** bounded live recheck through COS Core → Plugins → Guard → UXP, not a broad regression battery. Managed Photoshop bridge ready with matching revision and active MCP child PID **24524** started after the current planner build. New isolated RGB 768×512 Photoshop document **1760** had one independent normal-layer narrow side wall, same slim polygon as the earlier blotchy failure. Guard native `e7e_narrow_light_live_field_20261010_c` rendered the new narrow `painterly.form_field(kind=light-field)` plan once; both full-frame and cropped AFTER images were delivered. The earlier three round isolated light spots were replaced by one **connected vertical tonal region**, a narrow functional improvement, but the surface now looks like **uneven soft vertical striping/haze**, not persuasive coherent planar light. Review was recorded `target=unresolved`, **no artistic PASS** and **no parameter-sweep retries**. Saved exact evidence `processes/e7e-narrow-lightfield-live-process/run-01/export/before-lightfield.jpg` (SHA-256 `6ea5c6290feffeb38aa2ac028a7fb127a9ca2bdf93c949794c36993f56af652e`), `after-lightfield.jpg` (SHA-256 `9f7dd5cb51cc330fe9f96654694b25078fc4cb7487cebf32b98a7aa6415153ff`) and `narrow-lightfield-evidence.psd`; closed only temporary document **1760** through Guard without repeat save. **Decision:** do not keep adjusting radius/stroke count; any future renderer attempt needs a different bounded continuous-tone or surface-aligned approach and one real visual comparison. No unrelated user document mutation, code edits or test suites in this live recheck.
+
+- 2026-10-10 — **E.7e follow-up build/readback; no second art test.** The narrow `light-field` sweep fix passed the single owning Vitest suite **11/11**, both `npx tsc --noEmit` and `npx tsc`, and targeted `git diff --check`. Managed MCP child **PID 35352** started at **20:28:49**, after `dist/core/painterly-strokes.js` was rebuilt at **20:28:33**; Photoshop UXP remained ready with matching Bridge revision. **New rendering pixels were not reviewed**, so do not promote this to artistic PASS. The exact Guard close record targeted **only document 1686**. Afterwards read-only Photoshop listing had user doc **850** still open; earlier user doc **1260** was no longer listed. Its disappearance was not attributed to any Guard operation in this probe. No user-art mutations were sent, no broad test suite or release step.
+
+- 2026-10-10 — **E.7e actual architecture quality probe: LIVE ARTISTIC FAIL; narrow authored light-field sweep SOURCE FIX, live rendering still unverified.** Inspected the existing blue-hour neighborhood painting in user Photoshop doc 850 **read-only**; a large central shopfront is recognizable but architecture/material still rely on flat planes. Since the Guard public contract has no document-duplication operation, did **not** edit either original user document. Created independent RGB 768×512 study 1686 using Guard, isolated the shopfront façade and its left side wall on individually owned NORMAL layers, and ran one `painterly.form_field(kind=light-field)` pass. The separate side plane improved depth locally, but the native BRUSH result was **several discrete large gray-blue oval blotches**, not coherent wall lighting; accepted execution explicitly evaluated as **unresolved artistic result**, not a painting-quality PASS. Saved evidence in `processes/e7e-neighborhood-volume-process/run-01/export/`: `architecture-side-before-field.jpg`, `architecture-lightfield-after.jpg`, `architecture-lightfield-study.psd`; closed only disposable doc 1686 after saving. Diagnosed source: a smooth analytic field is transformed by generic Hertzmann limited 16/8/4-pixel round strokes; narrow 42×234 wall makes coarse footprints highly visible and texture-like. Implemented **only** for sufficiently narrow `light-field` authored components a separate bounded long-axis brush-sweep plan in `src/core/painterly-strokes.ts`, with several tonal intervals sampled from the analytic field, exact original owner/clip swept-footprint clearance, strict existing stroke budget and honest non-improvement surrogate metric. Existing reference-JPEG, ellipsoid and wider-field paths remain unchanged. One regression in `tests/painterly-strokes.test.ts` asserts connected sweeps/variation/clip/budget; owning suite **11/11 PASS**, `npx tsc --noEmit` PASS. No native new-algorithm pixels reviewed yet: **SOURCE/OFFLINE only; artistic gain remains OPEN**. No imagegen/local model, no full test suite, no edits to user paintings or unrelated Git changes.
+
+- 2026-10-10 — **E.11 same-cycle accepted connected_move + Undo — LIVE PASS.** After the user's managed Digital Painting Edition plugin-only restart, confirmed new MCP child **PID 29980**, started **19:38:24**, executing this repository's `dist/cos-plugin.js` built at **19:35**; matching Photoshop UXP Bridge ping `ready=true` (no COS/UXP restart). On a new disposable 320×240 RGB document **1674**, Guard created independent blue parent NORMAL layer **2** at `(50,70)-(145,160)` and orange child NORMAL layer **3** at `(140,100)-(186,135)`, 5px overlap, each with a durable logical owner and parent construction revision. The guarded atomic `e11_samecycle_move_20261010_d` physically translated both layers +20px X, preserving the contact with **one** `MCP Connected Move` state (**6/index5 → 7/index6**). Critically the next **single** `photoshop_guard_cycle_auto` supplied *both* `previous_operation_id=e11_samecycle_move_20261010_d` + an explicit accepted visual observation **and** `next_pass` containing `photoshop_undo(steps=1)`. It dispatched successfully under the fresh same-cycle preflight, returned `closed_previous.verdict_recorded=true` and completed `e11_samecycle_undo_20261010_e`; there was **no** `bounded_undo_source_unproven` rejection and **no** separate acceptance call. After Undo, native History returned to **index5**, Redo available, native layer IDs 2/3 unchanged, and independently hashed full-canvas 320×240 JPEG quality-12 `before.jpg` and `after-undo.jpg` matched bit-for-bit SHA-256 `2e28dd37df7d05c65040f005445e71fd7440840a02e13bf91793094d0689dfaa`. Guard's accepted Undo journal stores exact one-step History, `undo_source_operation_id=e11_samecycle_move_20261010_d`, `semantic_state_restored=true`; the move source is retired with `rolled_back=true`, `current_frame_authority=false`. Owner readbacks restored parent `construction_revision=e11_samecycle_parent_20261010_b`, child `construction_revision=e11_samecycle_child_20261010_c` and its original parent construction revision. Guard recovery was clean. Evidence retained under `processes/e11-samecycle-live-process/run-01/export/` and durable Guard journals; test document 1674 was closed without saving, original user documents **850/1260** preserved. **Previously open same-cycle admission defect now LIVE PASS for exact single-step connected move.** Other transform types, branched or interrupted/multi-step Undo and coherent-3D perspective remain open. No commit/reset/clean.
+
+- 2026-10-10 — **E.11 same-cycle accept + Undo SOURCE/OFFLINE FIX (LIVE pending) and E.25 three-generation connected_move LIVE PASS.** Fixed compact `cycle_auto(previous_operation_id + previous_observation + next_pass: photoshop_undo)` rejecting a valid, still-pending `connected_move` with `bounded_undo_source_unproven`. `src/core/guard/session-store.ts` now narrowly recognizes a provisional pending source only during initial compilation when the exact prior visual microplan has complete pinned document/preview/semantic baseline and one exact owned History unit, without intervening history-writing operations. `src/core/guard/cycle-compiler.ts` supplies that provisional candidate only for an explicit **accept+target_resolved=yes** previous verdict. Runtime's existing **post-closure state-only** validation and `SessionStore.begin` still require the actually persisted accepted source before any native Undo dispatch. New negative controls reject wrong previous ID, wrong document, unproven History and state-only bypass. Embedded Guard regression confirms both acceptance and one compact authenticated Undo in one call on a synthetic valid source. **443/443 PASS in nine suites**, TypeScript `dist` rebuilt, public-contract and tool-count audit PASS (**132 tools, 15 Guard**), `git diff --check` PASS. **This same-cycle fix is not live activated** until COS Digital Painting Edition plugin-only restart (do not restart COS or UXP). Separately, on the **previously running** MCP/UXP, disposable Photoshop document **1658** passed a real **three-level** owner/physical layer test: blue root layer 2 `(30,70)-(115,160)`, orange child layer 3 `(110,100)-(165,138)`, green grandchild layer 4 `(160,110)-(190,130)`. Guard `e25_grandchild_move_20261010_e` physically translated all three by +20px X in **one** `MCP Connected Move` History state (**8/index7→9/index8**), keeping both 5px contacts; exact image review advanced three construction revisions and both parent revision references. One guarded Undo `e25_grandchild_undo_20261010_f` returned index **7** with Redo available, preserved layer IDs 2/3/4 and yielded **bitwise identical** full-canvas JPEG BEFORE/after Undo SHA-256 `bc96960f76dabf30de9f16357a60fd88ddbc7bf950242ee8e302e328ba286f92`. Guard restored original root/child/grandchild construction revisions and both ancestor references. Evidence in `processes/e25-three-generation-live-process/run-01/export/`; test document **1658** closed without saving, user documents 850/1260 untouched. Broader articulated/scale/rotate/perspective and multi-step recovery remain OPEN. No commit/reset/clean.
+
+- 2026-10-10 — **E.11 connected_move semantic owner Undo parity LIVE PASS (after managed MCP plugin restart).** Confirmed COS child **PID 28176** launched at 19:15:27 against current `dist/cos-plugin.js` (build 19:10:38), with Photoshop UXP ping ready and bridge revision matched; COS itself and UXP Bridge were not restarted. Via Guard, created and eventually closed without saving **only** disposable RGB 320×240 document **1646** (`Untitled-3`). Created independent blue parent NORMAL layer ID **2** bounds `(50,70)-(145,160)` and orange child NORMAL ID **3** bounds `(140,100)-(186,135)`, linked owners `e11-panel-owner→e11-tab-owner`. Native `connected_move` **+20px X** physically moved both layers, kept 5px overlap, and added exactly **one** `MCP Connected Move` History state (`6/index5→7/index6`); after accepted whole-frame review, both semantic `construction_revision` values advanced to `e11_semantic_undo_move_20261010_d`. The single Guard `photoshop_undo` `e11_semantic_undo_revert_20261010_e` returned History to index **5** (connected move available as Redo), preserved native layer IDs 2/3 and yielded exact matching full-frame JPEG SHA-256 BEFORE/after `2e28dd37df7d05c65040f005445e71fd7440840a02e13bf91793094d0689dfaa`. Its durable journal binds `undo_source_operation_id=e11_semantic_undo_move_20261010_d`, `undo_expected_history_steps=1`, exact native `owned_history_steps=1`, `semantic_state_restored=true`; moved source is `rolled_back=true` / `current_frame_authority=false`. Read-only Guard owner projections restored parent's original construction revision `e11_semantic_undo_parent_20261010_b`, child's original `e11_semantic_undo_child_20261010_c`, and child's original parent-revision binding. Evidence: `processes/e11-semantic-undo-live-process/run-01/export/e11-before.jpg`, `e11-after-undo.jpg`, and local Guard journals. **One remaining safe ordering limitation:** combining acceptance of an outstanding move and immediate Undo as one `cycle_auto` rejected pre-dispatch with `bounded_undo_source_unproven`; explicitly closing acceptance, then issuing Undo in a second Guard cycle succeeded. Multi-step/interrupted semantic Undo, parent→child→grandchild and perspective constraints remain OPEN. Only original `Untitled-1` (850) and `Untitled-2` (1260) remain open; no commits, resets or clean.
+
+- 2026-10-10 — **E.11 connected_move semantic Undo parity: SOURCE/OFFLINE FIX, live activation still required.** The successful physical `MCP Connected Move`/single Undo on disposable doc 1633 previously left the parent and child `construction_revision` pointing at an undone accepted transform. Root cause: the Guard compact ROLLBACK microplan wrapped `photoshop_undo` without native step-count projection or a bound Undo source, bypassing the existing `boundedUndoSemanticRecovery` used by standalone pending rollbacks. Updated `src/tools/history-operations.ts` to preserve legacy text but append an authenticated structured `undo_history_states_consumed` receipt only when real UXP returns `undone=true` and its exact step count. `src/tools/visual-microplan-tools.ts` now counts that one verified Undo history unit; `src/core/guard/session-store.ts` binds an explicit compact Undo to the latest accepted source only with current-frame identity, intact baseline semantic snapshot, exact source-owned History, report/ack and no intervening history writer. On ordinary exact-image Undo acceptance, Guard retires the undone operation, restores previous scene/task facts and recomputes native parent/child owners from the preserved journal. Missing native evidence or wrong/missing Undo count refuses semantic promotion rather than guessing. Regression tests added to `tests/bounded-undo-semantics.test.ts`, `tests/visual-microplan.test.ts` and `tests/document-history-state-contract.test.ts`; tested restored parent/child revision/reference after SessionStore restart and negative false-claim scenarios. **441/441 PASS in nine impacted Vitest suites**, `npx tsc` rebuilt `dist`, Guard contract audit and tool-count verification PASS (**132 public; 15 Guard**), `git diff --check` PASS. This was **not** rerun against live Photoshop after the new TypeScript build. To activate: COS Plugins → Digital Painting Edition → Restart (plugin only); new UXP reload is not needed for these TypeScript-only changes. No commits, forced process termination or changes to user artwork.
+
+- 2026-10-10 — **E.25 connected_move: LIVE two-owner native pixels + single History + exact guarded Undo PASS; E.11 semantic Undo debt discovered.** Activated the newly built managed COS Digital Painting Edition child and reloaded **only** the Photoshop MCP UXP Bridge through Adobe UXP Developer Tool. Ran guarded disposable documents 1610/1622/1633, preserving user documents 850/1260 and foreign Git changes. First two native connected translations failed: parent layer `translate()` returned without any physical displacement while inactive; Guard refused to promote the unchanged image, and recovery reconciled the failures without replay or blind Undo. Fixed `uxp-plugin/p1-layer-ops.js` by selecting each pinned physical layer within one `MCP Connected Move` History suspension, validating active-layer identity, translating, re-reading per-layer bounds, restoring original active layer and committing only after verification; failures abort. Extended `tests/connected-move-atomic.test.ts` with stale DOM-proxy, active-only translation, originally active child and complete two-level descendant manifest regressions (**25/25 targeted PASS; 432/432 PASS in eight affected suites**). `npx tsc --noEmit`, UXP JS syntax, `verify:guard-public-contract`, `verify:tool-counts` (**132 tools; 15 Guard**), and `git diff --check` all PASS. **Third live attempt** `e25_cm_select_atomic_20261010_n` on doc 1633 confirmed both independent NORMAL layers 2/3 actually move +20 px X (parent bounds `(50,70)-(145,160)→(70,70)-(165,160)`, child `(140,100)-(186,135)→(160,100)-(206,135)`); exact live whole-frame pixels, color samples, preserved contact and Photoshop History `6/index5→7/index6` with **one** `MCP Connected Move` state. The normal Guard exact review accepted the result and advanced both construction revisions. One controlled Guard Undo `e25_cm_select_undo_20261010_o` returned to index 5 and the unchanged original physical layer IDs; full-canvas quality-12 JPEG BEFORE and after Undo have identical SHA-256 `2e28dd37df7d05c65040f005445e71fd7440840a02e13bf91793094d0689dfaa`; evidence in `processes/e25-connected-move-acceptance-process/run-03/export/`. Live stale-bounds negative `e25_cm_stale_native_negative_20261010_p` rejected without native History suspension/mutation and left pixels/history unchanged, but this check still happens **after Guard-to-UXP dispatch**, not before. **New E.11 barrier:** read-only Guard ownership *after confirmed Undo* still reports both semantic owner construction revisions as the undone move operation; exact physical History/pixel restoration is thus **not** yet proven as semantic owner revision restoration. User docs untouched; all disposable documents closed without saving. Two-level descendants and coherent-3D perspective gate were only tested offline; E.25/E.11 beyond this slice and E.27 remain OPEN. No commit/reset/clean.
+
+- 2026-10-10 — **E.25 connected-move final compatibility audit (still offline, no live Photoshop claim):** The first broad regression exposed an extra SessionStore journal scan on every ordinary Guard cycle caused by the new connected-owner validation. Corrected `src/core/connected-move-guard.ts`/`src/core/guard/runtime.ts` to perform expensive owner/scene reads **only if the compiled pass actually contains `connected_move`**. The previously red missing-document projection-count test then passed. Repeated all seven impacted suites — **423/423 PASS**: native-source connected motion/abort/receipt, layer catalog, durable SessionStore, VisualMicroPlan, embedded Guard, Method Palette and compact contract. `npx tsc` rebuilt `dist` successfully; UXP syntax and `git diff --check` passed. `npm run verify:guard-public-contract` passed its schema audit/self-test; `npm run verify:tool-counts` confirmed the unchanged **132** public tools and **15** Guard tools. Confirmed managed MCP child still points to this checkout, PID **33060**, with no active jobs; it was **not** restarted, and the UXP bridge was **not** reloaded. New physical two-layer operation is ready for a minimal disposable-document live test **after plugin-only restart and UXP reload**, not yet visually accepted.
+
+- 2026-10-10 — **E.25 connected native translation IMPLEMENTED IN SOURCE, OFFLINE PASS; LIVE DEPLOYMENT PENDING.** Extended the existing `photoshop_move_layer` with a `connected_move` owner/physical-layer manifest (one parent, 1–7 descendants, pinned source bounds), leaving ordinary move unchanged. `uxp-plugin/p1-layer-ops.js` verifies exact Photoshop document, distinct visible NORMAL native layers, source bounds within 1px and a nonzero ±512px translation, then moves every layer within one `MCP Connected Move` native History suspension. It verifies all final bounds, returns exactly `history_steps:1` with per-owner evidence only after successful commit, and aborts the suspension on any partial failure without claiming success. `src/tools/layer-transform-operations.ts` disallows non-UXP or unguarded/raw connected calls and forwards a structured atomic receipt. The existing tool's nested schema is extended in `src/tools/layer-transform-catalog.ts`; no new public tools or alternate mutation lane. `src/core/connected-move-guard.ts` and `src/core/guard/runtime.ts` require complete current durable descendant coverage, matching parent/child revisions and physical layer IDs; `coherent_3d` connected moves are explicitly blocked pending perspective scene-revision acceptance. `src/core/guard/session-store.ts` updates descendant revisions and geometry anchors only if the journal contains an accepted exact-frame visual pass, one exact native History span and matching source/target bounds receipts for **all** owners. Otherwise the child stays stale, preserving the safety fix from the previous E.25 step. Native-source/negative-control tests, public Guard-context routing and SessionStore durable projection checks added in `tests/connected-move-atomic.test.ts`, `tests/layer-domain-contract.test.ts` and `tests/session-store-regressions.test.ts`. Initial targeted run **126/126 PASS**, `npx tsc --noEmit`, `npx tsc` build-to-dist (no clean), `node --check uxp-plugin/p1-layer-ops.js` PASS. Verified the running COS binary is the user's E.26 staging release and child PID uses this repository's `dist/cos-plugin.js`. No Guard active jobs. **No live Photoshop mutation, child restart, forced process termination or UXP reload in this stage; live acceptance not yet performed.** Managed COS Plugins restart UI is tray-only and not available through the enumerated desktop windows. Next activation: COS Plugins > Digital Painting Edition > Restart, reload the Photoshop UXP Bridge, then one disposable two-owner native move + Guard Undo + exact whole-frame comparison. E.25 and E.27 remain gated.
+
+- 2026-10-10 — **E.25 native parent-only move falsified physical child propagation; two unsafe evidence promotions removed in source (runtime reload pending).** On fresh disposable 320×240 doc **1598**, via the ordinary connected COS/Guard route, painted one blue parent on physical layer **2** and a contacting orange child on independent layer **3**. Registered both as separately editable scene units and obtained exact BEFORE `e25_connected_paint_child_20261010_e2`. Selected only the blue parent; native `photoshop_move_layer(deltaX=20,deltaY=0)` completed. Exact Photoshop AFTER `e25_connected_move_parent_only_20261010_g` showed the blue parent physically displaced while the orange child remained fixed, breaking contact. A proposed separate child move was *not dispatched*: preflight `stage_priority_gate` and `artistic_strategy_change_required` rejected further transform following degraded global readability. No bypass, blind redo or cosmetic pass was used. One-point perspective negative control was then performed through **read-only lint** only. A formally valid `coherent_3d` model supplied explicit `source_frame.document_incarnation='uxp-definitely-not-this-instance'`; the original public lint unexpectedly returned `ok:true` because its compiler auto-repair rewrote the token to the present witness. No perspective mutation was sent.
+
+  **Source fixes:** `src/core/guard/session-store.ts` now keeps dependent geometry/parent revisions **stale** after a parent-only transform, rather than reprojecting anchors from mathematical provenance without child pixel evidence. The ordinary existing `construction_graph_parent_stale` must prevent falsely trusted child continuation; future atomic native multi-owner operation is needed for real propagation. `src/core/guard/preflight-repair.ts` no longer treats explicitly mismatched scene-geometry/camera/lighting incarnations as auto-patchable: omitted technical identity remains derivable from verified context, explicit foreign identity stays a fail-closed rejection. Updated positive and negative SessionStore, preflight and compact-cycle regression expectations in `tests/session-store-regressions.test.ts`, `tests/preflight-repair.test.ts`, `tests/compact-contract-regressions.test.ts`. **Regression tests: 205/205 PASS across three files; TypeScript typecheck PASS, diff whitespace check PASS.** This **does not implement automatic native child movement**. Disposable doc 1598 was closed without saving; final Photoshop tabs: untouched user `Untitled-1` id 850 and earlier empty `Untitled-2` id 1260. Source-only safety fixes are **not loaded by the currently running MCP child**; live perspective rejection after reload and the native multi-owner path are pending. E.25/E.27 remain open.
+
+- 2026-10-10 — **E.11 guarded atomic fill/history ownership FIXED AND LIVE VERIFIED.** Reproduced the earlier `photoshop_fill_layer` native UXP implementation issuing separate `Select Canvas → Fill → Deselect` Photoshop History states without any explicit `history_steps` receipt. Changed `uxp-plugin/main.js` to group all preparation, fill, deselection and temporary active-layer restore inside an actual `suspendHistory({documentID,name:'MCP Fill Layer'})`/`resumeHistory(id,true)` native transaction. Explicit `history_steps:1` is returned **only after successful commit**. Failed Photoshop fill descriptors, missing confirmation and native commit errors never claim history; failure handling restores temporary UI state before aborting the suspension, and a failed abort yields `fill_history_rollback_unconfirmed`. Added real-source mocked UXP tests `tests/uxp-fill-history.test.ts` covering successful full preparation and pre-existing selection, native failures and mismatched document; focused `uxp-fill-history`, `layer-domain-contract`, `visual-microplan`, `bounded-undo-semantics` suites **96/96 PASS**. `node --check uxp-plugin/main.js` and `npx tsc --noEmit` PASS. No COS host or MCP child restart.
+
+  **Live acceptance on a newly created disposable native Photoshop doc 1592:** reloaded the actual connected `Photoshop MCP UXP Bridge` through Adobe UXP Developer Tool (state Loaded after); exact UXP runtime witness changed and ping remained ready. On one independent `NORMAL` layer ID **2**, an initial guarded green fill `e11_fill_atomic_baseline_20261010_c` produced **one** Photoshop History state `MCP Fill Layer` (index **3**); the second guarded purple fill `e11_fill_atomic_probe_20261010_d` produced exactly **one more** such state (index **4**). Real exact-image observation requesting rollback no longer returned `semantic_pass_rollback_unproven`: Guard authorized **exactly one owned step**. Normal `photoshop_guard_cycle_auto` Undo `e11_fill_atomic_undo_20261010_e` restored History index **3**, with Redo available and original owner layer ID **2** unchanged. Whole-frame BEFORE and AFTER JPEG file SHA-256 both **`d96966323acf8c9b6288d4618e6a51e26803b6b6647508aff4c444b7d03c7dad`**, byte-identical. Temporary `Untitled-3` doc 1592 closed without saving through Guard; original user `Untitled-1` id 850 and earlier `Untitled-2` id 1260 remain untouched. E.11 single-owner fill-preparation history slice is now **LIVE PASSED**; interrupted/mixed/multi-owner/anchor recovery and remaining E.25 connected-geometry gates are **not** thereby passed. E.27 stays deferred.
+
+- 2026-10-10 — **Live E.25 Bezier plus real alpha-cutout PASS; E.11 prepared multi-history rollback FAIL-CLOSED (source defect identified).** Verified Photoshop UXP bridge and separate original `Untitled-1` doc 850. Earlier disposable `Untitled-2` doc 1260 was active and visually empty, but Guard recovery returned `document_identity_unverified` after UXP restart; did **not** invent the user's explicit same-incarnation confirmation or change that tab. Instead created new disposable 320×240 RGB `Untitled-3`, document **1576**, through the normal COS/Guard route and bound `processes/e25-e11-live-closure-process/run-01` with `simple_graphic` technical brief. Created native layer **2** `E25 | curved hollow panel`. `e25_bezier_hole_native_20261010_b` painted a genuine smooth cubic Bezier outer region with explicit `SUBTRACT` inner contour. Guard exact BEFORE/AFTER showed smooth turquoise ring. Hid Background: Photoshop reported `visible:false`, but Guard JPEG rendered transparency white so that was **not counted as hole evidence**. Created a separate lower layer **3**, `E25 | alpha-check underlay`, filled bright magenta via `e25_alpha_underlay_fill_20261010_f`: its pixels showed through the centre and outside the intact turquoise ring, demonstrating the inner area is a **real transparent cutout**, not overpainted white. Saved durable control PSD `processes/e25-e11-live-closure-process/run-01/export/e25-bezier-hole-alpha-control-20261010.psd` (**54,911 bytes**). This closes E.25 single-owner native cubic-contour/physical alpha-cutout slice; connected physical descendant propagation and perspective invalidation remain open.
+
+  **E.11 further live probe:** on the same disposable document, a second fill changed only the alpha-check layer magenta → orange (`e11_multi_history_fill_probe_20261010_h`), preserving accepted ring/hole on real Photoshop pixels. Native Photoshop History advanced from **9 states/currentIndex=8** to **12 states/currentIndex=11**, with the actual additional states `Select Canvas`, `Fill`, `Deselect`. The Guard received a visually grounded request to rollback that temporary fill but returned `semantic_pass_rollback_unproven`, refused mutation, and did **not** silently assume a three-step Undo. This is a **reproduced missing exact prepared-span history receipt**, not successful E.11 parity. To avoid stranded visual debt, explicitly accepted only the temporary technical fill outcome, keeping the missing rollback proof open. The pre-fill PSD remained preserved; `Untitled-3` was closed without saving via `e25_e11_close_disposable_20261010_i`. Final Photoshop documents: unchanged user work `Untitled-1` ID 850 and empty earlier test `Untitled-2` ID 1260. Did not perform a blind Undo, reload, force identity recovery, or touch original art. Full E.11 restoration, E.25 dependent transform/perspective, and E.27 local-warp remain gated. E.26 functional Goal test additionally requires an enabled source chat (previous host reported Goal disabled), not fabricated synthetic execution.
+
+- 2026-10-10 — **E.7h global-defect / bounded-Painter scale conflict fixed offline; live acceptance pending.** Reproduced the Director `global` refusal followed by priority-gate `medium` refusal. Director tasks can now declare `correction_target={problem_id,region_bounds}` for an existing open global must-fix, with a construction plan and medium scope. The priority gate permits only the active matching task's medium structural correction inside its declared review region, explicitly linked by `addresses_problem_id` and a distinct component `problem_id`. Unplanned/unrelated/cosmetic/detail/stale-directive and out-of-region requests stay blocked; global Painter execution remains forbidden. Region bounds describe the review scope, **not an enforced native pixel mask or semantic quality proof**; existing owner/protection/history/exact-image gates remain authoritative. Component goal success cannot resolve the global problem, and failed related component attempts contribute to the parent recovery history so changing a task id does not reset exhausted strategies. Rejections now explain the bounded correction route; compact planning/status/resume preserve the saved target. Public Director schema and contract audit include the new field. Before-fix reproduction failed as expected; focused new regressions **11/11 PASS**, complete existing Director/Painter file **78/78 PASS**, TypeScript in-place build PASS. No Photoshop mutation, plugin restart, runtime-state rewrite or automatic live repair; user activation/review remains pending. E.7g semantic editability work remains planned separately.
+
+- 2026-10-10 — **E.27 preparatory mathematical draft only; NO TESTS, NO Photoshop execution, gates unchanged.** At the user's request to advance without running tests, inspected the current Painting Method Palette and transform/UXP source. The only published `transform-layer` primitive covers move/scale/rotate; no verified local-warp UXP capability exists. Added an independent `src/core/local-warp-geometry.ts` **inert** similarity-MLS grid planner (2–16 authored landmark pairs, bounded single-owner/document/revision/ROI, optional protected-point hints, edge falloff and sampled displacement/area/stretch guards). Its result is explicitly `geometry-candidate-only`, `executable: false`, with missing native/owner/history/review authorities. It is **not imported into the runtime Palette, registered as a Photoshop/MCP tool, attached to Guard, deployed or called**. Native masks/pixel ownership, exact inverse resampling, foldover freedom between sample nodes and reversible native History are **not established**. Added paired English/Russian engineering contracts (`docs/en/e27-local-warp-design.md` / `docs/ru/e27-local-warp-design.md`), linked them from painting-method guides, and credited Schaefer/McLean/Hoppe (2006) as **algorithm inspiration, not copied code**, in `THIRD_PARTY_NOTICES.md` and `third-party-components.json`. No npm dependencies. As requested **no tests, TypeScript build/typecheck, lint or Photoshop mutations were executed**; correctness remains unverified. E.25/E.11 gates remain; E.26 runtime Goal continuation remains unaccepted. Preserved unrelated existing working-tree changes.
+
+- 2026-10-10 — **E.26 functional live-acceptance boundary inspected; E.25 parent-transform receipt tolerance gap fixed offline.** The running staged E.26 COS package remained healthy. Its authenticated *read-only* local Control API reported app `goal.enabled=false` and the examined recent Painter sessions `automation=off`, not a Goal-enabled source turn with a real `continue_required` receipt. A Chrome ChatGPT tab was on Settings, not an active Painter chat. Thus **no real Goal final→next-correction activation was exercised**; the already proven E.26 package activation remains distinct from the still-open functional acceptance. No Goal settings were changed, synthetic journal events created, or model messages sent.
+
+  E.25 live readiness via the public COS Photoshop Guard discovered the post-restart document identity gate: existing Ontime doc **850** has a new UXP session incarnation; `photoshop_guard_resume(projection=recovery)` requires explicit user confirmation before a safe same-document pixel/owner comparison. One **empty 256×192 temporary Photoshop document 1260** was created for curve/cutout testing, but the protected active-document switch failed closed (`document_identity_unverified`, no mutation dispatched). The temporary document remains open and inactive; Ontime pixels were **not edited**. No blind confirmation, bypass or test success was claimed.
+
+  Offline E.25 persisted-parent correction: reproduced **red-before-fix** with valid source/target rectangles and invalid `tolerance_px`: SessionStore had reprojected a dependent owner's coordinates and advanced its parent revision despite an excessive/malformed tolerance forbidden by live preflight. `src/core/guard/session-store.ts` now revalidates `tolerance_px` as a native finite number in **[0,2]** before any descendant replay. Extended `tests/session-store-regressions.test.ts` with seven invalid tolerance variants (null/string/negative/2.01/1000/NaN/Infinity) and supplied the normal exact tolerance on positive move/scale and cropped-coordinate tests. Focused suite **129/129 tests PASS (four files)**, `npx tsc --noEmit` PASS, diff whitespace check PASS. Current managed PaintPilot child has **not** loaded this newer source revision. E.25 live curve/cutout and exact parent-pixel propagation, E.11 remaining interrupted/multi-owner parity and E.26 final→continue acceptance remain open; E.27 is still gated.
+
+- 2026-10-10 — **E.26 new COS host package activation VERIFIED (runtime Goal continuation still pending).** After the user explicitly started `release/e26-staging/win-unpacked/Chat On Steroids.exe`, inspected the *real* Windows process: exactly one root instance, PID **29308**, started **13:35:32**, path in the staged E.26 directory. SHA-256 of its actually loaded `resources/app.asar` exactly matches the new E.26 build, **`CF0C67D7A0C7203BB9F0704BB9EE07BF8AB0474182DD4CFA20642776D2F21AD5`** (the old `release/win-unpacked` package still has hash `744CA8D93BD1B9CF9876110A043DA0A97E2F8373C1F12AC9FB57BE4C9EE32DA3`). Verified MCP child PID **7844** launched this PaintPilot `dist/cos-plugin.js`; native Photoshop/UXP bridge ready with one original document ID **850**, without any document mutation. Host E.26 *activation* can now be marked passed. The actual Goal-enabled Painter final→verified `continue_required`→next substantive correction, explicit Stop and no-gain blocked outcome are **not yet live accepted**. Do not close E.26 entirely or start E.27 based on activation evidence alone.
+
+- 2026-10-10 — **COS restart did not activate staged E.26; proceeded with bounded E.25 offline parent-provenance negative controls.** Verified actual running `Chat On Steroids.exe` still points to `chat-on-steroids-OUR-RELEASE-2.1.32/release/win-unpacked`, whose active `resources/app.asar` SHA-256 remains `744CA8D93BD1B9CF9876110A043DA0A97E2F8373C1F12AC9FB57BE4C9EE32DA3`. The separately prepared E.26 package remains in `release/e26-staging/win-unpacked`, SHA-256 `CF0C67D7A0C7203BB9F0704BB9EE07BF8AB0474182DD4CFA20642776D2F21AD5`. Therefore a restart **of the original executable did not install or activate the E.26 fix**; no host replacement, unsafe in-place copying or Goal live success was claimed. Photoshop ping independently confirmed the matching UXP bridge and original Ontime id 850; no painting mutations were sent.
+
+  Expanded `tests/session-store-regressions.test.ts` to assert fail-closed persisted parent-transform propagation for **ten** distinct malformed cases (was four): null/boolean/string, zero or inverted parent source/target extents, nonfinite `NaN` and infinity. Under malformed provenance, the child's geometry anchors and prior `parent_construction_revision` must remain unchanged. Targeted offline Vitest suites `session-store-regressions`, `object-construction`, `contour-geometry`, `geometry-contract-repair`: **4/4 files, 129/129 tests PASS**; `git diff --check` passed. This is evidence for E.25 persisted-provenance negative controls and existing curve/cutout geometry tests, **not** full live Photoshop curve/cutout fidelity, perspective invalidation or physical connected-pixel propagation. Those items remain open. E.26 still needs controlled adoption of the staged host package and real Goal continuation acceptance; E.27 remains deferred.
+
+- 2026-10-10 — **P0-E.26 prepared in a separate real Windows x64 COS package (activation pending).** On the exact `chat-on-steroids-OUR-RELEASE-2.1.32` host checkout, successfully ran production `npm run build`, followed by `electron-builder --win --x64 --dir` with isolated output to avoid overwriting the **currently running** `release/win-unpacked` package. Kept the generated package in the ignored `release/e26-staging/win-unpacked` directory. The packaged-runtime smoke-test passed on Windows with Electron 44.3.0, MCP dependency loading, Sharp/VIPS, node-pty, tree-sitter, tunnel and rg. Inspected the staged `app.asar` directly and confirmed the actual bundled main entry includes `painting_guard_unresolved_no_action` and the fixed host-authored PaintPilot Guard decision constraint. Staged app.asar SHA-256 `CF0C67D7A0C7203BB9F0704BB9EE07BF8AB0474182DD4CFA20642776D2F21AD5`; original active COS app.asar SHA-256 `744CA8D93BD1B9CF9876110A043DA0A97E2F8373C1F12AC9FB57BE4C9EE32DA3`. This confirms the correct updated **artifact exists**, not that it was activated. No host restart, installation, real Goal-enabled model test or Photoshop mutation was performed. Next E.26 gate: safe host replacement/restart followed by a single real Painter final → Guard `continue_required` → concrete same-activation continuation check. User STOP, true completed-artwork state and no-gain blockers also need live acceptance. The earlier 256/256 COS focused tests remain the most recent test-suite evidence. E.26 remains P0; E.27 remains gated by unfinished E.25/E.11.
+
+- 2026-10-10 — **E.11 minimal live Smart Filter exact-undo acceptance via COS Photoshop MCP — PASSED.** After the unrelated concurrent work cleared, live `photoshop_ping` reported a connected matching UXP bridge and the existing Ontime document id 850. Created an isolated 256×192 technical document id **1248**, bound `simple_graphic` process `processes/e11-smart-filter-live-test-process/run-01`, painted one sharp blue rectangle on raster layer 2, and durably registered the actual orthographic scene with a +1px controlled move. Live `e11_live_gaussian_history_20261010` applied Gaussian Smart Filter radius 3 after valid imaging preflight: `NORMAL id=2` became `SMARTOBJECT id=3`; native Photoshop History recorded a single `MCP Gaussian Blur` state, background unchanged. Exact image review showed the expected isolated blur. Guard then reported **exactly one history step remaining** and allowed `e11_live_gaussian_undo_20261010` to execute exactly one controlled Undo. The original sharp `NORMAL id=2` returned and the whole-frame SHA-256 matched the pre-blur image *bit for bit*: **`0354b9a13d52712b2823f2b7d33378d70d896bf98e071363ef8fca768b312908`**. Photoshop history returned from index 5 to 4, with Redo available. A temporary MCP poll connection error did not trigger replay: bounded Guard recovery confirmed the originally dispatched Undo had completed. Closed disposable document without saving (`e11_live_close_disposable_20261010`); final ping/list confirmed only the untouched original Ontime id 850 (1536×1024, nine layers) remains active and bridge ready. **Scope:** this closes only E.11 one-owner protected Smart Filter native history and bounded Undo. Broader interrupted/multi-owner and registered-anchor parity, remaining E.25 acceptance and E.27 `local-warp` prerequisites stay open. The COS E.26 host-binary Goal final→continue path was **not** tested in this deliberately minimal live session.
 
 - 2026-10-10 — **P0-E.26 offline COS Goal/Loop continuation boundary fix, activation pending.** Verified the *running* COS process is `chat-on-steroids-OUR-RELEASE-2.1.32/release/win-unpacked/Chat On Steroids.exe`; its actual `node.exe` MCP child launches this PaintPilot repo's `dist/cos-plugin.js`. Read the exact Goal/Loop / Automatic Continue source in that same 2.1.32 checkout. The host's Goal helper previously received the canonical assistant/user transcript and only **counts** of local tool calls, not an attributed Guard `next_state`; after a Painter final, it could incorrectly accept a helper `stop` as `no-reply` / reached-goal despite `continue_required`. This is a demonstrated source-path vulnerability consistent with the overnight symptom, not a validated trace of every historical session.
 

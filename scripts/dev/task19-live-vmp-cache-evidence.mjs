@@ -4,7 +4,8 @@ import path from 'node:path';
 
 const root = process.cwd();
 const operationDir = path.join(root, '.photoshop-runtime', 'controller', 'operations');
-const outputPath = path.join(root, 'docs', 'task19-cache-live-vmp-evidence.json');
+// Historical benchmark output is not part of maintained artist-facing docs.
+const outputPath = path.join(root, 'evidence', 'historical', 'task19-cache-live-vmp-evidence.json');
 const ids = [
   ['cache-final-p1-cold', 'cache-final-p1-warm'],
   ['cache-final-p2-cold', 'cache-final-p2-warm'],

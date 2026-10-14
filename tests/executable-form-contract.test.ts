@@ -399,6 +399,9 @@ async function nativeRebuild(clearFailure = false, targetIds = [9]) {
     selectLayerByIdDescriptor: (id: number) => ({ _obj: 'select', id }),
     makeUxpRegionSubPath: () => ({}),
     paintTargetCompositing: () => ({ layer_id: 9 }),
+    // The isolated paintRegions VM slice calls the shared brush-restoration
+    // helper even when this region-only fixture has no brush state to restore.
+    restoreBatchBrushStyle: async () => {},
     Date,
     Number,
     Array,
@@ -539,7 +542,7 @@ it('adds whole-brief assessment after save without repainting or overwriting the
       current_frame: { operation_id: 'visual-1', sha256: sha, accepted: true },
     };
     const source: any = {
-      visual: true,
+      id: 'visual-1', sequence: 1, phase: 'completed', visual: true,
       args: { document_id: 7 },
       verdict: { disposition: 'accept' },
       preview: { sha256: sha, materialized_path: file },
@@ -549,6 +552,10 @@ it('adds whole-brief assessment after save without repainting or overwriting the
     store.paintingState = () => ({ documents: { 7: state } });
     store.read = () => source;
     store.visualDeliveryDebt = () => undefined;
+    store.currentDocumentRecords = () => [source];
+    store.activeJobs = () => [];
+    store.validateChatCritic = () => undefined;
+    store.validateEditableScope = () => undefined;
     store.updatePaintingState = (_id: number, update: any) => {
       state = update(state);
     };

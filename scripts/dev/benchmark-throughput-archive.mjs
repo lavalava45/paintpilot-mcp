@@ -5,16 +5,16 @@ import path from 'node:path';
 const PROTOCOL = 'photoshop.guard.throughput_event_archive.v1';
 const MAX_ENTRY_BYTES = 1024 * 1024;
 const READ_CHUNK_BYTES = 64 * 1024;
-// The reader validates arbitrarily large archives, but the downstream run
-// benchmark currently needs retained events for per-pass attribution. Bound
-// that projection instead of letting a long selected run exhaust the process.
-// Exceeding either bound invalidates exact counters; it never truncates them.
+// Legacy callers can retain a bounded diagnostic projection. A caller that
+// supplies onSelectedEvent receives verified entries incrementally without
+// retaining the selected stream; it must discard its accumulator if the
+// final integrity result is unverified (including late corruption/drift).
 const MAX_SELECTED_EVENT_BYTES = 16 * 1024 * 1024;
 const MAX_SELECTED_EVENTS = 50_000;
 
 // This is a read-only benchmark verifier, not an alternative Guard event store.
 // It must never promote a damaged/legacy archive to complete run evidence.
-export function benchmarkArchiveEvidence(runtimeDirectory, state) {
+export function benchmarkArchiveEvidence(runtimeDirectory, state, { onSelectedEvent } = {}) {
   if (!runtimeDirectory || !state) return null;
   const documentId = Number(state.document_id);
   if (!Number.isSafeInteger(documentId) || documentId <= 0) return null;
@@ -35,6 +35,7 @@ export function benchmarkArchiveEvidence(runtimeDirectory, state) {
   if (!Number.isSafeInteger(throughput.archive_sequence) || throughput.archive_sequence < 1) return fail('state sequence is missing');
   const events = [];
   let selectedBytes = 0;
+  let selectedCount = 0;
   let previous = 0;
   const inspect = line => {
     if (line.length > MAX_ENTRY_BYTES) return 'oversized entry';
@@ -43,21 +44,31 @@ export function benchmarkArchiveEvidence(runtimeDirectory, state) {
     if (!row || typeof row !== 'object' || Array.isArray(row)) return 'invalid entry';
     const { sha256, ...payload } = row;
     if (payload.protocol !== PROTOCOL || payload.document_id !== documentId
-      || !Number.isSafeInteger(payload.sequence) || payload.sequence !== previous + 1
+      || !Number.isSafeInteger(payload.sequence) || payload.sequence < 1
       || !payload.event || typeof payload.event !== 'object' || Array.isArray(payload.event)
       || (payload.document_incarnation !== null && typeof payload.document_incarnation !== 'string')) {
-      return 'sequence gap or invalid entry';
+      return 'invalid entry';
     }
     if (sha256 !== createHash('sha256').update(JSON.stringify(payload)).digest('hex')) return 'checksum mismatch';
+    // Two Guard processes can race on the same document sequence. A valid
+    // checksum cannot make duplicate/out-of-order writes exact run evidence.
+    if (payload.sequence !== previous + 1) return 'sequence gap or duplicate';
     previous = payload.sequence;
     // A pending-identity event might belong to this run: retain it so
     // unkeyed/undated ambiguity is never silently discarded.
     if (payload.document_incarnation === incarnation || payload.document_incarnation === null) {
       selectedBytes += Buffer.byteLength(JSON.stringify(payload.event), 'utf8');
-      if (selectedBytes > MAX_SELECTED_EVENT_BYTES || events.length >= MAX_SELECTED_EVENTS) {
-        return 'selected event retention limit exceeded';
+      selectedCount += 1;
+      if (!Number.isSafeInteger(selectedBytes) || !Number.isSafeInteger(selectedCount)) {
+        return 'selected event accounting overflow';
       }
-      events.push(payload.event);
+      if (onSelectedEvent) {
+        onSelectedEvent(payload.event);
+      } else if (selectedBytes > MAX_SELECTED_EVENT_BYTES || events.length >= MAX_SELECTED_EVENTS) {
+        return 'selected event retention limit exceeded';
+      } else {
+        events.push(payload.event);
+      }
     }
     return null;
   };
@@ -95,7 +106,13 @@ export function benchmarkArchiveEvidence(runtimeDirectory, state) {
       return fail('archive changed during read');
     }
   } catch { return fail('archive cannot be read'); }
-  finally { if (fd !== undefined) closeSync(fd); }
+  finally {
+    if (fd !== undefined) {
+      try { closeSync(fd); }
+      catch { return fail('archive close failed'); }
+    }
+  }
   if (previous !== throughput.archive_sequence) return fail('archive/state sequence mismatch');
-  return { integrity: 'consistent', events, warning: null };
+  return { integrity: 'consistent', events, selected_count: selectedCount,
+    selected_bytes: selectedBytes, streamed: Boolean(onSelectedEvent), warning: null };
 }

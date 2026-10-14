@@ -43,6 +43,7 @@ export type PaintingVisualIntent = (typeof PAINTING_VISUAL_INTENTS)[number];
 
 export const PAINTING_CONSTRUCTION_ROLES = [
   'structured-mass',
+  'structured-contour',
   'continuous-field',
   'volumetric-soft-mass',
   'optical-veil',
@@ -185,6 +186,15 @@ const SEEDS: CapabilitySeed[] = [
     preparationTools: ['photoshop_set_brush'],
     requiredTools: ['photoshop_paint_strokes', 'photoshop_set_brush'],
     executionHints: { stroke_tool: 'BRUSH', brush: { hardness: 100 } },
+  },
+  {
+    id: 'constructed-contour',
+    label: 'Calculated outline in the chosen brush medium',
+    methodClass: 'region',
+    impactClasses: ['construct', 'edge'],
+    visualIntents: ['line', 'hard-edge'],
+    primaryTool: 'photoshop_paint_regions',
+    requiredTools: ['photoshop_paint_regions'],
   },
   {
     id: 'region-block-in',
@@ -488,7 +498,7 @@ export function paintingMethodCapabilities(registry: ToolRegistry): PaintingMeth
 }
 
 const INTENT_PREFERENCE: Record<PaintingVisualIntent, string[]> = {
-  line: ['pencil-line', 'hard-brush-line', 'installed-brush-preset'],
+  line: ['hard-brush-line', 'pencil-line', 'installed-brush-preset'],
   mass: ['installed-brush-preset', 'region-block-in', 'hard-brush-line'],
   'painted-mass': ['installed-brush-preset', 'soft-brush-build', 'region-block-in'],
   'planar-mass': ['installed-brush-preset', 'hard-brush-line', 'region-block-in'],
@@ -521,8 +531,36 @@ export interface PaintingMethodSelection {
   rejected: Array<{ id: string; availability: MethodAvailability; reason: string }>;
 }
 
+/** Exact, read-only executor contract attached to method selection, not a second schema round-trip. */
+export function paintingMethodExecutionContract(registry: ToolRegistry, method: PaintingMethodCapability) {
+  const allowedCommands = [...new Set(method.executionTools?.length
+    ? method.executionTools : method.primaryTool ? [method.primaryTool] : [])]
+    .filter(name => registry.has(name));
+  return {
+    method_id: method.id,
+    allowed_commands: allowedCommands,
+    action_contracts: allowedCommands.map(name => ({
+      tool: name,
+      input_schema: structuredClone(registry.get(name)!.tool.inputSchema),
+    })),
+    request_skeleton: {
+      next_pass: {
+        request_key: '<unique attempt id>',
+        document_id: '<pinned document id>',
+        goal: '<artist-authored goal>',
+        preferred_method_id: method.id,
+        actions: [{ tool: method.primaryTool, args: '<fill from matching input_schema>' }],
+      },
+    },
+    skeleton_is_not_executable: true,
+    artistic_decisions_required: 'Supply actual geometry, colors, proportions, support and owner declarations. The server only derives unambiguous technical bindings; do not submit placeholders.',
+    next: 'Use this contract in the ordinary cycle_auto request. No separate status or schema call is required.',
+  };
+}
+
 const CONSTRUCTION_ROLE_INTENT: Record<PaintingConstructionRole, PaintingVisualIntent> = {
   'structured-mass': 'mass',
+  'structured-contour': 'line',
   'continuous-field': 'continuous-field',
   'volumetric-soft-mass': 'painted-mass',
   'optical-veil': 'atmospheric-mass',

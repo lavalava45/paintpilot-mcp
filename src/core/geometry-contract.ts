@@ -1,3 +1,4 @@
+import { canvasComponent, componentSpaceIssue } from './component-space.js';
 import type { StructuredRepairOperation } from './guard/preflight-repair.js';
 
 type RecordValue = Record<string, unknown>;
@@ -119,6 +120,8 @@ export function prepareGeometryContract(input: RecordValue, context: RecordValue
   const scene = supplied ?? record(context.scene_geometry_model);
   const logical = record(pass.logical_layer);
   const binding = record(logical?.geometry_binding);
+  const spaceIssue = componentSpaceIssue(pass, context);
+  if (spaceIssue) issues.push({ path: 'next_pass.logical_layer.component_space', ...spaceIssue });
   function inject(target: RecordValue, key: string, value: unknown, path: string, source: string): void {
     if (target[key] !== undefined || value === undefined || value === null) return;
     target[key] = structuredClone(value);
@@ -144,10 +147,10 @@ export function prepareGeometryContract(input: RecordValue, context: RecordValue
       path: `next_pass.scene_geometry_model.source_frame.${key}`, message: `scene_geometry_model.source_frame.${key} is required; pinned context is unavailable`, expected: sourceFrame.properties?.[key],
     });
   }
-  const constructing = context.painting_profile === 'nontrivial_painting'
+  const constructing = !canvasComponent(pass, context) && context.painting_profile === 'nontrivial_painting'
     && pass.action_class !== 'ROLLBACK' && logical?.decision !== 'temporary-hypothesis'
     && rows(pass.actions).some(v => typeof v.tool === 'string' && /photoshop_(paint_|fill_layer|apply_)/.test(v.tool))
-    && (pass.construction_role === 'structured-mass' || logical?.construction_change === true
+    && (['structured-mass', 'structured-contour'].includes(String(pass.construction_role)) || logical?.construction_change === true
       || (logical?.decision === 'create-new' && !!logical?.construction_tier));
   if (constructing && scene?.applicability === 'coherent_3d' && logical?.hypothesis_id && logical.geometry_binding === undefined) issues.push({
     path: 'next_pass.logical_layer.geometry_binding', decision: true, code: 'geometry_binding_required',

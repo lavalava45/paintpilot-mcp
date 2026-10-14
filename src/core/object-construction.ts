@@ -1,9 +1,12 @@
 import { createHash } from 'node:crypto';
 import { normalizeIKChains, solveIKChains, type ConstructionIKChain } from './ik-construction.js';
 import { CONTOUR_GEOMETRY, smoothClosedContour, ContourGeometryError } from './contour-geometry.js';
+import { filledContourIssues } from './filled-contour-topology.js';
 import {
   SCENE_SUBJECT_KINDS,
   normalizeSceneOwnershipPlan,
+  extendSceneOwnershipPlan,
+  type SceneOwnershipPlan,
   type SceneSubjectKind,
 } from './scene-ownership-plan.js';
 
@@ -30,6 +33,16 @@ export interface ConstructionPart {
   role: string;
   outline: string[];
   curve: 'linear' | 'smooth';
+  intersection_policy?: 'intentional';
+}
+export interface ConstructionSpatialCheck {
+  id: string;
+  kind: 'attachment' | 'size-ratio' | 'placement' | 'support';
+  points: string[];
+  max_distance?: number;
+  min?: number;
+  max?: number;
+  bounds?: { left: number; top: number; right: number; bottom: number };
 }
 export interface ConstructionConstraint {
   id: string;
@@ -56,6 +69,7 @@ export interface ConstructionModel {
   parts: ConstructionPart[];
   constraints: ConstructionConstraint[];
   proportion_checks?: Array<{ id: string; points: string[]; min: number; max: number }>;
+  spatial_checks?: ConstructionSpatialCheck[];
   ik_chains?: ConstructionIKChain[];
   camera: {
     kind: 'orthographic' | 'perspective';
@@ -191,6 +205,8 @@ export function normalizeConstructionModel(value: unknown): ConstructionModel {
       r = obj(v, p);
     if (r.curve !== undefined && !['linear', 'smooth'].includes(String(r.curve)))
       fail(`${p}.curve`, 'Choose linear|smooth');
+    if (r.intersection_policy !== undefined && !['simple', 'intentional'].includes(String(r.intersection_policy)))
+      fail(`${p}.intersection_policy`, 'Choose simple|intentional');
     return {
       id: str(r.id, `${p}.id`, true),
       object_id: str(r.object_id, `${p}.object_id`, true),
@@ -199,6 +215,7 @@ export function normalizeConstructionModel(value: unknown): ConstructionModel {
         str(x, `${p}.outline[${j}]`, true)
       ),
       curve: r.curve === 'smooth' ? 'smooth' : 'linear',
+      ...(r.intersection_policy === 'intentional' ? { intersection_policy: 'intentional' as const } : {}),
     };
   });
   const counts = {
@@ -307,6 +324,33 @@ export function normalizeConstructionModel(value: unknown): ConstructionModel {
   });
   if (new Set(proportion_checks.map(c => c.id)).size !== proportion_checks.length)
     fail('model.proportion_checks', 'Duplicate check id');
+  const spatialCounts = { attachment: 2, 'size-ratio': 4, placement: 1, support: 3 };
+  const spatial_checks = rows(raw.spatial_checks ?? [], 'model.spatial_checks', 32, 0)
+    .map((value, i): ConstructionSpatialCheck => {
+      const path = `model.spatial_checks[${i}]`, row = obj(value, path);
+      const kind = row.kind as ConstructionSpatialCheck['kind'];
+      if (!Object.hasOwn(spatialCounts, kind)) fail(`${path}.kind`, 'Choose attachment|size-ratio|placement|support');
+      const refs = rows(row.points, `${path}.points`, 4, 1).map((ref, j) => str(ref, `${path}.points[${j}]`, true));
+      if (refs.length !== spatialCounts[kind]) fail(`${path}.points`, `${kind} requires ${spatialCounts[kind]} landmark ids`);
+      for (const ref of refs) if (!pointMap.has(ref)) fail(`${path}.points`, `Unknown landmark ${ref}`);
+      const max_distance = ['attachment', 'support'].includes(kind) ? num(row.max_distance, `${path}.max_distance`) : undefined;
+      const min = kind === 'size-ratio' ? num(row.min, `${path}.min`) : undefined;
+      const max = kind === 'size-ratio' ? num(row.max, `${path}.max`) : undefined;
+      if (max_distance !== undefined && max_distance < 0) fail(path, 'max_distance must be nonnegative canvas pixels');
+      if (min !== undefined && (min <= 0 || max! < min)) fail(path, 'Choose explicit positive minimum/maximum projected size ratio');
+      let bounds: ConstructionSpatialCheck['bounds'];
+      if (kind === 'placement') {
+        const rawBounds = obj(row.bounds, `${path}.bounds`);
+        bounds = { left: num(rawBounds.left, `${path}.bounds.left`), top: num(rawBounds.top, `${path}.bounds.top`),
+          right: num(rawBounds.right, `${path}.bounds.right`), bottom: num(rawBounds.bottom, `${path}.bounds.bottom`) };
+        if (bounds.left > bounds.right || bounds.top > bounds.bottom) fail(`${path}.bounds`, 'Expected ordered canvas-pixel bounds');
+      }
+      return { id: str(row.id, `${path}.id`, true), kind, points: refs,
+        ...(max_distance !== undefined ? { max_distance } : {}),
+        ...(min !== undefined ? { min, max } : {}), ...(bounds ? { bounds } : {}) };
+    });
+  if (new Set(spatial_checks.map(c => c.id)).size !== spatial_checks.length)
+    fail('model.spatial_checks', 'Duplicate spatial check id');
   const ik_chains = normalizeIKChains(raw.ik_chains, points, issues);
   for (const o of objects.filter(o => o.rigid)) {
     if (points.some(p => p.object_id === o.id && !p.fixed))
@@ -358,6 +402,7 @@ export function normalizeConstructionModel(value: unknown): ConstructionModel {
     constraints,
     camera,
     ...(proportion_checks.length ? { proportion_checks } : {}),
+    ...(spatial_checks.length ? { spatial_checks } : {}),
     ...(ik_chains.length ? { ik_chains } : {}),
   };
 }
@@ -369,6 +414,7 @@ export function constructionOwnershipPlan(model: ConstructionModel) {
       semantic_id: p.id,
       owner_id: p.id,
       role: p.role,
+      edit_axes: ['visibility', 'color', 'material', 'lighting', 'position', 'mask', 'rollback'],
       editability:
         model.objects.find((o) => o.id === p.object_id)?.subject_kind === 'continuous-field'
           ? 'continuous-field'
@@ -598,6 +644,25 @@ export function solveConstruction(value: unknown) {
     projected.set(p.id, { x, y });
   }
   if (issues.length) throw new ConstructionError(issues);
+  for (const c of model.spatial_checks ?? []) {
+    const p = c.points.map(id => projected.get(id)!);
+    const length2 = (a: { x: number; y: number }, b: { x: number; y: number }) => Math.hypot(a.x - b.x, a.y - b.y);
+    let actual = 0, valid = true;
+    if (c.kind === 'attachment') actual = length2(p[0], p[1]);
+    if (c.kind === 'size-ratio') actual = length2(p[0], p[1]) / length2(p[2], p[3]);
+    if (c.kind === 'placement') valid = p[0].x >= c.bounds!.left && p[0].x <= c.bounds!.right
+      && p[0].y >= c.bounds!.top && p[0].y <= c.bounds!.bottom;
+    if (c.kind === 'support') {
+      const dx = p[2].x - p[1].x, dy = p[2].y - p[1].y, len2 = dx * dx + dy * dy;
+      const t = len2 > 1e-12 ? ((p[0].x - p[1].x) * dx + (p[0].y - p[1].y) * dy) / len2 : NaN;
+      actual = len2 > 1e-12 ? Math.hypot(p[0].x - p[1].x - t * dx, p[0].y - p[1].y - t * dy) : Infinity;
+      valid = t >= 0 && t <= 1;
+    }
+    if ((c.kind === 'attachment' || c.kind === 'support') && actual > c.max_distance! + 1e-6) valid = false;
+    if (c.kind === 'size-ratio' && (!Number.isFinite(actual) || actual < c.min! - 1e-6 || actual > c.max! + 1e-6)) valid = false;
+    if (!valid) issues.push({ code: 'construction_spatial_relation_unsatisfied', path: `model.spatial_checks.${c.id}`,
+      message: `${c.kind} on landmarks ${c.points.join(',')} fails in final projected canvas coordinates (measured=${actual}). Revise these component landmarks or the authored relation; fixed points are not exempt.` });
+  }
   const parts = model.parts.map((p) => {
     const control = p.outline.map((id) => projected.get(id)!);
     let contour = control;
@@ -626,6 +691,8 @@ export function solveConstruction(value: unknown) {
         path: `model.parts.${p.id}`,
         message: 'Closed outline has no projected area',
       });
+    for (const issue of filledContourIssues(p.id, [{ points: contour, intersection_policy: p.intersection_policy }]))
+      issues.push({ code: issue.code, path: `model.parts.${p.id}.outline`, message: issue.message });
     const bounds = {
       left: Math.min(...contour.map((v) => v.x)),
       top: Math.min(...contour.map((v) => v.y)),
@@ -781,6 +848,8 @@ export const CONSTRUCTION_MODEL_SCHEMA = object(
             description:
               'smooth preserves a closed Catmull-Rom shape via cubic Bezier subdivision at 0.25 canvas-pixel tolerance, max 256 output points; reduce projected size/curvature or choose linear if the bounded contour cannot meet that accuracy.',
           },
+          intersection_policy: { type: 'string', enum: ['simple', 'intentional'],
+            description: 'Default is simple filled contour. Intentional allows explicitly authored self-crossings; zero-length edges remain invalid.' },
         },
         ['id', 'object_id', 'role', 'outline']
       ),
@@ -821,6 +890,19 @@ export const CONSTRUCTION_MODEL_SCHEMA = object(
       description: 'Category-independent checks of length(A,B)/length(C,D) in intrinsic object units. Artist chooses plausible bounds; the solver does not invent them.',
       items: object({ id, points: { type: 'array', minItems: 4, maxItems: 4, items: id },
         min: { type: 'number', exclusiveMinimum: 0 }, max: { type: 'number', exclusiveMinimum: 0 } }, ['id','points','min','max']),
+    },
+    spatial_checks: {
+      type: 'array', maxItems: 32,
+      description: 'Optional artist-chosen relations checked AFTER camera projection, including fixed landmarks. These do not invent correct anatomy. attachment=two landmarks within max_distance; size-ratio=four landmarks with min/max; placement=one landmark inside absolute canvas bounds; support=contact landmark against a finite two-landmark support segment within max_distance.',
+      items: object({
+        id,
+        kind: { type: 'string', enum: ['attachment', 'size-ratio', 'placement', 'support'] },
+        points: { type: 'array', minItems: 1, maxItems: 4, items: id },
+        max_distance: { type: 'number', minimum: 0 },
+        min: { type: 'number', exclusiveMinimum: 0 },
+        max: { type: 'number', exclusiveMinimum: 0 },
+        bounds: object({ left: number, top: number, right: number, bottom: number }, ['left','top','right','bottom']),
+      }, ['id','kind','points']),
     },
     ik_chains: {
       type: 'array',
@@ -880,6 +962,13 @@ export const CONSTRUCTION_PASS_SCHEMA = object(
     model_id: id,
     revision: { type: 'integer', minimum: 1 },
     part_id: id,
+    rendering: object({
+      preset_name: { type: 'string', description: 'Optional chosen installed brush preset; otherwise use the prepared current brush. Its actual selection must pass ordinary native readback.' },
+      mode: { type: 'string', enum: ['fill', 'outline'], description: 'Geometry does not choose the medium. outline makes controlled BRUSH contours without a fill; fill preserves legacy masses.' },
+      size: { type: 'number', exclusiveMinimum: 0, maximum: 5000, description: 'Required canvas-pixel line width for outline.' },
+      opacity: { type: 'number', minimum: 1, maximum: 100 },
+      flow: { type: 'number', minimum: 1, maximum: 100 },
+    }, ['mode']),
     reshape_object_ids: { type: 'array', maxItems: 16, items: id, description: 'Explicit shape correction, not a rigid pose edit. Rebuild every affected component and review actual pixels.' },
     color: object(
       {
@@ -911,7 +1000,7 @@ export function validateRigidRevision(previous: ConstructionModel, current: Cons
 }
 
 export interface ConstructionContext {
-  construction_bindings?: Array<{ owner_id: string; bounds?: { left: number; top: number; right: number; bottom: number } }>;
+  construction_bindings?: Array<{ owner_id: string; rendering?: Record<string, unknown>; bounds?: { left: number; top: number; right: number; bottom: number } }>;
   logical_layer_owners?: Array<Record<string, unknown>>;
   scene_ownership_plan?: Record<string, unknown> | null;
 }
@@ -1009,6 +1098,23 @@ export function expandConstructionPass(
       'next_pass.construction.color',
       'Choose explicit RGB values in [0,255]; geometry does not invent color'
     );
+  const previousRendering = context.construction_bindings?.find(b => b.owner_id === request.part_id)?.rendering;
+  const rendering = (request.rendering ?? previousRendering) as Record<string, unknown> | undefined;
+  const renderMode = rendering?.mode ?? (raw.visual_intent === 'line' ? 'outline' : 'fill');
+  if (!['fill', 'outline'].includes(String(renderMode)))
+    error('construction_rendering_invalid', 'next_pass.construction.rendering.mode', 'Choose fill or outline explicitly.');
+  if (raw.visual_intent === 'line' && renderMode === 'fill')
+    error('construction_rendering_intent_conflict', 'next_pass.construction.rendering.mode', 'A line intention cannot execute a fill; choose outline and its width.');
+  const outline = renderMode === 'outline';
+  const preset = rendering?.preset_name;
+  if (preset !== undefined && (typeof preset !== 'string' || !preset.trim()))
+    error('construction_preset_invalid', 'next_pass.construction.rendering.preset_name', 'Choose a nonempty installed preset name.');
+  const size = Number(rendering?.size);
+  if (outline && (!Number.isFinite(size) || size <= 0 || size > 5000))
+    error('construction_line_style_required', 'next_pass.construction.rendering.size', 'Choose a positive line width in canvas pixels; a line request is never silently converted to fill.');
+  const opacity = Number(rendering?.opacity ?? 100), flow = Number(rendering?.flow ?? 100);
+  if (![opacity, flow].every(v => Number.isFinite(v) && v > 0 && v <= 100))
+    error('construction_line_style_invalid', 'next_pass.construction.rendering', 'Opacity and flow must be in (0,100].');
   const matches = (context.logical_layer_owners ?? []).filter(
     (o) => o.hypothesis_id === part!.id && o.temporary !== true
   );
@@ -1043,18 +1149,78 @@ export function expandConstructionPass(
     left: Math.min(part!.bounds.left, previousBounds.left), top: Math.min(part!.bounds.top, previousBounds.top),
     right: Math.max(part!.bounds.right, previousBounds.right), bottom: Math.max(part!.bounds.bottom, previousBounds.bottom),
   } : part!.bounds;
+  if (outline) {
+    const radius = Math.max(size, Number(previousRendering?.size ?? 0)) / 2;
+    reviewBounds.left -= radius; reviewBounds.top -= radius;
+    reviewBounds.right += radius; reviewBounds.bottom += radius;
+  }
   if (raw.region_bounds !== undefined) {
     const bounds = raw.region_bounds as Record<string, number>;
     if (!bounds || !['left','top','right','bottom'].every(k => Number.isFinite(bounds[k]))
       || bounds.left > reviewBounds.left || bounds.top > reviewBounds.top || bounds.right < reviewBounds.right || bounds.bottom < reviewBounds.bottom)
       error('construction_review_bounds_conflict', 'next_pass.region_bounds', 'Review bounds must include both old and new component extents; omit them to derive the union');
   }
-  const plan = constructionOwnershipPlan(model);
-  if (context.scene_ownership_plan) plan.plan_id = String(context.scene_ownership_plan.plan_id);
+  const generated = constructionOwnershipPlan(model);
+  // Geometry revisions do not redefine already-authorized semantic ownership.
+  // Only genuinely new construction parts may introduce new units/owners.
+  let plan: SceneOwnershipPlan = generated;
+  if (context.scene_ownership_plan) {
+    const durable = normalizeSceneOwnershipPlan(context.scene_ownership_plan);
+    // Construction part IDs address physical *owners*. A separately named
+    // semantic component may already belong to that owner (e.g.
+    // semantic=window-frame, owner=window-frame-owner). Preserve its original
+    // semantic identity rather than manufacturing a second unit with
+    // semantic_id=part_id on the same layer.
+    const alignedUnits = generated.units.map(unit => {
+      const byOwner = durable.units.filter(saved => saved.owner_id === unit.owner_id);
+      if (byOwner.length > 1)
+        error('construction_owner_ambiguous', 'next_pass.construction.part_id',
+          `Construction owner ${unit.owner_id} already represents multiple semantic units (${byOwner.map(row => row.semantic_id).join(', ')}); resolve shared ownership before independently rebuilding a part.`);
+      const bySemantic = durable.units.find(saved => saved.semantic_id === unit.semantic_id);
+      if (bySemantic && bySemantic.owner_id !== unit.owner_id)
+        error('construction_owner_semantic_conflict', 'next_pass.construction.part_id',
+          `Construction part ${unit.owner_id} collides with semantic_id=${unit.semantic_id} owned by ${bySemantic.owner_id}; use the existing owner ID, never silently reassign a semantic component.`);
+      return byOwner[0] ?? unit;
+    });
+    const semanticByPart = new Map(generated.units.map((unit, index) =>
+      [unit.semantic_id, alignedUnits[index]!.semantic_id]));
+    const alignedObjects = (generated.objects ?? []).map(object => ({
+      ...object,
+      component_semantic_ids: object.component_semantic_ids.map(id => semanticByPart.get(id) ?? id),
+    }));
+    for (const object of alignedObjects) {
+      const other = durable.objects?.find(saved => saved.object_id !== object.object_id
+        && saved.component_semantic_ids.some(id => object.component_semantic_ids.includes(id)));
+      if (other)
+        error('construction_owner_object_conflict', 'next_pass.construction.model.objects',
+          `Construction object ${object.object_id} references a component belonging to saved object ${other.object_id}; preserve the original semantic object membership.`);
+    }
+    const known = new Set(durable.units.map(unit => unit.semantic_id));
+    const additions = alignedUnits.filter(unit => !known.has(unit.semantic_id));
+    const objects = (durable.objects ?? []).map(object => {
+      const generatedObject = alignedObjects.find(row => row.object_id === object.object_id);
+      return generatedObject ? {
+        ...object,
+        component_semantic_ids: [...new Set([...object.component_semantic_ids,
+          ...generatedObject.component_semantic_ids.filter(id => additions.some(unit => unit.semantic_id === id))])],
+      } : object;
+    });
+    for (const object of alignedObjects) {
+      if (!objects.some(row => row.object_id === object.object_id)
+        && object.component_semantic_ids.some(id => additions.some(unit => unit.semantic_id === id)))
+        objects.push(object);
+    }
+    plan = additions.length
+      ? extendSceneOwnershipPlan(durable, normalizeSceneOwnershipPlan({
+          ...durable, units: [...durable.units, ...additions], objects,
+        }))
+      : durable;
+  }
   if (owner && raw.action_class !== undefined && raw.action_class !== 'REPLACE')
     error('construction_rebuild_action_conflict', 'next_pass.action_class', 'Rebuilding an owned component replaces its old pixels; use REPLACE or omit the class');
   const target = owner ? layerId : '$steps.construction_layer.details.layerId';
   const actions: Record<string, unknown>[] = [];
+  if (outline && preset) actions.push({ id: 'construction_brush', tool: 'photoshop_select_brush_preset', args: { name: preset } });
   if (!owner)
     actions.push({
       id: 'construction_layer',
@@ -1067,12 +1233,15 @@ export function expandConstructionPass(
     args: {
       document_id: raw.document_id,
       ...(owner ? { replace_contents: true } : {}),
+      ...(owner ? { clip_bounds: reviewBounds } : {}),
       regions: [
         {
           id: part!.id,
           layer_id: target,
           color,
-          contours: [{ points: part!.contour, closed: true }],
+          ...(outline ? { render_mode: 'outline', stroke_size: size, opacity, stroke_flow: flow } : {}),
+          contours: [{ points: part!.contour, closed: true,
+            ...(part!.intersection_policy ? { intersection_policy: part!.intersection_policy } : {}) }],
         },
       ],
     },
@@ -1080,8 +1249,11 @@ export function expandConstructionPass(
   return {
     pass: {
       ...raw,
+      ...(outline ? { construction_role: 'structured-contour', visual_intent: 'line', preferred_method_id: 'constructed-contour' } : {}),
       ...(owner ? { action_class: 'REPLACE', risk: 'high' } : {}),
       actions,
+      // Explicit declarations remain subject to the ordinary Guard conflict
+      // check; only implicit construction continuation inherits this plan.
       scene_ownership_plan: raw.scene_ownership_plan ?? plan,
       layer_separation_check: raw.layer_separation_check ?? {
         change_kind: owner ? 'continuation' : 'new-object',
@@ -1097,8 +1269,8 @@ export function expandConstructionPass(
         hypothesis: part!.role,
         rollback_value: owner ? 'moderate' : 'high',
         expected_independent_rollback: true,
-        physical_role: 'opaque-mass',
-        opacity_role: 'opaque',
+        physical_role: owner?.physical_role ?? (outline ? 'other' : 'opaque-mass'),
+        opacity_role: owner?.opacity_role ?? (outline ? 'transparent-overlay' : 'opaque'),
         ...(owner ? { layer_id: layerId } : { layer_name: part!.role }),
         ...supplied,
       },
@@ -1113,6 +1285,9 @@ export function expandConstructionPass(
       model_sha256: solved.model_sha256,
       ...(solved.ik ? { ik: solved.ik } : {}),
       contour_geometry: CONTOUR_GEOMETRY,
+      rendering: { mode: renderMode, ...(outline ? { size, opacity, flow, ...(preset ? { preset_name: preset } : {}) } : {}) },
+      render_mode: renderMode,
+      ...(outline ? { stroke_size: size } : {}),
       pixel_geometry_verified: false,
     },
   };

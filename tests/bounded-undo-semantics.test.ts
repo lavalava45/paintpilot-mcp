@@ -22,7 +22,7 @@ function frame(dir: string, name: string, value: number) {
     width: 32, height: 32, canvas_width: 32, canvas_height: 32, mime_type: 'image/jpeg' };
 }
 
-function fixture(options: { steps?: number; executedSteps?: number; failed?: boolean; legacyText?: boolean; ownership?: string } = {}) {
+function fixture(options: { steps?: number; executedSteps?: number; failed?: boolean; legacyText?: boolean; ownership?: string; skipUndo?: boolean } = {}) {
   const dir = mkdtempSync(path.join(tmpdir(), 'bounded-undo-semantics-'));
   dirs.push(dir);
   const s = new SessionStore(path.join(dir, 'controller'), { visualBarrierDirectory: path.join(dir, 'barriers'), workspaceRoot: dir });
@@ -60,6 +60,7 @@ function fixture(options: { steps?: number; executedSteps?: number; failed?: boo
     art_director: { ...director, status: 'completed', tasks: [{ ...director.tasks[0], status: 'completed', successful_microplans: 3 }] },
     commentary_detail: 'detailed', frame_counter: 77,
     pending_rollback: { operation_id: 'rejected', required_undo_steps: 2, remaining_undo_steps: 2 } }));
+  if (!options.skipUndo) {
   const undo = { id: 'undo', tool: 'photoshop_undo', args: { document_id: 42, steps: options.steps ?? 2 },
     summary: 'Restore the previous subject state.', purpose: 'Discard the flat modeling attempt.', sequence: 3,
     phase: 'dispatched', visual: true, before_preview: rejected, created_at: '2026-10-04T00:00:03Z' };
@@ -71,6 +72,7 @@ function fixture(options: { steps?: number; executedSteps?: number; failed?: boo
     : JSON.stringify({ ok: !options.failed, undo_history_states_consumed: count }) }] };
   s.complete(undo, result);
   s.attachPreview('undo', { content: [{ type: 'text', text: JSON.stringify(before) }] });
+  }
   const review = { id: 'undo', preview_id: 'undo', sha256: before.sha256, verdict: 'neutral', disposition: 'accept',
     target_resolved: 'no', observed_change: 'The previous volume is restored; the form task remains unfinished.',
     observations: [{ region: 'whole frame', visible: 'The previous mass is restored; its material and plane turns remain unfinished.' }],
@@ -80,6 +82,129 @@ function fixture(options: { steps?: number; executedSteps?: number; failed?: boo
 }
 
 describe('E.11 ordinary bounded undo semantic recovery', () => {
+  it('permits provisional same-cycle accept+Undo only for an exact pending source, while preserving final dispatch gate', () => {
+    const f = fixture({ skipUndo: true });
+    const source = f.s.read('rejected') as any;
+    delete source.verdict;
+    source.result = { content: [{ type: 'text', text: JSON.stringify({
+      pass_execution: { history_ownership: {
+        protocol: 'photoshop.guard.semantic_pass_history_ownership.v1',
+        status: 'exact', owned_history_steps: 1,
+      } },
+    }) }] };
+    f.s.write(source);
+    f.s.updatePaintingState(42, current => ({
+      ...current, pending_rollback: undefined,
+      current_frame: { operation_id: 'rejected', sha256: f.rejected.sha256,
+        path: f.rejected.materialized_path, accepted: false },
+    }));
+    const undo = { tool: 'photoshop_execute_visual_microplan', args: {
+      document_id: 42, action_class: 'ROLLBACK',
+      steps: [{ tool: 'photoshop_undo', args: { document_id: 42, steps: 1 } }],
+    } };
+    const errors = (opts: any = {}) => f.s.collectPreflightErrors(undo, opts);
+    expect(errors().join(' ')).toContain('bounded_undo_source_unproven');
+    expect(errors({ plannedAcceptedUndoSourceOperationId: 'rejected' }).join(' ')).not.toContain('bounded_undo_source_unproven');
+    expect(errors({ plannedAcceptedUndoSourceOperationId: 'other' }).join(' ')).toContain('bounded_undo_source_unproven');
+    expect(errors({ plannedAcceptedUndoSourceOperationId: 'rejected', stateOnly: true }).join(' ')).toContain('bounded_undo_source_unproven');
+    const stale = structuredClone(source);
+    stale.result.content[0].text = JSON.stringify({ pass_execution: { history_ownership: {
+      protocol: 'photoshop.guard.semantic_pass_history_ownership.v1', status: 'unproven',
+    } } });
+    f.s.write(stale);
+    expect(errors({ plannedAcceptedUndoSourceOperationId: 'rejected' }).join(' ')).toContain('bounded_undo_source_unproven');
+    f.s.write(source);
+    const wrongDocument = structuredClone(undo);
+    wrongDocument.args.document_id = 43;
+    expect(f.s.collectPreflightErrors(wrongDocument, { plannedAcceptedUndoSourceOperationId: 'rejected' }).join(' '))
+      .toContain('bounded_undo_source_unproven');
+  });
+
+  it('restores accepted connected_move owner revisions after an exactly evidenced one-step Guard microplan Undo', () => {
+    const f = fixture({ skipUndo: true });
+    const retainedRecord = f.s.read('retained') as any;
+    retainedRecord.result = { content: [{ type: 'text', text: JSON.stringify({ continuation_layers: [
+      { hypothesis_id: 'panel', layer_id: 2, construction_change: true, construction_tier: 'primary' },
+      { hypothesis_id: 'tab', layer_id: 3, construction_change: true, construction_tier: 'secondary',
+        parent_hypothesis_id: 'panel', parent_construction_revision: 'retained' },
+    ] }) }] };
+    f.s.write(retainedRecord);
+    const source = f.s.read('rejected') as any;
+    source.args = { document_id: 42, action_class: 'ADD', steps: [{
+      id: 'move', tool: 'photoshop_move_layer', args: { deltaX: 20, deltaY: 0, connected_move: {
+        parent: { owner_id: 'panel', layer_id: 2, expected_bounds: { left: 10, top: 10, right: 40, bottom: 40 } },
+        children: [{ owner_id: 'tab', layer_id: 3, expected_bounds: { left: 35, top: 15, right: 48, bottom: 30 } }],
+      } },
+    }] };
+    source.verdict = { verdict: 'improvement', disposition: 'accept', target_resolved: 'yes' };
+    source.operation_ack = { protocol: 'photoshop.guard.operation_ack.v1', receipt_token: 'accepted' };
+    source.report = { did: 'Moved both native layers.', why: 'Maintain connected construction.',
+      result: 'Both linked pixels moved and the exact frame was accepted.' };
+    source.result = { content: [{ type: 'text', text: JSON.stringify({
+      pass_execution: { history_ownership: { protocol: 'photoshop.guard.semantic_pass_history_ownership.v1',
+        status: 'exact', owned_history_steps: 1, total_history_steps: 1 } },
+      mutation_results: { move: { ok: true, details: { connected: true, moved: true, history_steps: 1,
+        parent_owner_id: 'panel', deltaX: 20, deltaY: 0, layer_receipts: [
+          { owner_id: 'panel', layer_id: 2,
+            source_bounds: { left: 10, top: 10, right: 40, bottom: 40 },
+            target_bounds: { left: 30, top: 10, right: 60, bottom: 40 } },
+          { owner_id: 'tab', layer_id: 3,
+            source_bounds: { left: 35, top: 15, right: 48, bottom: 30 },
+            target_bounds: { left: 55, top: 15, right: 68, bottom: 30 } },
+        ] } } },
+    }) }] };
+    f.s.write(source);
+    f.s.updatePaintingState(42, current => ({ ...current, pending_rollback: undefined,
+      current_frame: { operation_id: 'rejected', sha256: f.rejected.sha256, path: f.rejected.materialized_path,
+        accepted: true }, accepted_frame: { operation_id: 'rejected', sha256: f.rejected.sha256,
+        path: f.rejected.materialized_path, accepted: true } }));
+    expect(f.s.semanticLayerOwners(42).find((owner: any) => owner.hypothesis_id === 'tab'))
+      .toMatchObject({ construction_revision: 'rejected', parent_construction_revision: 'rejected' });
+    const undoRequest = { id: 'undo-connected', tool: 'photoshop_execute_visual_microplan',
+      args: { document_id: 42, action_class: 'ROLLBACK', steps: [
+        { id: 'one-undo', tool: 'photoshop_undo', args: { document_id: 42, steps: 1 } },
+        { id: 'after', tool: 'photoshop_get_preview', args: {} },
+      ] } };
+    const wronglyDeep = structuredClone(undoRequest);
+    wronglyDeep.args.steps[0].args.steps = 2;
+    expect(f.s.collectPreflightErrors(wronglyDeep).some(error => error.includes('bounded_undo_source_unproven'))).toBe(true);
+    const missingDepth = structuredClone(undoRequest) as any;
+    delete missingDepth.args.steps[0].args.steps;
+    expect(f.s.collectPreflightErrors(missingDepth).some(error => error.includes('bounded_undo_steps_unproven'))).toBe(true);
+    vi.spyOn(f.s, 'collectPreflightErrors').mockReturnValueOnce([]);
+    const undo = f.s.begin(undoRequest).record;
+    f.s.complete(undo, { content: [{ type: 'text', text: JSON.stringify({
+      ok: true,
+      mutation_results: { 'one-undo': { undone: true, steps: 1, undo_history_states_consumed: 1,
+        evidence: 'uxp_native_undo_receipt' } },
+      pass_execution: { history_ownership: { protocol: 'photoshop.guard.semantic_pass_history_ownership.v1',
+        status: 'exact', owned_history_steps: 1 } },
+    }) }] });
+    f.s.attachPreview('undo-connected', { content: [{ type: 'text', text: JSON.stringify(f.before) }] });
+    expect(f.s.read('undo-connected').undo_source_operation_id).toBe('rejected');
+    const review = { ...f.review, id: 'undo-connected', preview_id: 'undo-connected' };
+    const authenticated = f.s.read('undo-connected') as any;
+    const bad = structuredClone(authenticated);
+    const body = JSON.parse(bad.result.content[0].text);
+    delete body.mutation_results['one-undo'].evidence;
+    bad.result.content[0].text = JSON.stringify(body);
+    f.s.write(bad);
+    expect(() => f.s.verdict(review)).toThrow(/bounded_undo_restore_unverified/);
+    expect(f.s.read('rejected').rolled_back).not.toBe(true);
+    f.s.write(authenticated);
+    f.s.verdict(review);
+    expect(f.s.read('rejected')).toMatchObject({ rolled_back: true, current_frame_authority: false });
+    expect(f.s.semanticLayerOwners(42)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ hypothesis_id: 'panel', construction_revision: 'retained' }),
+      expect.objectContaining({ hypothesis_id: 'tab', construction_revision: 'retained', parent_construction_revision: 'retained' }),
+    ]));
+    const restarted = new SessionStore(path.join(f.dir, 'controller'), { workspaceRoot: f.dir });
+    expect(restarted.semanticLayerOwners(42)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ hypothesis_id: 'panel', construction_revision: 'retained' }),
+      expect.objectContaining({ hypothesis_id: 'tab', construction_revision: 'retained', parent_construction_revision: 'retained' }),
+    ]));
+  });
+
   it('restores retained scene/task facts with the native undo result', () => {
     const f = fixture({ legacyText: true });
     expect(f.s.read('rejected').baseline_semantic_state.forged).toBeUndefined();

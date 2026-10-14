@@ -1237,6 +1237,7 @@ describe('embedded Photoshop Guard', () => {
     expect(Object.keys(schema('photoshop_guard_cycle_auto').properties)).toEqual([
         'protocol_version',
         'previous_operation_id',
+        'review_operation_id',
         'previous_observation',
         'painting_intent',
         'next_pass',
@@ -1452,6 +1453,41 @@ describe('embedded Photoshop Guard', () => {
     });
     expect(result.isError).not.toBe(true);
     expect(JSON.parse((result.content[0] as { type: 'text'; text: string }).text)).toMatchObject({ ok: true });
+  });
+
+  it('returns an actionable exact-frame correction instead of terminal Art Director rejection for a missing relationship audit', async () => {
+    const dispatch = vi.fn(async () => ({ ok: true }));
+    const runtime = {
+      store: { paintingState: () => ({ documents: { '102': { art_director: { whole_image_glance: {
+        due: true, reason: 'global_change',
+        required_operation_id: 'mykonos_20261011_left_middle_house_structural_01',
+        required_frame_sha256: '1c5ad32246a4939691dfa9660d2ef08d4a4a067c575395cb13f2caa3f13449d2',
+        required_relations: ['negative-space/composition', 'occlusion/depth'],
+      } } } } }) },
+      collectArtDirectorReviewErrors: () => [],
+      artDirector: dispatch,
+    } as unknown as EmbeddedGuardRuntime;
+    const tool = createGuardTools(runtime).find(definition => definition.tool.name === 'photoshop_guard_art_director')!;
+    const result = await tool.handler({ document_id: 102, action: 'review', directive: { directive_id: 'mykonos-cobble' },
+      whole_image_glance: {
+        trigger: 'global_change', operation_id: 'mykonos_20261011_left_middle_house_structural_01',
+        frame_sha256: '1c5ad32246a4939691dfa9660d2ef08d4a4a067c575395cb13f2caa3f13449d2',
+        observation: 'Both whole-frame spatial relations require an explicit review.',
+      },
+    });
+    const body = JSON.parse((result.content[0] as { type: 'text'; text: string }).text);
+    expect(body).toMatchObject({ code: 'guard_art_director_contract_invalid', visual_mutation_started: false,
+      required_whole_image_glance: {
+        field: 'whole_image_glance.relationship_audit.checks',
+        trigger: 'global_change',
+        operation_id: 'mykonos_20261011_left_middle_house_structural_01',
+        required_relations: ['negative-space/composition', 'occlusion/depth'],
+        received_relations: [], missing_relations: ['negative-space/composition', 'occlusion/depth'],
+      },
+    });
+    expect(body.issues.join(' ')).toContain('whole_image_glance.relationship_audit.checks is missing required relations');
+    expect(body.correction).toContain('Never invent pass');
+    expect(dispatch).not.toHaveBeenCalled();
   });
 
   it('publishes compact Guard, runtime-state and UXP revisions without requiring version ceremony', async () => {
@@ -2524,6 +2560,109 @@ describe('embedded Photoshop Guard', () => {
     expect(repeated.closed_previous).toMatchObject({ closed: true, operation_id: 'atomic-cycle-previous' });
     expect(runtime.store.read('atomic-cycle-invalid-next-repeat')).toBeUndefined();
   });
+  it('accepts the exact pending source and dispatches one compact Undo in the SAME cycle without weakening post-closure checks', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'embedded-guard-same-cycle-undo-'));
+    dirs.push(dir);
+    const { registry, before, after } = fakeRegistry(dir);
+    let frame = before;
+    let mutations = 0;
+    let undos = 0;
+    registry.register('photoshop_get_preview', {
+      tool: { name: 'photoshop_get_preview', description: 'pinned full frame',
+        inputSchema: { type: 'object', properties: { document_id: { type: 'number' },
+          max_dimension_px: { type: 'number' }, quality: { type: 'number' } } } },
+      handler: async () => ({ content: [{ type: 'text', text: JSON.stringify(frame) }] }),
+    });
+    registry.register('photoshop_set_layer_opacity', {
+      tool: { name: 'photoshop_set_layer_opacity', description: 'one exact history mutation',
+        inputSchema: { type: 'object', properties: { document_id: { type: 'number' },
+          opacity: { type: 'number' } }, required: ['opacity'] } },
+      handler: async () => {
+        mutations++;
+        frame = mutations === 1 ? before : after;
+        return { content: [{ type: 'text', text: JSON.stringify({ ok: true, history_steps: 1 }) }] };
+      },
+    });
+    registry.register('photoshop_undo', {
+      tool: { name: 'photoshop_undo', description: 'authenticated single native Undo',
+        inputSchema: { type: 'object', properties: { document_id: { type: 'number' },
+          steps: { type: 'number' } }, required: ['steps'] } },
+      handler: async () => {
+        undos++;
+        frame = before;
+        return { content: [
+          { type: 'text', text: 'Undo successful (1 step)\nResult: {"undone":true,"steps":1}' },
+          { type: 'text', text: JSON.stringify({ undone: true, steps: 1,
+            undo_history_states_consumed: 1, evidence: 'uxp_native_undo_receipt' }) },
+        ] };
+      },
+    });
+    const runtime = runtimeFor(registry, dir);
+    runtime.artRun({ document_id: 42, process_dir: 'processes/same-cycle-undo-process/run-01',
+      painting_profile: 'simple_graphic', commentary_mode: 'technical' });
+    runtime.store.updatePaintingState(42, current => ({ ...current,
+      document_instance: { host_witness: {
+        protocol: 'photoshop.uxp.document_instance_witness.v1',
+        session_id: 'embedded-guard-fixture', token: 'embedded-guard-fixture:42',
+      } },
+    }));
+    const pass = (key: string, opacity: number) => ({
+      request_key: key, document_id: 42, goal: 'Record one exact reversible opacity operation.',
+      stage: 'FORM', scale: 'global', region: 'whole-canvas',
+      actions: [{ tool: 'photoshop_set_layer_opacity', args: { opacity } }],
+    });
+    const baseline = await runtime.cycle({ next_pass: pass('same-undo-baseline', 75) }) as any;
+    expect(baseline.execution.phase).toBe('completed');
+    await runtime.cycle({ previous_operation_id: 'same-undo-baseline',
+      previous_observation: { observed: 'The baseline full frame is intact.', target: 'resolved' } });
+    // Explicit accepted-frame fixture: the later source must own an exact
+    // semantic baseline. Runtime admission cannot infer it from a blank initial
+    // document or from the model's description of acceptance.
+    runtime.store.updatePaintingState(42, current => ({ ...current,
+      current_frame: { operation_id: 'same-undo-baseline', sha256: before.sha256,
+        path: before.materialized_path, accepted: true },
+      accepted_frame: { operation_id: 'same-undo-baseline', sha256: before.sha256,
+        path: before.materialized_path, accepted: true },
+    }));
+    const source = await runtime.cycle({ next_pass: pass('same-undo-source', 55) }) as any;
+    expect(source.execution.phase).toBe('completed');
+    expect(runtime.store.read('same-undo-source')?.baseline_semantic_state).toBeDefined();
+    expect(runtime.store.read('same-undo-source')?.baseline_preview).toBeDefined();
+    // The simple opacity pass above is directly compiled in this fake
+    // registry. Pin its completed synthetic transcript as a one-step
+    // VisualMicroPlan exactly as a real connected_move source is journaled.
+    const sourceRecord = runtime.store.read('same-undo-source') as any;
+    sourceRecord.tool = 'photoshop_execute_visual_microplan';
+    sourceRecord.args = { ...sourceRecord.args, action_class: 'REFINE', steps: [
+      { id: 'move', tool: 'photoshop_move_layer', args: { deltaX: 20, deltaY: 0 } },
+    ] };
+    sourceRecord.result = { content: [{ type: 'text', text: JSON.stringify({
+      pass_execution: { history_ownership: {
+        protocol: 'photoshop.guard.semantic_pass_history_ownership.v1',
+        status: 'exact', owned_history_steps: 1,
+      } },
+    }) }] };
+    runtime.store.write(sourceRecord);
+    expect(runtime.store.read('same-undo-source')?.verdict).toBeUndefined();
+    const sameCycle = await runtime.cycle({
+      previous_operation_id: 'same-undo-source',
+      previous_observation: { observed: 'One exact native opacity change is visible in the full frame.',
+        target: 'resolved', action: 'accept' },
+      next_pass: {
+        request_key: 'same-undo-rollback', document_id: 42,
+        goal: 'Restore the accepted baseline through the one owned History state.',
+        actions: [{ tool: 'photoshop_undo', args: { document_id: 42, steps: 1 } }],
+      },
+    }) as any;
+    expect(sameCycle.closed_previous).toMatchObject({ closed: true,
+      operation_id: 'same-undo-source', verdict_recorded: true });
+    expect(sameCycle.preflight_rejection).toBeUndefined();
+    expect(sameCycle.execution?.operation_id).toBe('same-undo-rollback');
+    expect(undos).toBe(1);
+    expect(runtime.store.read('same-undo-rollback')?.undo_source_operation_id).toBe('same-undo-source');
+    expect(runtime.store.read('same-undo-rollback')?.undo_expected_history_steps).toBe(1);
+    expect(runtime.store.read('same-undo-source')?.verdict?.disposition).toBe('accept');
+  });
 
   it('restores controller and project-local art-run state when post-closure rollback revalidation rejects next operation', async () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'embedded-guard-post-closure-gate-'));
@@ -3070,6 +3209,7 @@ describe('embedded Photoshop Guard', () => {
         inputSchema: {
           type: 'object',
           properties: {
+            document_id: { type: 'number' },
             red: { type: 'number' },
             green: { type: 'number' },
             blue: { type: 'number' },
@@ -5592,6 +5732,7 @@ describe('embedded Photoshop Guard', () => {
       painting_profile: 'simple_graphic',
     });
 
+    const receiptSpy = vi.spyOn(runtime.store, 'recordVisualDeliveryReceipt');
     const cycleTool = createGuardTools(runtime).find(def => def.tool.name === 'photoshop_guard_cycle_auto')!;
     const publicResult = await cycleTool.handler({
       next_pass: {
@@ -5614,6 +5755,8 @@ describe('embedded Photoshop Guard', () => {
     expect(previewCalls).toBe(2);
     expect(mutationCalls).toBe(1);
     expect(publicResult.content.filter((item: any) => item.type === 'image')).toHaveLength(4);
+    expect(receiptSpy).toHaveBeenCalledTimes(1);
+    expect(receiptSpy.mock.calls[0]?.[1]).toMatchObject({ transport: 'mcp_image_content_inline_cycle' });
     const body = JSON.parse((publicResult.content[0] as any).text);
     expect(body.visual_review).toMatchObject({
       operation_id: 'review-package-operation',
@@ -5644,7 +5787,7 @@ describe('embedded Photoshop Guard', () => {
         document_id: 42,
       },
       delivery: {
-        transport: 'mcp_image_content_explicit_review',
+        transport: 'mcp_image_content_inline_cycle',
         delivery_complete: true,
         delivered: [
           expect.objectContaining({ role: 'after', sha256: after.sha256 }),

@@ -242,3 +242,104 @@ it('oversized active owner binding returns that document and intact recovery blo
   expect(body.mutation_replay_permitted).toBe(false);
   expect(Buffer.byteLength(JSON.stringify(body))).toBeLessThanOrEqual(GUARD_STATE_RESPONSE_MAX_BYTES);
 });
+
+it('RH-06 keeps long-session status actionable while archiving historical artistic findings', () => {
+  const dir = fixture();
+  const primary = { problem_id: 'facade-perspective', severity: 'must-fix', scale: 'medium', status: 'open' };
+  const binding = { hypothesis_id: 'right-facade', layer_id: 17, geometry_binding: { revision: 6 } };
+  const backlog = Array.from({ length: 85 }, (_, i) => ({
+    problem_id: `finding-${i}`, status: 'open', notes: 'visible artistic detail '.repeat(30),
+  }));
+  const doc = { document_id: 130, next_required_action: 'review facade geometry',
+    current_frame: { operation_id: 'frame-39', sha256: 'exact-sha' },
+    largest_open_must_fix: primary, logical_layer_owners: [binding],
+    problem_backlog: backlog, artistic_losses: backlog, last_critique: { observations: backlog },
+    unresolved_visual_basis: { observations: backlog },
+  };
+  const input = { next_required_action: 'review facade geometry', documents: { '130': doc },
+    pending_visual_verdict_details: [{ operation_id: 'frame-40', sha256: 'pending-exact-sha' }],
+    uncertain: ['uncertain-1'], pending_reports: ['pending-2'] };
+  const body = JSON.parse(serializeGuardState(input, dir, 'status'));
+  expect(Buffer.byteLength(JSON.stringify(body))).toBeLessThanOrEqual(GUARD_STATE_RESPONSE_MAX_BYTES);
+  expect(body.code).toBeUndefined();
+  expect(body.next_required_action).toBe(input.next_required_action);
+  expect(body.documents['130']).toMatchObject({ document_id: 130, largest_open_must_fix: primary,
+    logical_layer_owners: [binding], current_frame: doc.current_frame });
+  expect(body.pending_visual_verdict_details).toEqual(input.pending_visual_verdict_details);
+  expect(body.uncertain).toEqual(['uncertain-1']);
+  expect(body.pending_reports).toEqual(['pending-2']);
+  expect(body.documents['130'].problem_backlog).toBeUndefined();
+  expect(body.response_budget.artistic_detail_requires_resume).toBe(true);
+  expect(JSON.parse(fs.readFileSync(body.response_budget.full_projection_path, 'utf8'))).toEqual(input);
+});
+
+it('RH-06 prioritizes the current Director task over bulky stored Director evaluations', () => {
+  const dir = fixture();
+  const task = { task_id: 'facade', status: 'active', allowed_scales: ['medium', 'small'],
+    correction_target: { problem_id: 'perspective', region_bounds: { left: 25, top: 30, right: 150, bottom: 170 } } };
+  const director = { directive_id: 'director-v4', status: 'active', current_task_id: 'facade', review_due: false,
+    tasks: [task], style_contract: { analysis: 'style '.repeat(4500) },
+    whole_image_glance: { history: Array(80).fill('observation '.repeat(50)) } };
+  const input = { next_required_action: 'correct perspective', documents: {
+    '99': { document_id: 99, art_director: director, largest_open_must_fix: { problem_id: 'perspective' },
+      current_frame: { operation_id: 'exact-frame', sha256: 'sha' } },
+  } };
+  const body = JSON.parse(serializeGuardState(input, dir, 'status'));
+  expect(body.code).toBeUndefined();
+  expect(body.documents['99'].art_director).toMatchObject({ directive_id: 'director-v4', status: 'active',
+    current_task_id: 'facade', review_due: false, tasks: [task] });
+  expect(body.documents['99'].art_director.style_contract).toBeUndefined();
+  expect(body.response_budget.artistic_detail_requires_resume).toBe(true);
+  expect(JSON.parse(fs.readFileSync(body.response_budget.full_projection_path, 'utf8'))).toEqual(input);
+});
+
+it('RH-06 preserves an active whole-image mutation barrier and its public review route', () => {
+  const dir = fixture();
+  const glance = { due: true, reason: 'global_change', required_operation_id: 'frame-44',
+    required_frame_sha256: 'a'.repeat(64), required_relations: ['support/contact', 'occlusion/depth'],
+    history: Array(80).fill({ observation: 'historical whole-frame note '.repeat(40) }) };
+  const input = { next_required_action: 'review global change', documents: {
+    '42': { document_id: 42, next_required_action: 'review global change', art_director: {
+      directive_id: 'director-active', status: 'active', current_task_id: 'structure', review_due: false,
+      tasks: [{ task_id: 'structure', status: 'active' }], whole_image_glance: glance,
+      style_contract: { analysis: 'style '.repeat(5000) },
+    } },
+  } };
+  const body = JSON.parse(serializeGuardState(input, dir, 'status'));
+  expect(body.code).toBeUndefined();
+  expect(body.documents['42'].art_director.whole_image_glance).toMatchObject({
+    due: true, reason: 'global_change', required_operation_id: 'frame-44',
+    required_frame_sha256: 'a'.repeat(64), required_relations: ['support/contact', 'occlusion/depth'],
+  });
+  expect(body.documents['42'].art_director.whole_image_glance.history).toBeUndefined();
+  expect(body.response_budget.artistic_detail_next_public_call).toMatchObject({
+    tool: 'photoshop_guard_art_director', args: { document_id: 42, action: 'review' },
+  });
+  expect(Buffer.byteLength(JSON.stringify(body))).toBeLessThanOrEqual(GUARD_STATE_RESPONSE_MAX_BYTES);
+});
+
+it('RH-06 fails closed instead of silently clipping recovery identities or owner bindings', () => {
+  const dir = fixture();
+  const blockers = Array.from({ length: 20 }, (_, i) => ({ kind: 'operation', operation_id: `pending-${i}`,
+    document_id: 42, phase: 'uncertain', detail: 'recovery-evidence '.repeat(90) }));
+  const blockerBody = JSON.parse(serializeGuardState({
+    next_required_action: 'reconcile unresolved work before mutation',
+    documents: { '42': { document_id: 42, next_required_action: 'reconcile unresolved work before mutation' } },
+    identity_recovery_blockers: blockers,
+  }, dir, 'status'));
+  expect(blockerBody.code).toBe('guard_state_projection_requires_public_resume');
+  expect(blockerBody.continuation_blocked).toBe(true);
+  expect(blockerBody.identity_recovery_blocker_count).toBe(20);
+  expect(blockerBody.identity_recovery_blockers).toEqual([blockers[0]]);
+
+  const owners = Array.from({ length: 20 }, (_, i) => ({ hypothesis_id: `owner-${i}`, layer_id: i + 1,
+    geometry_binding: { owner_id: `owner-${i}`, anchors: 'binding '.repeat(180) } }));
+  const ownerBody = JSON.parse(serializeGuardState({
+    next_required_action: 'continue bounded painting',
+    documents: { '42': { document_id: 42, next_required_action: 'continue bounded painting', logical_layer_owners: owners } },
+  }, dir, 'status'));
+  expect(ownerBody.code).toBe('guard_state_projection_requires_public_resume');
+  expect(ownerBody.continuation_blocked).toBe(true);
+  expect(ownerBody.next_required_action).toContain('projection=ownership');
+  expect(Buffer.byteLength(JSON.stringify(ownerBody))).toBeLessThanOrEqual(GUARD_STATE_RESPONSE_MAX_BYTES);
+});

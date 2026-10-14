@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { authoredSurfaceField, SURFACE_FIELD_PROPERTIES } from './authored-surface-field.js';
 
 type Point = { x: number; y: number };
 type Bounds = { left: number; top: number; right: number; bottom: number };
@@ -16,6 +17,7 @@ export function authoredFormField(value: unknown, bounds: Bounds, maxDimension =
   const fail = (path: string, text: string): never => {
     throw new FormFieldError(`painterly.form_field.${path}`, text);
   };
+  if (f?.kind === 'surface' || f?.kind === 'cast-shadow') return authoredSurfaceField(f, bounds, maxDimension, fail);
   const finite = (n: unknown): n is number =>
     typeof n === 'number' && Number.isFinite(n) && Math.abs(n) <= 1e6;
   const point = (p: any, path: string): Point => {
@@ -86,7 +88,15 @@ export function authoredFormField(value: unknown, bounds: Bounds, maxDimension =
         const norm = Math.hypot(nx, ny, nz) || 1;
         intensity = Math.max(0, (nx * direction[0] + ny * direction[1] + nz * direction[2]) / norm);
       } else {
-        intensity = Math.exp(-0.5 * (u * u + v * v));
+        // A light-field is a broad directional hotspot on the authored surface,
+        // not a symmetric glow independent of the requested light direction.
+        // Shift its center in normalized, *rotated* surface coordinates. A
+        // front-facing direction [0,0,1] retains the centered Gaussian;
+        // opposite tangent directions illuminate opposite sides. The z
+        // component reduces the tangent displacement through normalization.
+        const lightU = (cos * direction[0] + sin * direction[1]) * 0.75;
+        const lightV = (-sin * direction[0] + cos * direction[1]) * 0.75;
+        intensity = Math.exp(-0.5 * ((u - lightU) ** 2 + (v - lightV) ** 2));
       }
       const amount = ambient + (1 - ambient) * intensity,
         offset = (y * width + x) * 4;
@@ -132,9 +142,10 @@ const rgb = {
 export const FORM_FIELD_SCHEMA = {
   type: 'object',
   description:
-    'Explicit authored analytic form/light target, NOT a photographic reference or anatomy inference. All colors and lighting are chosen by the artist. Generates bounded shape-following brush marks through the normal painterly executor.',
+    'Explicit authored analytic form/light target, NOT a photographic reference or anatomy inference. All colors and lighting are chosen by the artist. surface uses triangles/sections in shared canvas x/y + depth z, optional vertex normals and oriented material response. cast-shadow projects an explicit caster onto a receiver along directional light with contact density/falloff. This is a 2.5D orthographic approximation, not anatomy inference/PBR. Surface/shadow masks intersect the component/protection clip and generate real bounded brush actions.',
   properties: {
-    kind: { type: 'string', enum: ['ellipsoid', 'light-field'] },
+    kind: { type: 'string', enum: ['ellipsoid', 'light-field', 'surface', 'cast-shadow'] },
+    ...SURFACE_FIELD_PROPERTIES,
     center: point,
     radius: point,
     light_direction: { type: 'array', minItems: 3, maxItems: 3, items: { type: 'number' } },
@@ -143,6 +154,11 @@ export const FORM_FIELD_SCHEMA = {
     light_color: rgb,
     ambient: { type: 'number', minimum: 0, maximum: 0.8 },
   },
-  required: ['kind', 'center', 'radius', 'light_direction', 'shadow_color', 'light_color'],
+  required: ['kind', 'light_direction', 'shadow_color', 'light_color'],
+  anyOf: [
+    { properties: { kind: { enum: ['ellipsoid', 'light-field'] } }, required: ['center', 'radius'] },
+    { properties: { kind: { enum: ['surface'] } }, anyOf: [{ required: ['surfaces'] }, { required: ['sections'] }] },
+    { properties: { kind: { enum: ['cast-shadow'] } }, required: ['caster', 'receiver', 'contact'] },
+  ],
   additionalProperties: false,
 };

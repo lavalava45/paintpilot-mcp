@@ -104,6 +104,9 @@ export function createLayerTools(
 
     layerTool('photoshop_paint_color_gradient', 'Paint one continuous linear raster color/value field on an exact layer. This is pixel color, not a transparency mask gradient.', schema({
       layer_id: { type: 'number', minimum: 1, description: 'Stable target layer id.' },
+      preserve_transparency: { type: 'boolean', description: 'Surface tone on an existing NORMAL raster owner only: temporarily protect transparent pixels in one native History transaction, restore the original lock and active layer, and reject any change of the layer bounds. Outside pixels stay transparent.' },
+      clip_contour: { type: 'array', minItems: 3, maxItems: 256, items: { type: 'object', properties: { x: { type: 'number' }, y: { type: 'number' } }, required: ['x', 'y'], additionalProperties: false }, description: 'Optional unfeathered polygon clip in canvas pixels; requires preserve_transparency=true and no pre-existing selection. Temporary path/selection are removed in the same History transaction.' },
+      opacity: { type: 'number', minimum: 1, maximum: 100, default: 100, description: 'Native gradient strength in percent; applies without changing the layer opacity.' },
       from: { type: 'object', properties: { x: { type: 'number' }, y: { type: 'number' } }, required: ['x', 'y'], description: 'Gradient start in canvas pixels.' },
       to: { type: 'object', properties: { x: { type: 'number' }, y: { type: 'number' } }, required: ['x', 'y'], description: 'Gradient end in canvas pixels.' },
       stops: { type: 'array', minItems: 2, maxItems: 4, items: { type: 'object', properties: { position: { type: 'number', minimum: 0, maximum: 1 }, red: { type: 'number', minimum: 0, maximum: 255 }, green: { type: 'number', minimum: 0, maximum: 255 }, blue: { type: 'number', minimum: 0, maximum: 255 } }, required: ['position', 'red', 'green', 'blue'] }, description: '2–4 strictly ordered color stops; first=0, last=1.' },

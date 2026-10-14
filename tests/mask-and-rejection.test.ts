@@ -119,7 +119,7 @@ function native(options:{existing?:boolean;disabled?:boolean;failSelect?:boolean
   return {};
  }));
  const harness={target:{doc,targetLayerId:7,targetDescriptor:{name:'Road'},originalLayerId:7,resolution:72,width:100,height:100},
- snapshot:async()=>({settings:{...brush}}),apply:async(s:typeof brush)=>({settings:brush={...brush,...s}}),
+ snapshot:async()=>({settings:{...brush}}),apply:async(s:typeof brush)=>({settings:brush={...brush,...s},observed_fields:['size','opacity','flow']}),
  color:()=>({...color}),setColor:(c:typeof color)=>{color={...c};brush.opacity=1;},draw:async()=>{if(options.failDraw)throw Error('draw failed');draws.push({channel:active[0].name,color:{...color},brush:{...brush}});}};
  const api=runInNewContext(source+`
  preparePaintTarget=async()=>harness.target; preflightStrokeToolsModal=async()=>({ready:true});

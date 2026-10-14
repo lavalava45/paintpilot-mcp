@@ -31,9 +31,19 @@ export async function runUndo(router: PhotoshopBackendRouter, args: Args): Promi
       steps,
     });
     if (!outcome.ok || !outcome.data) throw new Error(outcome.error ?? 'uxp_undo_failed');
-    return message(
-      `Undo successful (${steps} step${steps > 1 ? 's' : ''})\nResult: ${JSON.stringify(outcome.data)}`
-    );
+    const confirmed = outcome.data.undone === true && outcome.data.steps === steps;
+    return {
+      content: [
+        { type: 'text', text: `Undo successful (${steps} step${steps > 1 ? 's' : ''})\nResult: ${JSON.stringify(outcome.data)}` },
+        // Keep the existing human-facing text contract. Only an affirmative
+        // native UXP receipt may supply exact history depth to a Guard
+        // VisualMicroPlan: the caller's requested steps alone prove nothing.
+        ...(confirmed ? [{ type: 'text' as const, text: JSON.stringify({
+          undone: true, steps, undo_history_states_consumed: steps,
+          evidence: 'uxp_native_undo_receipt',
+        }) }] : []),
+      ],
+    };
   } catch (error) {
     return atomicFailureFromError(error);
   }

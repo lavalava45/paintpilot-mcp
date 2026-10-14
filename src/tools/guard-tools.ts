@@ -1,9 +1,12 @@
-import { CHAT_CRITIC_SCHEMA, criticRoleInstruction, criticSpawnHandoff } from '../core/guard/chat-critic.js';
+import { COMPONENT_SPACE_SCHEMA } from '../core/component-space.js';
+import { PHOTOSHOP_DRAWING_ROUTE } from '../prompts/host-guidance.js';
+import { CHAT_CRITIC_SCHEMA, criticRoleInstruction, criticSpawnHandoff, supportContactWeightInstruction } from '../core/guard/chat-critic.js';
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import type { ToolDefinition, ToolResult } from '../core/tool-registry.js';
 import { EmbeddedGuardRuntime, guardRuntimeErrorCode } from '../core/guard/runtime.js';
+import { ADDRESSES_PROBLEM_IDS_SCHEMA } from '../core/guard/problem-links.js';
 import { projectGuardDiagnostics, serializeGuardState } from '../core/guard/response-budget.js';
 import { currentToolExecutionContext } from '../core/execution-context.js';
 import { ReviewContextCache, type ReviewContextImage } from '../core/guard/review-context-cache.js';
@@ -18,6 +21,8 @@ import { PAINTING_STAGE_RESET_REASONS } from '../core/painting-stage-policy.js';
 import { ATTENTION_BINDING_SCHEMA } from '../core/perceptual-hierarchy.js';
 import { collectSchemaErrors, type JsonSchemaNode } from '../core/guard/cycle-compiler.js';
 import { SCENE_GEOMETRY_SCHEMA, GEOMETRY_BINDING_SCHEMA } from '../core/geometry-contract.js';
+import { CAMERA_BINDING_SCHEMA } from '../core/scene-camera-imaging-model.js';
+import { VISUAL_MICROPLAN_SURFACE_FRAME_SCHEMA } from '../core/visual-microplan.js';
 import {
   DEFAULT_BRUSH_SCENE_ROLES,
   MEDIA_MARK_CHARACTERS,
@@ -68,13 +73,16 @@ import {
   PHYSICAL_STACK_CRITERIA,
   PHYSICAL_STACK_CRITERION_STATUSES,
 } from '../core/physical-stack-check.js';
-import { sceneOwnershipPlanSchema } from '../core/scene-ownership-plan.js';
+import { sceneOwnershipPlanSchema, sceneOwnershipContinuationSchema } from '../core/scene-ownership-plan.js';
+import { EDITABLE_SCOPE_REVIEW_SCHEMA } from '../core/guard/editable-scope.js';
+import { originalBriefAnchor, STRUCTURAL_CORRECTION_SCHEMA } from '../core/guard/critic-correction.js';
 import { CONSTRUCTION_MODEL_SCHEMA, CONSTRUCTION_PASS_SCHEMA, ConstructionError, constructionReviewTarget, solveConstruction } from '../core/object-construction.js';
 import { PAINTERLY_PASS_SCHEMA } from '../core/painterly-strokes.js';
 import { PAINTING_COMPLETION_SCHEMA } from '../core/guard/document-artistic-debt.js';
 import { SCENE_CAMERA_IMAGING_MODEL_SCHEMA } from '../core/scene-camera-imaging-model.js';
 import { IMAGING_PREFLIGHT_SCHEMA } from '../core/imaging-preflight.js';
 import {
+  PAINTING_INTENT_CONTRACT_FIELDS,
   PAINTING_INTENT_ACTIONS,
   PAINTING_INTENT_SCALES,
   PAINTING_INTENT_VISUAL_INTENTS,
@@ -246,7 +254,9 @@ async function explicitReviewImageResult(
   operationId: string,
   requestedRoles?: string[],
   forceRedelivery = false,
-  redeliveryReason?: string
+  redeliveryReason?: string,
+  wholeSceneReview = false,
+  deliveryMode: 'explicit' | 'inline' = 'explicit'
 ): Promise<ToolResult> {
   const record = runtime.store.read(operationId);
   if (!record?.visual || !record.preview) {
@@ -397,7 +407,7 @@ async function explicitReviewImageResult(
 
   const reviewResultReadyAt = new Date().toISOString();
   const delivery = {
-    transport: images.length ? 'mcp_image_content_explicit_review'
+    transport: images.length ? (deliveryMode === 'inline' ? 'mcp_image_content_inline_cycle' : 'mcp_image_content_explicit_review')
       : delivered.length ? 'confirmed_same_chat_image_references' : 'metadata_only',
     delivered,
     omitted,
@@ -429,9 +439,17 @@ async function explicitReviewImageResult(
   const taskId = record.args?.planner_task_id ?? record.planner_task_id;
   const task = director?.tasks?.find(row => row.task_id === taskId);
   // This is a request to the host looking at the delivered pixels, never a server verdict.
-  const criticRole = runtime.store.chatCriticRequest(operationId, projectionContext);
+  const criticRole = runtime.store.chatCriticRequest(operationId, projectionContext, wholeSceneReview);
+  const taskAnchor = originalBriefAnchor(state ?? {}, criticRole?.required === true || wholeSceneReview);
+  // Restore the complete brief once, in artistic_review.original_brief, not in two copies.
+  if (taskAnchor.restore_full_brief && state?.original_brief) {
+    delete taskAnchor.original_brief;
+    taskAnchor.original_brief_field = 'artistic_review.original_brief';
+  }
   const artisticReview = {
     mode: 'same_chat',
+    task_anchor: taskAnchor,
+    editable_scope: runtime.store.editableScopeRequest(operationId, projectionContext, wholeSceneReview),
     ...(criticRole ? { critic_role: { ...criticRole, ...(criticRole.required ? {
       instruction: criticRoleInstruction(presentationContext.language),
       optional_spawn: criticSpawnHandoff(criticRole, state ?? {}, record) } : {}) } } : {}),
@@ -456,9 +474,9 @@ async function explicitReviewImageResult(
     stage: record.stage ?? record.args?.stage ?? state?.current_stage ?? 'GLOBAL_BLOCK_IN',
     planner_task: task ? { task_id: task.task_id, summary: task.summary } : null,
     after_sha256: record.preview.sha256,
-    instruction: presentationContext.language === 'ru'
+    instruction: (presentationContext.language === 'ru'
       ? 'Посмотри на доставленные AFTER и BEFORE: что реально видно в форме, пропорциях, перспективе и освещении относительно исходного задания и выбранного стиля? Не используй отчёт о выполненных командах как доказательство. Запиши видимый результат в previous_observation.observed, самый важный оставшийся недостаток в primary_mismatch и честный target. Если цель не достигнута, следующий painting_intent или next_pass должен исправлять этот недостаток конкретным способом построения; при повторном провале меняй построение, а не добавляй фактуру или блики. Различай улучшение прохода, готовность стадии и всей работы. Если кадра или задания недостаточно, укажи неопределённость. Оцени primitive_footprint относительно формы объекта и задания: при доминировании плоской заготовки/пиктограммы укажи suspect и сохрани дефект объекта; unknown оставляет долг оценки. Успех локального прохода не закрывает этот долг. Полезную начальную заготовку можно сохранить. Дальность сама по себе не требует размытия: оцени воздушную перспективу, фокус, материал и выборочные края отдельно. Смягчение не исправляет геометрию; фильтр не закрывает долг формы только потому, что исчезли углы. Заполненные поля не доказывают качество; дополнительный вызов оценки не нужен.'
-      : 'Inspect the delivered AFTER and BEFORE: what is actually visible in form, proportions, perspective and lighting against the original brief and intended style? Do not use executed commands as evidence. Put the visible result in previous_observation.observed, the largest remaining defect in primary_mismatch and an honest target. If the goal is unmet, the next painting_intent or next_pass must address that defect with a concrete construction change; after repeated failure change construction instead of adding texture or highlights. Distinguish pass improvement, stage readiness and whole-image completion. State uncertainty when the frame or brief is insufficient. Assess primitive_footprint against object form and the brief: use suspect for scaffold/pictogram-dominant representation and retain the object defect; unknown leaves assessment debt. Local pass success does not close this debt. Useful initial block-in pixels may be retained. Distance alone does not require blur: assess atmospheric perspective, focus, material and selective edges separately. Softening does not repair geometry; a filter does not clear form debt merely because corners disappear. Filled fields do not prove quality; no separate assessment call is needed.',
+      : 'Inspect the delivered AFTER and BEFORE: what is actually visible in form, proportions, perspective and lighting against the original brief and intended style? Do not use executed commands as evidence. Put the visible result in previous_observation.observed, the largest remaining defect in primary_mismatch and an honest target. If the goal is unmet, the next painting_intent or next_pass must address that defect with a concrete construction change; after repeated failure change construction instead of adding texture or highlights. Distinguish pass improvement, stage readiness and whole-image completion. State uncertainty when the frame or brief is insufficient. Assess primitive_footprint against object form and the brief: use suspect for scaffold/pictogram-dominant representation and retain the object defect; unknown leaves assessment debt. Local pass success does not close this debt. Useful initial block-in pixels may be retained. Distance alone does not require blur: assess atmospheric perspective, focus, material and selective edges separately. Softening does not repair geometry; a filter does not clear form debt merely because corners disappear. Filled fields do not prove quality; no separate assessment call is needed.') + ' ' + supportContactWeightInstruction(presentationContext.language),
   };
   // Continuation projection is review-service work; no external inference is awaited.
   delivery.timing.result_ready_at = new Date().toISOString();
@@ -476,7 +494,9 @@ async function explicitReviewImageResult(
           undelivered_roles: receipt.undelivered_roles,
         },
         ...(artisticContinuation ? { artistic_continuation: artisticContinuation } : {}),
-        next_required_action: receipt.delivery_complete
+        next_required_action: receipt.delivery_complete && record.verdict
+          ? `Re-evaluate the current whole frame through cycle_auto with review_operation_id=${operationId} + previous_observation (critic_review/editable_scope_review as needed), optionally with next_pass. Do not re-close its old operation or replay painting. Historical non-current images cannot authorize continuation.`
+          : receipt.delivery_complete
           ? (criticRole?.required ? 'Switch to Critic and review the whole exact scene against original_brief; submit previous_observation.critic_review with the next pass in the SAME cycle_auto. ' : '') + 'Perform artistic_review on the delivered pixels, then continue once with previous_operation_id + previous_observation and a painting_intent or next_pass addressing the largest visible defect. Omit the next pass only to finalize or when the user asked to stop.'
           : 'Some required review roles were not delivered. Request the remaining roles before visual verdict closure.',
   };
@@ -503,7 +523,7 @@ async function explicitReviewImageResult(
 }
 
 async function inlineReviewImageResult(runtime: EmbeddedGuardRuntime, operationId: string): Promise<ToolResult | null> {
-  const result = await explicitReviewImageResult(runtime, operationId);
+  const result = await explicitReviewImageResult(runtime, operationId, undefined, false, undefined, false, 'inline');
   if (result.isError) return null;
   const images = result.content.filter(item => item.type === 'image');
   if (!images.length) return null;
@@ -531,6 +551,7 @@ function compactPassSchema(): Record<string, unknown> {
         type: 'string',
         description: 'Stable problem id across attempts; omit only if request_key also identifies the problem.',
       },
+      structural_correction: STRUCTURAL_CORRECTION_SCHEMA,
       document_id: { type: 'number', minimum: 1 },
       restore_anchor_operation_id: {
         type: 'string',
@@ -598,7 +619,7 @@ function compactPassSchema(): Record<string, unknown> {
       },
       layer_separation_check: {
         type: 'object',
-        description: 'Editability decision; unchanged known-owner continuation inherits it. Required for new ownership, structural changes or rollback reassessment.',
+        description: 'Editability decision; only unchanged independently editable component continuation inherits it. Temporary composition scaffolds are frozen after their initial pass; add new component owners instead. Required for new ownership, structural changes or rollback reassessment.',
         properties: {
           change_kind: { type: 'string', enum: [...VISUAL_MICROPLAN_LAYER_CHANGE_KINDS] },
           substantial: { type: 'boolean' },
@@ -626,8 +647,8 @@ function compactPassSchema(): Record<string, unknown> {
         required: ['mode', 'current_layer_id', 'target_layer_ids', 'post_authoritative_layer_id'],
         additionalProperties: false,
       },
-      scene_ownership_plan: sceneOwnershipPlanSchema(
-        'Declare before semantic layer construction in every rendering profile, including first block-in. semantic_id is one editable part, owner_id its logical layer. objects declare subject_kind and single-part/compound-object; whole people/animals/furniture/windows cannot be single-part. Add units to the same plan without altering old bindings; distinct components require distinct owners/layers and intermediate review.'
+      scene_ownership_plan: sceneOwnershipContinuationSchema(
+        'First declaration must be complete: plan_id, objects, units, each new unit with owner_id, role, editability and edit_axes. Once saved, omit unchanged entries entirely; for extensions supply only new explicit units/objects or existing object component lists that preserve all old components. Saved owner/subject/classification edits remain rejected. Existing ownership/geometry bindings are inherited by Guard, not guessed by the artist.'
       ),
       scene_geometry_model: SCENE_GEOMETRY_SCHEMA,
       construction: { ...CONSTRUCTION_PASS_SCHEMA, description: 'General object proportions/connections and articulated reach/contact/pose edits: model.ik_chains preserves authored bone lengths and joint limits; curve=smooth builds continuous contours. Supply model once, then durable model_id, part_id and explicit color. Generates one component on its own layer. Do not also supply actions. No source reads or extra preparation call.' },
@@ -811,6 +832,7 @@ function compactPassSchema(): Record<string, unknown> {
           merge_target_layer_id: { type: 'number', minimum: 1 },
           physical_role: { type: 'string', enum: [...VISUAL_MICROPLAN_PHYSICAL_ROLES] },
           opacity_role: { type: 'string', enum: [...VISUAL_MICROPLAN_OPACITY_ROLES] },
+          component_space: COMPONENT_SPACE_SCHEMA,
           construction_tier: { type: 'string', enum: [...VISUAL_MICROPLAN_CONSTRUCTION_TIERS] },
           parent_hypothesis_id: { type: 'string' },
           parent_construction_revision: { type: 'string' },
@@ -864,8 +886,8 @@ function compactPassSchema(): Record<string, unknown> {
             type: 'array', items: { type: 'string' },
             description: 'Opening owners explicitly reviewed/preserved while mutating their parent semantic owner.',
           },
-          surface_frame: { type: 'object' },
-          camera_binding: { type: 'object' },
+          surface_frame: VISUAL_MICROPLAN_SURFACE_FRAME_SCHEMA,
+          camera_binding: CAMERA_BINDING_SCHEMA,
           attention_binding: ATTENTION_BINDING_SCHEMA,
         },
         required: ['decision', 'hypothesis_id', 'hypothesis', 'rollback_value', 'expected_independent_rollback'],
@@ -986,6 +1008,7 @@ function compactPassSchema(): Record<string, unknown> {
       },
       addresses_primary_mismatch: { type: 'boolean' },
       addresses_problem_id: { type: 'string' },
+      addresses_problem_ids: ADDRESSES_PROBLEM_IDS_SCHEMA,
       causal_strategy_id: { type: 'string' },
       strategy_family: { type: 'string' },
       causal_escalation_level: { type: 'integer', minimum: 0, maximum: 4 },
@@ -1004,6 +1027,8 @@ function compactPassSchema(): Record<string, unknown> {
         minLength: 12,
         description: 'Required when reusing a failed/rolled-back preset despite alternatives; explain why mark fit was not the cause and reuse is justified.',
       },
+      brush_use_reason: { type: 'string', minLength: 12,
+        description: 'When an installed, material/scale-compatible brush is used for a new visual_intent, explain the proposed mark behavior; on first use keep region_bounds and all stroke radii inside a 128px bounded trial. Suitability is judged on the same delivered AFTER, never by this explanation alone.' },
       root_cause_reason: { type: 'string', minLength: 12 },
       causal_level_change: { type: 'boolean' },
       pattern_intent: {
@@ -1043,8 +1068,8 @@ function compactPassSchema(): Record<string, unknown> {
           type: 'object',
           properties: {
             id: { type: 'string', description: 'Optional technical step key; omitted keys are assigned deterministically. Keep an explicit id when another action references it.' },
-            tool: { type: 'string' },
-            args: { type: 'object', additionalProperties: true },
+            tool: { type: 'string', description: 'Exact registered Photoshop command, never an inferred alias. photoshop_select_painting_method returns allowed_commands and the matching input_schema in the same response.' },
+            args: { type: 'object', additionalProperties: true, description: 'Use the exact input_schema from the chosen method execution_contract; Guard validates every nested required field, enum and bound before dispatch.' },
             description: { type: 'string' },
             method_id: { type: 'string' },
             edge_boundary_ids: { type: 'array', items: { type: 'string' } },
@@ -1060,11 +1085,18 @@ function compactPassSchema(): Record<string, unknown> {
 }
 
 function paintingIntentSchema(): Record<string, unknown> {
+  const passProperties = compactPassSchema().properties as Record<string, unknown>;
+  // One canonical schema for bootstrap and method changes; do not maintain opaque copies.
+  const contracts = Object.fromEntries(PAINTING_INTENT_CONTRACT_FIELDS.map(key => {
+    if (!passProperties[key]) throw new Error(`PaintingIntent contract ${key} is absent from next_pass`);
+    return [key, structuredClone(passProperties[key])];
+  }));
   return {
     type: 'object',
     description:
-      'Compact artistic decision for the hot loop. Guard derives stable protocol facts from durable state and keeps the existing next_pass validator authoritative. Concrete Photoshop action geometry remains explicit when it cannot be derived uniquely.',
+      'Compact artistic input for first construction and continuation. Declare scene_ownership_plan/scene models once, select target_owner_id, and choose exactly one of actions, construction or painterly. These fields use the same typed contracts and authoritative validation as next_pass. Rejected plans are not registered: retain and correct the declarations, never remove the owner.',
     properties: {
+      ...contracts,
       request_key: { type: 'string' },
       problem_id: { type: 'string' },
       document_id: { type: 'number', minimum: 1 },
@@ -1092,8 +1124,14 @@ function paintingIntentSchema(): Record<string, unknown> {
       material_role: { type: 'string' },
       preferred_method_id: { type: 'string' },
       preferred_brush_role: { type: 'string' },
+      brush_use_reason: { type: 'string', minLength: 12, description: 'Author a novel purpose for an existing technically valid brush; first use requires an exact bounded trial and same-cycle visual review.' },
       preserve: { type: 'array', items: { type: 'string' } },
       addresses_primary_mismatch: { type: 'boolean' },
+      addresses_problem_id: { type: 'string', description: 'Optional explicit parent defect. Eligible global-to-medium construction may inherit the active Director correction_target. A medium-to-small pass must retain the parent ID, a bounded Critic-reviewed defect region and qualifying structured correction evidence; component problem_id stays distinct.' },
+      addresses_problem_ids: ADDRESSES_PROBLEM_IDS_SCHEMA,
+      change_domains: { type: 'array', uniqueItems: true,
+        items: { type: 'string', enum: [...VISUAL_MICROPLAN_CHANGE_DOMAINS] },
+        description: 'Semantic effects, independent of brush/polygon method. An eligible bounded construction inherits active task allowed_global_changes when omitted; explicit effects stay subject to existing planner/priority gates.' },
       deferred_from_operation_id: {
         type: 'string',
         description: 'Select a compiler-owned deferred sub-pass after review; Guard reloads and revalidates the saved sub-pass.',
@@ -1108,8 +1146,8 @@ function paintingIntentSchema(): Record<string, unknown> {
           type: 'object',
           properties: {
             id: { type: 'string', description: 'Optional technical step key; omitted keys are assigned deterministically. Keep an explicit id when another action references it.' },
-            tool: { type: 'string' },
-            args: { type: 'object', additionalProperties: true },
+            tool: { type: 'string', description: 'Exact executable command from method selection.execution_contract.allowed_commands; never invent Photoshop names.' },
+            args: { type: 'object', additionalProperties: true, description: 'Exact selected execution_contract.action_contracts[].input_schema; unambiguous owner/document pins are filled by Guard, artistic geometry/color never is.' },
             description: { type: 'string' },
             method_id: { type: 'string' },
             edge_boundary_ids: { type: 'array', items: { type: 'string' } },
@@ -1254,6 +1292,11 @@ function compactObservationSchema(): Record<string, unknown> {
       target_resolved: { type: 'string', enum: ['yes', 'no', 'uncertain'] },
       painting_completion: PAINTING_COMPLETION_SCHEMA,
       critic_review: CHAT_CRITIC_SCHEMA,
+      brush_use_review: { type: 'object', additionalProperties: false,
+        description: 'Evaluate a bounded novel-purpose brush trial on the exact delivered AFTER in this same visual closure; rationale and command success are not evidence.',
+        properties: { status: { type: 'string', enum: ['pass', 'fail', 'unknown'] }, observed: { type: 'string', minLength: 12, maxLength: 400 } },
+        required: ['status', 'observed'] },
+      editable_scope_review: EDITABLE_SCOPE_REVIEW_SCHEMA,
       regressions: { type: 'array', items: { type: 'string' } },
       uncertainty: { type: 'string' },
       uncertainty_review: {
@@ -1444,6 +1487,7 @@ function cycleTool(name: string, description: string): Tool {
           description: 'Compact Guard protocol revision. Omit during normal model use; the provider supplies the current revision internally.',
         },
         previous_operation_id: { type: 'string' },
+        review_operation_id: { type: 'string', description: 'Exact current visual operation already reviewed/closed. Re-evaluate its retained frame after a save via previous_observation.critic_review/editable_scope_review without re-closing or replaying that operation. Choose this OR previous_operation_id.' },
         previous_observation: compactObservationSchema(),
         painting_intent: paintingIntentSchema(),
         next_pass: compactPassSchema(),
@@ -1469,10 +1513,15 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
       tool: {
         name: 'photoshop_guard_capabilities',
         description: 'Read Guard capabilities and recovery contract; tool_name returns one exact executable argument schema without source inspection.',
-        inputSchema: { type: 'object', properties: { if_revision: { type: 'string', description: 'Echo the prior discovery_revision when deliberately checking for changes; matching revision returns a compact unchanged receipt. Keep schemas from the earlier response.' }, tool_name: { type: 'string', description: 'One exact Photoshop command.' }, tool_names: { type: 'array', minItems: 1, maxItems: 8, uniqueItems: true, items: { type: 'string' }, description: 'Batch of exact command_sets names; avoids serial contract queries. Choose this OR tool_name.' } }, additionalProperties: false },
+        inputSchema: { type: 'object', properties: { deployment_health: { type: 'boolean', description: 'Explicit read-only source/dist/running-MCP/loaded-UXP comparison. Use after activation or a freshness blocker, not before every paint pass. Does not restart or paint.' }, if_revision: { type: 'string', description: 'Echo the prior discovery_revision when deliberately checking for changes; matching revision returns a compact unchanged receipt. Keep schemas from the earlier response.' }, tool_name: { type: 'string', description: 'One exact Photoshop command.' }, tool_names: { type: 'array', minItems: 1, maxItems: 8, uniqueItems: true, items: { type: 'string' }, description: 'Batch of exact command_sets names; avoids serial contract queries. Choose this OR tool_name.' } }, additionalProperties: false },
       },
       handler: async (args) => {
         if (args.tool_name !== undefined && args.tool_names !== undefined) throw new Error('Choose tool_name OR tool_names');
+        if (args.deployment_health === true) {
+          if (args.tool_name !== undefined || args.tool_names !== undefined || args.if_revision !== undefined)
+            throw new Error('deployment_health is a standalone freshness check; omit tool names and if_revision');
+          return json({ execution: 'not-executed', deployment_health: runtime.deploymentHealth() });
+        }
         const value = Array.isArray(args.tool_names)
           ? { execution: 'not-executed', contracts: args.tool_names.map(name => runtime.toolContract(String(name))) }
           : args.tool_name !== undefined ? runtime.toolContract(String(args.tool_name)) : {
@@ -1825,7 +1874,7 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
               type: 'object',
               properties: {
                 operation_id: { type: 'string' },
-                phase: { type: 'string', enum: ['review_finished', 'next_pass_ready'] },
+                phase: { type: 'string', enum: ['review_finished', 'critic_complete', 'next_pass_ready'] },
               },
               required: ['operation_id', 'phase'],
               additionalProperties: false,
@@ -1870,7 +1919,7 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
               ...(args.next_pass && typeof args.next_pass === 'object' && !Array.isArray(args.next_pass)
                 ? { next_pass_lint: await runtime.lintNextPass(args.next_pass as Record<string, unknown>) }
                 : {}),
-              next_required_action: marker.phase === 'review_finished'
+              next_required_action: marker.phase === 'review_finished' || marker.phase === 'critic_complete'
                 ? 'Prepare the next bounded artistic pass; optionally record next_pass_ready immediately before the continuation call.'
                 : 'Call photoshop_guard_cycle_auto with previous_operation_id + previous_observation and the prepared next_pass.',
             });
@@ -1894,7 +1943,7 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
       tool: {
         name: 'photoshop_guard_keep_logical_layer',
         description:
-          'Commit a visually accepted temporary owner using its journal-bound hypothesis_id and layer_id; does not alter pixels or layer structure.',
+          'Commit a visually accepted temporary component on a predeclared independent unit using its journal-bound hypothesis_id and layer_id; does not alter pixels or layer structure. A temporary composition-scaffold unit cannot be promoted or relabelled.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -1968,7 +2017,7 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
         description: 'Optional read-only validation of a complete continuation, including previous observation. cycle_auto already validates; do not lint each normal component or separately close a reviewed previous pass.',
         inputSchema: {
           type: 'object',
-          properties: { next_pass: compactPassSchema(), previous_operation_id: { type: 'string' }, previous_observation: compactObservationSchema() },
+          properties: { next_pass: compactPassSchema(), previous_operation_id: { type: 'string' }, review_operation_id: { type: 'string' }, previous_observation: compactObservationSchema() },
           required: ['next_pass'],
           additionalProperties: false,
         },
@@ -1981,25 +2030,24 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
     {
       tool: cycleTool(
         'photoshop_guard_cycle_auto',
-        'Run one bounded semantic pass, not an entire artistic stage, in local Photoshop; keep this route unless the user explicitly changes execution mode. After inspecting exact review images, send previous_operation_id + previous_observation (critic_review at its checkpoint) with optional next_pass; fetch missing images via photoshop_guard_review_image and poll returned job_id via photoshop_guard_job_poll.'
+        PHOTOSHOP_DRAWING_ROUTE + ' Run one bounded semantic pass, not an entire artistic stage, in local Photoshop; keep this route unless the user explicitly changes execution mode. After inspecting exact review images, send previous_operation_id + previous_observation (critic_review at its checkpoint) with optional next_pass; fetch missing images via photoshop_guard_review_image and poll returned job_id via photoshop_guard_job_poll.'
       ),
       handler: async (args) => {
         try {
           const envelope = await runtime.cycleAuto(compactCycleArgs(args)) as any;
-          const base = json(envelope, false, runtime);
           const operationId = envelope?.execution?.operation_id;
-          if (envelope?.next_state !== 'awaiting_visual_review' || typeof operationId !== 'string') return base;
+          if (envelope?.next_state !== 'awaiting_visual_review' || typeof operationId !== 'string') return json(envelope, false, runtime);
           const inline = await inlineReviewImageResult(runtime, operationId);
-          if (!inline) return base;
+          if (!inline) return json(envelope, false, runtime);
           const inlineText = inline.content.find(item => item.type === 'text');
           const inlineBody = inlineText?.type === 'text' ? JSON.parse(inlineText.text) : {};
-          const body = JSON.parse((base.content[0] as { type: 'text'; text: string }).text);
+          const body = structuredClone(envelope);
           body.visual_review.delivery = inlineBody.delivery;
           body.artistic_review = inlineBody.artistic_review;
           body.next_required_action = (inlineBody.artistic_review?.critic_role?.required ? 'Switch to Critic; return previous_observation.critic_review for the whole exact scene, then resume Painter. ' : '') + `Perform artistic_review on the inline exact image(s), then call photoshop_guard_cycle_auto once with previous_operation_id=${operationId} + previous_observation and next_pass addressing the largest visible defect. Omit next_pass to close only the current operation, or when the user asked to stop. PSD/JPEG saves and pass closure never certify the whole painting: continue original-brief/form/light/contact debt and pending construction rebuilds.`;
           return {
             content: [
-              { type: 'text', text: JSON.stringify(body, null, 2) },
+              { type: 'text', text: JSON.stringify(projectGuardDiagnostics(body, runtime.runtimeDirectory)) },
               ...inline.content.filter(item => item.type === 'image'),
             ],
           };
@@ -2016,6 +2064,7 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
           type: 'object',
           properties: {
             operation_id: { type: 'string' },
+            review_scope: { type: 'string', enum: ['whole-scene'], description: 'Request whole-scene Critic/editable-scope metadata for retained-frame re-evaluation, final completion or replacement confirmation using the same exact images; cached deliveries are reused.' },
             force_redelivery: { type: 'boolean', description: 'Only for unavailable/failed images; requires redelivery_reason. Same-operation exact delivered images in a host-proven chat are reused without claiming visual observation.' },
             redelivery_reason: { type: 'string', enum: ['images-unavailable', 'delivery-failed'] },
             roles: {
@@ -2035,7 +2084,8 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
         String(args.operation_id ?? ''),
         Array.isArray(args.roles) ? args.roles.filter((role): role is string => typeof role === 'string') : undefined,
         args.force_redelivery === true,
-        typeof args.redelivery_reason === 'string' ? args.redelivery_reason : undefined
+        typeof args.redelivery_reason === 'string' ? args.redelivery_reason : undefined,
+        args.review_scope === 'whole-scene'
       ),
     },
     {
@@ -2564,6 +2614,21 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
                           ],
                         },
                       },
+                      correction_target: {
+                        type: 'object',
+                        description: 'Optional bounded correction of an open must-fix: global→medium requires construction_plan and medium allowed_scales; medium→small additionally requires Critic-reviewed region_bounds enclosing this target and small allowed_scales. Nonstructural medium defects require the reviewed source_review_kind in both Director and Painter affected_qualities; named structural defects require structural_correction with actual matching parts/relations/geometry. Use a distinct component problem_id and address the parent. No automatic debt closure or ownership/geometry waiver. Bounds declare review scope, not a native pixel mask.',
+                        properties: {
+                          problem_id: { type: 'string' },
+                          region_bounds: {
+                            type: 'object',
+                            properties: Object.fromEntries(['left', 'top', 'right', 'bottom'].map(key => [key, { type: 'number', minimum: 0 }])),
+                            required: ['left', 'top', 'right', 'bottom'],
+                            additionalProperties: false,
+                          },
+                        },
+                        required: ['problem_id', 'region_bounds'],
+                        additionalProperties: false,
+                      },
                       affected_relations: { type: 'array', items: { type: 'string' } },
                       affected_qualities: { type: 'array', items: { type: 'string' } },
                       perceptual_zone_ids: {
@@ -2751,10 +2816,42 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
           }
         }
         const semantic = args.action === 'review' ? runtime.collectArtDirectorReviewErrors(args) : [];
-        const issues = [...new Set([...errors, ...semantic])];
+        // A pending whole-frame relationship audit is a correctable missing
+        // review field, not a terminal runtime/evidence failure. Do not infer
+        // pass/defect/uncertain from the directive or clear the pending debt.
+        const pendingGlance = args.action === 'review'
+          ? runtime.store?.paintingState?.().documents?.[String(args.document_id)]?.art_director?.whole_image_glance
+          : undefined;
+        const requiredRelations: string[] = pendingGlance?.due === true && Array.isArray(pendingGlance.required_relations)
+          ? pendingGlance.required_relations : [];
+        const suppliedGlance = args.whole_image_glance && typeof args.whole_image_glance === 'object'
+          && !Array.isArray(args.whole_image_glance) ? args.whole_image_glance as Record<string, unknown> : undefined;
+        const suppliedChecks = suppliedGlance?.relationship_audit && typeof suppliedGlance.relationship_audit === 'object'
+          && !Array.isArray(suppliedGlance.relationship_audit)
+          ? (suppliedGlance.relationship_audit as Record<string, unknown>).checks : undefined;
+        const receivedRelations = Array.isArray(suppliedChecks)
+          ? suppliedChecks.map((check: any) => check?.relation).filter((id): id is string => typeof id === 'string')
+          : [];
+        const missingRelations = requiredRelations.filter(relation => !receivedRelations.includes(relation));
+        const auditIssue = missingRelations.length
+          ? `whole_image_glance.relationship_audit.checks is missing required relations: ${missingRelations.join(', ')}. Received: ${JSON.stringify(receivedRelations)}. Review the exact current whole-frame pixels and provide a check for each; never assume pass.`
+          : undefined;
+        const issues = [...new Set([...errors, ...semantic, ...(auditIssue ? [auditIssue] : [])])];
         if (issues.length) return json({ ok: false, code: 'guard_art_director_contract_invalid',
           issues, visual_mutation_started: false,
-          correction: 'Correct all listed fields in one request using the published schema. Retrieve durable fields with photoshop_guard_resume(director_fields); never inspect source. Fixed composition requires empty hypotheses and no selected_id/selection_reason. Observed checks require current exact-image evidence; pending is legal only for an unobserved check.',
+          ...(auditIssue ? { required_whole_image_glance: {
+            field: 'whole_image_glance.relationship_audit.checks',
+            trigger: pendingGlance.reason,
+            operation_id: pendingGlance.required_operation_id,
+            frame_sha256: pendingGlance.required_frame_sha256,
+            required_relations: requiredRelations,
+            received_relations: receivedRelations,
+            missing_relations: missingRelations,
+            allowed_statuses: ['pass', 'defect', 'uncertain'],
+          } } : {}),
+          correction: auditIssue
+            ? 'This is a payload-only correction, not an authorization to skip review. Inspect the already-delivered exact WHOLE frame, retain the valid directive, then add whole_image_glance with the required trigger, operation_id, frame_sha256 and relationship_audit.checks for EVERY listed relation. Choose each status from visible evidence: pass, defect (with a structural review_finding), or uncertain. Never invent pass. If exact-image evidence is unavailable or still ambiguous, report that blocker instead of repeating an unchanged request.'
+            : 'Correct all listed fields in one request using the published schema. Retrieve durable fields with photoshop_guard_resume(director_fields); never inspect source. Fixed composition requires empty hypotheses and no selected_id/selection_reason. Observed checks require current exact-image evidence; pending is legal only for an unobserved check.',
         }, true);
         try { return json(await runtime.artDirector(args)); }
         catch (error) { return json({ ok: false, code: 'guard_art_director_rejected', message: error instanceof Error ? error.message : String(error),

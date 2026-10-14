@@ -2,14 +2,17 @@ import { describe, expect, it } from 'vitest';
 import {
   SCENE_SUBJECT_KINDS,
   normalizeSceneOwnershipPlan,
+  completeSceneOwnershipContinuation,
   extendSceneOwnershipPlan,
-  promoteTemporarySceneOwnershipUnit,
+  sceneScaffoldScopeIssue,
   sceneOwnershipPlanSchema,
+  sceneOwnershipContinuationSchema,
   sceneOwnershipOwnerIds,
   sceneOwnershipUnitsForOwner,
 } from '../src/core/scene-ownership-plan.js';
-import { collectSchemaErrors } from '../src/core/guard/cycle-compiler.js';
+import { collectSchemaErrors, compileGuardCycle } from '../src/core/guard/cycle-compiler.js';
 import { createGuardTools } from '../src/tools/guard-tools.js';
+import { ToolRegistry } from '../src/core/tool-registry.js';
 
 function unit(
   semanticId: string,
@@ -21,6 +24,7 @@ function unit(
     owner_id: ownerId,
     role: `Scene role ${semanticId}`,
     editability,
+    edit_axes: ['visibility', 'rollback'],
     rationale: 'Preserve future independent correction rights before structural painting begins.',
   };
 }
@@ -109,25 +113,86 @@ it('adds a lamp to the same durable plan but forbids remapping, deletion, owner 
   expect(before.units).toHaveLength(2);
 });
 
-it('promotes only the exact temporary component during explicit keep without relabeling pixels', () => {
-  const before = normalizeSceneOwnershipPlan({
-    plan_id: 'provisional', units: [unit('face', 'face-layer', 'temporary'), unit('backdrop')],
-    objects: [
-      { object_id: 'face', kind: 'single-part', subject_kind: 'single-component', component_semantic_ids: ['face'] },
-      { object_id: 'backdrop', kind: 'single-part', subject_kind: 'single-component', component_semantic_ids: ['backdrop'] },
-    ],
+it('completes a sparse next-pass ownership extension without rewriting any durable component', () => {
+  const before = normalizeSceneOwnershipPlan({ plan_id: 'mykonos',
+    units: [unit('left-wall'), unit('right-wall')],
+    objects: [{ object_id: 'street-architecture', kind: 'compound-object', subject_kind: 'custom-compound',
+      component_semantic_ids: ['left-wall', 'right-wall'] }],
   });
-  const after = normalizeSceneOwnershipPlan({
-    ...before, units: before.units.map(row => row.semantic_id === 'face' ? { ...row, editability: 'independent' } : row),
+  const delta = { units: [unit('sky', 'sky', 'continuous-field')],
+    objects: [{ object_id: 'sky-field', kind: 'single-part', subject_kind: 'continuous-field', component_semantic_ids: ['sky'] }],
+  };
+  const continued = completeSceneOwnershipContinuation(before, delta);
+  expect(continued.units).toHaveLength(3);
+  expect(continued.objects).toHaveLength(2);
+  expect(continued.units.find(x => x.semantic_id === 'left-wall')).toEqual(before.units.find(x => x.semantic_id === 'left-wall'));
+  expect(extendSceneOwnershipPlan(before, continued)).toEqual(continued);
+  expect(completeSceneOwnershipContinuation(before, { units: [{ semantic_id: 'left-wall' }] })).toEqual(before);
+  for (const changed of [
+    { units: [{ semantic_id: 'left-wall', owner_id: 'sky' }] },
+    { units: [{ semantic_id: 'left-wall', editability: 'continuous-field' }] },
+    { objects: [{ object_id: 'street-architecture', subject_kind: 'single-component' }] },
+    { objects: [{ object_id: 'street-architecture', component_semantic_ids: ['left-wall'] }] },
+  ]) expect(() => extendSceneOwnershipPlan(before, completeSceneOwnershipContinuation(before, changed))).toThrow();
+  expect(() => completeSceneOwnershipContinuation(before, { units: [{ semantic_id: 'new-part' }] }))
+    .toThrow(/owner_id/);
+  const published: any = createGuardTools({} as any).find(x => x.tool.name === 'photoshop_guard_cycle_auto')!.tool.inputSchema;
+  expect(collectSchemaErrors(delta, published.properties.next_pass.properties.scene_ownership_plan)).toEqual([]);
+  expect(collectSchemaErrors(delta, sceneOwnershipPlanSchema()).length).toBeGreaterThan(0);
+});
+
+it('uses durable ownership completion at the actual Guard next_pass compiler boundary', async () => {
+  const durable = normalizeSceneOwnershipPlan({ plan_id: 'mykonos', units: [unit('left-wall')],
+    objects: [{ object_id: 'left-building', kind: 'single-part', subject_kind: 'single-component',
+      component_semantic_ids: ['left-wall'] }] });
+  const registry = new ToolRegistry();
+  let dispatched = 0;
+  for (const name of ['photoshop_create_layer', 'photoshop_paint_regions',
+    'photoshop_get_preview', 'photoshop_execute_visual_microplan']) registry.register(name, {
+    tool: { name, inputSchema: { type: 'object' } },
+    handler: async () => { dispatched++; throw new Error('offline compiler must not dispatch'); },
   });
-  expect(promoteTemporarySceneOwnershipUnit(before, after, 'face-layer')).toEqual(after);
-  expect(() => extendSceneOwnershipPlan(before, after)).toThrow(/conflict/);
-  for (const invalid of [
-    { ...after, plan_id: 'other' },
-    { ...after, units: after.units.map(row => row.semantic_id === 'face' ? { ...row, owner_id: 'other-layer' } : row) },
-    { ...after, units: after.units.map(row => row.semantic_id === 'backdrop' ? { ...row, role: 'Reassigned backdrop' } : row) },
-    { ...after, objects: after.objects?.filter(row => row.object_id !== 'backdrop') },
-  ]) expect(() => promoteTemporarySceneOwnershipUnit(before, invalid as typeof after, 'face-layer')).toThrow(/conflict/);
+  const store: any = {
+    compactPassContext: () => ({ painting_profile: 'simple_graphic', scene_ownership_plan: durable,
+      logical_layer_owners: [], stage: 'GLOBAL_BLOCK_IN', has_visual_frame: true }),
+    collectClosePreviousErrors: () => [], collectPreflightErrors: () => [],
+  };
+  const cycle = await compileGuardCycle({ next_pass: {
+    request_key: 'mykonos-sky', problem_id: 'sky', document_id: 42,
+    goal: 'Add a bounded independent sky field', stage: 'GLOBAL_BLOCK_IN', scale: 'global',
+    scene_ownership_plan: {
+      units: [unit('sky', 'sky', 'continuous-field')],
+      objects: [{ object_id: 'sky', kind: 'single-part', subject_kind: 'continuous-field',
+        component_semantic_ids: ['sky'] }],
+    },
+    logical_layer: { decision: 'create-new', hypothesis_id: 'sky', hypothesis: 'Independent sky field',
+      rollback_value: 'moderate', expected_independent_rollback: true, layer_name: 'Sky' },
+    layer_separation_check: { change_kind: 'new-plane', substantial: true,
+      rollback_value: 'moderate', independent_adjustment_expected: true },
+    actions: [{ id: 'sky-layer', tool: 'photoshop_create_layer', args: { name: 'Sky' } },
+      { id: 'sky-paint', tool: 'photoshop_paint_regions', args: { regions: [{
+        id: 'sky-region', layer_id: '$steps.sky-layer.details.layerId',
+        color: { red: 10, green: 100, blue: 210 },
+        contours: [{ points: [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 50 }] }],
+      }] } }],
+  } }, store, registry);
+  expect(cycle.normalizations.map(n => n.code)).toContain('scene_ownership_continuation_completed');
+  expect(cycle.violations.filter(v => v.code.startsWith('scene_ownership'))).toEqual([]);
+  expect(cycle.violations, JSON.stringify(cycle.violations)).toEqual([]);
+  expect(dispatched).toBe(0);
+});
+
+it('refuses relabelling a temporary composition scaffold while preserving independent component experiments', () => {
+  const before = normalizeSceneOwnershipPlan({ plan_id: 'provisional',
+    units: [unit('study', 'study-layer', 'temporary'), unit('face')],
+    objects: ['study', 'face'].map(id => ({ object_id: id, kind: 'single-part', subject_kind: 'single-component', component_semantic_ids: [id] })),
+  });
+  expect(sceneScaffoldScopeIssue(before, 'study-layer')?.code).toBe('scene_scaffold_frozen');
+  expect(sceneScaffoldScopeIssue(before, 'face')).toBeUndefined();
+  const relabelled = normalizeSceneOwnershipPlan({ ...before,
+    units: before.units.map(row => row.semantic_id === 'study' ? { ...row, editability: 'independent' } : row),
+  });
+  expect(() => extendSceneOwnershipPlan(before, relabelled)).toThrow(/conflict/);
 });
 
 it('publishes one scene ownership schema with required subject_kind across every guard entry point', () => {
@@ -139,10 +204,10 @@ it('publishes one scene ownership schema with required subject_kind across every
 
   const tools = createGuardTools({} as any);
   const schema = (name: string) => tools.find(definition => definition.tool.name === name)!.tool.inputSchema as any;
-  const publishedPlans = [
+  const continuationPlans = [
     schema('photoshop_guard_cycle_auto').properties.next_pass.properties.scene_ownership_plan,
     schema('photoshop_guard_lint_next_pass').properties.next_pass.properties.scene_ownership_plan,
-    schema('photoshop_guard_keep_logical_layer').properties.scene_ownership_plan,
+    schema('photoshop_guard_cycle_auto').properties.painting_intent.properties.scene_ownership_plan,
   ];
   const personPlan = normalizeSceneOwnershipPlan({
     plan_id: 'knight-components',
@@ -156,10 +221,14 @@ it('publishes one scene ownership schema with required subject_kind across every
   });
   expect(personPlan.protocol).toBe('photoshop.guard.scene_ownership_plan.v1');
 
-  for (const published of publishedPlans) {
-    expect(published.properties).toEqual(canonical.properties);
-    expect(published.required).toEqual(canonical.required);
+  for (const published of continuationPlans) {
+    const continuation = sceneOwnershipContinuationSchema() as any;
+    expect(published.properties).toEqual(continuation.properties);
+    expect(published.required).toEqual(continuation.required);
     expect(published.additionalProperties).toBe(false);
     expect(collectSchemaErrors(personPlan, published, 'scene_ownership_plan')).toEqual([]);
   }
+  const keepPlan = schema('photoshop_guard_keep_logical_layer').properties.scene_ownership_plan;
+  expect(keepPlan.properties).toEqual(canonical.properties);
+  expect(keepPlan.required).toEqual(canonical.required);
 });

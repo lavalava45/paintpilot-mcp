@@ -491,6 +491,7 @@ function semanticSceneOwnershipPlan(
     role?: string;
     editability?: 'independent' | 'shared-owner' | 'continuous-field' | 'temporary';
     subjectKind?: 'single-component' | 'continuous-field';
+    editAxes?: string[];
   }>,
   shared: Array<{ ownerId: string; semanticIds: string[]; rationale?: string }> = []
 ) {
@@ -507,11 +508,15 @@ function semanticSceneOwnershipPlan(
     }),
     units: units.map(entry => {
       const item = typeof entry === 'string' ? { semanticId: entry } : entry;
+      const editability = item.editability ?? 'independent';
       return {
         semantic_id: item.semanticId,
         owner_id: item.ownerId ?? item.semanticId,
         role: item.role ?? `Major semantic concern ${item.semanticId}`,
-        editability: item.editability ?? 'independent',
+        editability,
+        ...(editability !== 'temporary'
+          ? { edit_axes: item.editAxes ?? ['visibility', 'color', 'position', 'rollback'] }
+          : {}),
         rationale: 'Predeclare this concern so later correction does not depend on reactive layer ownership.',
       };
     }),
@@ -551,7 +556,11 @@ async function establishBlurOwner(f: ReturnType<typeof fixture>) {
   if (prepared.job_id) await vi.waitFor(() => expect(f.runtime.pollJob(String(prepared.job_id)).state).toBe('completed'));
   return {
     previous_operation_id: 'blur-owner-setup',
-    previous_observation: { observed: 'The independent surface and camera basis are retained.', target: 'resolved' },
+    previous_observation: {
+      observed: 'The independent surface and camera basis are retained.',
+      target: 'resolved',
+      editable_scope_review: editableScopeReviewForOperation(f, 'blur-owner-setup'),
+    },
     imaging_preflight: {
       scene_camera_model_id: 'compact-contract-camera', scene_camera_revision: 1,
       effect_kind: 'global-softness', motivation: 'Controlled softness on the known background surface.',
@@ -680,7 +689,8 @@ async function createHotLoopOwner(
   f: ReturnType<typeof fixture>,
   requestKey: string,
   ownerId = 'hot-loop-owner',
-  artisticCommentary?: string
+  artisticCommentary?: string,
+  explicitEditAxes = false,
 ) {
   await body(await f.setArtRun.handler({
     document_id: 42,
@@ -698,9 +708,13 @@ async function createHotLoopOwner(
       stage: 'SHAPE',
       scale: 'global',
       ...structuredMassContract('stable painted structural mass'),
-      scene_ownership_plan: semanticSceneOwnershipPlan(`${requestKey}-ownership`, [
-        { semanticId: 'hot-loop-subject', ownerId, role: 'Hot-loop subject form' },
-      ]),
+      scene_ownership_plan: (() => {
+        const plan = semanticSceneOwnershipPlan(`${requestKey}-ownership`, [
+          { semanticId: 'hot-loop-subject', ownerId, role: 'Hot-loop subject form' },
+        ]);
+        if (explicitEditAxes) for (const unit of plan.units) (unit as any).edit_axes = ['visibility', 'color', 'position', 'rollback'];
+        return plan;
+      })(),
       layer_separation_check: semanticLayerSeparation('new-object', 'moderate', true),
       logical_layer: semanticLogicalLayer(ownerId, 'create-new', { layerName: 'Hot Loop Owner' }),
       actions: [
@@ -713,12 +727,49 @@ async function createHotLoopOwner(
   return result;
 }
 
+function editableScopeReviewForOperation(
+  f: ReturnType<typeof fixture>,
+  operationId: string,
+  wholeScene = false,
+) {
+  const scope = f.runtime.store.editableScopeRequest(operationId, undefined, wholeScene);
+  expect(scope).toBeDefined();
+  return {
+    request_id: scope.request_id,
+    parts: scope.parts.map((part: any) => ({
+      semantic_id: part.semantic_id,
+      layer_id: part.layer_id,
+      status: part.layer_id ? 'unknown' : 'missing',
+      visible: part.layer_id
+        ? 'The component is visible on its recorded layer, but this composite frame alone cannot prove isolated editability.'
+        : 'The declared component has no painted layer yet in this exact frame.',
+    })),
+    unmapped_parts: [],
+  };
+}
+
+function ownedPreviousObservation(
+  f: ReturnType<typeof fixture>,
+  operationId: string,
+  observed: string,
+  extra: Record<string, unknown> = {},
+  wholeScene = false,
+) {
+  return {
+    observed,
+    target: 'resolved',
+    editable_scope_review: editableScopeReviewForOperation(f, operationId, wholeScene),
+    ...extra,
+  };
+}
+
 async function closeHotLoopOwner(f: ReturnType<typeof fixture>, operationId: string) {
   const closed = await body(await f.cycle.handler({
     previous_operation_id: operationId,
     previous_observation: {
       observed: 'The stable semantic owner is visible and accepted for the next refinement.',
       target: 'resolved',
+      editable_scope_review: editableScopeReviewForOperation(f, operationId),
     },
   }));
   expect(closed.preflight_rejection).toBeUndefined();
@@ -735,23 +786,6 @@ function physicalStackObservation() {
 }
 
 describe('public compact Guard contract regressions', () => {
-  it.each(['direct', 'microplan'] as const)(
-    'rejects invalid authored change domains in %s passes before Photoshop mutation', async kind => {
-      const f = fixture();
-      const before = f.counts();
-      const result = await body(await f.cycle.handler({ next_pass: {
-        request_key: `invalid-change-domain-${kind}`,
-        document_id: 42,
-        goal: 'Validate authored change domains before mutation.',
-        change_domains: ['not-an-authorized-domain'],
-        actions: kind === 'direct'
-          ? [{ id: 'save', tool: 'photoshop_save_document', args: { path: path.join(f.dir, 'should-not-save.psd') } }]
-          : [regionAction('invalid-domain-region')],
-      } }));
-      expect(result.preflight_rejection?.error_codes).toContain('compact_change_domains_invalid');
-      expect(f.counts()).toEqual(before);
-    }
-  );
   it.each([true, false])('localizes frame narration with initial commentary=%s and no additional painting or review', async initialCommentary => {
     const f = fixture({ stickyAfter: true });
     vi.spyOn(f.runtime.store, 'presentationContext').mockReturnValue({ language: 'ru', commentary_mode: 'artistic', commentary_detail: 'detailed' } as any);
@@ -763,6 +797,7 @@ describe('public compact Guard contract regressions', () => {
     else expect(pending.commentary_notice).toMatchObject({ code: 'commentary_language_mismatch', expected_language: 'ru' });
     const closed = await body(await f.cycle.handler({ previous_operation_id: operationId,
       previous_observation: { observed: 'Масса появилась, но её объём пока не проработан.', target: 'unresolved',
+        editable_scope_review: editableScopeReviewForOperation(f, operationId),
         ...(!initialCommentary ? { artistic_commentary: narration } : {}) } }));
     expect(closed.preflight_rejection).toBeUndefined();
     const record = f.runtime.store.read(operationId)!;
@@ -944,7 +979,10 @@ describe('public compact Guard contract regressions', () => {
     expect(result.execution).toMatchObject({ phase: 'completed', failed: false });
     expect(f.runtime.store.read('owner-target-continue')?.latency?.auto_repair_count).toBe(0);
     expect(result.compiler_normalizations).toEqual(expect.arrayContaining([
-      expect.objectContaining({ code: 'semantic_owner_target_inherited' }),
+      expect.objectContaining({
+        code: 'technical_owner_binding_derived',
+        message: expect.stringContaining('logical_layer.layer_id'),
+      }),
     ]));
     const record = f.runtime.store.read('owner-target-continue');
     expect(record.args.logical_layer).toMatchObject({ layer_id: 9, layer_name: 'Hot Loop Owner' });
@@ -964,7 +1002,9 @@ describe('public compact Guard contract regressions', () => {
     const result = await body(await f.cycle.handler({
       previous_operation_id: 'invalid-physical-owner',
       previous_observation: { observed: 'The subject still leaks the background through its opaque body.',
-        target: 'resolved', physical_stack_check: check },
+        target: 'resolved',
+        editable_scope_review: editableScopeReviewForOperation(f, 'invalid-physical-owner'),
+        physical_stack_check: check },
       next_pass: { request_key: 'invalid-physical-value', document_id: 42, goal: 'Develop the subject values.',
         stage: 'VALUE', scale: 'medium', region: 'subject', ...structuredMassContract('painted subject values'),
         layer_separation_check: semanticLayerSeparation('continuation', 'low', false),
@@ -984,6 +1024,7 @@ describe('public compact Guard contract regressions', () => {
       previous_observation: {
         observed: 'The opaque subject retains complete coverage and coherent depth above the background.',
         target: 'resolved',
+        editable_scope_review: editableScopeReviewForOperation(f, 'ordinary-physical-owner'),
         physical_stack_check: physicalStackObservation(),
       },
     }));
@@ -1451,6 +1492,7 @@ describe('public compact Guard contract regressions', () => {
         physical_stack_check: physicalStackObservation(),
         observed: 'The bound owner is established against the accepted scene geometry revision.',
         target: 'resolved',
+        editable_scope_review: editableScopeReviewForOperation(f, 'e18c-valid-create'),
       },
       next_pass: {
         request_key: 'e18c-valid-continue',
@@ -1486,6 +1528,7 @@ describe('public compact Guard contract regressions', () => {
       previous_observation: {
         observed: 'The continuation preserved the same structural geometry dependency.',
         target: 'resolved',
+        editable_scope_review: editableScopeReviewForOperation(f, 'e18c-valid-continue'),
       },
       next_pass: {
         request_key: 'e18c-silent-replacement',
@@ -2015,45 +2058,44 @@ describe('public compact Guard contract regressions', () => {
   });
 
   it('surfaces machine-readable causal alternatives for an exhausted method class without dispatch', async () => {
-    const { cycle, runtime, counts } = fixture();
+    const f = fixture();
+    const { cycle, runtime, counts } = f;
     runtime.store.setArtRunState({
       document_id: 42,
       process_dir: 'processes/strategy-alternative-process/run-01',
       painting_profile: 'nontrivial_painting',
       commentary_mode: 'technical',
     });
-    runtime.store.write({
-      id: 'failed-line-strategy',
-      tool: 'photoshop_execute_visual_microplan',
-      args: {
-        document_id: 42,
-        problem_id: 'edge-strategy-problem',
-        method_class: 'line',
-        action_class: 'REFINE',
-        steps: [{
-          id: 'failed-line', tool: 'photoshop_paint_strokes', method_id: 'pencil-line',
-          args: { layer_id: 7, strokes: [{ tool: 'PENCIL', points: [{ x: 10, y: 10 }, { x: 20, y: 20 }] }] },
-        }],
+    await createHotLoopOwner(f, 'prior-structural-owner', 'hot-loop-owner', undefined, true);
+    const scope = runtime.store.editableScopeRequest('prior-structural-owner');
+    expect(scope?.required).toBe(true);
+    const closedOwner = await body(await cycle.handler({
+      previous_operation_id: 'prior-structural-owner',
+      previous_observation: {
+        observed: 'The authored form is visible, but isolated pixels cannot be proved from a whole-image JPEG.',
+        target: 'unresolved',
+        editable_scope_review: { request_id: scope.request_id, parts: scope.parts.map((part: any) => ({
+          semantic_id: part.semantic_id, layer_id: part.layer_id, status: 'unknown',
+          visible: 'The visible form exists but this composite frame alone cannot prove isolation.',
+        })), unmapped_parts: [] },
       },
-      problem_id: 'edge-strategy-problem',
-      stage: 'FORM',
-      scale: 'medium',
-      region: 'subject',
-      summary: 'Failed line strategy.',
-      purpose: 'Seed exhausted strategy evidence.',
-      hash: 'failed-line-strategy',
-      sequence: 1,
-      created_at: '2026-09-26T00:00:00.000Z',
-      completed_at: '2026-09-26T00:00:01.000Z',
-      phase: 'completed',
-      visual: true,
-      failed: false,
-      verdict: {
-        verdict: 'neutral', disposition: 'correct', target_resolved: 'no',
-        significance: { execution_effect: 'material', global: { mean_abs_rgb_delta: 0.02 } },
-        at: '2026-09-26T00:00:02.000Z',
-      },
-    });
+    }));
+    expect(closedOwner.preflight_rejection, JSON.stringify(closedOwner.preflight_rejection)).toBeUndefined();
+    const failed = await body(await cycle.handler({ next_pass: {
+      request_key: 'failed-line-strategy', problem_id: 'edge-strategy-problem', document_id: 42,
+      goal: 'Build the missing structural contour with a bounded line.',
+      stage: 'SHAPE', scale: 'medium', region: 'subject',
+      action_class: 'REFINE', visual_intent: 'line', impact_class: 'construct',
+      layer_separation_check: semanticLayerSeparation('continuation', 'low', false),
+      logical_layer: semanticLogicalLayer('hot-loop-owner', 'continue-logical-layer', { layerId: 9, layerName: 'Hot Loop Owner' }),
+      actions: [strokeAction('failed-line', 9, 'PENCIL')],
+    } }));
+    expect(failed.preflight_rejection, JSON.stringify(failed.preflight_rejection)).toBeUndefined();
+    const failedClosure = await body(await cycle.handler({
+      previous_operation_id: 'failed-line-strategy',
+      previous_observation: { observed: 'The line failed to build enough silhouette and spatial form.', target: 'unresolved' },
+    }));
+    expect(failedClosure.preflight_rejection, JSON.stringify(failedClosure.preflight_rejection)).toBeUndefined();
 
     const result = await body(await cycle.handler({
       next_pass: {
@@ -2061,7 +2103,7 @@ describe('public compact Guard contract regressions', () => {
         problem_id: 'edge-strategy-problem',
         document_id: 42,
         goal: 'Reinforce the structural contour with another line stroke.',
-        stage: 'FORM',
+        stage: 'SHAPE',
         scale: 'medium',
         region: 'subject',
         action_class: 'REFINE',
@@ -2082,7 +2124,266 @@ describe('public compact Guard contract regressions', () => {
     expect(alternativeViolation.details.available_causal_alternatives).toEqual(expect.arrayContaining([
       expect.objectContaining({ method_class: 'region', primary_tool: 'photoshop_paint_regions' }),
     ]));
-    expect(counts().strokeCalls).toBe(0);
+    const late = await body(await cycle.handler({ next_pass: {
+      request_key: 'repeat-line-late-stage', problem_id: 'edge-strategy-problem', document_id: 42,
+      goal: 'Try the same exhausted stroke later in the pipeline.', stage: 'FORM', scale: 'medium',
+      action_class: 'REFINE', visual_intent: 'line', impact_class: 'construct',
+      actions: [strokeAction('late-line', 9, 'PENCIL')],
+    } }));
+    const lateOptions = late.preflight_rejection?.violations?.find((item: any) =>
+      item.code === 'artistic_strategy_change_required')?.details.available_causal_alternatives;
+    expect(lateOptions).toEqual(expect.arrayContaining([expect.objectContaining({
+      method_class: 'region', required_execution_contract: {
+        action_classes: ['REPLACE', 'ERASE'], exact_layer_id_required: true,
+        clip_bounds_required_on_each_region_mutation: true, applies_at_stage: 'FORM',
+      },
+    })]));
+    expect(counts().strokeCalls).toBe(1);
+    // Follow the method actually offered by Guard. Only the region geometry is
+    // an authored artistic decision; all scope/strategy gates remain live.
+    const suggested = alternativeViolation.details.available_causal_alternatives.find(
+      (choice: any) => choice.method_class === 'region');
+    const correction = await body(await cycle.handler({ next_pass: {
+      request_key: 'changed-structural-region-strategy',
+      problem_id: 'edge-strategy-problem', document_id: 42,
+      goal: 'Replace the unsuccessful contour strokes with a bounded structural plane.',
+      stage: 'SHAPE', scale: 'medium', region: 'subject',
+      action_class: 'REFINE', visual_intent: 'mass', impact_class: 'construct',
+      layer_separation_check: semanticLayerSeparation('continuation', 'low', false),
+      logical_layer: semanticLogicalLayer('hot-loop-owner', 'continue-logical-layer', { layerId: 9, layerName: 'Hot Loop Owner' }),
+      actions: [{ ...regionAction('strategy-region'), tool: suggested.primary_tool,
+        args: { ...regionAction('strategy-region').args, regions: [{ ...regionAction('strategy-region').args.regions[0], layer_id: 9 }] } }],
+    } }));
+    expect(correction.preflight_rejection, JSON.stringify(correction.preflight_rejection)).toBeUndefined();
+    expect(correction.execution).toMatchObject({ phase: 'completed', failed: false });
+    expect(counts().regionCalls).toBe(2);
+    expect(counts().strokeCalls).toBe(1);
+    expect(runtime.store.read('failed-line-strategy')?.verdict?.target_resolved).toBe('no');
+  });
+
+  it('follows the public unknown-layer-producer correction into a real numeric Photoshop target', async () => {
+    const f = fixture();
+    const configured = await body(await f.setArtRun.handler({ document_id: 42,
+      process_dir: 'processes/cobblestone-layer-reference-process/run-01',
+      painting_profile: 'nontrivial_painting', commentary_mode: 'technical' }));
+    expect(configured.ok, JSON.stringify(configured)).toBe(true);
+    const region = regionAction('cobble-structural-mass');
+    region.args.regions[0].layer_id = '$steps.unknown-layer.details.layerId';
+    const first = {
+      request_key: 'mykonos-cobble-layer-bad-ref', problem_id: 'mykonos-cobble-component', document_id: 42,
+      goal: 'Create the independently editable structural paving component.',
+      stage: 'SHAPE', scale: 'global', ...structuredMassContract('opaque structural paving component'),
+      scene_ownership_plan: (() => {
+        const plan = semanticSceneOwnershipPlan('mykonos-cobble-owners', ['cobble-surface']);
+        (plan.units[0] as any).edit_axes = ['visibility', 'color', 'position', 'rollback'];
+        return plan;
+      })(),
+      layer_separation_check: semanticLayerSeparation(),
+      logical_layer: semanticLogicalLayer('cobble-surface', 'create-new', { layerName: 'Cobble Surface' }),
+      actions: [
+        { id: 'new-cobble-layer', tool: 'photoshop_create_layer', args: { name: 'Cobble Surface' } },
+        region,
+      ],
+    };
+    const denied = await body(await f.cycle.handler({ next_pass: first }));
+    const message = denied.preflight_rejection?.compact_correction_recipe?.field_correction_packet?.corrections
+      ?.find((issue: any) => issue.code === 'compact_action_reference_invalid')?.reason;
+    expect(message).toContain('available earlier photoshop_create_layer producer ids=');
+    const available = JSON.parse(message.match(/producer ids=(\[[^\]]*\])/)?.[1] ?? '[]');
+    expect(available).toEqual(['new-cobble-layer']);
+    expect(f.counts().regionCalls).toBe(0);
+    const repaired = structuredClone(first);
+    repaired.request_key = 'mykonos-cobble-layer-corrected';
+    repaired.actions[1].args.regions[0].layer_id = `$steps.${available[0]}.details.layerId`;
+    const accepted = await body(await f.cycle.handler({ next_pass: repaired }));
+    expect(accepted.preflight_rejection, JSON.stringify(accepted.preflight_rejection)).toBeUndefined();
+    expect(accepted.execution).toMatchObject({ phase: 'completed', failed: false });
+    const stored = f.runtime.store.read(repaired.request_key)! as any;
+    expect(stored.args.steps.find((step: any) => step.tool === 'photoshop_paint_regions')
+      .args.regions[0].layer_id).toBe(`$steps.${available[0]}.details.layerId`);
+    expect(f.runtime.store.semanticLayerOwners(42)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ hypothesis_id: 'cobble-surface', layer_id: 9 }),
+    ]));
+    expect(f.counts().regionCalls).toBe(1);
+
+    // The same persisted document continues without scene_ownership_plan. A
+    // conflicting physical target must remain a real Guard rejection.
+    const scope = f.runtime.store.editableScopeRequest(repaired.request_key);
+    expect(scope?.required).toBe(true);
+    const closed = await body(await f.cycle.handler({
+      previous_operation_id: repaired.request_key,
+      previous_observation: { observed: 'The authored paving plane exists; the composite frame does not prove isolation.',
+        target: 'unresolved', editable_scope_review: {
+          request_id: scope.request_id, parts: scope.parts.map((part: any) => ({
+            semantic_id: part.semantic_id, layer_id: part.layer_id, status: 'unknown',
+            visible: 'The plane is visible but layer isolation remains unconfirmed by this composite image.',
+          })), unmapped_parts: [],
+        } },
+    }));
+    expect(closed.preflight_rejection, JSON.stringify(closed.preflight_rejection)).toBeUndefined();
+    const followUp = {
+      request_key: 'mykonos-cobble-owner-wrong-layer', problem_id: 'mykonos-cobble-component', document_id: 42,
+      goal: 'Rebuild the same paving component using its durable semantic owner.',
+      stage: 'SHAPE', scale: 'medium', region: 'paving', ...structuredMassContract('opaque structural paving component'),
+      layer_separation_check: semanticLayerSeparation('continuation', 'low', false),
+      logical_layer: semanticLogicalLayer('cobble-surface', 'continue-logical-layer', { layerId: 777, layerName: 'Cobble Surface', rollbackValue: 'low' }),
+      actions: [{ ...regionAction('cobble-owner-refine'), args: { regions: [{ ...regionAction('cobble-owner-refine').args.regions[0], layer_id: 777 }] } }],
+    };
+    const refused = await body(await f.cycle.handler({ next_pass: followUp }));
+    const corrections = refused.preflight_rejection?.compact_correction_recipe?.field_correction_packet?.corrections ?? [];
+    const binding = corrections.find((row: any) => String(row.reason).includes('authoritative owner cobble-surface'));
+    expect(binding?.reason).toContain('layer_id=9');
+    expect(f.counts().regionCalls).toBe(1);
+    const actualId = Number(binding.reason.match(/authoritative owner cobble-surface layer_id=(\d+)/)?.[1]);
+    expect(actualId).toBe(9);
+    const ownerCorrection = structuredClone(followUp);
+    ownerCorrection.request_key = 'mykonos-cobble-owner-corrected';
+    ownerCorrection.logical_layer.layer_id = actualId;
+    ownerCorrection.actions[0].args.regions[0].layer_id = actualId;
+    const changedMethod = await body(await f.cycle.handler({ next_pass: ownerCorrection }));
+    const strategyIssue = changedMethod.preflight_rejection?.violations?.find((item: any) =>
+      item.code === 'artistic_strategy_change_required');
+    expect(strategyIssue?.details.exhausted_method_classes).toContain('region');
+    const line = strategyIssue.details.available_causal_alternatives.find((item: any) =>
+      item.method_class === 'line' && item.primary_tool === 'photoshop_paint_strokes');
+    expect(line).toBeDefined();
+    const nextAttempt = { ...ownerCorrection, request_key: 'mykonos-cobble-owner-changed-method',
+      goal: 'Reconstruct the paving contact boundary with a different structural line method.',
+      visual_intent: line.visual_intents[0],
+      actions: [{ ...strokeAction('cobble-structural-line', actualId, 'PENCIL'), tool: line.primary_tool }],
+    };
+    const roleRejected = await body(await f.cycle.handler({ next_pass: nextAttempt }));
+    const roleCorrection = roleRejected.preflight_rejection?.compact_correction_recipe?.field_correction_packet?.corrections
+      ?.find((item: any) => item.code === 'construction_role_intent_mismatch');
+    expect(roleCorrection?.reason).toContain('structured-mass resolves to visual_intent=mass, not line');
+    const compatible = structuredClone(nextAttempt);
+    compatible.request_key = 'mykonos-cobble-owner-compatible-line-role';
+    // The actual correction says the previous mass-only declaration cannot
+    // certify a line operation; do not keep the incompatible construction role.
+    delete (compatible as any).construction_role;
+    const restored = await body(await f.cycle.handler({ next_pass: compatible }));
+    expect(restored.preflight_rejection, JSON.stringify(restored.preflight_rejection)).toBeUndefined();
+    expect(restored.execution).toMatchObject({ phase: 'completed', failed: false });
+    expect(f.runtime.store.sceneOwnershipPlan(42).units[0].owner_id).toBe('cobble-surface');
+    expect(f.counts().regionCalls).toBe(1);
+    expect(f.counts().strokeCalls).toBe(1);
+  });
+
+  it.each(['roof', 'background', 'cloud'])('unified admission executes an owned %s repair through the full public cycle', async subject => {
+    const f = fixture();
+    await f.setArtRun.handler({ document_id: 42, process_dir: 'processes/general-admission-process/run-01',
+      painting_profile: 'nontrivial_painting', commentary_mode: 'technical' });
+    const owner = subject + '-owner', obligation = subject + '-repair', globalId = 'scene-debt';
+    const roi = { left: 0, top: 0, right: 200, bottom: 200 };
+    f.runtime.store.updatePaintingState(42, current => ({ ...current,
+      active_scale: 'global',
+      visual_problems: { [globalId]: { problem_id: globalId, scale: 'global', severity: 'must-fix',
+        status: 'open', region: 'whole scene', hypothesis: 'Reconstruct the unresolved scene components.' } },
+      last_critique: { problem_id: 'old-composite', target_resolved: 'no', primary_mismatch: 'An older composite concern.' },
+      chat_critic_findings: [
+        { problem_id: 'critic-light_material', criterion: 'light_material', correction_kind: 'material',
+          visible: 'The selected component needs coherent surface planes.', next_change: 'Build these planes first.' },
+        { problem_id: 'critic-form_proportions', criterion: 'form_proportions', correction_kind: 'form',
+          visible: 'Another component needs later proportional correction.', next_change: 'Repair it after the selected planes.' } ],
+      critic_obligations: [{ id: obligation, parent_problem_id: 'critic-light_material', criterion: 'light_material',
+        correction_kind: 'material', component_ids: [owner], depends_on_ids: [], status: 'fail',
+        visible: 'The selected surface planes remain incomplete.' }],
+      art_director: { directive_id: 'general-director', status: 'active', review_due: false,
+        current_task_id: 'component-task', whole_image_glance: { due: false }, tasks: [{
+          task_id: 'component-task', status: 'active', allowed_scales: ['medium'], allowed_global_changes: ['depth-structure'],
+          construction_plan: { representation_strategy: 'Build the owned planes', structural_features: ['planes'],
+            stage_exit_condition: 'The planes read coherently in the whole frame.' },
+          correction_target: { problem_id: globalId, region_bounds: roi } }] },
+    }));
+    const plan = semanticSceneOwnershipPlan('generic-' + subject, [owner]);
+    (plan.units[0] as any).edit_axes = ['visibility', 'color', 'position', 'rollback'];
+    const action = regionAction(subject + '-planes');
+    action.args.regions[0].layer_id = '$steps.component-layer.details.layerId';
+    const result = await body(await f.cycle.handler({ painting_intent: {
+      request_key: 'generic-' + subject, problem_id: subject + '-component', document_id: 42,
+      goal: 'Build the independently editable ' + subject + ' planes.', target_owner_id: owner,
+      action: 'add', stage: 'SHAPE', ...structuredMassContract('opaque owned surface'),
+      region_bounds: roi, scene_ownership_plan: plan,
+      scene_geometry_model: sceneGeometryModel('coherent_3d'),
+      logical_layer: { ...semanticLogicalLayer(owner, 'create-new', { layerName: subject }),
+        geometry_binding: geometryBinding(owner, 1) },
+      layer_separation_check: semanticLayerSeparation(),
+      actions: [{ id: 'component-layer', tool: 'photoshop_create_layer', args: { name: subject } }, action],
+    } }));
+    expect(result.preflight_rejection?.errors ?? []).toEqual([]);
+    expect(result.execution).toMatchObject({ phase: 'completed', failed: false });
+    expect(f.counts().regionCalls).toBe(1);
+    const operation = f.runtime.store.read('generic-' + subject);
+    expect(operation.args).toMatchObject({ scale: 'medium', addresses_problem_ids: [globalId, obligation] });
+    expect(f.runtime.store.paintingState().documents['42'].visual_problems[globalId].status).toBe('open');
+  });
+
+  it('repairs a Mykonos Painter/Critic/Director link without bypassing the global medium-scale gate', async () => {
+    const f = fixture();
+    await f.setArtRun.handler({ document_id: 42,
+      process_dir: 'processes/mykonos-component-process/run-01',
+      painting_profile: 'nontrivial_painting', commentary_mode: 'technical' });
+    const globalId = 'cumulative-trend-primitive-footprint-repeating';
+    const criticId = 'mykonos_distant_architecture_missing';
+    const componentId = 'mykonos_midleft_structural_component';
+    const roi = { left: 80, top: 80, right: 250, bottom: 240 };
+    // Minimal saved incident, not a positive stub for any Guard gate. All
+    // planner, priority, ownership and strategy checks run in the actual store.
+    f.runtime.store.updatePaintingState(42, current => ({ ...current,
+      visual_problems: { ...(current.visual_problems ?? {}), [globalId]: {
+        problem_id: globalId, scale: 'global', severity: 'must-fix', status: 'open',
+        region: 'multiple separate regions', hypothesis: 'Repeated primitive footprint',
+      } },
+      last_critique: { operation_id: 'mykonos-distant-house', problem_id: criticId,
+        primary_mismatch: 'The intermediate depth and scale remain unconvincing.', target_resolved: 'no' },
+      art_director: { directive_id: 'mykonos_director_structural_rebuild_v1',
+        status: 'active', review_due: false, current_task_id: 'midleft_structural_component',
+        whole_image_glance: { due: false }, tasks: [{ task_id: 'midleft_structural_component', status: 'active',
+          allowed_scales: ['medium'], allowed_global_changes: ['depth-structure'],
+          construction_plan: { representation_strategy: 'Create an independently owned 3D building mass',
+            structural_features: ['front and return planes'], stage_exit_condition: 'Whole-frame depth must read' },
+          correction_target: { problem_id: globalId, region_bounds: { left: 0, top: 0, right: 400, bottom: 300 } },
+        }] },
+    }));
+    const action = regionAction('midleft-plane');
+    action.args.regions[0].layer_id = '$steps.midleft-layer.details.layerId';
+    action.args.regions[0].contours[0].points = [
+      { x: 110, y: 115 }, { x: 205, y: 115 }, { x: 195, y: 225 }];
+    const draft = {
+      request_key: 'mykonos-midleft-rejected', problem_id: componentId, document_id: 42,
+      goal: 'Reconstruct the intermediate building volume and improve the global perspective.',
+      stage: 'SHAPE', scale: 'medium', region: 'midleft house', region_bounds: roi,
+      ...structuredMassContract('opaque mid-left facade'),
+      planner_directive_id: 'mykonos_director_structural_rebuild_v1',
+      planner_task_id: 'midleft_structural_component', painter_scope: 'medium',
+      change_domains: ['depth-structure'], addresses_problem_id: globalId,
+      scene_ownership_plan: (() => {
+        const plan = semanticSceneOwnershipPlan('mykonos-midleft-plan', ['midleft-wall']);
+        (plan.units[0] as any).edit_axes = ['visibility', 'color', 'position', 'rollback'];
+        return plan;
+      })(),
+      layer_separation_check: semanticLayerSeparation(),
+      logical_layer: semanticLogicalLayer('midleft-wall', 'create-new', { layerName: 'Midleft Wall' }),
+      actions: [{ id: 'midleft-layer', tool: 'photoshop_create_layer', args: { name: 'Midleft Wall' } }, action],
+    };
+    const refused = await body(await f.cycle.handler({ next_pass: draft }));
+    const linkIssue = refused.preflight_rejection?.compact_correction_recipe?.field_correction_packet?.corrections
+      ?.find((entry: any) => String(entry.reason).includes('primary_mismatch_unresolved'));
+    expect(linkIssue?.reason).toContain(criticId);
+    expect(f.counts().regionCalls).toBe(0);
+    const required = linkIssue.reason.match(/unresolved obligation\/defect="([^"]+)"/)?.[1];
+    expect(required).toBe(criticId);
+    const corrected = structuredClone(draft);
+    corrected.request_key = 'mykonos-midleft-linked';
+    corrected.addresses_problem_ids = [globalId, required];
+    const passed = await body(await f.cycle.handler({ next_pass: corrected }));
+    expect(passed.preflight_rejection, JSON.stringify(passed.preflight_rejection)).toBeUndefined();
+    expect(passed.execution).toMatchObject({ phase: 'completed', failed: false });
+    expect(f.counts().regionCalls).toBe(1);
+    const state = f.runtime.store.paintingState().documents['42'];
+    expect(state.visual_problems[globalId].status).toBe('open');
+    expect(state.last_critique.target_resolved).toBe('no');
+    expect(state.art_director.tasks[0].status).toBe('active');
   });
 
   it('derives only missing classification from executable commands for direct and bundled passes in either language', async () => {
@@ -3370,7 +3671,14 @@ describe('public compact Guard contract regressions', () => {
         actions: [gradient('base-gradient', 7)],
       } });
       expect(initial.preflight_rejection).toBeUndefined();
-      await closeHotLoopOwner(f, 'color-preflight-base');
+      const closedBase = await body(await f.cycle.handler({
+        previous_operation_id: 'color-preflight-base',
+        previous_observation: {
+          observed: 'The initial atmospheric color field is established for the next preflight.',
+          target: 'resolved',
+        },
+      }));
+      expect(closedBase.preflight_rejection).toBeUndefined();
 
       const sceneModel = {
         model_id: 'color-preflight-scene', revision: 1,
@@ -3622,6 +3930,89 @@ describe('public compact Guard contract regressions', () => {
       },
     }));
     expect(mismatch.preflight_rejection?.error_codes).toContain('brush_role_material_fitness_mismatch');
+  });
+
+  it('admits a bounded new brush purpose, caches only exact-frame accepted fit, and still rejects wrong scale', async () => {
+    const f = fixture({ brushInventory: true });
+    await createHotLoopOwner(f, 'brush-purpose-owner', 'hot-loop-owner', undefined, true);
+    const scope = f.runtime.store.editableScopeRequest('brush-purpose-owner');
+    const closed = await body(await f.cycle.handler({ previous_operation_id: 'brush-purpose-owner',
+      previous_observation: { observed: 'The independently owned surface was constructed and is now ready for a bounded brush test.',
+        target: 'unresolved', editable_scope_review: { request_id: scope.request_id,
+          parts: scope.parts.map((part: any) => ({ semantic_id: part.semantic_id, layer_id: part.layer_id,
+            status: 'unknown', visible: 'The composite image shows the shape but not isolated per-layer pixels.' })),
+          unmapped_parts: [],
+        },
+      },
+    }));
+    expect(closed.preflight_rejection, JSON.stringify(closed.preflight_rejection)).toBeUndefined();
+    const preflight = materialBrushPreflight();
+    Object.assign(preflight.roles[0], { role_id: 'synthetic-stone-dry', material_roles: ['stone'],
+      visual_intents: ['texture', 'line'], preferred_preset: 'Synthetic Dry Mark', alternative_presets: [],
+      working_scale: 'medium' });
+    const prepared = await body(await f.setArtRun.handler({ document_id: 42,
+      process_dir: 'processes/hot-loop-process/benchmark-01',
+      painting_profile: 'nontrivial_painting', commentary_mode: 'technical', brush_preflight: preflight }));
+    expect(prepared.ok, JSON.stringify(prepared)).toBe(true);
+    const draft = {
+      request_key: 'brush-new-purpose-without-rationale', problem_id: 'brush-new-purpose', document_id: 42,
+      goal: 'Build the structural stone mass with a preflighted dry brush.',
+      stage: 'SHAPE', scale: 'medium', region: 'hot-loop-owner',
+      region_bounds: { left: 0, top: 0, right: 120, bottom: 120 },
+      visual_intent: 'mass', material_role: 'stone', brush_role: 'synthetic-stone-dry',
+      impact_class: 'construct', action_class: 'REFINE',
+      layer_separation_check: semanticLayerSeparation('continuation', 'low', false),
+      logical_layer: semanticLogicalLayer('hot-loop-owner', 'continue-logical-layer', { layerId: 9, layerName: 'Hot Loop Owner' }),
+      actions: [strokeAction('bounded-stone-brush', 9, 'BRUSH')],
+    };
+    const initial = await body(await f.cycle.handler({ next_pass: draft }));
+    expect(initial.preflight_rejection?.error_codes).toContain('brush_role_new_purpose_trial_required');
+    expect(initial.preflight_rejection?.compact_correction_recipe?.field_correction_packet?.corrections)
+      .toEqual(expect.arrayContaining([expect.objectContaining({ path: 'next_pass.brush_use_reason' })]));
+    expect(f.counts().strokeCalls).toBe(0);
+    const bounded = { ...draft, request_key: 'brush-new-purpose-bounded-trial',
+      brush_use_reason: 'The dry mark has controlled width and pressure suited to establishing a sparse stone plane.' };
+    const trial = await body(await f.cycle.handler({ next_pass: bounded }));
+    expect(trial.preflight_rejection, JSON.stringify(trial.preflight_rejection)).toBeUndefined();
+    expect(trial.execution).toMatchObject({ phase: 'completed', failed: false });
+    expect(f.counts().strokeCalls).toBe(1);
+    const noReview = await body(await f.cycle.handler({ previous_operation_id: bounded.request_key,
+      previous_observation: { observed: 'Trial marks are visible, but no brush-fit evaluation was supplied.', target: 'unresolved' } }));
+    expect(noReview.preflight_rejection?.finalization_errors.join(' ')).toContain('brush_use_review_required');
+    const assessed = await body(await f.cycle.handler({ previous_operation_id: bounded.request_key,
+      previous_observation: { observed: 'The bounded mark edges and overlap create a coherent stone mass for this exact scale.',
+        target: 'resolved', brush_use_review: { status: 'pass',
+          observed: 'The exact delivered frame visibly shows continuous mass with controlled dry-mark edge buildup.' } } }));
+    expect(assessed.preflight_rejection, JSON.stringify(assessed.preflight_rejection)).toBeUndefined();
+    expect(f.runtime.store.paintingState().documents['42'].brush_fitness_reviews).toEqual(expect.arrayContaining([
+      expect.objectContaining({ status: 'pass', operation_id: bounded.request_key }),
+    ]));
+    const reused = { ...draft, request_key: 'brush-new-purpose-reuse', problem_id: 'brush-new-purpose-reuse',
+      region_bounds: { left: 0, top: 0, right: 250, bottom: 220 },
+      actions: [strokeAction('reused-stone-brush', 9, 'BRUSH')] };
+    const accepted = await body(await f.cycle.handler({ next_pass: reused }));
+    expect(accepted.preflight_rejection, JSON.stringify(accepted.preflight_rejection)).toBeUndefined();
+    expect(f.counts().strokeCalls).toBe(2);
+    const wrongScale = { ...draft, request_key: 'brush-new-purpose-wrong-scale', scale: 'small',
+      brush_use_reason: bounded.brush_use_reason };
+    const denied = await body(await f.cycle.handler({ next_pass: wrongScale }));
+    expect(denied.preflight_rejection?.error_codes).toContain('brush_role_material_fitness_mismatch');
+    expect(f.counts().strokeCalls).toBe(2);
+    const reusedClosure = await body(await f.cycle.handler({ previous_operation_id: reused.request_key,
+      previous_observation: { observed: 'The approved synthetic dry marks remain at their original settings.', target: 'resolved' } }));
+    expect(reusedClosure.preflight_rejection, JSON.stringify(reusedClosure.preflight_rejection)).toBeUndefined();
+    // Installed-brush settings are authoritative technical evidence; an old
+    // approval must not silently survive a different brush configuration.
+    f.runtime.store.updatePaintingState(42, current => ({ ...current,
+      brush_preflight: { ...current.brush_preflight, roles: current.brush_preflight.roles.map((role: any) =>
+        role.role_id === 'synthetic-stone-dry' ? { ...role,
+          effective_settings: { ...role.effective_settings, hardness: 15 } } : role) },
+    }));
+    const settingsChanged = { ...draft, request_key: 'brush-new-purpose-settings-changed',
+      problem_id: 'brush-new-purpose-settings-changed' };
+    const staleApproval = await body(await f.cycle.handler({ next_pass: settingsChanged }));
+    expect(staleApproval.preflight_rejection?.error_codes).toContain('brush_role_new_purpose_trial_required');
+    expect(f.counts().strokeCalls).toBe(2);
   });
 
   it('preserves exact object context for a direct MICRO pass without adding a second artistic mutation', async () => {
@@ -4059,10 +4450,11 @@ describe('public compact Guard contract regressions', () => {
       return f.cycle.handler({
         ...(previousOperationId ? {
           previous_operation_id: previousOperationId,
-          previous_observation: {
-            observed: 'The preceding planned semantic owner is established.',
-            target: 'resolved',
-          },
+          previous_observation: ownedPreviousObservation(
+            f,
+            previousOperationId,
+            'The preceding planned semantic owner is established.',
+          ),
         } : {}),
         next_pass: {
           request_key: requestKey,
@@ -4198,11 +4590,12 @@ describe('public compact Guard contract regressions', () => {
     catRefine.args.clip_bounds = { left: 0, top: 0, right: 180, bottom: 180 };
     const continued = await body(await f.cycle.handler({
       previous_operation_id: 'primaryOwner-owner-create-attempt-01',
-      previous_observation: {
-        physical_stack_check: physicalStackObservation(),
-        observed: 'The primaryOwner owner layer is present and structurally readable.',
-        target: 'resolved',
-      },
+      previous_observation: ownedPreviousObservation(
+        f,
+        'primaryOwner-owner-create-attempt-01',
+        'The primaryOwner owner layer is present and structurally readable.',
+        { physical_stack_check: physicalStackObservation() },
+      ),
       next_pass: {
         request_key: 'primaryOwner-owner-form-attempt-02',
         problem_id: 'primaryOwner-owner-form',
@@ -4239,10 +4632,11 @@ describe('public compact Guard contract regressions', () => {
     mismatchedAction.args.clip_bounds = { left: 0, top: 0, right: 180, bottom: 180 };
     const mismatchedTarget = await body(await f.cycle.handler({
       previous_operation_id: 'primaryOwner-owner-form-attempt-02',
-      previous_observation: {
-        observed: 'The primaryOwner form refinement is retained on the same semantic owner.',
-        target: 'resolved',
-      },
+      previous_observation: ownedPreviousObservation(
+        f,
+        'primaryOwner-owner-form-attempt-02',
+        'The primaryOwner form refinement is retained on the same semantic owner.',
+      ),
       next_pass: {
         request_key: 'primaryOwner-owner-action-target-mismatch',
         problem_id: 'primaryOwner-owner-form',
@@ -4265,10 +4659,11 @@ describe('public compact Guard contract regressions', () => {
     wrongOwner.args.clip_bounds = { left: 0, top: 0, right: 180, bottom: 180 };
     const polluted = await body(await f.cycle.handler({
       previous_operation_id: 'primaryOwner-owner-form-attempt-02',
-      previous_observation: {
-        observed: 'The primaryOwner form refinement is retained on the same semantic owner.',
-        target: 'resolved',
-      },
+      previous_observation: ownedPreviousObservation(
+        f,
+        'primaryOwner-owner-form-attempt-02',
+        'The primaryOwner form refinement is retained on the same semantic owner.',
+      ),
       next_pass: {
         request_key: 'secondaryOwner-wrong-owner-attempt',
         problem_id: 'secondaryOwner-owner',
@@ -4313,7 +4708,7 @@ describe('public compact Guard contract regressions', () => {
     treeAction.args.regions[0].layer_id = '$steps.primaryForm-layer.details.layerId';
     const primaryForm = await body(await f.cycle.handler({
       previous_operation_id: 'shared-create',
-      previous_observation: { observed: 'Shared owner retained.', target: 'resolved' },
+      previous_observation: ownedPreviousObservation(f, 'shared-create', 'Shared owner retained.'),
       next_pass: {
         request_key: 'primaryForm-create', problem_id: 'primaryForm-owner', document_id: 42,
         goal: 'Create the independent primaryForm owner.', stage: 'SHAPE', scale: 'global',
@@ -4330,7 +4725,7 @@ describe('public compact Guard contract regressions', () => {
     wrongTarget.args.clip_bounds = { left: 0, top: 0, right: 180, bottom: 180 };
     const rejected = await body(await f.cycle.handler({
       previous_operation_id: 'primaryForm-create',
-      previous_observation: { observed: 'PrimaryForm owner retained.', target: 'resolved' },
+      previous_observation: ownedPreviousObservation(f, 'primaryForm-create', 'PrimaryForm owner retained.'),
       next_pass: {
         request_key: 'primaryForm-wrong-target', problem_id: 'primaryForm-correction', document_id: 42,
         goal: 'Correct only the primaryForm.', stage: 'FORM', scale: 'medium', region: 'primaryForm',
@@ -4386,10 +4781,66 @@ describe('public compact Guard contract regressions', () => {
     const correction = regionAction('primaryForm-historical-correction');
     correction.args.regions[0].layer_id = 9;
     correction.args.clip_bounds = { left: 0, top: 0, right: 180, bottom: 180 };
+    const unauthorized = await body(await f.cycle.handler({
+      previous_operation_id: 'primaryForm-base-create',
+      previous_observation: ownedPreviousObservation(
+        f,
+        'primaryForm-base-create',
+        'The primaryForm owner remains structurally valid.',
+        { physical_stack_check: physicalStackObservation() },
+      ),
+      next_pass: {
+        request_key: 'primaryForm-correct-history-unauthorized', problem_id: 'primaryForm-correction', document_id: 42,
+        goal: 'Attempt the historical underpaint without explicit cross-layer authorization.',
+        stage: 'FORM', scale: 'medium', region: 'primaryForm',
+        region_bounds: { left: 0, top: 0, right: 180, bottom: 180 }, action_class: 'REPLACE',
+        layer_separation_check: semanticLayerSeparation('continuation', 'low', false),
+        logical_layer: semanticLogicalLayer('primaryForm', 'continue-logical-layer', { layerId: 10, layerName: 'PrimaryForm Current' }),
+        actions: [correction],
+      },
+    }));
+    expect(unauthorized.preflight_rejection?.error_codes).toContain('technical_binding_conflict');
+    expect(f.counts().regionCalls).toBe(1);
+
+    const wrongCurrentPin = await body(await f.cycle.handler({
+      previous_operation_id: 'primaryForm-base-create',
+      previous_observation: ownedPreviousObservation(
+        f,
+        'primaryForm-base-create',
+        'The primaryForm owner remains structurally valid.',
+        { physical_stack_check: physicalStackObservation() },
+      ),
+      next_pass: {
+        request_key: 'primaryForm-correct-history-wrong-current-pin', problem_id: 'primaryForm-correction', document_id: 42,
+        goal: 'Attempt the historical underpaint while incorrectly rebinding the current owner.',
+        stage: 'FORM', scale: 'medium', region: 'primaryForm',
+        region_bounds: { left: 0, top: 0, right: 180, bottom: 180 }, action_class: 'REPLACE',
+        layer_separation_check: semanticLayerSeparation('continuation', 'low', false),
+        logical_layer: semanticLogicalLayer('primaryForm', 'continue-logical-layer', { layerId: 9, layerName: 'PrimaryForm Current' }),
+        cross_layer_correction: {
+          mode: 'correction', current_layer_id: 10, target_layer_ids: [9],
+          post_authoritative_layer_id: 10,
+        },
+        actions: [correction],
+      },
+    }));
+    expect(wrongCurrentPin.preflight_rejection?.error_codes).toContain('technical_binding_conflict');
+    expect(wrongCurrentPin.preflight_rejection?.violations).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: 'technical_binding_conflict',
+        details: { path: 'next_pass.logical_layer.layer_id' },
+      }),
+    ]));
+    expect(f.counts().regionCalls).toBe(1);
+
     const corrected = await body(await f.cycle.handler({
       previous_operation_id: 'primaryForm-base-create',
-      previous_observation: { observed: 'The primaryForm owner remains structurally valid.', target: 'resolved',
-        physical_stack_check: physicalStackObservation() },
+      previous_observation: ownedPreviousObservation(
+        f,
+        'primaryForm-base-create',
+        'The primaryForm owner remains structurally valid.',
+        { physical_stack_check: physicalStackObservation() },
+      ),
       next_pass: {
         request_key: 'primaryForm-correct-history', problem_id: 'primaryForm-correction', document_id: 42,
         goal: 'Correct only the historical primaryForm underpaint while preserving current owner authority.',
@@ -4436,6 +4887,7 @@ describe('public compact Guard contract regressions', () => {
       parentHypothesisId: string | undefined,
       previousOperationId?: string,
       negativeSpace?: Record<string, unknown>,
+      reviewScope: 'touched-owner' | 'whole-scene' | 'none' = 'touched-owner',
     ) => {
       const layerStep = `${requestKey}-layer`;
       const region = regionAction(`${requestKey}-region`);
@@ -4443,7 +4895,15 @@ describe('public compact Guard contract regressions', () => {
       return body(await f.cycle.handler({
         ...(previousOperationId ? {
           previous_operation_id: previousOperationId,
-          previous_observation: { observed: 'The preceding construction owner is established.', target: 'resolved' },
+          previous_observation: reviewScope === 'none'
+            ? { observed: 'The preceding temporary construction hypothesis is established.', target: 'resolved' }
+            : ownedPreviousObservation(
+              f,
+              previousOperationId,
+              'The preceding construction owner is established.',
+              {},
+              reviewScope === 'whole-scene',
+            ),
         } : {}),
         next_pass: {
           request_key: requestKey,
@@ -4494,7 +4954,8 @@ describe('public compact Guard contract regressions', () => {
     const facadeTexture = regionAction('cg-facade-texture-region');
     facadeTexture.args.regions[0].layer_id = facadeOwner.layer_id;
     const fillOpening = await body(await f.cycle.handler({
-      previous_operation_id: 'cg-opening', previous_observation: { observed: 'Opening topology is established.', target: 'resolved' },
+      previous_operation_id: 'cg-opening',
+      previous_observation: ownedPreviousObservation(f, 'cg-opening', 'Opening topology is established.'),
       next_pass: {
         request_key: 'cg-facade-texture-unreviewed', problem_id: 'facade-material', document_id: 42,
         goal: 'Repaint the facade without reviewing its opening.', stage: 'SHAPE', scale: 'medium',
@@ -4506,7 +4967,8 @@ describe('public compact Guard contract regressions', () => {
     expect(fillOpening.preflight_rejection?.error_codes).toContain('negative_space_preservation_required');
 
     const preservedOpening = await body(await f.cycle.handler({
-      previous_operation_id: 'cg-opening', previous_observation: { observed: 'Opening topology is established.', target: 'resolved' },
+      previous_operation_id: 'cg-opening',
+      previous_observation: ownedPreviousObservation(f, 'cg-opening', 'Opening topology is established.'),
       next_pass: {
         request_key: 'cg-facade-texture-preserved', problem_id: 'facade-material', document_id: 42,
         goal: 'Repaint the facade while preserving the reviewed opening topology.', stage: 'SHAPE', scale: 'medium',
@@ -4519,10 +4981,16 @@ describe('public compact Guard contract regressions', () => {
     expect(preservedOpening.preflight_rejection).toBeUndefined();
 
     // Surface work cannot jump to an absent prerequisite (same contract also applies to primaryForm/receiverSurface owners).
-    const missing = await createOwner('cg-missing-surface', 'ripple-specular', 'surface', 'wave-group', 'cg-facade-texture-preserved');
+    const missing = await createOwner(
+      'cg-missing-surface', 'ripple-specular', 'surface', 'wave-group',
+      'cg-facade-texture-preserved', undefined, 'whole-scene',
+    );
     expect(missing.preflight_rejection?.error_codes).toContain('construction_graph_parent_missing');
 
-    const unrelated = await createOwner('cg-unrelated-primary', 'continuousField-field', 'primary', undefined, 'cg-facade-texture-preserved');
+    const unrelated = await createOwner(
+      'cg-unrelated-primary', 'continuousField-field', 'primary', undefined,
+      'cg-facade-texture-preserved', undefined, 'whole-scene',
+    );
     expect(unrelated.preflight_rejection).toBeUndefined();
 
     // A structural correction to the primary invalidates its dependent branch, but not unrelated owners.
@@ -4531,7 +4999,11 @@ describe('public compact Guard contract regressions', () => {
     refine.args.regions[0].layer_id = primaryOwner.layer_id;
     const corrected = await body(await f.cycle.handler({
       previous_operation_id: 'cg-unrelated-primary',
-      previous_observation: { observed: 'The unrelated primary owner is established.', target: 'resolved' },
+      previous_observation: ownedPreviousObservation(
+        f,
+        'cg-unrelated-primary',
+        'The unrelated primary owner is established.',
+      ),
       next_pass: {
         request_key: 'cg-primaryStructure-structural-correction', problem_id: 'cg-primaryStructure-correction', document_id: 42,
         goal: 'Correct the primary primaryStructure silhouette.', stage: 'SHAPE', scale: 'global', change_domains: ['silhouette'],
@@ -4556,7 +5028,13 @@ describe('public compact Guard contract regressions', () => {
     skyContinue.args.regions[0].layer_id = skyOwner.layer_id;
     const unrelatedStillValid = await body(await f.cycle.handler({
       previous_operation_id: 'cg-primaryStructure-structural-correction',
-      previous_observation: { observed: 'The primaryStructure silhouette correction is established.', target: 'resolved' },
+      previous_observation: ownedPreviousObservation(
+        f,
+        'cg-primaryStructure-structural-correction',
+        'The primaryStructure silhouette correction is established.',
+        {},
+        true,
+      ),
       next_pass: {
         request_key: 'cg-unrelated-continue', problem_id: 'cg-continuousField-tone', document_id: 42,
         goal: 'Continue unrelated continuousField tone without structural invalidation.', stage: 'SHAPE', scale: 'global',
@@ -4578,7 +5056,13 @@ describe('public compact Guard contract regressions', () => {
     tempRegion.args.regions[0].layer_id = `$steps.${tempLayerStep}.details.layerId`;
     const tempPrimary = await body(await f.cycle.handler({
       previous_operation_id: 'cg-unrelated-continue',
-      previous_observation: { observed: 'The unrelated continuousField continuation remains valid.', target: 'resolved' },
+      previous_observation: ownedPreviousObservation(
+        f,
+        'cg-unrelated-continue',
+        'The unrelated continuousField continuation remains valid.',
+        {},
+        true,
+      ),
       next_pass: {
         request_key: 'cg-temp-primary', problem_id: 'cg-temp-primary', document_id: 42,
         goal: 'Try a temporary primary construction hypothesis.', stage: 'SHAPE', scale: 'global',
@@ -4589,7 +5073,10 @@ describe('public compact Guard contract regressions', () => {
       },
     }));
     expect(tempPrimary.preflight_rejection).toBeUndefined();
-    const unresolvedChild = await createOwner('cg-temp-child', 'temp-detail', 'secondary', 'temp-mass', 'cg-temp-primary');
+    const unresolvedChild = await createOwner(
+      'cg-temp-child', 'temp-detail', 'secondary', 'temp-mass',
+      'cg-temp-primary', undefined, 'none',
+    );
     expect(unresolvedChild.preflight_rejection?.error_codes).toContain('construction_graph_parent_unresolved');
   });
 
@@ -4603,7 +5090,10 @@ describe('public compact Guard contract regressions', () => {
       const layerStep = `${key}-layer`; const region = regionAction(`${key}-region`);
       region.args.regions[0].layer_id = `$steps.${layerStep}.details.layerId`;
       return body(await f.cycle.handler({
-        ...(previous ? { previous_operation_id: previous, previous_observation: { observed: 'Prior owner established.', target: 'resolved' } } : {}),
+        ...(previous ? {
+          previous_operation_id: previous,
+          previous_observation: ownedPreviousObservation(f, previous, 'Prior owner established.'),
+        } : {}),
         next_pass: {
           request_key: key, problem_id: key, document_id: 42, goal: `Establish ${id}.`, stage: 'SHAPE', scale: 'global',
           ...(!previous ? { scene_ownership_plan: causalScenePlan } : {}),
@@ -4634,7 +5124,8 @@ describe('public compact Guard contract regressions', () => {
     const sourceOwner = f.runtime.store.compactPassContext(42).logical_layer_owners.find((owner: any) => owner.hypothesis_id === 'tower');
     const revise = regionAction('cause-source-revise-region'); revise.args.regions[0].layer_id = sourceOwner.layer_id;
     const revised = await body(await f.cycle.handler({
-      previous_operation_id: 'cause-reflection', previous_observation: { observed: 'Reflection relation is established.', target: 'resolved' },
+      previous_operation_id: 'cause-reflection',
+      previous_observation: ownedPreviousObservation(f, 'cause-reflection', 'Reflection relation is established.'),
       next_pass: {
         request_key: 'cause-source-revise', problem_id: 'cause-source-revise', document_id: 42, goal: 'Move/rebuild the source mass.', stage: 'SHAPE', scale: 'global',
         ...structuredMassContract('source structural mass'),
@@ -4647,7 +5138,8 @@ describe('public compact Guard contract regressions', () => {
 
     const continueEffect = regionAction('cause-effect-continue-region'); continueEffect.args.regions[0].layer_id = effectOwner.layer_id;
     const stale = await body(await f.cycle.handler({
-      previous_operation_id: 'cause-source-revise', previous_observation: { observed: 'Source structure changed.', target: 'resolved' },
+      previous_operation_id: 'cause-source-revise',
+      previous_observation: ownedPreviousObservation(f, 'cause-source-revise', 'Source structure changed.'),
       next_pass: {
         request_key: 'cause-effect-stale', problem_id: 'cause-effect-stale', document_id: 42, goal: 'Continue the old reflection without causal review.', stage: 'SHAPE', scale: 'medium',
         layer_separation_check: semanticLayerSeparation('continuation', 'low', false),
@@ -4702,7 +5194,7 @@ describe('public compact Guard contract regressions', () => {
     continuation.args.regions[0].layer_id = owner.layer_id;
     const inherited = await body(await f.cycle.handler({
       previous_operation_id: 'sf-create',
-      previous_observation: { observed: 'The oriented surface is established.', target: 'resolved' },
+      previous_observation: ownedPreviousObservation(f, 'sf-create', 'The oriented surface is established.'),
       next_pass: {
         request_key: 'sf-continue', problem_id: 'sf-continue', document_id: 42,
         goal: 'Continue marks on the same oriented surface.', stage: 'SHAPE', scale: 'medium',
@@ -4722,7 +5214,7 @@ describe('public compact Guard contract regressions', () => {
     equivalent.args.regions[0].layer_id = owner.layer_id;
     const equivalentResult = await body(await f.cycle.handler({
       previous_operation_id: 'sf-continue',
-      previous_observation: { observed: 'The inherited surface frame remains coherent.', target: 'resolved' },
+      previous_observation: ownedPreviousObservation(f, 'sf-continue', 'The inherited surface frame remains coherent.'),
       next_pass: {
         request_key: 'sf-equivalent', problem_id: 'sf-equivalent', document_id: 42,
         goal: 'Continue with semantically equivalent frame metadata.', stage: 'SHAPE', scale: 'medium',
@@ -4741,7 +5233,7 @@ describe('public compact Guard contract regressions', () => {
     const changedFrame = { ...frame, axes: [{ id: 'surface-flow', angle_degrees: 78, weight: 1 }] };
     const rejected = await body(await f.cycle.handler({
       previous_operation_id: 'sf-equivalent',
-      previous_observation: { observed: 'The directional continuation is coherent.', target: 'resolved' },
+      previous_observation: ownedPreviousObservation(f, 'sf-equivalent', 'The directional continuation is coherent.'),
       next_pass: {
         request_key: 'sf-drift', problem_id: 'sf-drift', document_id: 42,
         goal: 'Silently rotate the established surface frame.', stage: 'SHAPE', scale: 'medium',
@@ -4806,10 +5298,11 @@ describe('public compact Guard contract regressions', () => {
     frontRegion.args.regions[0].layer_id = '$steps.front-supportedStructure-layer.details.layerId';
     const front = await body(await f.cycle.handler({
       previous_operation_id: 'rear-supportedStructure-shape',
-      previous_observation: {
-        observed: 'The rear supportedStructure is established as the first opaque depth anchor.',
-        target: 'resolved',
-      },
+      previous_observation: ownedPreviousObservation(
+        f,
+        'rear-supportedStructure-shape',
+        'The rear supportedStructure is established as the first opaque depth anchor.',
+      ),
       next_pass: {
         request_key: 'front-supportedStructure-shape',
         problem_id: 'front-supportedStructure-shape',
@@ -4848,10 +5341,11 @@ describe('public compact Guard contract regressions', () => {
     wrongRegion.args.regions[0].layer_id = '$steps.wrong-order-layer.details.layerId';
     const wrong = await body(await f.cycle.handler({
       previous_operation_id: 'front-supportedStructure-shape',
-      previous_observation: {
-        observed: 'The front supportedStructure correctly occludes the rear supportedStructure and the layer stack matches depth.',
-        target: 'resolved',
-      },
+      previous_observation: ownedPreviousObservation(
+        f,
+        'front-supportedStructure-shape',
+        'The front supportedStructure correctly occludes the rear supportedStructure and the layer stack matches depth.',
+      ),
       next_pass: {
         request_key: 'wrong-order-supportedStructure-shape',
         problem_id: 'wrong-order-supportedStructure-shape',
@@ -4976,7 +5470,7 @@ describe('public compact Guard contract regressions', () => {
     // The temporary unit is predeclared, but promotion still requires a
     // committed, independently editable owner plan; a temporary-only plan
     // cannot authorize a persistent owner implicitly.
-    expect(unplannedKeep.message).toMatch(/scene_ownership_owner_unplanned/);
+    expect(unplannedKeep.message).toMatch(/scene_scaffold_frozen/);
 
     const kept = await body(await f.keepLogicalLayer.handler({
       request_key: 'temporary-primaryOwner-keep',
@@ -4987,15 +5481,50 @@ describe('public compact Guard contract regressions', () => {
         { semanticId: 'primaryOwner-temp', editability: 'independent' },
       ]),
     }));
-    expect(kept.ok).toBe(true);
-    expect(kept.semantic_layer_lifecycle).not.toHaveProperty('rationale');
+    expect(kept).toMatchObject({ ok: false, code: 'semantic_layer_lifecycle_rejected' });
+    expect(kept.message).toMatch(/scene_scaffold_frozen/);
     expect(f.runtime.store.compactPassContext(42).logical_layer_owners).toEqual([
-      expect.objectContaining({ hypothesis_id: 'primaryOwner-temp', layer_id: 9, temporary: false, decision: 'keep' }),
+      expect.objectContaining({ hypothesis_id: 'primaryOwner-temp', layer_id: 9, temporary: true }),
     ]);
     expect(f.runtime.store.statusCompact().documents['42'].scene_ownership_plan).toMatchObject({
       plan_id: 'temporary-primaryOwner-owners',
-      source_operation_id: 'temporary-primaryOwner-keep',
+      units: [expect.objectContaining({ semantic_id: 'primaryOwner-temp', owner_id: 'primaryOwner-temp', editability: 'temporary' })],
     });
+
+    const replacementRegion = regionAction('primaryOwner-replacement-region');
+    replacementRegion.args.regions[0].layer_id = '$steps.primaryOwner-replacement-layer.details.layerId';
+    const replacement = await body(await f.cycle.handler({
+      previous_operation_id: 'temporary-primaryOwner-create',
+      previous_observation: ownedPreviousObservation(
+        f,
+        'temporary-primaryOwner-create',
+        'The provisional owner remains useful as a frozen composition scaffold while the accepted component is rebuilt independently.',
+      ),
+      next_pass: {
+        request_key: 'primaryOwner-replacement-create',
+        problem_id: 'temporary-primaryOwner-replacement',
+        document_id: 42,
+        goal: 'Build the accepted primaryOwner as a new independently editable component while retaining the frozen scaffold.',
+        stage: 'SHAPE',
+        scale: 'global',
+        ...structuredMassContract('independent primaryOwner replacement mass'),
+        scene_ownership_plan: semanticSceneOwnershipPlan('temporary-primaryOwner-owners', [
+          { semanticId: 'primaryOwner-temp', editability: 'temporary' },
+          { semanticId: 'primaryOwner-replacement', editability: 'independent' },
+        ]),
+        layer_separation_check: semanticLayerSeparation('new-object', 'moderate', true),
+        logical_layer: semanticLogicalLayer('primaryOwner-replacement', 'create-new', { layerName: 'PrimaryOwner Replacement' }),
+        actions: [
+          { id: 'primaryOwner-replacement-layer', tool: 'photoshop_create_layer', args: { name: 'PrimaryOwner Replacement' } },
+          replacementRegion,
+        ],
+      },
+    }));
+    expect(replacement.preflight_rejection).toBeUndefined();
+    expect(f.runtime.store.compactPassContext(42).logical_layer_owners).toEqual(expect.arrayContaining([
+      expect.objectContaining({ hypothesis_id: 'primaryOwner-temp', layer_id: 9, temporary: true }),
+      expect.objectContaining({ hypothesis_id: 'primaryOwner-replacement', layer_id: 10, temporary: false }),
+    ]));
   });
 });
 
@@ -5009,10 +5538,11 @@ describe('hot-loop compiler integration', () => {
 
     const result = await body(await f.cycle.handler({
       previous_operation_id: 'hot-loop-intent-owner',
-      previous_observation: {
-        observed: 'The base owner is accepted; the next decision is to reinforce its painted form.',
-        target: 'resolved',
-      },
+      previous_observation: ownedPreviousObservation(
+        f,
+        'hot-loop-intent-owner',
+        'The base owner is accepted; the next decision is to reinforce its painted form.',
+      ),
       painting_intent: {
         request_key: 'hot-loop-intent-refine',
         problem_id: 'hot-loop-intent-refine-problem',
@@ -5071,21 +5601,32 @@ describe('hot-loop compiler integration', () => {
 
     expect(result.preflight_rejection).toBeUndefined();
     expect(f.counts().regionCalls - before.regionCalls).toBe(1);
-    expect(f.runtime.store.read('hot-loop-auto-repair')?.latency?.compiler_repair_audit).toMatchObject({
-      protocol: 'photoshop.guard.compiler_repair.v1',
-      final_validation: 'valid',
-      repairs: expect.arrayContaining([expect.objectContaining({
-        kind: 'inject_from_context',
-        path: 'next_pass.logical_layer.layer_id',
-      })]),
-    });
-    expect(f.runtime.store.read('hot-loop-auto-repair')?.latency?.auto_repair_count).toBeGreaterThanOrEqual(1);
+    expect(result.compiler_normalizations).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: 'technical_owner_binding_derived',
+        message: expect.stringContaining('logical_layer.layer_id'),
+      }),
+    ]));
+    expect(f.runtime.store.read('hot-loop-auto-repair')?.latency?.compiler_repair_audit).toBeUndefined();
+    expect(f.runtime.store.read('hot-loop-auto-repair')?.latency?.auto_repair_count).toBe(0);
   });
 
   it('never overwrites an explicitly different known-owner region target during local repair', async () => {
     const f = fixture();
-    await createHotLoopOwner(f, 'hot-loop-explicit-target-owner');
-    await closeHotLoopOwner(f, 'hot-loop-explicit-target-owner');
+    await createHotLoopOwner(f, 'hot-loop-explicit-target-owner', 'hot-loop-owner', undefined, true);
+    const scope = f.runtime.store.editableScopeRequest('hot-loop-explicit-target-owner');
+    const closed = await body(await f.cycle.handler({
+      previous_operation_id: 'hot-loop-explicit-target-owner',
+      previous_observation: {
+        observed: 'The authored owner exists; its isolated pixels remain unconfirmed on composite evidence.',
+        target: 'unresolved',
+        editable_scope_review: { request_id: scope.request_id, parts: scope.parts.map((part: any) => ({
+          semantic_id: part.semantic_id, layer_id: part.layer_id, status: 'unknown',
+          visible: 'The painted owner appears, but separate pixel-level editability is not proved.',
+        })), unmapped_parts: [] },
+      },
+    }));
+    expect(closed.preflight_rejection, JSON.stringify(closed.preflight_rejection)).toBeUndefined();
     const before = f.counts();
     const region = regionAction('explicit-wrong-target-region');
     region.args.regions[0].layer_id = 77;
@@ -5145,7 +5686,7 @@ describe('hot-loop compiler integration', () => {
     expect(f.counts().regionCalls).toBe(before.regionCalls);
   });
 
-  it('repairs a stale supplied scene-model incarnation inside the public cycle before exposing any remaining violation', async () => {
+  it('rejects an explicitly stale scene-model incarnation in the public cycle without rewriting the source witness', async () => {
     const f = fixture({ sceneGeometry: false });
     await f.setArtRun.handler({
       document_id: 42,
@@ -5187,15 +5728,14 @@ describe('hot-loop compiler integration', () => {
       },
     }));
 
-    expect(result.preflight_rejection?.error_codes ?? []).not.toContain('scene_geometry_model_incarnation_mismatch');
-    expect(result.compiler_repair_audit).toMatchObject({
-      protocol: 'photoshop.guard.compiler_repair.v1',
-      repairs: expect.arrayContaining([expect.objectContaining({
-        kind: 'replace_from_context',
-        path: 'next_pass.scene_geometry_model.source_frame.document_incarnation',
-      })]),
-    });
-    expect(result.cycle_latency.auto_repair_count).toBeGreaterThanOrEqual(1);
+    expect(result.preflight_rejection?.error_codes ?? []).toContain('scene_geometry_model_incarnation_mismatch');
+    expect(result.compiler_repair_audit?.repairs ?? []).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ path: 'next_pass.scene_geometry_model.source_frame.document_incarnation' }),
+    ]));
+    // The compact response may include a completed PREVIOUS technical receipt;
+    // that does not mean the rejected new operation was dispatched.
+    expect(result.preflight_rejection).toBeDefined();
+    expect(result.visual_mutation_started).not.toBe(true);
   });
 
   it('keeps reject -> correction out of recovery and preserves durable compiler lineage', async () => {

@@ -19,6 +19,7 @@ import path from 'node:path';
 import { Logger } from '../utils/logger.js';
 import { executionTimeoutMs } from '../core/execution-context.js';
 import { UXP_BRIDGE_REVISION } from '../core/guard/protocol-version.js';
+import { RUNNING_DEPLOYMENT } from '../core/deployment-health.js';
 import { SessionStore } from '../core/guard/session-store.js';
 import { UserConfigValidationError } from '../core/user-config.js';
 import {
@@ -114,6 +115,7 @@ const eventListeners = new Set<(event: UxpBridgeEvent) => void | Promise<void>>(
 let lastPluginPollAt = 0;
 let pluginPollCount = 0;
 let pluginBridgeRevision: string | null = null;
+let pluginDeploymentSourceSha256: string | null = null;
 let pluginRuntimeInstanceWitness: string | null = null;
 let pluginPhotoshopVersion: string | null = null;
 let pluginDocumentCount: number | null = null;
@@ -444,8 +446,10 @@ export function getUxpBridgeHealthSnapshot(now = Date.now()) {
     plugin_poll_count: pluginPollCount,
     transport: 'long-poll' as const,
     bridge_revision: pluginBridgeRevision,
+    uxp_source_sha256: pluginDeploymentSourceSha256,
     runtime_instance_witness: pluginRuntimeInstanceWitness,
     expected_bridge_revision: UXP_BRIDGE_REVISION,
+    server_deployment: RUNNING_DEPLOYMENT,
     photoshop_version: pluginPhotoshopVersion,
     document_count: pluginDocumentCount,
     active_document: pluginActiveDocument,
@@ -663,6 +667,7 @@ export async function ensureUxpBridgeServer(): Promise<number> {
         if (announcedProtocol !== UXP_BRIDGE_REGISTRATION_PROTOCOL) {
           lastPluginPollAt = 0;
           pluginBridgeRevision = null;
+          pluginDeploymentSourceSha256 = null;
           pluginRuntimeInstanceWitness = null;
           pluginPhotoshopVersion = null;
           pluginDocumentCount = null;
@@ -678,6 +683,8 @@ export async function ensureUxpBridgeServer(): Promise<number> {
           return;
         }
         const announcedRevision = url.searchParams.get('revision')?.trim() || null;
+        const deploymentSha = url.searchParams.get('deploymentSourceSha256') ?? '';
+        pluginDeploymentSourceSha256 = /^[a-f0-9]{64}$/.test(deploymentSha) ? deploymentSha : null;
         if (announcedRevision !== UXP_BRIDGE_REVISION) {
           lastPluginPollAt = 0;
           pluginBridgeRevision = announcedRevision;
@@ -1167,6 +1174,7 @@ export async function shutdownUxpBridgeServer(): Promise<void> {
   lastPluginPollAt = 0;
   pluginPollCount = 0;
   pluginBridgeRevision = null;
+  pluginDeploymentSourceSha256 = null;
   pluginPhotoshopVersion = null;
   pluginDocumentCount = null;
   pluginActiveDocument = null;

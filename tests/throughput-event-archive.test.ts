@@ -1,9 +1,9 @@
-import { afterEach, expect, it } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { SessionStore } from '../src/core/guard/session-store.js';
-import { throughputArchivePath } from '../src/core/guard/throughput-event-archive.js';
+import { appendThroughputArchiveEvent, readThroughputArchivePage, throughputArchivePath } from '../src/core/guard/throughput-event-archive.js';
 
 const directories: string[] = [];
 afterEach(() => {
@@ -100,6 +100,22 @@ it('does not claim archived coverage of events that predate the new archive', ()
   });
 });
 
+it('does not certify archive coverage when the state omits the explicit legacy-history verdict', () => {
+  const { store } = fixture();
+  store.recordArtisticThroughputEvent(42, {
+    kind: 'rejected', operation_id: 'known-run', model_visible: true, semantic_actions: 0,
+  });
+  expect(store.throughputArchivePage(42)).toMatchObject({ integrity: 'consistent' });
+  store.updatePaintingState(42, current => ({ ...current, artistic_throughput: {
+    ...current.artistic_throughput,
+    archive_legacy_history_unverified: undefined,
+  } }));
+  expect(store.throughputArchivePage(42)).toMatchObject({
+    integrity: 'unverified',
+    reasons: expect.arrayContaining(['archive_legacy_coverage_unproven']),
+  });
+});
+
 it('detects a sequence gap after an interrupted state-persisted/archive-missing write', () => {
   const { store } = fixture();
   store.recordArtisticThroughputEvent(42, { kind: 'bookkeeping', semantic_actions: 0 });
@@ -112,4 +128,94 @@ it('detects a sequence gap after an interrupted state-persisted/archive-missing 
     integrity: 'unverified', last_sequence: 3,
     reasons: expect.arrayContaining(['sequence_gap_or_duplicate']),
   });
+});
+
+it('does not certify an empty existing archive as complete history', () => {
+  const { dir } = fixture();
+  const file = throughputArchivePath(dir, 42);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, '');
+  expect(readThroughputArchivePage(dir, 42)).toMatchObject({
+    integrity: 'unverified', reasons: expect.arrayContaining(['archive_empty']),
+  });
+});
+
+it('does not certify an empty page when the requested cursor exceeds verified archive history', () => {
+  const { dir } = fixture();
+  appendThroughputArchiveEvent(dir, 42, 1, 'first-canvas', {
+    kind: 'rejected', operation_id: 'run-a-one', model_visible: true,
+  });
+  expect(readThroughputArchivePage(dir, 42, { afterSequence: 1 })).toMatchObject({
+    integrity: 'consistent', events: [], last_sequence: 1,
+  });
+  expect(readThroughputArchivePage(dir, 42, { afterSequence: 2 })).toMatchObject({
+    integrity: 'unverified', events: [], last_sequence: 1,
+    reasons: expect.arrayContaining(['cursor_beyond_archive']),
+  });
+});
+
+it('refuses a stale complete page when another writer appends just after EOF', () => {
+  const { dir } = fixture();
+  appendThroughputArchiveEvent(dir, 42, 1, 'first-canvas', {
+    kind: 'rejected', operation_id: 'run-a-one', model_visible: true,
+  });
+  const realReadSync = fs.readSync.bind(fs);
+  let appended = false;
+  const spy = vi.spyOn(fs, 'readSync').mockImplementation((fd, buffer, offset, length, position) => {
+    const count = realReadSync(fd, buffer, offset, length, position);
+    if (count === 0 && !appended) {
+      appended = true;
+      appendThroughputArchiveEvent(dir, 42, 2, 'first-canvas', {
+        kind: 'recovery', operation_id: 'run-a-two', model_visible: true,
+      });
+    }
+    return count;
+  });
+  try {
+    expect(readThroughputArchivePage(dir, 42)).toMatchObject({
+      integrity: 'unverified', reasons: expect.arrayContaining(['archive_changed_during_read']),
+    });
+  } finally { spy.mockRestore(); }
+  expect(appended).toBe(true);
+  expect(readThroughputArchivePage(dir, 42)).toMatchObject({
+    integrity: 'consistent', last_sequence: 2,
+  });
+});
+
+it('returns unverified if another process rotates the archive between existence check and open', () => {
+  const { dir } = fixture();
+  appendThroughputArchiveEvent(dir, 42, 1, 'first-canvas', {
+    kind: 'rejected', operation_id: 'run-a-one', model_visible: true,
+  });
+  const file = throughputArchivePath(dir, 42);
+  const originalOpen = fs.openSync.bind(fs);
+  let rotated = false;
+  const spy = vi.spyOn(fs, 'openSync').mockImplementation((filePath, flags, mode) => {
+    if (filePath === file && flags === 'r' && !rotated) {
+      rotated = true;
+      fs.renameSync(file, `${file}.rotated`);
+    }
+    return originalOpen(filePath, flags, mode);
+  });
+  try {
+    expect(readThroughputArchivePage(dir, 42)).toMatchObject({
+      integrity: 'unverified', reasons: expect.arrayContaining(['archive_open_failed']),
+    });
+  } finally { spy.mockRestore(); }
+  expect(rotated).toBe(true);
+});
+
+it('returns unverified rather than throwing when the archive read fails after opening', () => {
+  const { dir } = fixture();
+  appendThroughputArchiveEvent(dir, 42, 1, 'first-canvas', {
+    kind: 'rejected', operation_id: 'run-a-one', model_visible: true,
+  });
+  const spy = vi.spyOn(fs, 'readSync').mockImplementation(() => {
+    throw Object.assign(new Error('simulated interrupted read'), { code: 'EIO' });
+  });
+  try {
+    expect(readThroughputArchivePage(dir, 42)).toMatchObject({
+      integrity: 'unverified', reasons: expect.arrayContaining(['archive_read_failed']),
+    });
+  } finally { spy.mockRestore(); }
 });
