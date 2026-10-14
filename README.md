@@ -215,7 +215,7 @@ Clone and build:
 
 ```bash
 git clone https://github.com/lavalava45/paintpilot-mcp.git
-cd photoshop-mcp-digital-painting
+cd paintpilot-mcp
 pnpm install --frozen-lockfile
 npm run build:server
 ```

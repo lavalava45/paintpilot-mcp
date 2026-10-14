@@ -1,0 +1,4 @@
+# Retained licenses use byte-exact LF; NOTICE attestations use byte-exact CRLF.
+licenses/*-LICENSE.txt -text
+licenses/Apache-2.0.txt -text
+licenses/*-NOTICE.txt text eol=crlf

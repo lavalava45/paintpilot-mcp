@@ -24,7 +24,7 @@ the superseded October 9 COS schema synchronization investigation is retained
 
 ```bash
 git clone <repository-url>
-cd photoshop-mcp-digital-painting
+cd paintpilot-mcp
 pnpm install --frozen-lockfile
 npm run build
 ```

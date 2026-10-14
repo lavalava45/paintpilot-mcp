@@ -75,7 +75,6 @@ for (const path of examples) {
 const primaryIdentityFiles = [
   'package.json', 'server.json', 'mcpb/manifest.json', 'README.md', 'INSTALL.md',
   'CONTRIBUTING.md', 'RELEASE_CHECKLIST.md', 'llms.txt', 'AGENTS.md',
-  'README.de.md', 'README.es.md', 'README.ja.md', 'README.tr.md', 'README.zh-CN.md',
   'docs/architecture.md', 'docs/development.md', 'docs/available-tools.md',
   'docs/painting-policy/foundations.md', 'docs/mascot.md', 'src/prompts/host-guidance.ts',
 ];

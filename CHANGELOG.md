@@ -1,5 +1,18 @@
 # Changelog
 
+- 2026-10-14 — **Reconcile release-candidate Guard fixes with the maintained painter.**
+  Reapplied RC commits `83dc5bb` and `b54faf8` to the refactored
+  `digital-painting` runtime. A valid exact-frame closure that exposes a new
+  global priority or whole-image glance now remains durable when the paired next
+  pass is rejected; the rejected mutation is not dispatched. Also carried
+  forward the optional, independently owned construction `tonal_regions`
+  capability from `51a3fee`, with no automatic first-pass polygon policy:
+  explicit brush media and artwork-specific method choice remain authoritative.
+  Removed five discontinued translated README placeholders, refreshed the
+  Windows-only environment example, repository clone paths and documented
+  current tool count. The RC's historical local art evidence is preserved
+  separately; these engineering changes are not artistic Beta acceptance.
+
 - 2026-10-14 — **SessionStore P1-B: bounded Painter continuation recommendations.**
   Added typed, pure `src/core/guard/continuation-admissibility.ts` and own
   regression suite. `artisticContinuationContext().next_candidates` now

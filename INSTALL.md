@@ -27,7 +27,7 @@ URL, then run:
 
 ```bash
 git clone <repository-url>
-cd photoshop-mcp-digital-painting
+cd paintpilot-mcp
 ```
 
 Keep the checkout in a stable directory that will not be deleted by a package
@@ -111,7 +111,7 @@ Pass `PHOTOSHOP_PATH` in the stdio transport environment when automatic detectio
 ```
 
 After rebuilding/updating the project, refresh the Chat On Steroids Plugins schema through
-the normal host UI. The accepted native catalog is **130 tools total / 14 Guard tools**.
+the normal host UI. The current native catalog is **132 tools total / 15 Guard tools**.
 A stale legacy 64-tool snapshot is not a limitation of this server.
 
 For local development, distinguish **schema refresh** from **process restart**:
@@ -196,7 +196,7 @@ npm run test:measurement-tools
 npm run test:landmark-ergonomics
 ```
 
-The MCP server should expose the **130-tool / 14-Guard-tool** Digital Painting Edition catalog, including:
+The MCP server should expose the **132-tool / 15-Guard-tool** Digital Painting Edition catalog, including:
 
 ```text
 photoshop_list_brush_presets
