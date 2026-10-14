@@ -1,0 +1,972 @@
+
+> photoshop-mcp-digital-painting@1.7.6 verify:canonical
+> npm run build:server && npm run verify:guard-public-contract && npm run verify:third-party-notices && npm run verify:pack && npm run lint && npm run test:acceptance && npm run verify:compact-v2-contract && npm run verify:painting-policy && npm run verify:photoshop-prompts && npm run verify:source-independence && npm run verify:product-identity && npm run verify:provenance && npm run verify:external-intake && npm run verify:tool-counts && npm run verify:live-evidence-ledger && npm run verify:docs
+
+
+> photoshop-mcp-digital-painting@1.7.6 build:server
+> tsx scripts/build-server.ts
+
+[build-server] Published 3634184b825c; bridge compact-v2-20261012-component-outline-v18.
+[build-server] Running components were not restarted. Next: CoS plugin Restart -> UXP Reload if changed -> npm run deployment:health.
+
+> photoshop-mcp-digital-painting@1.7.6 verify:guard-public-contract
+> node scripts/dev/audit-guard-public-contract.mjs --self-test
+
+{
+  "ok": true,
+  "tool_count": 38,
+  "guarded_tool_count": 15,
+  "schema_fingerprint": "b9a6d481e41c06145fa1a8594fbb1985f04597e235151a245a6300e80a1e24f5",
+  "checked_model_paths": 58,
+  "permissive_untyped_next_pass_tools": [
+    "photoshop_guard_status",
+    "photoshop_guard_lint_next_pass"
+  ],
+  "diagnostic_violations_checked": 0,
+  "errors": [],
+  "negative_controls": "PASS (omitted subject_kind, compact edit_axes drift and newly required Guard field detected)"
+}
+
+> photoshop-mcp-digital-painting@1.7.6 verify:third-party-notices
+> node scripts/verify-third-party-notices.mjs
+
+third-party notices PASS: 5 direct runtime dependencies; versions, notices, source evidence and package inclusion
+
+> photoshop-mcp-digital-painting@1.7.6 verify:pack
+> node scripts/verify-pack.mjs
+
+verify:pack ok — 210 packed dist JS files, imports resolve, retired UI/analytics surfaces absent.
+
+> photoshop-mcp-digital-painting@1.7.6 lint
+> eslint src --ext .ts
+
+
+E:\Downloads\devspace-test\experiments\photoshop-mcp-digital-painting\src\core\authored-form-field.ts
+  16:22  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  23:21  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  27:21  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+E:\Downloads\devspace-test\experiments\photoshop-mcp-digital-painting\src\core\authored-surface-field.ts
+    2:27  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   32:22  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   33:22  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   38:21  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   43:21  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   48:24  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   77:29  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   80:43  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   89:31  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   99:30  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  113:36  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  158:44  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  281:47  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+E:\Downloads\devspace-test\experiments\photoshop-mcp-digital-painting\src\core\component-space.ts
+   8:38  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   8:52  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  11:49  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  16:42  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  16:56  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  19:49  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  34:57  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+E:\Downloads\devspace-test\experiments\photoshop-mcp-digital-painting\src\core\geometry-binding.test.ts
+  11:51  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  12:16  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+E:\Downloads\devspace-test\experiments\photoshop-mcp-digital-painting\src\core\guard\brush-role-extension.ts
+   4:35  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   5:65  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  14:45  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  14:57  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  35:32  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+E:\Downloads\devspace-test\experiments\photoshop-mcp-digital-painting\src\core\guard\chat-critic.ts
+    7:27  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  192:19  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+E:\Downloads\devspace-test\experiments\photoshop-mcp-digital-painting\src\core\guard\compact-action-class.ts
+  35:48  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+E:\Downloads\devspace-test\experiments\photoshop-mcp-digital-painting\src\core\guard\construction-execution.ts
+   11:49   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   11:63   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   17:30   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   19:37   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   22:35   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   26:66   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   40:63   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   69:20   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   75:19   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   76:16   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   78:11   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   92:58   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   92:72   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   96:74   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   97:80   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   99:73   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  111:111  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+E:\Downloads\devspace-test\experiments\photoshop-mcp-digital-painting\src\core\guard\critic-correction.ts
+    5:27  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  128:19  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  130:16  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  206:9   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  304:28  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  304:34  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+E:\Downloads\devspace-test\experiments\photoshop-mcp-digital-painting\src\core\guard\critic-obligations.ts
+   20:71  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   24:49  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   32:46  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   36:45  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   54:65  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   54:78  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   59:64  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   68:39  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   71:39  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  107:49  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  107:62  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  107:76  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+E:\Downloads\devspace-test\experiments\photoshop-mcp-digital-painting\src\core\guard\cycle-compiler.ts
+   891:76   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   893:46   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  1294:109  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  2076:25   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  2076:33   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+E:\Downloads\devspace-test\experiments\photoshop-mcp-digital-painting\src\core\guard\document-artistic-debt.ts
+   37:52  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   46:84  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   60:47  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   60:59  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   73:45  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   73:63  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   75:66  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   77:60  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  109:34  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  115:45  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  115:63  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+E:\Downloads\devspace-test\experiments\photoshop-mcp-digital-painting\src\core\guard\editable-scope.ts
+   24:26  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   28:46  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   28:58  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   28:72  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   28:85  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   48:52  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   48:66  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   48:78  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   48:96  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   61:36  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   61:65  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   63:27  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   64:31  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   65:15  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   91:44  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  115:52  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  123:52  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  127:48  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+E:\Downloads\devspace-test\experiments\photoshop-mcp-digital-painting\src\core\guard\mechanical-patterning.ts
+   46:53   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   52:54   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   55:146  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   72:50   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  195:52   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  198:38   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  263:44   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  263:51   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  267:38   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  272:52   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  394:57   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  396:38   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  405:20   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  417:69   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  445:105  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+E:\Downloads\devspace-test\experiments\photoshop-mcp-digital-painting\src\core\guard\next-pass-compiler.ts
+  166:54  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  345:54  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  347:60  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  701:72  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+E:\Downloads\devspace-test\experiments\photoshop-mcp-digital-painting\src\core\guard\preflight-repair.ts
+   36:79  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   53:31  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   69:60  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   70:55  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   71:66  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   77:38  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   78:45  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   80:38  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   80:74  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   81:29  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   82:61  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   84:26  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   85:69  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  502:50  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  518:86  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  519:48  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+E:\Downloads\devspace-test\experiments\photoshop-mcp-digital-painting\src\core\guard\problem-links.ts
+  18:46  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+E:\Downloads\devspace-test\experiments\photoshop-mcp-digital-painting\src\core\guard\runtime.ts
+    96:50   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   926:24   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  1023:83   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  1049:100  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  1054:67   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  1065:43   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  1074:70   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  1075:58   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  1093:56   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  1132:64   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  1133:52   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  1206:49   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  1217:54   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  1405:46   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  1406:48   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  2066:89   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  2357:33   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  2360:49   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  2363:32   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  2363:74   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  2631:94   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  2686:28   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  2686:70   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+E:\Downloads\devspace-test\experiments\photoshop-mcp-digital-painting\src\core\guard\session-store.ts
+   5100:34  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  11505:48  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+E:\Downloads\devspace-test\experiments\photoshop-mcp-digital-painting\src\core\guard\throughput-event-archive.ts
+  75:14  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+E:\Downloads\devspace-test\experiments\photoshop-mcp-digital-painting\src\core\painterly-strokes.ts
+  911:63   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  911:121  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+E:\Downloads\devspace-test\experiments\photoshop-mcp-digital-painting\src\core\scene-geometry-model.test.ts
+  4:27  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+E:\Downloads\devspace-test\experiments\photoshop-mcp-digital-painting\src\core\scene-ownership-plan.ts
+  471:76  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+E:\Downloads\devspace-test\experiments\photoshop-mcp-digital-painting\src\core\visual-microplan.ts
+  1336:57  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  1341:73  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+E:\Downloads\devspace-test\experiments\photoshop-mcp-digital-painting\src\tools\guard-tools.ts
+  2037:79  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  2833:40  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+E:\Downloads\devspace-test\experiments\photoshop-mcp-digital-painting\src\tools\visual-microplan-tools.ts
+  2633:65  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+✖ 173 problems (0 errors, 173 warnings)
+
+
+> photoshop-mcp-digital-painting@1.7.6 test:acceptance
+> npm run verify:acceptance-matrix && vitest run --maxWorkers=1 --testTimeout=15000
+
+
+> photoshop-mcp-digital-painting@1.7.6 verify:acceptance-matrix
+> node scripts/verify-acceptance-matrix.mjs
+
+acceptance matrix coverage ok — 16 cited test names resolve inside 176 source Vitest files
+
+ RUN  v4.1.11 E:/Downloads/devspace-test/experiments/photoshop-mcp-digital-painting
+
+[2026-10-14T21:32:47.001Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:32:47.370Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:32:47.632Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:32:48.338Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:32:49.004Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:32:49.356Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:32:49.683Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:32:49.993Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:32:50.339Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:32:50.739Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:32:51.058Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:32:51.411Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:32:51.739Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:32:51.984Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:32:52.242Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:32:52.443Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:32:52.661Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:32:52.701Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:32:52.750Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:32:52.876Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:32:53.020Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:32:53.094Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:32:53.139Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:32:53.297Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:32:53.350Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:32:53.401Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:32:53.491Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:32:53.629Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:32:53.703Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:32:53.773Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:32:53.820Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:32:53.893Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:32:53.970Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:32:54.142Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:32:54.221Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:32:54.685Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:32:54.784Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:32:54.944Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:32:55.016Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:32:55.070Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:32:55.151Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:32:55.225Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:32:55.403Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:32:55.582Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:32:55.642Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:32:55.817Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:32:55.874Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:32:55.970Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:32:56.023Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:32:56.192Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:32:56.385Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:32:56.436Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:32:56.526Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:32:56.677Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:32:56.752Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:32:56.837Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:32:57.550Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:32:58.116Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:32:58.393Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:32:58.560Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:32:58.711Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:32:58.882Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:32:59.223Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:32:59.365Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:32:59.714Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:32:59.837Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:00.192Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:00.496Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:00.653Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:00.714Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:00.778Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:00.856Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:00.933Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:00.979Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:01.058Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:01.132Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:01.273Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:01.354Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:01.726Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:02.052Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:02.196Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:02.334Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:02.431Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:02.515Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:02.658Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:02.795Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:02.875Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:03.007Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:03.134Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:03.261Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:03.403Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:03.532Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:03.662Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:03.741Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:03.899Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:04.112Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:04.322Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:04.434Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:04.669Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:04.799Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:04.953Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:05.000Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:05.184Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:05.346Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:05.397Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:05.426Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:05.474Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:05.557Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:05.780Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:05.930Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:06.063Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:06.139Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:06.278Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:06.447Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:06.698Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:06.950Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:07.005Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:07.095Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:07.154Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:07.510Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:07.777Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:08.094Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:08.182Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:08.409Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:08.459Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:08.552Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:08.610Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:08.690Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:09.584Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:09.734Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:09.845Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:09.925Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:10.258Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:10.397Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:10.482Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:10.865Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:11.004Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:11.173Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:11.357Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:11.898Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:12.467Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:12.887Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:13.535Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:16.161Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:16.977Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:17.610Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:18.073Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:18.570Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:19.002Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:19.354Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:19.659Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:19.686Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:20.084Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+ ✓ tests/compact-contract-regressions.test.ts (106 tests) 33713ms
+     ✓ localizes frame narration with initial commentary=true and no additional painting or review  410ms
+     ✓ delivers bounded strategy history through combined closure and sync execution  703ms
+     ✓ delivers bounded strategy history through combined closure and async execution  672ms
+     ✓ inherits omitted owner hypothesis and rollback value before parsing: 'continue-logical-layer'/undefined  343ms
+     ✓ inherits omitted owner hypothesis and rollback value before parsing: 'adjust'/undefined  339ms
+     ✓ inherits omitted owner hypothesis and rollback value before parsing: 'continue-logical-layer'/'low'  301ms
+     ✓ inherits omitted owner hypothesis and rollback value before parsing: 'adjust'/'low'  355ms
+     ✓ preserves an explicit owner reassessment instead of overwriting it with inherited facts  392ms
+     ✓ inherits only a unique durable owner target: 'continue-logical-layer'/undefined/false/false  313ms
+     ✓ inherits only a unique durable owner target: 'adjust'/undefined/false/false  336ms
+     ✓ inherits only a unique durable owner target: 'continue-logical-layer'/undefined/true/false  354ms
+     ✓ requires an applicable durable scene geometry model before committed structured construction  621ms
+     ✓ enforces durable Object Geometry Binding for committed coherent-3D owners  1145ms
+     ✓ binds focus/depth treatment to the exact current camera model and accepted owner geometry  377ms
+     ✓ requires local attention-consuming passes to bind to the authorized Art Director perceptual zone  429ms
+     ✓ runs mandatory quantitative Geometry Preflight before coherent-3D Photoshop dispatch  363ms
+     ✓ executes initial layer toning without scene geometry but retains exact review and declared construction gates  333ms
+     ✓ surfaces machine-readable causal alternatives for an exhausted method class without dispatch  727ms
+     ✓ follows the public unknown-layer-producer correction into a real numeric Photoshop target  567ms
+     ✓ derives only missing classification from executable commands for direct and bundled passes in either language  1758ms
+     ✓ keeps ambiguous or destructive classification mismatches fail-closed before mutation  493ms
+     ✓ derives a unique executed method despite stale descriptive metadata: Refine the transition.  377ms
+     ✓ derives a unique executed method despite stale descriptive metadata: Смягчить переход без смены действий.  328ms
+     ✓ requires material-fit brush evidence for substantial nontrivial form/material work  321ms
+     ✓ enforces MATERIAL stroke representation readiness without requiring a prose plan  312ms
+     ✓ enforces MATERIAL blur representation readiness without requiring a prose plan  514ms
+     ✓ keeps supported atmospheric color preflight in Guard while validating real microplan schemas  354ms
+     ✓ keeps missing atmospheric color preflight in Guard while validating real microplan schemas  306ms
+     ✓ compiles explicit selection preparation plus layer-mask creation as one selection-mask VisualMicroPlan  325ms
+     ✓ admits a bounded new brush purpose, caches only exact-frame accepted fit, and still rejects wrong scale  888ms
+     ✓ keeps request idempotency separate from stable problem identity across attempts  339ms
+     ✓ normalizes explicit negative regression sentinels instead of treating them as regression evidence  391ms
+     ✓ requires a durable scene ownership plan before the first committed nontrivial owner and rejects reactive owner invention  560ms
+     ✓ requires stable semantic layer ownership for committed nontrivial painting and reuses the same owner across request ids  564ms
+     ✓ rejects a primaryForm-only correction aimed at a different independently owned component  415ms
+     ✓ dispatches an explicitly authorized historical-layer correction without changing owner authority  643ms
+     ✓ enforces a subject-agnostic construction graph and invalidates only dependent downstream structure  2640ms
+     ✓ binds causal effects to durable source/receiver revisions and makes them stale after source structure changes  813ms
+     ✓ persists a surface frame across continuation and rejects silent orientation drift  619ms
+     ✓ binds physical depth relations to exact Photoshop layer placement before value/form rendering  473ms
+     ✓ keeps temporary semantic ownership durable across continuation and blocks committed refinement until it is explicitly resolved  494ms
+     ✓ turns one PaintingIntent decision into one Guard dispatch with durable owner facts injected locally  433ms
+     ✓ repairs a missing known-owner layer binding locally and dispatches without a model-visible rejection  345ms
+     ✓ never overwrites an explicitly different known-owner region target during local repair  311ms
+     ✓ keeps reject -> correction out of recovery and preserves durable compiler lineage  391ms
+     ✓ splits only a safe independent budget overflow and persists the deferred sub-pass for post-review continuation  574ms
+[2026-10-14T21:33:22.213Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:26.665Z] [WARN] [ToolRegistry] Tool 'photoshop_save_document' already registered, overwriting
+[2026-10-14T21:33:26.970Z] [WARN] [ToolRegistry] Tool 'photoshop_get_preview' already registered, overwriting
+[2026-10-14T21:33:26.970Z] [WARN] [ToolRegistry] Tool 'photoshop_set_layer_opacity' already registered, overwriting
+[2026-10-14T21:33:28.791Z] [WARN] [ToolRegistry] Tool 'photoshop_paint_dabs' already registered, overwriting
+[2026-10-14T21:33:31.182Z] [WARN] [ToolRegistry] Tool 'photoshop_get_preview' already registered, overwriting
+[2026-10-14T21:33:31.232Z] [WARN] [ToolRegistry] Tool 'photoshop_paint_dabs' already registered, overwriting
+[2026-10-14T21:33:31.482Z] [WARN] [ToolRegistry] Tool 'photoshop_set_layer_opacity' already registered, overwriting
+[2026-10-14T21:33:33.288Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+[2026-10-14T21:33:34.976Z] [WARN] [ToolRegistry] Tool 'photoshop_get_preview' already registered, overwriting
+[2026-10-14T21:33:34.976Z] [WARN] [ToolRegistry] Tool 'photoshop_paint_dabs' already registered, overwriting
+[2026-10-14T21:33:35.283Z] [WARN] [ToolRegistry] Tool 'photoshop_get_preview' already registered, overwriting
+[2026-10-14T21:33:35.283Z] [WARN] [ToolRegistry] Tool 'photoshop_set_layer_opacity' already registered, overwriting
+[2026-10-14T21:33:35.659Z] [WARN] [ToolRegistry] Tool 'photoshop_get_preview' already registered, overwriting
+[2026-10-14T21:33:35.659Z] [WARN] [ToolRegistry] Tool 'photoshop_set_layer_opacity' already registered, overwriting
+ ✓ tests/embedded-guard.test.ts (104 tests) 14506ms
+     ✓ keeps ordinary status journal scans bounded to one even with a large operation history  1603ms
+     ✓ reuses the cycle projection for missing-document recovery before async selection  1205ms
+     ✓ accepts the exact pending source and dispatches one compact Undo in the SAME cycle without weakening post-closure checks  374ms
+     ✓ continues a multi-region block-in after a locally resolved background pass without completing the planner task  346ms
+     ✓ rejects stale close-only finalization instead of stopping a newer active workflow  309ms
+     ✓ keeps async reservation, execution, and polling to one full journal scan with 300 historical records  1013ms
+     ✓ inlines a fitting Guard-cycle visual review and preserves explicit exact redelivery without a preview recapture  335ms
+     ✓ escalates a structured local finding with read-only crop evidence for the same operation before allowing the next mutation  370ms
+ ✓ tests/benchmark-archive-integration.test.ts (12 tests) 3684ms
+   ✓ streams more than 50,000 selected events without truncating exact run counters  3163ms
+ ✓ tests/session-store-regressions.test.ts (102 tests) 3541ms
+     ✓ does not propagate malformed persisted parent-transform bounds into descendant geometry  309ms
+ ✓ tests/benchmark-archive-large.test.ts (2 tests) 2844ms
+   ✓ verifies archives beyond 32 MiB without skipping earlier foreign-incarnation evidence or late corruption  2157ms
+   ✓ refuses exact counters when selected events exceed a bounded retention budget  685ms
+ ✓ tests/planner-painter.test.ts (107 tests) 1896ms
+[2026-10-14T21:33:51.504Z] [INFO] [UxpBridgeServer] UXP bridge listening on 127.0.0.1:39452
+[2026-10-14T21:33:52.908Z] [WARN] [UxpBridgeServer] Failed to load UXP receipt journal entry C:\Users\dslava\AppData\Local\Temp\photoshop-uxp-receipts-Qqc6b6\16035bf4e9e9862acd77a376d1fa9a38c9b55512e8871d5d9abfe13731e17075.json: Expected property name or '}' in JSON at position 1 (line 1 column 2)
+[2026-10-14T21:33:52.911Z] [INFO] [UxpBridgeServer] UXP bridge listening on 127.0.0.1:39452
+[2026-10-14T21:33:53.000Z] [WARN] [UxpBridgeServer] Failed to load UXP receipt journal entry C:\Users\dslava\AppData\Local\Temp\photoshop-uxp-receipts-Qqc6b6\16035bf4e9e9862acd77a376d1fa9a38c9b55512e8871d5d9abfe13731e17075.json: Expected property name or '}' in JSON at position 1 (line 1 column 2)
+[2026-10-14T21:33:53.002Z] [INFO] [UxpBridgeServer] UXP bridge listening on 127.0.0.1:39452
+ ✓ src/platform/uxp-bridge-server.test.ts (37 tests) 1764ms
+[2026-10-14T21:33:55.284Z] [WARN] [ToolRegistry] Tool 'photoshop_analyze_value_structure' already registered, overwriting
+ ✓ tests/accepted-anchor-restore.test.ts (15 tests) 1601ms
+ ✓ tests/painterly-strokes.test.ts (14 tests) 1566ms
+[2026-10-14T21:33:58.728Z] [ERROR] [ToolRegistry] Tool execution failed: photoshop_analyze_value_structure Error: current_frame_file_changed
+    at Object.currentFrame (E:/Downloads/devspace-test/experiments/photoshop-mcp-digital-painting/src/core/guard/runtime.ts:416:86)
+    at Object.handler (E:/Downloads/devspace-test/experiments/photoshop-mcp-digital-painting/src/tools/value-check-tools.ts:50:31)
+    at ToolRegistry.execute (E:/Downloads/devspace-test/experiments/photoshop-mcp-digital-painting/src/core/runtime-registries.ts:77:31)
+    at E:/Downloads/devspace-test/experiments/photoshop-mcp-digital-painting/tests/painter-recovery-evidence.test.ts:150:29
+    at file:///E:/Downloads/devspace-test/experiments/photoshop-mcp-digital-painting/node_modules/.pnpm/@vitest+runner@4.1.11/node_modules/@vitest/runner/dist/chunk-artifact.js:302:11
+    at file:///E:/Downloads/devspace-test/experiments/photoshop-mcp-digital-painting/node_modules/.pnpm/@vitest+runner@4.1.11/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:26
+    at file:///E:/Downloads/devspace-test/experiments/photoshop-mcp-digital-painting/node_modules/.pnpm/@vitest+runner@4.1.11/node_modules/@vitest/runner/dist/chunk-artifact.js:2326:20
+    at new Promise (<anonymous>)
+    at runWithCancel (file:///E:/Downloads/devspace-test/experiments/photoshop-mcp-digital-painting/node_modules/.pnpm/@vitest+runner@4.1.11/node_modules/@vitest/runner/dist/chunk-artifact.js:2323:10)
+    at file:///E:/Downloads/devspace-test/experiments/photoshop-mcp-digital-painting/node_modules/.pnpm/@vitest+runner@4.1.11/node_modules/@vitest/runner/dist/chunk-artifact.js:2305:20
+[2026-10-14T21:33:58.785Z] [ERROR] [ToolRegistry] Tool execution failed: photoshop_analyze_value_structure Error: value_evidence_source_overwrite_forbidden: choose a different materialize_path
+    at Object.handler (E:/Downloads/devspace-test/experiments/photoshop-mcp-digital-painting/src/tools/value-check-tools.ts:75:17)
+    at ToolRegistry.execute (E:/Downloads/devspace-test/experiments/photoshop-mcp-digital-painting/src/core/runtime-registries.ts:77:31)
+    at E:/Downloads/devspace-test/experiments/photoshop-mcp-digital-painting/tests/painter-recovery-evidence.test.ts:157:29
+    at file:///E:/Downloads/devspace-test/experiments/photoshop-mcp-digital-painting/node_modules/.pnpm/@vitest+runner@4.1.11/node_modules/@vitest/runner/dist/chunk-artifact.js:302:11
+    at file:///E:/Downloads/devspace-test/experiments/photoshop-mcp-digital-painting/node_modules/.pnpm/@vitest+runner@4.1.11/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:26
+    at file:///E:/Downloads/devspace-test/experiments/photoshop-mcp-digital-painting/node_modules/.pnpm/@vitest+runner@4.1.11/node_modules/@vitest/runner/dist/chunk-artifact.js:2326:20
+    at new Promise (<anonymous>)
+    at runWithCancel (file:///E:/Downloads/devspace-test/experiments/photoshop-mcp-digital-painting/node_modules/.pnpm/@vitest+runner@4.1.11/node_modules/@vitest/runner/dist/chunk-artifact.js:2323:10)
+    at file:///E:/Downloads/devspace-test/experiments/photoshop-mcp-digital-painting/node_modules/.pnpm/@vitest+runner@4.1.11/node_modules/@vitest/runner/dist/chunk-artifact.js:2305:20
+    at new Promise (<anonymous>)
+ ✓ tests/painter-recovery-evidence.test.ts (21 tests) 1138ms
+ ✓ tests/task19-cache-ab-benchmark.test.ts (2 tests) 1182ms
+     ✓ runs three isolated child-process cold/warm pairs without Photoshop and observes real cache reuse  1176ms
+ ✓ tests/bounded-undo-semantics.test.ts (7 tests) 760ms
+[2026-10-14T21:34:03.362Z] [INFO] [UxpBridgeServer] UXP bridge listening on 127.0.0.1:38453
+ ✓ tests/chat-critic-role.test.ts (23 tests) 765ms
+ ✓ tests/throughput-event-archive.test.ts (12 tests) 597ms
+   ✓ durably pages more than 64 events across a new SessionStore without growing the live mirror  438ms
+ ✓ tests/uxp-bootstrap.test.ts (11 tests) 691ms
+     ✓ verifies nameless preset readback through a real Photoshop select event, preserving conflict, missing events and errors  506ms
+ ✓ tests/representation-fidelity-bridge.test.ts (8 tests) 734ms
+ ✓ tests/throughput-archive-process-races.test.ts (4 tests) 666ms
+ ✓ tests/chat-economy.test.ts (13 tests) 693ms
+ ✓ tests/physical-stack-check.test.ts (10 tests) 452ms
+ ✓ tests/visual-review-escalation-state.test.ts (17 tests) 474ms
+[2026-10-14T21:34:12.936Z] [INFO] [UxpBridgeServer] UXP bridge listening on 127.0.0.1:39752
+ ✓ src/platform/uxp-user-config-api.test.ts (1 test) 423ms
+ ✓ tests/artistic-evaluator.test.ts (5 tests) 431ms
+   ✓ requests same-chat pixel review at all stages without calling or preparing a separate evaluator  341ms
+ ✓ tests/recovery-state-machine.test.ts (19 tests) 421ms
+ ✓ tests/component-recovery-regressions.test.ts (9 tests) 440ms
+ ✓ tests/manual-document-close-recovery.test.ts (9 tests) 381ms
+ ✓ tests/artistic-recovery-production.test.ts (18 tests) 387ms
+ ✓ tests/roadmap-correction.test.ts (7 tests) 302ms
+ ✓ tests/executable-form-contract.test.ts (16 tests) 299ms
+[2026-10-14T21:34:21.076Z] [WARN] [ToolRegistry] Tool 'photoshop_paint_regions' already registered, overwriting
+ ✓ tests/object-construction.test.ts (30 tests) 316ms
+ ✓ tests/value-check.test.ts (16 tests) 298ms
+ ✓ tests/guarded-blur.test.ts (31 tests) 158ms
+ ✓ tests/geometry-contract-repair.test.ts (6 tests) 147ms
+ ✓ tests/soft-dominance-review.test.ts (12 tests) 232ms
+ ✓ tests/refinement-check.test.ts (19 tests) 201ms
+ ✓ tests/nonvisual-closure.test.ts (21 tests) 244ms
+ ✓ tests/task8a-review-pack.test.ts (4 tests) 75ms
+ ✓ tests/next-pass-compiler.test.ts (13 tests) 108ms
+ ✓ src/platform/photoshop-backend.test.ts (18 tests) 83ms
+ ✓ tests/timing-continuation.test.ts (9 tests) 140ms
+ ✓ tests/visual-microplan.test.ts (83 tests) 130ms
+ ✓ tests/uxp-paint-opacity.test.ts (37 tests) 105ms
+ ✓ tests/throughput-legacy-coverage-write.test.ts (4 tests) 118ms
+ ✓ tests/contour-geometry.test.ts (6 tests) 103ms
+ ✓ tests/component-scope.test.ts (14 tests) 147ms
+ ✓ tests/guard-response-budget.test.ts (14 tests) 120ms
+ ✓ tests/guard-state-evidence-correctness.test.ts (4 tests) 46ms
+ ✓ tests/throughput-semantic-source-integrity.test.ts (7 tests) 101ms
+ ✓ tests/deployment-health.test.ts (6 tests) 95ms
+ ✓ tests/runtime-state-versioning.test.ts (5 tests) 84ms
+ ✓ tests/mask-and-rejection.test.ts (26 tests) 123ms
+ ✓ tests/brush-pack-profile.test.ts (7 tests) 86ms
+ ✓ tests/state-preview.test.ts (1 test) 66ms
+ ✓ tests/mechanical-patterning-review.test.ts (12 tests) 75ms
+ ✓ tests/throughput-source-classification.test.ts (4 tests) 74ms
+ ✓ tests/uxp-stamp-history.test.ts (22 tests) 68ms
+ ✓ tests/unified-artistic-operation.test.ts (7 tests) 126ms
+ ✓ tests/benchmark-painting-cycles.test.ts (8 tests) 67ms
+ ✓ tests/ik-construction.test.ts (9 tests) 53ms
+ ✓ tests/compact-v2-live-evidence.test.ts (7 tests) 60ms
+ ✓ tests/preparation-cache.test.ts (10 tests) 66ms
+ ✓ src/core/user-config.test.ts (3 tests) 58ms
+ ✓ tests/throughput-integrity.test.ts (5 tests) 66ms
+[2026-10-14T21:34:43.862Z] [WARN] [ToolRegistry] Tool 'photoshop_list_documents' already registered, overwriting
+ ✓ tests/visual-microplan-compiler.test.ts (20 tests) 58ms
+ ✓ src/core/process-video-trace.test.ts (20 tests) 74ms
+[2026-10-14T21:34:44.659Z] [WARN] [ToolRegistry] Tool 'photoshop_paint_strokes' already registered, overwriting
+[2026-10-14T21:34:44.690Z] [WARN] [ToolRegistry] Tool 'photoshop_paint_strokes' already registered, overwriting
+[2026-10-14T21:34:44.693Z] [WARN] [ToolRegistry] Tool 'photoshop_set_brush' already registered, overwriting
+[2026-10-14T21:34:44.693Z] [WARN] [ToolRegistry] Tool 'photoshop_paint_dabs' already registered, overwriting
+[2026-10-14T21:34:44.695Z] [WARN] [ToolRegistry] Tool 'photoshop_set_brush' already registered, overwriting
+[2026-10-14T21:34:44.695Z] [WARN] [ToolRegistry] Tool 'photoshop_paint_dabs' already registered, overwriting
+ ✓ tests/edge-control.test.ts (10 tests) 56ms
+ ✓ tests/scene-ownership-plan.test.ts (10 tests) 56ms
+ ✓ tests/benchmark-unjournaled-prefix-window.test.ts (10 tests) 74ms
+ ✓ tests/first-pass-contract-recovery.test.ts (3 tests) 48ms
+ ✓ tests/benchmark-event-classification.test.ts (8 tests) 52ms
+ ✓ tests/benchmark-incomplete-journal-boundary.test.ts (8 tests) 55ms
+ ✓ tests/brush-pack-ingestion.test.ts (6 tests) 47ms
+ ✓ src/tools/painting-uxp-routing.test.ts (14 tests) 48ms
+ ✓ tests/async-poll-throughput-ownership.test.ts (2 tests) 52ms
+ ✓ tests/director-attention-recovery.test.ts (9 tests) 69ms
+ ✓ tests/microplan-recovery.test.ts (2 tests) 62ms
+ ✓ tests/benchmark-journal-start-marker-order.test.ts (6 tests) 45ms
+ ✓ tests/benchmark-inverted-journal-boundary.test.ts (6 tests) 60ms
+[2026-10-14T21:34:52.856Z] [INFO] [UxpBridgeServer] UXP bridge listening on 127.0.0.1:38453
+ ✓ tests/document-history-state-contract.test.ts (6 tests) 31ms
+ ✓ tests/representation-owner-inference.test.ts (5 tests) 43ms
+ ✓ tests/cycle-auto-telemetry-failures.test.ts (4 tests) 40ms
+ ✓ tests/benchmark-owned-event-window.test.ts (8 tests) 48ms
+ ✓ tests/benchmark-semantic-action-integrity.test.ts (7 tests) 46ms
+ ✓ src/core/executable-geometry-validation.test.ts (35 tests) 39ms
+ ✓ tests/editable-scope.test.ts (6 tests) 41ms
+ ✓ tests/connected-move-atomic.test.ts (25 tests) 34ms
+ ✓ tests/gradient-mask-safety.test.ts (7 tests) 28ms
+ ✓ src/core/geometry-railway-regression.test.ts (4 tests) 27ms
+ ✓ tests/native-surface-gradient.test.ts (7 tests) 36ms
+ ✓ src/core/geometry-preflight.test.ts (7 tests) 28ms
+ ✓ tests/task8a-calibration.test.ts (7 tests) 29ms
+ ✓ src/core/geometry-binding.test.ts (8 tests) 116ms
+[2026-10-14T21:34:58.809Z] [INFO] [WindowsDetector] Found Photoshop at: C:\Program Files\Adobe\Adobe Photoshop 2030\Photoshop.exe
+ ✓ tests/windows-detector.test.ts (2 tests) 30ms
+ ✓ tests/stamp-instance-placement.test.ts (3 tests) 29ms
+ ✓ tests/brush-pack-stamp-profile.test.ts (4 tests) 32ms
+ ✓ src/core/geometry-additional-regressions.test.ts (6 tests) 33ms
+ ✓ tests/painting-intent.test.ts (3 tests) 24ms
+ ✓ tests/painting-method-palette.test.ts (16 tests) 25ms
+ ✓ tests/uxp-migration-completeness.test.ts (5 tests) 42ms
+ ✓ tests/uxp-document-target-guard.test.ts (4 tests) 20ms
+ ✓ tests/layer-domain-contract.test.ts (10 tests) 28ms
+ ✓ tests/uxp-fill-history.test.ts (6 tests) 26ms
+ ✓ tests/uxp-brush-probe-selection.test.ts (3 tests) 16ms
+ ✓ tests/uxp-document-units.test.ts (5 tests) 32ms
+ ✓ tests/preflight-repair.test.ts (10 tests) 23ms
+ ✓ tests/filter-adjustment-domain-contract.test.ts (9 tests) 55ms
+ ✓ tests/world-consistency-critic.test.ts (16 tests) 34ms
+ ✓ tests/uxp-path-geometry.test.ts (1 test) 17ms
+ ✓ tests/artistic-contract.test.ts (11 tests) 18ms
+ ✓ tests/selection-mask-domain-contract.test.ts (6 tests) 20ms
+ ✓ src/tools/layer-uxp-routing.test.ts (10 tests) 20ms
+ ✓ tests/image-smart-object-domain-contract.test.ts (7 tests) 16ms
+ ✓ tests/guard-execution-policy.test.ts (2 tests) 16ms
+ ✓ tests/style-contract-runtime.test.ts (11 tests) 11ms
+ ✓ tests/execution-overhead.test.ts (2 tests) 17ms
+[2026-10-14T21:35:11.680Z] [ERROR] [PhotoshopConnection] Photoshop detection failed: Error: Photoshop missing
+    at Object.detect (E:/Downloads/devspace-test/experiments/photoshop-mcp-digital-painting/src/platform/connection.test.ts:32:47)
+    at PhotoshopConnection.inspect (E:/Downloads/devspace-test/experiments/photoshop-mcp-digital-painting/src/platform/discovery-runtime.ts:94:74)
+    at PhotoshopConnection.ping (E:/Downloads/devspace-test/experiments/photoshop-mcp-digital-painting/src/platform/discovery-runtime.ts:100:18)
+    at E:/Downloads/devspace-test/experiments/photoshop-mcp-digital-painting/src/platform/connection.test.ts:34:29
+    at file:///E:/Downloads/devspace-test/experiments/photoshop-mcp-digital-painting/node_modules/.pnpm/@vitest+runner@4.1.11/node_modules/@vitest/runner/dist/chunk-artifact.js:302:11
+    at file:///E:/Downloads/devspace-test/experiments/photoshop-mcp-digital-painting/node_modules/.pnpm/@vitest+runner@4.1.11/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:26
+    at file:///E:/Downloads/devspace-test/experiments/photoshop-mcp-digital-painting/node_modules/.pnpm/@vitest+runner@4.1.11/node_modules/@vitest/runner/dist/chunk-artifact.js:2326:20
+    at new Promise (<anonymous>)
+    at runWithCancel (file:///E:/Downloads/devspace-test/experiments/photoshop-mcp-digital-painting/node_modules/.pnpm/@vitest+runner@4.1.11/node_modules/@vitest/runner/dist/chunk-artifact.js:2323:10)
+    at file:///E:/Downloads/devspace-test/experiments/photoshop-mcp-digital-painting/node_modules/.pnpm/@vitest+runner@4.1.11/node_modules/@vitest/runner/dist/chunk-artifact.js:2305:20
+[2026-10-14T21:35:11.681Z] [ERROR] [PhotoshopConnection] Failed to get Photoshop version: Error: Photoshop missing
+    at Object.detect (E:/Downloads/devspace-test/experiments/photoshop-mcp-digital-painting/src/platform/connection.test.ts:32:47)
+    at PhotoshopConnection.inspect (E:/Downloads/devspace-test/experiments/photoshop-mcp-digital-painting/src/platform/discovery-runtime.ts:94:74)
+    at PhotoshopConnection.getVersion (E:/Downloads/devspace-test/experiments/photoshop-mcp-digital-painting/src/platform/discovery-runtime.ts:110:31)
+    at E:/Downloads/devspace-test/experiments/photoshop-mcp-digital-painting/src/platform/connection.test.ts:35:29
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at file:///E:/Downloads/devspace-test/experiments/photoshop-mcp-digital-painting/node_modules/.pnpm/@vitest+runner@4.1.11/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20
+ ✓ src/platform/connection.test.ts (2 tests) 13ms
+ ✓ src/tools/canonical-lane-blockers-uxp.test.ts (4 tests) 14ms
+ ✓ src/core/scene-lighting-color-model.test.ts (10 tests) 14ms
+[2026-10-14T21:35:12.724Z] [WARN] [ToolRegistry] Tool 'demo' already registered, overwriting
+[2026-10-14T21:35:12.733Z] [WARN] [PromptRegistry] Prompt 'guide' already registered, overwriting
+[2026-10-14T21:35:12.735Z] [INFO] [Session] Connecting to Photoshop...
+[2026-10-14T21:35:12.735Z] [INFO] [Session] Successfully connected to Photoshop
+[2026-10-14T21:35:12.736Z] [INFO] [Session] Connecting to Photoshop...
+[2026-10-14T21:35:12.736Z] [WARN] [Session] Failed to connect to Photoshop
+ ✓ tests/bootstrap-substrate.test.ts (4 tests) 17ms
+ ✓ tests/text-style-domain-contract.test.ts (4 tests) 12ms
+ ✓ src/core/scene-camera-imaging-model.test.ts (8 tests) 15ms
+ ✓ tests/artistic-operation-contract.test.ts (7 tests) 17ms
+ ✓ tests/brush-method-evidence.test.ts (11 tests) 11ms
+ ✓ tests/benchmark-archive-close-failure.test.ts (1 test) 13ms
+ ✓ tests/compact-physical-stack.test.ts (10 tests) 7ms
+ ✓ tests/visual-review-region.test.ts (11 tests) 8ms
+ ✓ tests/visual-review-profile.test.ts (19 tests) 11ms
+ ✓ tests/model-facing-tool-result.test.ts (5 tests) 11ms
+ ✓ tests/document-target.test.ts (9 tests) 11ms
+ ✓ tests/compact-edge-bindings.test.ts (4 tests) 6ms
+ ✓ tests/execution-lease.test.ts (1 test) 6ms
+ ✓ tests/pass-check-applicability.test.ts (4 tests) 8ms
+ ✓ tests/material-response.test.ts (5 tests) 6ms
+ ✓ tests/structural-defect-cycle.test.ts (3 tests) 10ms
+ ✓ tests/preview-barriers.test.ts (2 tests) 10ms
+ ✓ src/core/geometry-contract.test.ts (3 tests) 9ms
+ ✓ tests/painting-stage-policy.test.ts (9 tests) 8ms
+ ✓ tests/compact-stroke-budget.test.ts (5 tests) 8ms
+ ✓ src/core/imaging-preflight.test.ts (4 tests) 12ms
+ ✓ src/core/scene-geometry-model.test.ts (5 tests) 11ms
+ ✓ tests/operation-narrative.test.ts (10 tests) 8ms
+ ✓ src/core/geometry-math.test.ts (5 tests) 9ms
+ ✓ src/core/perceptual-hierarchy.test.ts (3 tests) 8ms
+ ✓ tests/compact-change-domains.test.ts (4 tests) 8ms
+ ✓ tests/compact-owner-metadata.test.ts (5 tests) 6ms
+ ✓ tests/compact-action-class.test.ts (5 tests) 6ms
+ ✓ tests/compact-envelope-gates.test.ts (7 tests) 8ms
+ ✓ tests/legacy-transport-retirement.test.ts (2 tests) 6ms
+ ✓ tests/artistic-recovery-policy.test.ts (7 tests) 7ms
+ ✓ tests/legacy-consumer-retirement.test.ts (2 tests) 8ms
+ ✓ tests/compact-method-admissibility.test.ts (6 tests) 5ms
+ ✓ tests/compact-brush-material-preflight.test.ts (8 tests) 11ms
+ ✓ src/core/color-gradient-preflight.test.ts (4 tests) 15ms
+ ✓ src/core/execution-context.test.ts (4 tests) 6ms
+ ✓ src/core/photoshop-ping.test.ts (2 tests) 5ms
+ ✓ tests/brush-setter-readback.test.ts (1 test) 9ms
+ ✓ tests/spatial-support.test.ts (7 tests) 7ms
+ ✓ tests/region-reconstruction-recovery.test.ts (1 test) 9ms
+ ✓ tests/brush-setter-quantization.test.ts (2 tests) 10ms
+ ✓ src/errors/envelope.test.ts (4 tests) 7ms
+ ✓ tests/commentary-mode-contract.test.ts (5 tests) 7ms
+ ✓ src/platform/capabilities.test.ts (3 tests) 7ms
+ ✓ tests/compact-pass-budget-gates.test.ts (5 tests) 6ms
+ ✓ tests/continuation-admissibility.test.ts (4 tests) 7ms
+ ✓ tests/compact-review-region-gates.test.ts (6 tests) 5ms
+ ✓ tests/open-brief-subject-selection.test.ts (2 tests) 7ms
+ ✓ tests/correction-admissibility.test.ts (3 tests) 7ms
+ ✓ tests/uxp-panel-localization.test.ts (2 tests) 5ms
+ ✓ tests/compact-layer-targets.test.ts (5 tests) 7ms
+ ✓ tests/blend-mode.test.ts (6 tests) 6ms
+ ✓ tests/compact-construction-role-gates.test.ts (5 tests) 5ms
+ ✓ tests/direct-change-domains.test.ts (4 tests) 5ms
+ ✓ tests/source-independence-clone-detector.test.ts (2 tests) 4ms
+ ✓ tests/compact-initial-layer-tone.test.ts (5 tests) 6ms
+ ✓ tests/benchmark-repair-overflow.test.ts (2 tests) 6ms
+ ✓ tests/uxp-user-config-document-sync.test.ts (1 test) 4ms
+ ✓ src/core/guard/session-store.test.ts (3 tests) 10ms
+
+ Test Files  176 passed (176)
+      Tests  1915 passed (1915)
+   Start at  21:32:43
+   Duration  174.59s (transform 5.29s, setup 0ms, import 34.71s, tests 82.94s, environment 26ms)
+
+
+> photoshop-mcp-digital-painting@1.7.6 verify:compact-v2-contract
+> node scripts/verify-compact-v2-contract-audit.mjs
+
+OK: compact-v2 13b audit artifact is structurally complete and current behavior acceptance is recorded.
+
+> photoshop-mcp-digital-painting@1.7.6 verify:painting-policy
+> node scripts/verify-digital-painting-policy.mjs
+
+OK: digital painting policy kernel is consistent; kernel=12966 chars, detailed-policy=103041 chars, prompt=17996 chars.
+
+> photoshop-mcp-digital-painting@1.7.6 verify:photoshop-prompts
+> tsx scripts/verify-photoshop-prompt-coverage.ts
+
+Registered 3 tools and 5 prompts.
+OK: legacy recipe tools/prompts absent, 5 guide prompts registered, 5 total prompts, state/preview/capabilities tools registered, sticky-route instructions and Guard metadata are covered.
+
+> photoshop-mcp-digital-painting@1.7.6 verify:source-independence
+> node scripts/verify-source-independence.mjs
+
+{
+  "protocol": "photoshop.source_independence.v1",
+  "baseline": "7b635963f87b5b8ff5380c3156841f5253ec8063",
+  "runtime": {
+    "files": 221,
+    "lines": 69092,
+    "exact_lines": 200,
+    "exact_ratio": 0.0028946911364557404
+  },
+  "thresholds": {
+    "max_runtime_exact": 0.005,
+    "large_block_lines": 12,
+    "cross_path_block_lines": 8,
+    "high_file_exact": 0.5
+  },
+  "identical_files": [],
+  "large_blocks": [],
+  "cross_path_blocks": [],
+  "high_similarity_files": [],
+  "retired_pack_entries": [],
+  "upstream_script_dependencies": [],
+  "top_files": [
+    {
+      "path": "src/platform/uxp-bridge-server.ts",
+      "lines": 1095,
+      "exact_lines": 77,
+      "exact_ratio": 0.07031963470319634
+    },
+    {
+      "path": "uxp-plugin/main.js",
+      "lines": 4903,
+      "exact_lines": 47,
+      "exact_ratio": 0.009585967774831736
+    },
+    {
+      "path": "src/platform/uxp-bridge-client.ts",
+      "lines": 1018,
+      "exact_lines": 10,
+      "exact_ratio": 0.009823182711198428
+    },
+    {
+      "path": "src/tools/smart-object-tools.ts",
+      "lines": 75,
+      "exact_lines": 7,
+      "exact_ratio": 0.09333333333333334
+    },
+    {
+      "path": "src/tools/blend-mode.ts",
+      "lines": 26,
+      "exact_lines": 6,
+      "exact_ratio": 0.23076923076923078
+    },
+    {
+      "path": "src/tools/layer-ordering-tools.ts",
+      "lines": 63,
+      "exact_lines": 6,
+      "exact_ratio": 0.09523809523809523
+    },
+    {
+      "path": "src/tools/layer-properties-tools.ts",
+      "lines": 92,
+      "exact_lines": 6,
+      "exact_ratio": 0.06521739130434782
+    },
+    {
+      "path": "src/tools/layer-tools.ts",
+      "lines": 106,
+      "exact_lines": 6,
+      "exact_ratio": 0.05660377358490566
+    },
+    {
+      "path": "src/tools/document-tools.ts",
+      "lines": 82,
+      "exact_lines": 5,
+      "exact_ratio": 0.06097560975609756
+    },
+    {
+      "path": "src/tools/image-placement-tools.ts",
+      "lines": 53,
+      "exact_lines": 5,
+      "exact_ratio": 0.09433962264150944
+    },
+    {
+      "path": "src/tools/stack-tools.ts",
+      "lines": 41,
+      "exact_lines": 5,
+      "exact_ratio": 0.12195121951219512
+    },
+    {
+      "path": "src/tools/text-tools.ts",
+      "lines": 79,
+      "exact_lines": 5,
+      "exact_ratio": 0.06329113924050633
+    },
+    {
+      "path": "src/tools/export-tools.ts",
+      "lines": 32,
+      "exact_lines": 4,
+      "exact_ratio": 0.125
+    },
+    {
+      "path": "src/tools/history-tools.ts",
+      "lines": 31,
+      "exact_lines": 4,
+      "exact_ratio": 0.12903225806451613
+    },
+    {
+      "path": "src/tools/state-tools.ts",
+      "lines": 64,
+      "exact_lines": 4,
+      "exact_ratio": 0.0625
+    }
+  ]
+}
+
+> photoshop-mcp-digital-painting@1.7.6 verify:product-identity
+> node scripts/verify-product-identity.mjs
+
+{
+  "protocol": "photoshop.product_identity.v1",
+  "package_name": "photoshop-mcp-digital-painting",
+  "server_id": "io.github.lavalava45/photoshop-mcp-digital-painting",
+  "mcpb_name": "photoshop-mcp-digital-painting",
+  "display_name": "Photoshop MCP — Digital Painting Edition",
+  "repository": "https://github.com/lavalava45/paintpilot-mcp",
+  "platforms": [
+    "win32"
+  ],
+  "examples": [
+    "examples/claude-code-mcp.json",
+    "examples/claude-desktop-config.json",
+    "examples/cursor-config.json"
+  ],
+  "notice_present": true,
+  "primary_identity_files_checked": 20
+}
+
+> photoshop-mcp-digital-painting@1.7.6 verify:provenance
+> node scripts/verify-provenance.mjs
+
+{
+  "protocol": "photoshop.provenance.v1",
+  "baseline": "7b635963f87b5b8ff5380c3156841f5253ec8063",
+  "upstream_repository": "https://github.com/alisaitteke/photoshop-mcp",
+  "current_license_project_owned": true,
+  "package_includes_license": true,
+  "package_includes_notice": true,
+  "mcpb_license": "MIT",
+  "notice_sections": {
+    "historical_origin": true,
+    "project_authored_work": true,
+    "architectural_divergence": true,
+    "selective_ports_policy": true
+  }
+}
+
+> photoshop-mcp-digital-painting@1.7.6 verify:external-intake
+> node scripts/verify-external-intake.mjs
+
+{
+  "protocol": "photoshop.external_intake.v1",
+  "policy": "docs/external-intake.md",
+  "upstream_remote_required": false,
+  "standing_upstream_remote_allowed": false,
+  "workflow_files_checked": [
+    "CONTRIBUTING.md",
+    "docs/development.md",
+    "docs/release-policy.md",
+    "RELEASE_CHECKLIST.md",
+    ".github/pull_request_template.md"
+  ],
+  "github_workflows_checked": 1,
+  "canonical_gate_wired": true,
+  "pr_intake_evidence_fields": true,
+  "forbidden_sync_matches": []
+}
+
+> photoshop-mcp-digital-painting@1.7.6 verify:tool-counts
+> tsx scripts/verify-tool-counts.ts
+
+catalog counts consistent: 132 = 132 atomic + 0 recipes; 15 Guard tools; 5 MCP prompt templates
+
+> photoshop-mcp-digital-painting@1.7.6 verify:live-evidence-ledger
+> node scripts/verify-live-evidence-ledger.mjs
+
+live evidence ledger STRUCTURE PASS — 23 entries; 21 locally present and hash-checked; 2 unavailable and NOT verified
+Missing gitignored evidence (use --require-all-local to fail on this):
+  .photoshop-runtime/controller/operations/multiscale-live-20260924-composition-01.json
+  .photoshop-runtime/controller/operations/multiscale-live-20260924-host-refresh-02.json
+
+> photoshop-mcp-digital-painting@1.7.6 verify:docs
+> node scripts/verify-bilingual-docs.mjs
+
+Bilingual docs PASS: 9 paired chapters, 10 shared historical images, no broken relative links

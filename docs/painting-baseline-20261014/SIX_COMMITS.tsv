@@ -1,0 +1,6 @@
+a3799e4b42fc56d5fdb0e416249a9edc0428bd74`t2026-10-14T16:06:48Z`tfix(guard): retain new cumulative priority across rejected next pass
+5fdd34059ea6082a1d718fdea73f3853e1360459`t2026-10-14T16:06:49Z`tfix(guard): persist exact glance boundary after visual closure
+aef526964f0971822c2367f9051475cb0078db5a`t2026-10-14T16:07:48Z`tfeat(painting): build color-value regions in first owned construction
+f96d4ad4112fe267d40803c1acd5384e17621462`t2026-10-14T16:13:31Z`tchore(repo): retire obsolete locale stubs and fix Windows checkout docs
+7392a44b37d7ef45a51623c4ae24558681b3871d`t2026-10-14T16:18:21Z`tfix(painting): keep recognition prompt bounded and medium-aware
+fac85eab4c978f65614da268243ae1d8747f9ec0`t2026-10-14T18:45:32Z`tfix(painter): verify installed brush marks and escape prepaint stalls

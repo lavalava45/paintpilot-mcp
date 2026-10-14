@@ -1,6 +1,6 @@
 # Painting Quality Roadmap
 
-Last updated: 2026-10-13
+Last updated: 2026-10-15
 
 Goal: **a visibly better image sooner**, preserving the user's subject, style and composition.
 This is the short work plan. [Technical details and acceptance](PAINTING-WORK-DETAILS.md)
@@ -8,12 +8,101 @@ hold the existing task identifiers and conditions; [CHANGELOG](../CHANGELOG.md) 
 [The acceptance matrix](roadmap-final-acceptance-matrix.md) records evidence status.
 Reorganization does not mean any open feature or artistic claim has been completed.
 
+**Single source of truth (2026-10-15):** this roadmap owns restoration priorities,
+the entire frozen post-first-city delta, canonical Git cleanup and foreign-file
+triage. [Verbatim evidence and full patch](painting-baseline-20261014/) are
+supporting artifacts, **not competing roadmaps** or authorization to apply
+changes. Read the Priority 0 and Git cleanup sections before selecting a task
+from the older painting queue. Historical `implemented` notes are not proof
+that a newer archived change is installed in the restored baseline.
+
 **Current release direction:** [finite Release Hardening gate](RELEASE-HARDENING.md).
 Freeze optional feature growth and qualify the existing Critic → Painter → Guard →
 Photoshop path against six registered scenes, real pixels, safety, recovery,
 autonomy and independent artistic assessment. The 2026-10-13 Mykonos failure
 families are queued there by underlying cause, **not** as another P1/P2/P3
 expansion. Existing roadmap outcomes remain open until their real acceptance.
+
+## Priority 0 — restore the original creative environment, not one picture
+
+**User decision:** restore the artist's **general creative judgment** as used in
+the first successful pink floating city, across varying briefs. Do not hard-code
+the old city's composition, substitute new rules for the older artist, or
+cherry-pick later improvements during the control test. Another agent is
+working on artistic recovery; coordinate before changing checkout, COS, or UXP.
+
+| Aspect | Historical first run | Current evidence / limit |
+| --- | --- | --- |
+| Run and brief | `processes/flying-pink-ninja-city-process/20261014-marker-city`; bright pink marker city with ninjas, no imagegen | Original brief, saved art, frames and run state retained; not a universal prompt template |
+| Document and time | Photoshop document `4969`; started **2026-10-14 17:29 +03**; MCP PID `26496` | Run evidence retained; historical PID's binary/source fingerprint not archived |
+| Profile | `simple_graphic`; no `construction_policy: enforced`; 123 installed brush presets | Profile is **per run**, not a COS setting. Do not force all art to `simple_graphic` |
+| Closest committed code | `3689249f292616c4cc258beed41c4d23453a646c`, 2026-10-14 12:21 +03 | Best evidenced pre-first-run Git snapshot; not independent proof of historical in-memory build |
+| Restored technical state | `digital-painting` and `origin/digital-painting` at `3689249` | Clean tree, active MCP and loaded UXP source fingerprints agree, COS global launch points to canonical checkout; `deployment:health=current` |
+| Quality | The first city progressed rapidly through large-scale forms and spatial relationships | **Artist quality NOT YET RE-QUALIFIED**: model context and choices are not restorable by Git checkout |
+
+**Technical gate (2026-10-15):** `npm run verify:canonical` passed:
+**176 test files / 1,915 tests**; source, prompt, policy, packaging and
+provenance checks passed. Legacy live-evidence ledger verifies 21 of 23 local
+entries; **2 evidence files are absent**. This is an engineering check, not
+an artistic verdict. `%APPDATA%/chat-on-steroids/config.json` is semantically
+back to its pre-intervention backup: a temporary global `simple_graphic`
+instruction inserted during investigation was removed. Do not add COS-global
+artist settings; do not erase the shared Guard controller with old user runs.
+
+**Next acceptance:** on a fresh Photoshop document use the **verbatim**
+historical pink-city brief, explicitly bind **only that new comparison art run**
+with `painting_profile: simple_graphic`, verify the saved setting **before
+painting**, then compare the first 5–12 meaningful frames, overall visual
+complexity, time to recognizable whole scene, layer order, actual brush marks,
+Guard refusals and artistic progress at equal time. This is experimental
+control, **not** a change to the default profile for other prompts. Preserve
+History, snapshots and exact run evidence. User judges image quality.
+
+### Complete frozen changes AFTER that version — lowest risk first
+
+**Exact range:** `3689249..fac85ea` = **six commits, 33 modified paths**;
+**none applied to the restored baseline**. Every path and full diff is in the
+annex. This ordering is a **review priority**, not permission to merge.
+
+| Review tier | Complete change families and commits | Why gated |
+| --- | --- | --- |
+| 1. Repository-only | `f96d4ad`: Windows/docs/product identity/`.gitattributes` EOL notice integrity, retirement of five unsupported locale README stubs | Low direct art risk. Require separate license/provenance/product checks |
+| 2. Guard consistency | `a3799e4`: preserve cumulative/global priority across rejected next pass; `5fdd340`: persist exact whole-image glance boundary | Safety/accounting, but can alter Director pacing; check live workflow |
+| 3. Brush technical verification | Parts of `fac85ea`: native UXP brush-preset identity readback, selector fallback requiring replanning, installed-preset footprint proof; tests | May improve trust but block brush use or postpone first pixel; verify real marks and throughput |
+| 4. Guard-preparation / stall gates | Parts of `fac85ea`: brush role preflight, cached probe/evidence admission, repeated preparation failure and stall recovery | Can change artistic method selection and cadence; compare failed turns and visual gain |
+| 5. Direct artistic strategy **LAST** | `aef5269`: `tonal_regions` and color-region first construction; `7392a44`: recognition-prompt rewrite; artistic-prompt/Director parts of `fac85ea`: whole-frame composition contracts and replacement strategies | Highest creative-risk: may reward flat geometry and restrict art direction; require blind multi-brief A/B before *any* opt-in |
+
+**Complete portable evidence inside this repo:**
+
+| File | Authority / contents |
+| --- | --- |
+| [Full ordered change catalog](painting-baseline-20261014/POST_BASELINE_CHANGES_SORTED.md) | All **33** paths, exact changes, tests and risk distinctions; not just commit titles |
+| [Full binary-safe Git patch](painting-baseline-20261014/ALL_CHANGES_AFTER_FIRST_CITY.patch) | `git diff --binary --full-index 3689249 fac85ea`; **164,992 bytes**, SHA-256 `BD1E610F53C05FEF1E0F7B355E2B8DA5021DD73BC9BCF27EFD9761A4AC7CE35D` |
+| [Six full individual commit patches](painting-baseline-20261014/patches/) | `git format-patch --binary --full-index 3689249..fac85ea`; preserves each commit's message, author and isolated exact changes for future review, **not for automatic application** |
+| [First-city environment audit](painting-baseline-20261014/FIRST_CITY_ENVIRONMENT_AUDIT.md) | Verified vs unknown COS, MCP, UXP, profile, state and historical runtime facts |
+| [Timestamped activation record](painting-baseline-20261014/RESTORED_BASELINE_STATUS.md) | Historical PID/build snapshot; not a claim that this PID is still active |
+| [Six commits](painting-baseline-20261014/SIX_COMMITS.tsv) and [all changed paths](painting-baseline-20261014/ALL_CHANGED_FILES.tsv) | Machine-readable reference indexes |
+| [Full canonical test output](painting-baseline-20261014/baseline-verify-20261015.txt) | Test details, guardrails and unavailable old evidence |
+| [SHA-256 inventory](painting-baseline-20261014/ARTIFACTS.sha256) | Rechecked hashes for **all 13** repository-contained evidence files and individual patches; archived external bundle hash is recorded below |
+
+**Per-commit exact patches (chronological; review tier above, not commit order):**
+[1. `a3799e4` cumulative Guard](painting-baseline-20261014/patches/0001-fix-guard-retain-new-cumulative-priority-across-reje.patch),
+[2. `5fdd340` glance boundary](painting-baseline-20261014/patches/0002-fix-guard-persist-exact-glance-boundary-after-visual.patch),
+[3. `aef5269` tonal regions](painting-baseline-20261014/patches/0003-feat-painting-build-color-value-regions-in-first-own.patch),
+[4. `f96d4ad` repo cleanup](painting-baseline-20261014/patches/0004-chore-repo-retire-obsolete-locale-stubs-and-fix-Wind.patch),
+[5. `7392a44` prompt compaction](painting-baseline-20261014/patches/0005-fix-painting-keep-recognition-prompt-bounded-and-med.patch),
+[6. `fac85ea` brush/Guard/artistic changes](painting-baseline-20261014/patches/0006-fix-painter-verify-installed-brush-marks-and-escape-.patch).
+
+**Full commit history:** `fac85eab4c978f65614da268243ae1d8747f9ec0`
+is preserved in local and GitHub branch `archive/post-first-city-20261014`;
+`artist-first-city-baseline-20261014` marks the frozen `3689249` baseline.
+A separate verified Git bundle (34,589,458 bytes) is safely held at
+`E:\Downloads\devspace-test\_archives\paintpilot-first-city-baseline-20261014\POST_FIRST_CITY_FULL_HISTORY.bundle`,
+SHA-256 `EBB88D770F904BAD9B212E5E329E77D18CD6A5DE9C8E4485BEF25F2BA6E03CC5`.
+The bundle is **not imported as another 35 MB binary into Git** because the
+archived branch already retains every historical commit. This roadmap and the
+repository's full patch remain the **authoritative entry point**. Do not
+apply patches/bundles or delete preservation refs before separate approval.
 
 ## Start here
 
@@ -191,6 +280,105 @@ is maintenance-only. [Details: E.8](PAINTING-WORK-DETAILS.md#e8).
 | Supplied brush/stamp packs | A real user pack and scene are available. [P0-E.7](PAINTING-WORK-DETAILS.md#supplied-packs) |
 | Local warp, wider transactions and pressure profiling | A reproduced need justifies them and native safety prerequisites are met. [E.27](PAINTING-WORK-DETAILS.md#e27) |
 | Process video, release, other hosts and optional 3D/perception | Later or specifically requested; these do not block the main painting path. [E.22 and later sections](PAINTING-WORK-DETAILS.md#e22) |
+
+## Repository consolidation — ONE canonical product version (PLANNED, not executed)
+
+**Decision:** `digital-painting` is the **single maintained integration/release
+branch** at `github.com/lavalava45/paintpilot-mcp`; its checkout is
+`E:\Downloads\devspace-test\experiments\photoshop-mcp-digital-painting`.
+No permanent RC/develop/fix/integration branch should be deployed alongside
+it. Historical versions may remain accessible as **immutable annotated tags,
+verified Git bundles and offline evidence**, without being live development
+lines. `origin/HEAD` / GitHub default branch should ultimately point to
+`digital-painting`. Do **not** equate consolidation with merging abandoned
+experimental features or overwriting the first-city baseline.
+
+**Inventory observed 2026-10-15 (re-evaluate immediately before deletion):**
+
+| Branch or worktree | Relationship to frozen `3689249` | Disposition after evidence review |
+| --- | --- | --- |
+| Local + remote `digital-painting` | Canonical baseline, clean and deployed | **KEEP** as the only active branch; later approved changes land through review here |
+| Local + remote `archive/post-first-city-20261014` | `fac85ea`, **6** post-baseline commits | **KEEP until** all required patches, tag/bundle checks and restoration work are signed off; then replace branch with an archive tag if retention permits |
+| Local `fix/brush-paint-stall-20261014` | Same tip `fac85ea`; occupied checkout `work/paintpilot-brush-recovery-20261014` | **DELETE CANDIDATE** once no agent uses it and archival equivalence is proven |
+| Local `archive/retired-beta-rc-20261013` | Diverged (**10 baseline-only / 7 RC-only** commits), not merely an ancestor | **PRESERVE unique RC history** in tag/bundle before proposing removal; do not casually drop those 7 commits |
+| Local `integration/current-project-20261014` | Ancestor: 3 commits behind baseline | **DELETE CANDIDATE**, after confirming no surviving unique evidence |
+| Local `integration/night-refactor-20261014` | Ancestor: 4 commits behind; worktree still attached at `experiments/paintpilot-refactor-isolation-20261014` | **REMOVE worktree only after its owner stops**; then delete branch |
+| Local `digital-painting-local-history-20260914` | Diverged (**113 baseline-only / 13 local-history-only**) | **PRESERVE 13 unique commits** as a tag/bundle or verify safe irrelevance; only then propose deletion |
+| Local + remote `master`, remote `develop` | Old ancestor lines, not the current digital-painting product | **DELETE CANDIDATES**, but audit GitHub protections, external PRs, default branch and provenance first |
+| Remote `origin/affix/*`, `origin/docs/*`, `origin/feat/*`, `origin/fix/*` | 2026-10-15 remote-tracking inventory has legacy branches (**16 branch refs**, excluding symbolic `origin/HEAD`) | Review branch ownership / open PRs / unique commits, then propose explicit per-ref remote deletion |
+
+**Canonicalization sequence and acceptance gates:**
+
+1. **Freeze and inventory (no mutation):** record `git status`,
+   `git worktree list --porcelain`, `git branch -avv`, tags, remote refs,
+   exact divergence (e.g. `git rev-list --left-right --count HEAD...branch`),
+   GitHub PR/protection/default-branch state, and active COS/UXP launch paths.
+   Preserve all unrelated or another agent's uncommitted work.
+2. **Prove one release source:** decide whether the verified first-city baseline
+   `3689249` still passes the user's multi-brief artistic test; **do not**
+   promote the newer `fac85ea` silently. Check source/dist build identity,
+   running MCP PID/path, loaded UXP SHA, `deployment:health`, and enabled
+   COS plugin inventory. There must be **one** intended deploy root.
+3. **Archive unique history:** for every candidate branch/worktree determine
+   unique commits; create permanent, reviewed annotated tag and independently
+   verifiable bundle **before** removal. Keep the patch and ranked catalog
+   above. Note `master`/legacy forks may have authorship/provenance value;
+   deleting a branch name must not erase history or notices.
+4. **Publish exact deletion manifest for approval:** paths/branch refnames
+   (local and remote separately), tip SHA, unique-commit count, GitHub PRs,
+   owner/worktree occupancy, destination tag/bundle and recovery instructions.
+   **Do not delete anything without user approval of this concrete list.**
+5. **Remove idle checkout/worktree branches first:** detach/close only after
+   checking live agents and `git status`; then remove redundant **local**
+   refs and old worktrees. For remote branches, confirm no protected/default
+   refs or active PRs; delete explicitly approved refs on `origin`. Keep
+   `origin/HEAD` correct; `git remote prune` alone does **not** delete
+   remote branches.
+6. **Final proof:** `git branch -avv`, `git worktree list`,
+   `git remote -v`, `git status`, `git tag --list`, `git fsck`, GitHub
+   default/remote ref enumeration, `npm run verify:canonical`,
+   `npm run verify:external-intake`, `npm run verify:provenance`,
+   `npm run verify:source-independence`, `npm run deployment:health`.
+   Archive the before/after manifest and rollback instructions here.
+
+**Definition of done:** exactly **one active maintained/deployed checkout and
+one canonical source branch**; no duplicate active release candidates, no
+stale COS/UXP paths, no unexplained working branches. Historical tags, bundles
+and third-party provenance **remain**. This is a **planned future cleanup**,
+not an authorization to rewrite published history or delete now.
+
+## Foreign / unexplained / obsolete Git files — provenance-first cleanup (PLANNED)
+
+**User request:** explicitly audit “files that aren't ours and somehow got
+into Git”, not just branches. Classify **tracked vs ignored, project-owned vs
+derived upstream vs valid third-party dependency vs generated evidence**.
+An unusual path is a **candidate**, not proof of alien authorship. Preserve
+`LICENSE`, `NOTICE`, `THIRD_PARTY_NOTICES.md`,
+`third-party-components.json`, `licenses/*`, Git lineage, working assets,
+PSD/frames/video/process receipts, and others' unstaged edits. Follow
+[source-independence audit](source-independence-audit.md),
+[selective external intake](external-intake.md) and
+[release-policy](release-policy.md); don't manufacture a new licensing policy.
+
+| Audit queue | Exact paths / known context | Required decision before removal |
+| --- | --- | --- |
+| **A — unsupported README locale stubs** | `README.de.md`, `README.es.md`, `README.ja.md`, `README.tr.md`, `README.zh-CN.md`: currently **tracked again** because restoring `3689249` restored them. They were removed in the **deferred** `f96d4ad` | Verify these are mere unsupported placeholders, no dependent links, translations or licensing commitments; propose *documentation-only* deletion separately, without applying unrelated `f96d4ad` edits |
+| **B — historically upstream-derived examples** | `examples/*` (including Claude/Cursor examples); 2026-09-29 source-independence report estimated ~82–83% exact overlap at that time | Re-run present-file provenance, usage/installer tests and upstream attribution check. Replace with new maintained project examples **only if useful**, else propose deleting obsolete copies |
+| **C — unmaintained spike scripts** | `scripts/spike-photoshop-actions.ts`, `scripts/spike-2026-features.ts`: 2026-09-29 audit identified formerly upstream-identical experimental scripts; **neither is tracked at the 2026-10-15 baseline** | Treat this as historical cleanup evidence, not as two current deletion targets; confirm absence from build/distribution and revisit only if reintroduced |
+| **D — inherited scaffolding/config** | `.prettierrc`, `.env.example`, legacy `mcpb/` metadata and other inherited root files | **Do not assume foreign = removable.** Classify owner, active dependency and environment/packaging impact. Keep required configuration or replace safely |
+| **E — large review/evidence packs** | `task8a-review-pack/*` (~1.57 MB, 23 files) and `task23-review-pack/*` (~1.64 MB, 39 files), tracked | These may be **our own test evidence**, not foreign files. Preserve manifests, image hashes and licensing; consider archive or Git release artifact only after links/acceptance and owner sign-off |
+| **F — ignored/generated local debris** | `.tmp-*`, `.mcp-preview/`, `.photoshop-runtime/`, `processes/`, `release/`, `dist/`, `node_modules/` | Separate ignored runtime records from tracked content; **never bulk-delete** user PSD, frame, export, logs or Guard journals. Propose only specific reproducible throwaways |
+| **G — remaining vendor/upstream surfaces** | Legacy `src/`, `uxp-plugin/`, notices, sample files or manifests flagged by the current `verify:source-independence` or provenance inspection | No sweeping deletion: tests must prove no runtime/UXP dependency and preserve copyright/license obligations. Independent rewrites are a **separate feature proposal**, not a rollback |
+
+**File cleanup procedure:** collect `git ls-files` / `git check-ignore -v`,
+per-file `git log --follow` and upstream comparisons where justified; label
+each exact path **keep / replace / archive / candidate-remove / uncertain**;
+include reason, last owner/commit, test/README dependency, license evidence,
+backup destination and estimated affected bytes. Present a dry-run deletion
+list and user approval **before** `git rm`, branch deletion, `git clean`,
+history rewriting or pushing. Execute only an approved batch, run canonical
+and provenance gates, verify README RU/EN links, then update this roadmap
+and commit with explicit scope. **No cleanup has been executed by this plan.**
 
 ## Keep the plan small
 

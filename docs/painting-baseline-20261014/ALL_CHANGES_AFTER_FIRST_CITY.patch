@@ -1,0 +1,2825 @@
+diff --git a/.env.example b/.env.example
+index 095cd8b2803ae790d0e5f22ad01b33eca4f75a13..a7edb321a753323f6100ce673379f45ce84a454a 100644
+--- a/.env.example
++++ b/.env.example
+@@ -1,15 +1,9 @@
+-# Optional: disable anonymous usage analytics
+-# ANALYTICS_DISABLED=1
+-# POSTHOG_DISABLED=1
+-
+-# Rybbit (defaults are embedded in src/analytics/config.ts)
+-# RYBBIT_API_KEY=rb_your_ingest_key
+-# RYBBIT_HOST=https://hey.sideguard.io
+-# RYBBIT_SITE_ID=5e488c650441
+-
+-# Beta team content sharing (prompts/responses) is controlled via the UI consent
+-# modal and Settings → Privacy — there is no separate env flag.
+-
+-# Existing server options
+-# PHOTOSHOP_PATH=/Applications/Adobe Photoshop 2025/Adobe Photoshop 2025.app/Contents/MacOS/Adobe Photoshop 2025
++# Windows-only Photoshop MCP / PaintPilot runtime configuration examples.
++# Set PHOTOSHOP_PATH only when automatic Photoshop discovery does not work.
++# PHOTOSHOP_PATH=C:\Program Files\Adobe\Adobe Photoshop 2026\Photoshop.exe
++#
++# Logging: 0=DEBUG, 1=INFO, 2=WARN, 3=ERROR.
+ # LOG_LEVEL=1
++#
++# For Chat On Steroids, use dist/cos-plugin.js. It enables required Guard
++# mode automatically; arbitrary inherited analytics variables are not used.
+diff --git a/.gitattributes b/.gitattributes
+new file mode 100644
+index 0000000000000000000000000000000000000000..a0a3a41325da22323f9ddbee6851f681e4b059fa
+--- /dev/null
++++ b/.gitattributes
+@@ -0,0 +1,4 @@
++# Retained licenses use byte-exact LF; NOTICE attestations use byte-exact CRLF.
++licenses/*-LICENSE.txt -text
++licenses/Apache-2.0.txt -text
++licenses/*-NOTICE.txt text eol=crlf
+diff --git a/AGENTS.md b/AGENTS.md
+index 18fcf27df6becea6e52d2cbac308ee3682cef687..6e14cedc410c801cd367e0d13e5ab59d1a7975c6 100644
+--- a/AGENTS.md
++++ b/AGENTS.md
+@@ -119,6 +119,17 @@ Establish the setting/path/large masses in the following bounded passes before r
+ do not begin with an independent atmosphere-only/gradient task. Preserve editable owner layers
+ and the bounded pass contract. Director is optional; its first task should cover whole-scene
+ recognition/composition with global/medium scope and the relevant subject/context zones.
++For early structured-mass recognition, consider the tested multi-color
++`photoshop_paint_regions` approach: several intentional closed color/value regions
++inside one independently editable component/layer, rather than one monochrome
++primitive awaiting decoration. This preference does not bypass compound-part
++ownership, one-owner Guard passes, or user/style-required brush/soft media.
++When a first pass must use `construction`, its optional `tonal_regions` allow
++several authored, contained colored masses inside the solved selected part in
++the same Guard rollback unit. Prefer meaningful form/value turns to a flat
++one-color construction followed by decorative cleanup; never use tonal regions
++to flatten independently editable parts.
++
+ 
+ Component ownership applies to every rendering profile, including simple_graphic and initial
+ block-in. Do not put an entire person/animal/furniture/window on one persistent layer and promise
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 8a261ae9e87890481a6afe8093f03d36ef7e98f1..9f86c119e388b424a308d87009a53151769c2949 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -1,5 +1,36 @@
+ # Changelog
+ 
++- 2026-10-14 — **Investigate stalled pink-marker city and distinguish brush inventory from verified marks.**
++  Compared the previous `simple_graphic` run (19 artistic dispatches and
++  17/55 Guard rejections) with the later `nontrivial_painting` run
++  (3 artistic dispatches and 14/24 rejections). The latter Director selected
++  a single central island rather than the multi-island composition. Its
++  `Hard Round` preparation failed `brush_setter_unverified` before any
++  of the 12 planned strokes were dispatched; the Photoshop host omitted
++  native preset identity. A 123-preset catalog and brush roles marked
++  `probe_status=not-needed` with empty `candidate_evidence` did **not**
++  establish that the real marks resemble felt-tip strokes. The same native
++  limitation had appeared in previous Mykonos tests. See
++  `docs/ART-REGRESSION-PINK-CITY-20261014.md` for evidence and A/B limits.
++  The recovery work adds a bounded, explicit alternative-preset selection
++  path without silent substitution, isolated installed-preset mark probes
++  with JPEG/receipt proof, and a distinct recovery gate for repeated
++  pre-visual preparation failures; the composition guidance prioritizes
++  coverage and relations before revisiting local finish.
++
++- 2026-10-14 — **Reconcile release-candidate Guard fixes with the maintained painter.**
++  Reapplied RC commits `83dc5bb` and `b54faf8` to the refactored
++  `digital-painting` runtime. A valid exact-frame closure that exposes a new
++  global priority or whole-image glance now remains durable when the paired next
++  pass is rejected; the rejected mutation is not dispatched. Also carried
++  forward the optional, independently owned construction `tonal_regions`
++  capability from `51a3fee`, with no automatic first-pass polygon policy:
++  explicit brush media and artwork-specific method choice remain authoritative.
++  Removed five discontinued translated README placeholders, refreshed the
++  Windows-only environment example, repository clone paths and documented
++  current tool count. The RC's historical local art evidence is preserved
++  separately; these engineering changes are not artistic Beta acceptance.
++
+ - 2026-10-14 — **SessionStore P1-B: bounded Painter continuation recommendations.**
+   Added typed, pure `src/core/guard/continuation-admissibility.ts` and own
+   regression suite. `artisticContinuationContext().next_candidates` now
+diff --git a/INSTALL.md b/INSTALL.md
+index 36a249150f3c9c3addbce102e8a135e2147cef0c..018f857c2c064b43ef6fb969826cf4e9a366b4f4 100644
+--- a/INSTALL.md
++++ b/INSTALL.md
+@@ -27,7 +27,7 @@ URL, then run:
+ 
+ ```bash
+ git clone <repository-url>
+-cd photoshop-mcp-digital-painting
++cd paintpilot-mcp
+ ```
+ 
+ Keep the checkout in a stable directory that will not be deleted by a package
+@@ -111,7 +111,7 @@ Pass `PHOTOSHOP_PATH` in the stdio transport environment when automatic detectio
+ ```
+ 
+ After rebuilding/updating the project, refresh the Chat On Steroids Plugins schema through
+-the normal host UI. The accepted native catalog is **130 tools total / 14 Guard tools**.
++the normal host UI. The current native catalog is **132 tools total / 15 Guard tools**.
+ A stale legacy 64-tool snapshot is not a limitation of this server.
+ 
+ For local development, distinguish **schema refresh** from **process restart**:
+@@ -196,7 +196,7 @@ npm run test:measurement-tools
+ npm run test:landmark-ergonomics
+ ```
+ 
+-The MCP server should expose the **130-tool / 14-Guard-tool** Digital Painting Edition catalog, including:
++The MCP server should expose the **132-tool / 15-Guard-tool** Digital Painting Edition catalog, including:
+ 
+ ```text
+ photoshop_list_brush_presets
+diff --git a/README.de.md b/README.de.md
+deleted file mode 100644
+index 1413cf28cebfb51492f876b025cd90feda5270fb..0000000000000000000000000000000000000000
+--- a/README.de.md
++++ /dev/null
+@@ -1,10 +0,0 @@
+-# Photoshop MCP — Digital Painting Edition
+-
+-This localized page is not currently maintained. Use the canonical English documentation:
+-
+-- [README.md](README.md) — project overview and current product identity
+-- [INSTALL.md](INSTALL.md) — installation
+-- [NOTICE](NOTICE) — historical origin and licensing provenance
+-- [lavalava45/photoshop-mcp-digital-painting](https://github.com/lavalava45/paintpilot-mcp) — project repository
+-
+-The project is independently maintained and is not affiliated with or endorsed by Adobe Inc.
+diff --git a/README.es.md b/README.es.md
+deleted file mode 100644
+index 1413cf28cebfb51492f876b025cd90feda5270fb..0000000000000000000000000000000000000000
+--- a/README.es.md
++++ /dev/null
+@@ -1,10 +0,0 @@
+-# Photoshop MCP — Digital Painting Edition
+-
+-This localized page is not currently maintained. Use the canonical English documentation:
+-
+-- [README.md](README.md) — project overview and current product identity
+-- [INSTALL.md](INSTALL.md) — installation
+-- [NOTICE](NOTICE) — historical origin and licensing provenance
+-- [lavalava45/photoshop-mcp-digital-painting](https://github.com/lavalava45/paintpilot-mcp) — project repository
+-
+-The project is independently maintained and is not affiliated with or endorsed by Adobe Inc.
+diff --git a/README.ja.md b/README.ja.md
+deleted file mode 100644
+index 1413cf28cebfb51492f876b025cd90feda5270fb..0000000000000000000000000000000000000000
+--- a/README.ja.md
++++ /dev/null
+@@ -1,10 +0,0 @@
+-# Photoshop MCP — Digital Painting Edition
+-
+-This localized page is not currently maintained. Use the canonical English documentation:
+-
+-- [README.md](README.md) — project overview and current product identity
+-- [INSTALL.md](INSTALL.md) — installation
+-- [NOTICE](NOTICE) — historical origin and licensing provenance
+-- [lavalava45/photoshop-mcp-digital-painting](https://github.com/lavalava45/paintpilot-mcp) — project repository
+-
+-The project is independently maintained and is not affiliated with or endorsed by Adobe Inc.
+diff --git a/README.md b/README.md
+index 58bf3509f7a11ca154832f4bdbbaa087cc30b057..899b761788291c50e9702fa1cf2e8883f9a2819a 100644
+--- a/README.md
++++ b/README.md
+@@ -215,7 +215,7 @@ Clone and build:
+ 
+ ```bash
+ git clone https://github.com/lavalava45/paintpilot-mcp.git
+-cd photoshop-mcp-digital-painting
++cd paintpilot-mcp
+ pnpm install --frozen-lockfile
+ npm run build:server
+ ```
+diff --git a/README.tr.md b/README.tr.md
+deleted file mode 100644
+index 1413cf28cebfb51492f876b025cd90feda5270fb..0000000000000000000000000000000000000000
+--- a/README.tr.md
++++ /dev/null
+@@ -1,10 +0,0 @@
+-# Photoshop MCP — Digital Painting Edition
+-
+-This localized page is not currently maintained. Use the canonical English documentation:
+-
+-- [README.md](README.md) — project overview and current product identity
+-- [INSTALL.md](INSTALL.md) — installation
+-- [NOTICE](NOTICE) — historical origin and licensing provenance
+-- [lavalava45/photoshop-mcp-digital-painting](https://github.com/lavalava45/paintpilot-mcp) — project repository
+-
+-The project is independently maintained and is not affiliated with or endorsed by Adobe Inc.
+diff --git a/README.zh-CN.md b/README.zh-CN.md
+deleted file mode 100644
+index 1413cf28cebfb51492f876b025cd90feda5270fb..0000000000000000000000000000000000000000
+--- a/README.zh-CN.md
++++ /dev/null
+@@ -1,10 +0,0 @@
+-# Photoshop MCP — Digital Painting Edition
+-
+-This localized page is not currently maintained. Use the canonical English documentation:
+-
+-- [README.md](README.md) — project overview and current product identity
+-- [INSTALL.md](INSTALL.md) — installation
+-- [NOTICE](NOTICE) — historical origin and licensing provenance
+-- [lavalava45/photoshop-mcp-digital-painting](https://github.com/lavalava45/paintpilot-mcp) — project repository
+-
+-The project is independently maintained and is not affiliated with or endorsed by Adobe Inc.
+diff --git a/docs/ART-REGRESSION-PINK-CITY-20261014.md b/docs/ART-REGRESSION-PINK-CITY-20261014.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..dace5a1762b8baab663a348b4bc3908b14c97069
+--- /dev/null
++++ b/docs/ART-REGRESSION-PINK-CITY-20261014.md
+@@ -0,0 +1,69 @@
++# Art regression audit — pink flying city, 2026-10-14
++
++Status: incident evidence, **not** a benchmark of final quality. The two runs
++used the same core brief, but different art-run profiles and deliberately
++different compositions. Neither run proves that the five RC-reconciliation
++commits caused the quality regression.
++
++| Evidence | Earlier run | Later run |
++| --- | --- | --- |
++| Process | `processes/flying-pink-ninja-city-process/20261014-marker-city` | `processes/flying-ninja-city-process/pink-marker-city-20261014` |
++| Profile | `simple_graphic` | `nontrivial_painting` |
++| Composition | Multiple islands and bridges | Director selected `central-island` over `archipelago` |
++| Completed visual dispatches at review | 19 | 3 |
++| Model-visible Guard calls / rejected | 55 / 17 | 24 / 14 |
++| Recognizable cast | 3 ninja | 3 ninja |
++| Last brush-style pass | No confirmed organic marker strokes | `pink-city-organic-architectural-revision-05` did **not** paint: `guard_select_brush` failed `brush_setter_unverified` |
++| Preflight | No durable nontrivial brush-role requirement | 123 inventoried presets, but roles `pink-marker` and `dry-texture` had `candidate_evidence=[]` and `probe_status=not-needed` |
++
++## Causal findings
++
++1. **Preset name is not native proof.** The Photoshop UXP selector emitted
++   `preset_verification.source=unavailable` and `observed_preset=null`.
++   The preparatory action failed before `photoshop_paint_strokes` could execute.
++   The recorded microplan included 12 strokes; **zero were dispatched**.
++   Never count authored actions as applied pixels.
++   The same `brush_setter_unverified` failure was already reported for
++   two Mykonos brush retries on 2026-10-11/12 (see CHANGELOG). This is a
++   pre-existing Photoshop preset readback limitation, not a newly
++   introduced regression from the 2026-10-14 RC reconciliation.
++2. **Inventory is not a mark-profile.** The durable `brush_preflight`
++   describes names/roles without observed footprints, buildup, pressure or
++   behavior on canvas. The original technique requirement was therefore
++   effectively unverified despite `completed=true`.
++3. **Composition loss is independent of brush failure.** The new Director
++   chose a single central island and proceeded to local revisions before
++   completing broader environment relationships. In the earlier run, the
++   artist established two side islands and bridges by its sixth visual
++   operation. Neither layout is universally mandatory, but the current
++   choice left significantly less spatial narrative.
++4. **The stricter profile increased coordination cost.** The later run's
++   rejected-to-visible-Guard-call ratio is `14/24` versus `17/55`.
++   Its rejected operations include ownership, construction geometry,
++   intent/material obligations, and repeated plan normalization. These
++   are safety and semantic constraints, not proof that painting improved.
++   `simple_graphic` skips some of these constraints; this does not justify
++   silently downgrading the profile or weakening existing pixel protections.
++5. **Loop escape remained advisory.** `decision_loop_stall` recognized
++   an absence of progress but did not select an executable different
++   strategy; follow-up work saved a PSD, not a better image.
++
++## Regression criteria for subsequent runs
++
++- Record the actual native preset identity or a truly **observed** alternative
++  brush mark. Do not infer mark character from the name or successful API call.
++- On incompatible native selection or unverifiable brush, stop before pixel
++  mutation, attempt an independently verifiable alternative, then either
++  continue using a genuinely different safe method or surface a bounded
++  blocker. No infinite preset retry or repeated status calls.
++- Evaluate brief-specific whole-frame composition against alternative
++  hypotheses **before** local finish work. Preserve broad scene potential;
++  do not interpret recognizability of three ninja as composition completion.
++- Measure elapsed time to the first meaningful visual change, number of
++  verified changes per Guard call, rejected plan reasons, and exact
++  before/after pixels. A successful save operation is not visual progress.
++
++The exact images and runtime-state files reside in the two process directories
++above. The prior version has a richer **observed** composition at comparable
++elapsed time, but differences in profile and stage prohibit isolating this to
++one recent commit without a controlled A/B rerun.
+diff --git a/docs/RELEASE-S01-TIGER-INCIDENT-20261013.md b/docs/RELEASE-S01-TIGER-INCIDENT-20261013.md
+index 9492af8f4f2b3c401ab4d9d9537c30f3b7fffda6..a02cd5938b52ebe9cf31869b20f5e3150ae52dbe 100644
+--- a/docs/RELEASE-S01-TIGER-INCIDENT-20261013.md
++++ b/docs/RELEASE-S01-TIGER-INCIDENT-20261013.md
+@@ -69,6 +69,32 @@ After two semantic repair attempts, no further mutation was dispatched; the tors
+ 
+ ## Next engineering and artistic steps (NOT YET DONE)
+ 
++**Source fix recorded after this incident:** The repeatable conflict is a
++close+next *transactional durability* fault, not proof that the Art Director
++needs weaker spatial admission. On a new cumulative global must-fix promoted
++by a valid previous exact-image verdict, post-closure Painter priority
++revalidation used to restore the entire closure snapshot on rejection, so the
++following Director request could not find the problem it had been told to
++repair. The guarded runtime now **retains that validated visual closure and
++its promoted global debt** when only the new next pass is rejected by the
++newly durable global priority. No rejected Photoshop mutation is dispatched.
++Rollback/uncertain closure still restores the snapshot, and Director medium
++task/geometry/ownership requirements remain intact.
++
++Owning regressions:
++- `tests/embedded-guard.test.ts`: real two-pass cumulative promotion inside
++  a combined close+next cycle, retained valid verdict and newly durable
++  global must-fix, no execution of the rejected continuation; existing
++  rollback snapshot test remains required.
++- `tests/planner-painter.test.ts`: durable multi-region cumulative defect
++  admitted by Director as a bounded medium correction, while the global
++  parent remains open and an unplanned pass is rejected.
++
++**Engineering tests do not prove artistic recovery.** Rebuild/activate this
++source change, run the corrected Director/Painter path in a fresh Photoshop
++S01 document, and inspect the actual tiger anatomy before closing this
++incident. The original failed PSD remains untouched.
++
+ 1. **Do not patch around the tiger/theme.** Construct a subject-agnostic owning regression test using an open *cumulative global* must-fix promoted from multiple materially separated Critic-reviewed regions, followed by a real medium construction correction that directly addresses it. Test both public Guard rejection instructions and Art Director's region-admission rule against the same durable state. Preserve exact Critic/owner/rollback authority; do not weaken safety.
+ 2. Determine the general viable mapping from multi-region cumulative evidence to a bounded medium correction, or provide a clear executable alternative (such as a legitimate global construction pass). No ungrounded region union and no fabricated Critic assessment. The user should not have to hand-author technical metadata already saved in Guard.
+ 3. Validate the appropriate **supported** art profile and available oil/texture brushes before the next realistic painting run; `simple_graphic` is confirmed and may be inappropriate, but must not be silently replaced with an invented profile.
+diff --git a/docs/development.md b/docs/development.md
+index 233f044ea295d0f848c7d807a9858aa31304c8a6..9dd71db294396229bc1e36e2accaea519e94808b 100644
+--- a/docs/development.md
++++ b/docs/development.md
+@@ -24,7 +24,7 @@ the superseded October 9 COS schema synchronization investigation is retained
+ 
+ ```bash
+ git clone <repository-url>
+-cd photoshop-mcp-digital-painting
++cd paintpilot-mcp
+ pnpm install --frozen-lockfile
+ npm run build
+ ```
+diff --git a/scripts/verify-product-identity.mjs b/scripts/verify-product-identity.mjs
+index b008a9d985cb5a0aa73dcc2c1726fc0819988911..1224114f2bc82d36d723a83cf85d3fdcaf1f6731 100644
+--- a/scripts/verify-product-identity.mjs
++++ b/scripts/verify-product-identity.mjs
+@@ -75,7 +75,6 @@ for (const path of examples) {
+ const primaryIdentityFiles = [
+   'package.json', 'server.json', 'mcpb/manifest.json', 'README.md', 'INSTALL.md',
+   'CONTRIBUTING.md', 'RELEASE_CHECKLIST.md', 'llms.txt', 'AGENTS.md',
+-  'README.de.md', 'README.es.md', 'README.ja.md', 'README.tr.md', 'README.zh-CN.md',
+   'docs/architecture.md', 'docs/development.md', 'docs/available-tools.md',
+   'docs/painting-policy/foundations.md', 'docs/mascot.md', 'src/prompts/host-guidance.ts',
+ ];
+diff --git a/src/core/guard/cycle-compiler.ts b/src/core/guard/cycle-compiler.ts
+index 0d8c22b9be67af30115932760fdfc0f66cd088f1..f7c650a6a7eab45585dcf6ffd3d2951e4493fe73 100644
+--- a/src/core/guard/cycle-compiler.ts
++++ b/src/core/guard/cycle-compiler.ts
+@@ -3120,13 +3120,17 @@ function compileCompactPass(
+       brushRole = candidates[0] ?? roles[0];
+     }
+ 
+-    if (brushRole && materialFitnessRequired && ['MATERIAL', 'DETAIL', 'MICRO_DETAIL'].includes(String(stage))) {
++    const probeRequiredForIntent = [
++      'painted-mass', 'broken-mass', 'atmospheric-mass', 'directional-mass', 'surface-flow', 'texture',
++    ].includes(visualIntent ?? '');
++    if (brushRole && (probeRequiredForIntent
++      || (materialFitnessRequired && ['MATERIAL', 'DETAIL', 'MICRO_DETAIL'].includes(String(stage))))) {
+       const probeStatus = text(brushRole.probe_status)?.toLowerCase();
+       if (!['pass', 'cached'].includes(probeStatus ?? '')) {
+         violations.push(violation(
+           'next_operation',
+           'brush_role_probe_required',
+-          `brush_role=${text(brushRole.role_id)} must have probe_status=pass|cached for substantial ${stage} material/finish work`
++          `brush_role=${text(brushRole.role_id)} must have probe_status=pass|cached for material-dependent ${visualIntent ?? stage ?? 'brush'} work`
+         ));
+       }
+     }
+@@ -3136,9 +3140,7 @@ function compileCompactPass(
+         text(brushRole.preferred_preset),
+         ...(Array.isArray(brushRole.alternative_presets) ? brushRole.alternative_presets.map(text) : []),
+       ].filter(Boolean));
+-      const candidateEvidence = Array.isArray(brushRole.candidate_evidence)
+-        ? brushRole.candidate_evidence.find(candidate => text(candidate?.preset_name) === selectedPreset)
+-        : undefined;
++      const candidateRows = Array.isArray(brushRole.candidate_evidence) ? brushRole.candidate_evidence : [];
+       const viablePresetCount = acceptedPresets.size;
+       if (materialFitnessRequired && viablePresetCount > 1 && !selectedPreset) {
+         violations.push(violation(
+@@ -3181,6 +3183,33 @@ function compileCompactPass(
+       if (viablePresetCount <= 1 || !materialFitnessRequired) {
+         selectedPreset ??= text(brushRole.preferred_preset);
+       }
++      const candidateEvidence = candidateRows.find(candidate => text(candidate?.preset_name) === selectedPreset);
++      if (probeRequiredForIntent) {
++        if (!candidateEvidence) {
++          violations.push(violation(
++            'next_operation',
++            'brush_candidate_evidence_required',
++            `brush_role=${text(brushRole.role_id)} preset_name=${selectedPreset ?? 'missing'} requires candidate_evidence for visual_intent=${visualIntent}`
++          ));
++        } else if (!text(context.brush_pack_id) && !candidateEvidence.probe_evidence) {
++          violations.push(violation(
++            'next_operation',
++            'brush_probe_evidence_required',
++            `brush_role=${text(brushRole.role_id)} preset_name=${selectedPreset ?? 'missing'} requires verified probe_preset JPEG evidence for visual_intent=${visualIntent}`
++          ));
++        }
++      }
++      const fallbackNames = candidateRows
++        .filter(candidate => {
++          const name = text(candidate?.preset_name);
++          if (!name || name === selectedPreset || !acceptedPresets.has(name)) return false;
++          if (probeRequiredForIntent && !text(context.brush_pack_id) && !candidate?.probe_evidence) return false;
++          return Number.isFinite(Number(candidate?.evidence_score));
++        })
++        .sort((a, b) => Number(b?.evidence_score) - Number(a?.evidence_score))
++        .map(candidate => text(candidate?.preset_name))
++        .filter(Boolean)
++        .slice(0, 2);
+       const fitIntents = Array.isArray(brushRole.visual_intents) ? brushRole.visual_intents.map(text).filter(Boolean) : [];
+       const novelIntent = !!visualIntent && !fitIntents.includes(visualIntent);
+       const useKey = brushUseKey(brushRole, requestedMaterialRole ?? '', visualIntent ?? '', requestedBrushScale ?? '', selectedPreset ?? '', text(context.brush_pack_id));
+@@ -3205,7 +3234,10 @@ function compileCompactPass(
+         actions.unshift({
+           id: selectId,
+           tool: 'photoshop_select_brush_preset',
+-          args: { name: selectedPreset },
++          args: {
++            name: selectedPreset,
++            ...(fallbackNames.length ? { fallback_names: fallbackNames } : {}),
++          },
+           description: 'Guard-selected material-fit preflighted brush role for this compact pass.',
+         });
+       }
+diff --git a/src/core/guard/runtime.ts b/src/core/guard/runtime.ts
+index 356fab404fc65b84a3ca12cae2e189f52e4cf353..0a46f4a02aad92a2d2ea275fcd0d0ba65acfddf9 100644
+--- a/src/core/guard/runtime.ts
++++ b/src/core/guard/runtime.ts
+@@ -891,7 +891,10 @@ export class EmbeddedGuardRuntime {
+     const brushPreflight = input.brush_preflight && typeof input.brush_preflight === 'object' && !Array.isArray(input.brush_preflight)
+       ? {
+           ...(input.brush_preflight as Record<string, unknown>),
+-          ...(runtimeInstanceWitness ? { runtime_instance_witness: runtimeInstanceWitness } : {}),
++          ...(runtimeInstanceWitness ? {
++            runtime_instance_witness: runtimeInstanceWitness,
++            runtime_instance_verified: true,
++          } : {}),
+         }
+       : input.brush_preflight;
+     const response = this.artRun({
+@@ -1339,17 +1342,26 @@ export class EmbeddedGuardRuntime {
+       if (!result.ok || !result.data) {
+         throw new Error(result.error ?? `brush_pack_probe_failed:${commandId}`);
+       }
++      const verifiedPresetName = typeof result.data.preset_name === 'string' ? result.data.preset_name.trim() : '';
++      if (verifiedPresetName !== presetName) {
++        throw new Error(`brush_pack_probe_native_identity_mismatch: requested=${presetName} verified=${verifiedPresetName || 'missing'}`);
++      }
+       const preview = recordOrEmpty(result.data.preview);
+       const whole = recordOrEmpty(preview.whole);
+       const base64 = typeof whole.base64 === 'string' ? whole.base64 : '';
+       if (!base64) throw new Error(`brush_pack_probe_preview_missing:${commandId}`);
+       const bytes = Buffer.from(base64, 'base64');
++      if (bytes.length < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8
++        || bytes[bytes.length - 2] !== 0xff || bytes[bytes.length - 1] !== 0xd9) {
++        throw new Error(`brush_pack_probe_preview_not_jpeg:${commandId}`);
++      }
+       const sha = createHash('sha256').update(bytes).digest('hex');
+       const evidenceDir = path.join(recordDirectory, 'probes', brushPackId.replace(/[^a-zA-Z0-9._-]+/g, '_'));
+       fs.mkdirSync(evidenceDir, { recursive: true });
+       const evidencePath = path.join(evidenceDir, `${sha}.jpg`);
+       if (!fs.existsSync(evidencePath)) fs.writeFileSync(evidencePath, bytes);
+       const evidence = {
++        preset_name: verifiedPresetName,
+         preview_path: evidencePath,
+         preview_sha256: sha,
+         operation_id: commandId,
+@@ -1384,6 +1396,98 @@ export class EmbeddedGuardRuntime {
+     }
+   }
+ 
++  async brushPresetProbe(input: Record<string, unknown>): Promise<Record<string, unknown>> {
++    const presetName = typeof input.preset_name === 'string' ? input.preset_name.trim() : '';
++    if (!presetName) throw new Error('brush_preset_probe_requires_preset_name');
++
++    let releaseExecution: (() => void) | undefined;
++    try {
++      releaseExecution = this.executionLease.acquire('photoshop_guard_brush_pack_profile');
++      const commandId = `brush-preset-probe:${createHash('sha256').update(JSON.stringify({
++        preset_name: presetName,
++        bridge_revision: UXP_BRIDGE_REVISION,
++        probe_nonce: randomUUID(),
++      })).digest('hex')}`;
++      const result = await invokeUxpProbeMediaBrush({ preset_name: presetName }, commandId);
++      if (!result.ok || !result.data) {
++        throw new Error(result.error ?? `brush_preset_probe_failed:${commandId}`);
++      }
++      const verifiedPresetName = typeof result.data.preset_name === 'string' ? result.data.preset_name.trim() : '';
++      if (verifiedPresetName !== presetName) {
++        throw new Error(`brush_preset_probe_native_identity_mismatch: requested=${presetName} verified=${verifiedPresetName || 'missing'}`);
++      }
++      const preview = recordOrEmpty(result.data.preview);
++      const whole = recordOrEmpty(preview.whole);
++      const base64 = typeof whole.base64 === 'string' ? whole.base64 : '';
++      if (!base64) throw new Error(`brush_preset_probe_preview_missing:${commandId}`);
++      const bytes = Buffer.from(base64, 'base64');
++      if (bytes.length < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8
++        || bytes[bytes.length - 2] !== 0xff || bytes[bytes.length - 1] !== 0xd9) {
++        throw new Error(`brush_preset_probe_preview_not_jpeg:${commandId}`);
++      }
++      const sha = createHash('sha256').update(bytes).digest('hex');
++      const bridgeHealth = getUxpBridgeHealthSnapshot();
++      const runtimeInstanceWitness = typeof bridgeHealth.runtime_instance_witness === 'string'
++        ? bridgeHealth.runtime_instance_witness.trim()
++        : '';
++      if (!bridgeHealth.plugin_connected || bridgeHealth.bridge_revision !== UXP_BRIDGE_REVISION || !runtimeInstanceWitness) {
++        throw new Error('brush_preset_probe_runtime_identity_unavailable');
++      }
++      const evidenceDir = path.join(
++        resolveBrushPackRecordDirectory(),
++        'probes',
++        'installed-presets',
++        presetName.replace(/[^a-zA-Z0-9._-]+/g, '_').slice(0, 96) || 'preset'
++      );
++      fs.mkdirSync(evidenceDir, { recursive: true });
++      const evidencePath = path.join(evidenceDir, `${sha}.jpg`);
++      if (!fs.existsSync(evidencePath)) fs.writeFileSync(evidencePath, bytes);
++      const receipt = {
++        protocol: 'photoshop.installed_brush.probe_receipt.v1',
++        probe_operation_id: commandId,
++        preset_name: verifiedPresetName,
++        effective_settings: recordOrEmpty(result.data.effective_settings),
++        backend: 'uxp',
++        runtime_revision: RUNTIME_STATE_VERSION,
++        bridge_revision: UXP_BRIDGE_REVISION,
++        runtime_instance_witness: runtimeInstanceWitness,
++        evidence: {
++          preview_path: evidencePath,
++          preview_sha256: sha,
++        },
++        layout: recordOrEmpty(result.data.layout),
++        recorded_at: new Date().toISOString(),
++      };
++      const receiptBytes = Buffer.from(JSON.stringify(receipt, null, 2), 'utf8');
++      const receiptSha = createHash('sha256').update(receiptBytes).digest('hex');
++      const receiptDir = path.join(resolveBrushPackRecordDirectory(), 'probe-receipts', 'installed-presets');
++      fs.mkdirSync(receiptDir, { recursive: true });
++      const receiptPath = path.join(receiptDir, `${createHash('sha256').update(commandId).digest('hex')}.json`);
++      const receiptTemp = `${receiptPath}.${process.pid}.${randomUUID()}.tmp`;
++      fs.writeFileSync(receiptTemp, receiptBytes);
++      fs.renameSync(receiptTemp, receiptPath);
++      return {
++        ok: true,
++        preset_name: verifiedPresetName,
++        effective_settings: result.data.effective_settings ?? {},
++        layout: result.data.layout ?? {},
++        evidence: {
++          preset_name: verifiedPresetName,
++          preview_path: evidencePath,
++          preview_sha256: sha,
++          operation_id: commandId,
++          runtime_instance_witness: runtimeInstanceWitness,
++          receipt_path: receiptPath,
++          receipt_sha256: receiptSha,
++        },
++        stable_command_id: commandId,
++        receipt_state: result.receipt?.state ?? null,
++      };
++    } finally {
++      releaseExecution?.();
++    }
++  }
++
+   collectArtDirectorReviewErrors(input: Record<string, unknown>): string[] {
+     return this.store.collectArtDirectorReviewErrors(input);
+   }
+@@ -2418,6 +2522,14 @@ export class EmbeddedGuardRuntime {
+         const closureSnapshot = transactionOperationId
+           ? this.store.snapshotClosureState(transactionOperationId)
+           : undefined;
++        // Retain the authoritative state from before the provisional closure.
++        // A truthful visual verdict may promote a new global problem only in
++        // the projected state of this combined close+next operation. If that
++        // next pass then needs an Art Director plan, rolling the closure back
++        // means the Director cannot yet see the newly promoted problem.
++        const beforeClosureDocument = previousRecordBeforeClosure?.args?.document_id
++          ? this.store.paintingState().documents?.[String(previousRecordBeforeClosure.args.document_id)]
++          : undefined;
+         const closureStartedAt = Date.now();
+         try {
+           closedPrevious = this.store.closePreviousCycle(cycleInput);
+@@ -2470,16 +2582,117 @@ export class EmbeddedGuardRuntime {
+           );
+           guardPreflightMs += Date.now() - postClosureStartedAt;
+           if (postClosureCheck.rejection) {
+-            this.store.restoreClosureState(closureSnapshot);
++            // A truthful, already validated visual verdict can promote a new
++            // global problem at closure. If its existence blocks the paired
++            // next visual pass, retain the completed verdict (as we do for an
++            // initially rejected next operation), but never dispatch that next
++            // mutation. The Director can then read the durable global problem.
++            // Other post-closure failures, notably rollback-required, retain
++            // the atomic snapshot-restore behavior.
++            const projectedDocument = previousRecordBeforeClosure?.args?.document_id
++              ? this.store.paintingState().documents?.[String(previousRecordBeforeClosure.args.document_id)]
++              : undefined;
++            const unsafeClosureDebt = postClosureCheck.violations.some((issue: any) =>
++              /rollback_required|pending_rollback|visual_barrier|identity_unverified|uncertain_execution/
++                .test(String(issue.code ?? '') + ' ' + String(issue.message ?? ''))
++            );
++            const newlyPromotedGlobal = closedPrevious.closed && previousOperationId && !unsafeClosureDebt
++              ? Object.values(projectedDocument?.visual_problems ?? {}).find((problem: any) =>
++                problem?.status === 'open' && problem.scale === 'global'
++                && problem.severity === 'must-fix'
++                && beforeClosureDocument?.visual_problems?.[problem.problem_id]?.status !== 'open'
++                && postClosureCheck.violations.some((issue: any) =>
++                  String(issue.message ?? '').startsWith('stage_priority_gate:')
++                  && String(issue.message ?? '').includes(problem.problem_id)
++                  && String(issue.message ?? '').includes('photoshop_guard_art_director')
++                )
++              ) as { problem_id: string } | undefined
++              : undefined;
++            // A global-change/stage-boundary glance is also generated only
++            // *after* the exact previous visual verdict is classified.
++            // Rolling that valid closure back makes an already reviewed
++            // Director appear to require the same frame indefinitely.
++            // Persist the verdict and return a read-only Director review
++            // instruction; never dispatch the requested next mutation.
++            const pendingGlance = projectedDocument?.art_director?.whole_image_glance;
++            const newlyDueGlance = closedPrevious.closed && previousOperationId && !unsafeClosureDebt
++              && beforeClosureDocument?.art_director?.whole_image_glance?.due !== true
++              && pendingGlance?.due === true
++              && pendingGlance.required_operation_id === previousOperationId
++              && typeof pendingGlance.required_frame_sha256 === 'string'
++              && postClosureCheck.violations.length > 0
++              && postClosureCheck.violations.every((issue: any) =>
++                String(issue.message ?? '').includes('whole_image_glance_required:')
++              )
++              ? pendingGlance : undefined;
++            if (!newlyPromotedGlobal && !newlyDueGlance) this.store.restoreClosureState(closureSnapshot);
+             const envelope = buildPreflightRejectionEnvelope(
+               postClosureCheck.nextOperation ?? nextOperation,
+               postClosureCheck.rejection,
+-              { closed_previous: { closed: false } }
++              { closed_previous: newlyPromotedGlobal || newlyDueGlance ? closedPrevious : { closed: false } }
+             );
+             const body = envelope.preflight_rejection;
+             envelope.preflight_rejection = body && typeof body === 'object'
+               ? { ...body as Record<string, unknown>, post_closure_semantic_revalidation: true }
+               : body;
++            if (newlyPromotedGlobal) {
++              const guidance =
++                `The previous exact-image visual verdict was durably finalized; new global must-fix "${newlyPromotedGlobal.problem_id}" now exists in Guard state. `
++                + 'Do NOT repeat previous_operation_id or previous_observation. '
++                + 'Call photoshop_guard_art_director action=review with an evidence-backed bounded medium construction task, correction_target and allowed_global_changes, '
++                + 'then submit the new causally linked Painter pass. The rejected next operation was not dispatched and no Photoshop pixels were changed by it.';
++              const rejection = envelope.preflight_rejection as Record<string, any>;
++              envelope.preflight_rejection = {
++                ...rejection,
++                durable_visual_finalization: {
++                  problem_id: newlyPromotedGlobal.problem_id,
++                  previous_operation_id: previousOperationId,
++                  previous_operation_closed: true,
++                  next_tool: 'photoshop_guard_art_director',
++                  execution: 'not-executed',
++                },
++                canonical_next_operation: {
++                  action: 'review-director-for-durable-global-problem',
++                  tool: 'photoshop_guard_art_director',
++                  requirement: guidance,
++                },
++                compact_correction_recipe: {
++                  ...(rejection.compact_correction_recipe ?? {}),
++                  repeat_same_semantic_cycle: false,
++                  previous_operation_closed: true,
++                  first_response: 'review the durable global defect with Art Director; do not repeat the valid previous visual verdict',
++                },
++                next_required_action: guidance,
++              };
++              (envelope.preflight_rejection as Record<string, unknown>).previous_operation_closed = true;
++              envelope.next_required_action = guidance;
++            } else if (newlyDueGlance) {
++              const guidance = `The previous exact visual verdict was finalized and created a whole-image review boundary for operation_id=${previousOperationId}, frame_sha256=${newlyDueGlance.required_frame_sha256}, trigger=${newlyDueGlance.reason}. `
++                + 'Do NOT close or replay that operation again. Review the exact frame with photoshop_guard_art_director action=review and whole_image_glance matching the required operation_id, frame_sha256 and trigger; '
++                + 'include a truthful relationship_audit for any required_relations. Only then retry the rejected next pass as a fresh cycle. No next Photoshop mutation was dispatched.';
++              const rejection = envelope.preflight_rejection as Record<string, any>;
++              envelope.preflight_rejection = {
++                ...rejection,
++                durable_visual_finalization: {
++                  previous_operation_id: previousOperationId,
++                  previous_operation_closed: true,
++                  review_kind: 'whole_image_glance',
++                  operation_id: previousOperationId,
++                  frame_sha256: newlyDueGlance.required_frame_sha256,
++                  trigger: newlyDueGlance.reason,
++                  required_relations: newlyDueGlance.required_relations ?? [],
++                  execution: 'not-executed',
++                },
++                compact_correction_recipe: {
++                  ...(rejection.compact_correction_recipe ?? {}),
++                  repeat_same_semantic_cycle: false,
++                  previous_operation_closed: true,
++                  first_response: 'review the durable exact-frame whole-image glance with Art Director; do not repeat the previous operation',
++                },
++                next_required_action: guidance,
++              };
++              envelope.next_required_action = guidance;
++            }
+             envelope.cycle_latency = {
+               protocol: 'photoshop.guard.cycle_latency.v1',
+               inter_call_unattributed_gap_ms: null,
+diff --git a/src/core/guard/session-store.ts b/src/core/guard/session-store.ts
+index ddea3468210ea216cc9b134fe8d2da98852d5731..73b5855bad53048e50ff8f49dc10d41a5e99f188 100644
+--- a/src/core/guard/session-store.ts
++++ b/src/core/guard/session-store.ts
+@@ -9,6 +9,7 @@ import { editableScopeRequest, validateEditableScopeReview, persistEditableScope
+ import { normalizeBrushAllowedScales } from './brush-scale-fit.js';
+ import { brushUseKey, boundedBrushTrial } from './brush-role-extension.js';
+ import { artisticContinuation, documentArtisticDebt, bindPaintingCompletion } from './document-artistic-debt.js';
++import { resolveBrushPackRecordDirectory } from '../brush-pack.js';
+ import fs from 'node:fs';
+ import path from 'node:path';
+ import { createHash, randomUUID } from 'node:crypto';
+@@ -825,6 +826,11 @@ function parseBrushPreflight(raw) {
+   if (!Array.isArray(raw.roles) || raw.roles.length < 1 || raw.roles.length > 16) {
+     throw new Error('brush_preflight.roles must contain 1-16 concrete brush roles');
+   }
++  const brushPackId = textOrUndefined(raw.brush_pack_id) ?? null;
++  const preflightRuntimeWitness = textOrUndefined(raw.runtime_instance_witness) ?? null;
++  const authoritativeRuntimeWitness = raw.runtime_instance_verified === true
++    ? preflightRuntimeWitness
++    : null;
+   const seen = new Set();
+   const roles = raw.roles.map((role, index) => {
+     if (!role || typeof role !== 'object' || Array.isArray(role)) {
+@@ -889,6 +895,84 @@ function parseBrushPreflight(raw) {
+           || !Number.isFinite(Number(scale.min_px)) || !Number.isFinite(Number(scale.max_px))) {
+           throw new Error('brush_preflight role ' + roleId + '.candidate_evidence[' + candidateIndex + '] is incomplete');
+         }
++        let probeEvidence;
++        if (candidate.probe_evidence !== undefined) {
++          const rawEvidence = candidate.probe_evidence;
++          if (!rawEvidence || typeof rawEvidence !== 'object' || Array.isArray(rawEvidence)) {
++            throw new Error('brush_preflight role ' + roleId + '.candidate_evidence[' + candidateIndex + '].probe_evidence must be an object');
++          }
++          const evidencePresetName = textOrUndefined(rawEvidence.preset_name);
++          const previewPath = textOrUndefined(rawEvidence.preview_path);
++          const previewSha = textOrUndefined(rawEvidence.preview_sha256)?.toLowerCase();
++          const operationId = textOrUndefined(rawEvidence.operation_id);
++          const evidenceRuntimeWitness = textOrUndefined(rawEvidence.runtime_instance_witness);
++          const receiptPath = textOrUndefined(rawEvidence.receipt_path);
++          const receiptSha = textOrUndefined(rawEvidence.receipt_sha256)?.toLowerCase();
++          if (evidencePresetName !== presetName || !previewPath || !/^[a-f0-9]{64}$/.test(previewSha ?? '')
++            || !/^brush-preset-probe:[a-f0-9]{64}$/.test(operationId ?? '')
++            || !evidenceRuntimeWitness || evidenceRuntimeWitness !== preflightRuntimeWitness
++            || !receiptPath || !/^[a-f0-9]{64}$/.test(receiptSha ?? '')) {
++            throw new Error('brush_preflight role ' + roleId + '.candidate_evidence[' + candidateIndex + '].probe_evidence is incomplete or does not match preset_name');
++          }
++          const recordRoot = fs.realpathSync(resolveBrushPackRecordDirectory());
++          const previewRoot = fs.realpathSync(path.join(recordRoot, 'probes', 'installed-presets'));
++          const receiptRoot = fs.realpathSync(path.join(recordRoot, 'probe-receipts', 'installed-presets'));
++          const resolveEvidenceFile = (candidatePath, expectedRoot, maxBytes, label) => {
++            const resolved = path.resolve(candidatePath);
++            if (!fs.existsSync(resolved)) {
++              throw new Error('brush_preflight role ' + roleId + '.candidate_evidence[' + candidateIndex + '].probe_evidence ' + label + ' file is missing');
++            }
++            const real = fs.realpathSync(resolved);
++            const relative = path.relative(expectedRoot, real);
++            if (!relative || relative.startsWith('..' + path.sep) || relative === '..' || path.isAbsolute(relative)) {
++              throw new Error('brush_preflight role ' + roleId + '.candidate_evidence[' + candidateIndex + '].probe_evidence ' + label + ' path is outside the installed-preset evidence directory');
++            }
++            const stat = fs.statSync(real);
++            if (!stat.isFile() || stat.size < 1 || stat.size > maxBytes) {
++              throw new Error('brush_preflight role ' + roleId + '.candidate_evidence[' + candidateIndex + '].probe_evidence ' + label + ' file size/type is invalid');
++            }
++            return real;
++          };
++          const resolvedPreviewPath = resolveEvidenceFile(previewPath, previewRoot, 12 * 1024 * 1024, 'preview');
++          const resolvedReceiptPath = resolveEvidenceFile(receiptPath, receiptRoot, 256 * 1024, 'receipt');
++          const previewBytes = fs.readFileSync(resolvedPreviewPath);
++          if (previewBytes.length < 4 || previewBytes[0] !== 0xff || previewBytes[1] !== 0xd8
++            || previewBytes[previewBytes.length - 2] !== 0xff || previewBytes[previewBytes.length - 1] !== 0xd9
++            || createHash('sha256').update(previewBytes).digest('hex') !== previewSha) {
++            throw new Error('brush_preflight role ' + roleId + '.candidate_evidence[' + candidateIndex + '].probe_evidence preview JPEG/SHA verification failed');
++          }
++          const receiptBytes = fs.readFileSync(resolvedReceiptPath);
++          if (createHash('sha256').update(receiptBytes).digest('hex') !== receiptSha) {
++            throw new Error('brush_preflight role ' + roleId + '.candidate_evidence[' + candidateIndex + '].probe_evidence receipt SHA verification failed');
++          }
++          let receipt;
++          try {
++            receipt = JSON.parse(receiptBytes.toString('utf8'));
++          } catch {
++            throw new Error('brush_preflight role ' + roleId + '.candidate_evidence[' + candidateIndex + '].probe_evidence receipt is not valid JSON');
++          }
++          if (receipt?.protocol !== 'photoshop.installed_brush.probe_receipt.v1'
++            || textOrUndefined(receipt?.probe_operation_id) !== operationId
++            || textOrUndefined(receipt?.preset_name) !== presetName
++            || textOrUndefined(receipt?.runtime_instance_witness) !== evidenceRuntimeWitness
++            || textOrUndefined(receipt?.evidence?.preview_sha256)?.toLowerCase() !== previewSha) {
++            throw new Error('brush_preflight role ' + roleId + '.candidate_evidence[' + candidateIndex + '].probe_evidence receipt does not bind this preset/preview');
++          }
++          const receiptPreviewPath = textOrUndefined(receipt?.evidence?.preview_path);
++          if (!receiptPreviewPath || !fs.existsSync(receiptPreviewPath)
++            || fs.realpathSync(receiptPreviewPath) !== resolvedPreviewPath) {
++            throw new Error('brush_preflight role ' + roleId + '.candidate_evidence[' + candidateIndex + '].probe_evidence receipt preview path does not bind the verified JPEG');
++          }
++          probeEvidence = {
++            preset_name: presetName,
++            preview_path: resolvedPreviewPath,
++            preview_sha256: previewSha,
++            operation_id: operationId,
++            runtime_instance_witness: evidenceRuntimeWitness,
++            receipt_path: resolvedReceiptPath,
++            receipt_sha256: receiptSha,
++          };
++        }
+         return {
+           preset_name: presetName,
+           profile_id: profileId,
+@@ -911,10 +995,26 @@ function parseBrushPreflight(raw) {
+           },
+           effective_settings: candidate.effective_settings && typeof candidate.effective_settings === 'object' && !Array.isArray(candidate.effective_settings)
+             ? { ...candidate.effective_settings } : {},
++          ...(probeEvidence ? { probe_evidence: probeEvidence } : {}),
+           caveats: Array.isArray(candidate.caveats) ? candidate.caveats.map(textOrUndefined).filter(Boolean) : [],
+         };
+       })
+       : [];
++    const probeRequiredForRole = visualIntents.some(intent => [
++      'painted-mass', 'broken-mass', 'atmospheric-mass', 'directional-mass', 'surface-flow', 'texture',
++    ].includes(intent));
++    if (probeRequiredForRole && authoritativeRuntimeWitness) {
++      if (!['pass', 'cached'].includes(probeStatus)) {
++        throw new Error('brush_preflight role ' + roleId + ' requires a real probe for material-dependent painted-mass/texture intents; probe_status=not-needed is invalid');
++      }
++      const preferredCandidate = candidateEvidence.find(candidate => candidate.preset_name === preferredPreset);
++      if (!preferredCandidate) {
++        throw new Error('brush_preflight role ' + roleId + ' requires candidate_evidence for preferred_preset=' + preferredPreset);
++      }
++      if (!brushPackId && !preferredCandidate.probe_evidence) {
++        throw new Error('brush_preflight role ' + roleId + ' requires probe_evidence from action=probe_preset for preferred_preset=' + preferredPreset);
++      }
++    }
+     const effective = role.effective_settings;
+     if (!effective || typeof effective !== 'object' || Array.isArray(effective)) {
+       throw new Error('brush_preflight role ' + roleId + ' requires effective_settings from Photoshop');
+@@ -951,7 +1051,6 @@ function parseBrushPreflight(raw) {
+       profile_id: textOrUndefined(role.profile_id) ?? null,
+     };
+   });
+-  const brushPackId = textOrUndefined(raw.brush_pack_id) ?? null;
+   const inventoryQuery = textOrUndefined(raw.inventory_query) ?? null;
+   return {
+     completed: true,
+@@ -1130,8 +1229,9 @@ function validateBrushStrategyAgainstPreflight(artRun, request) {
+         throw new Error(`brush_role_new_purpose_trial_required: material=${materialRole} and scale remain mandatory; visual_intent=${visualIntent} is advisory, not forbidden. Add next_pass.brush_use_reason (12+ chars), bounded region_bounds and trial strokes/dabs. ${issue ?? ''} ${strategy.brush_fitness_key !== key ? 'Compiler-provided brush settings identity does not match durable preflight.' : ''} Current role intents=${JSON.stringify(role.visual_intents ?? [])}. Review on the exact AFTER before reuse.`);
+     }
+   }
+-  const selectedCandidate = presetName && Array.isArray(role.candidate_evidence)
+-    ? role.candidate_evidence.find(candidate => candidate.preset_name === presetName)
++  const evidencePresetName = presetName ?? role.preferred_preset;
++  const selectedCandidate = evidencePresetName && Array.isArray(role.candidate_evidence)
++    ? role.candidate_evidence.find(candidate => candidate.preset_name === evidencePresetName)
+     : undefined;
+   const expectedPressurePolicy = selectedCandidate?.pressure_policy ?? role.pressure_policy;
+   if (pressurePolicy !== expectedPressurePolicy) {
+@@ -1144,12 +1244,6 @@ function validateBrushStrategyAgainstPreflight(artRun, request) {
+   if (methodClass === 'preset-brush' && !presetName) {
+     throw new Error(`brush_preset_required: method_class=preset-brush requires preset_name from brush_role=${brushRole}`);
+   }
+-  if (materialFitnessRequired && ['MATERIAL', 'DETAIL', 'MICRO_DETAIL'].includes(stage ?? '')) {
+-    const probeStatus = textOrUndefined(role.probe_status)?.toLowerCase();
+-    if (!['pass', 'cached'].includes(probeStatus ?? '')) {
+-      throw new Error(`brush_role_probe_required: brush_role=${brushRole} requires probe_status=pass|cached for ${stage} material/finish work`);
+-    }
+-  }
+   if (packPolicy?.mode === 'exclusive') {
+     if (artRun?.brush_preflight?.brush_pack_id !== packPolicy.brush_pack_id) {
+       throw new Error(`exclusive_brush_pack_preflight_required: durable brush_preflight must belong to ${packPolicy.brush_pack_id}`);
+@@ -1165,6 +1259,32 @@ function validateBrushStrategyAgainstPreflight(artRun, request) {
+       throw new Error(`exclusive_brush_pack_selection_required: preset_name=${presetName} must be explicitly selected before mutation`);
+     }
+   }
++  const probeRequiredForIntent = [
++    'painted-mass', 'broken-mass', 'atmospheric-mass', 'directional-mass', 'surface-flow', 'texture',
++  ].includes(visualIntent ?? '');
++  const physicalStackCheck = artRun?.physical_stack_check ?? artRun?.art_director?.physical_stack_check;
++  const durableStageRank = paintingStageRank(artRun?.current_stage);
++  const legacyAlreadyPastPhysicalStackGate = !physicalStackCheck
++    && durableStageRank !== undefined && durableStageRank >= 3;
++  const physicalStackPrerequisitePending = isPhysicalStackGatedStage(stage)
++    && !legacyAlreadyPastPhysicalStackGate
++    && (!physicalStackCheck || physicalStackCheck.status !== 'pass');
++  if (!physicalStackPrerequisitePending
++    && (probeRequiredForIntent || (materialFitnessRequired && ['MATERIAL', 'DETAIL', 'MICRO_DETAIL'].includes(stage ?? '')))) {
++    const probeStatus = textOrUndefined(role.probe_status)?.toLowerCase();
++    if (!['pass', 'cached'].includes(probeStatus ?? '')) {
++      throw new Error(`brush_role_probe_required: brush_role=${brushRole} requires probe_status=pass|cached for material-dependent ${visualIntent ?? stage ?? 'brush'} work`);
++    }
++  }
++  if (probeRequiredForIntent && !physicalStackPrerequisitePending) {
++    const evidenceBoundPackRole = !!artRun?.brush_preflight?.brush_pack_id && !!role.profile_id;
++    if (!selectedCandidate && !evidenceBoundPackRole) {
++      throw new Error(`brush_candidate_evidence_required: brush_role=${brushRole} preset_name=${evidencePresetName ?? 'missing'} requires candidate_evidence for visual_intent=${visualIntent}`);
++    }
++    if (!artRun?.brush_preflight?.brush_pack_id && !selectedCandidate?.probe_evidence) {
++      throw new Error(`brush_probe_evidence_required: brush_role=${brushRole} preset_name=${evidencePresetName ?? 'missing'} requires verified probe_preset JPEG evidence for visual_intent=${visualIntent}`);
++    }
++  }
+ }
+ 
+ function requestRequiresBrushPreflight(request) {
+@@ -1745,6 +1865,7 @@ function significanceModeOf(request) {
+ }
+ const WORKFLOW_STALL_ACTION_LIMIT = 8;
+ const WORKFLOW_STALL_INSUFFICIENT_LIMIT = 2;
++const WORKFLOW_STALL_PREPARE_FAILURE_LIMIT = 2;
+ const DECISION_LOOP_STALL_SECONDS = 90;
+ const SILENT_STALL_SECONDS = 90;
+ const CHECKPOINT_DEBT_LIMIT = 8;
+@@ -1755,6 +1876,114 @@ const PRIMITIVE_FOOTPRINT = new Set(['none', 'acceptable', 'suspect', 'unknown']
+ const RECOGNITION_SUBJECT = new Set(['yes', 'no', 'uncertain']);
+ const RECOGNITION_STYLE = new Set(['yes', 'no', 'uncertain', 'not_applicable']);
+ const RECOGNITION_EVALUATOR = new Set(['producer', 'blinded', 'human', 'external']);
++
++function preVisualPrepareFailure(record) {
++  if (!record || record.tool !== 'photoshop_execute_visual_microplan') return undefined;
++  const body = parseTexts(record.result).find(candidate =>
++    candidate?.code === 'microplan_prepare_failed' && candidate?.visual_mutation_started === false
++  );
++  if (!body) return undefined;
++  const failedStepId = textOrUndefined(body.failed_step);
++  const resultSteps = Array.isArray(body.steps) ? body.steps : [];
++  const failedStatus = failedStepId
++    ? resultSteps.find(step => textOrUndefined(step?.id) === failedStepId)
++    : undefined;
++  const requestedSteps = Array.isArray(record.args?.steps) ? record.args.steps : [];
++  const statusTool = textOrUndefined(failedStatus?.tool);
++  const requestedStep = (failedStepId
++    ? requestedSteps.find(step => textOrUndefined(step?.id) === failedStepId)
++    : undefined)
++    ?? (statusTool ? requestedSteps.find(step => textOrUndefined(step?.tool) === statusTool) : undefined);
++  const requestedArgs = requestedStep?.args && typeof requestedStep.args === 'object' && !Array.isArray(requestedStep.args)
++    ? requestedStep.args
++    : {};
++  const failureCategory = textOrUndefined(body.failure_category) ?? 'microplan_prepare_failed';
++  const failedTool = statusTool ?? textOrUndefined(requestedStep?.tool) ?? null;
++  const context = visualContext(record);
++  const routeFingerprint = fingerprint({
++    problem_id: context.problem_id ?? null,
++    method_class: record.args?.method_class ?? null,
++    brush_role: record.args?.paint_strategy?.brush_role ?? null,
++    preset_name: record.args?.paint_strategy?.preset_name ?? null,
++    failed_step: {
++      tool: failedTool,
++      method_id: requestedStep?.method_id ?? null,
++      args: requestedArgs,
++    },
++  });
++  return {
++    record,
++    failure_category: failureCategory,
++    failed_step: failedStepId ?? null,
++    failed_tool: failedTool,
++    route_fingerprint: routeFingerprint,
++  };
++}
++
++function prepareFailureRouteFingerprint(request, failedStepId, failedTool) {
++  if (!request || request.tool !== 'photoshop_execute_visual_microplan') return undefined;
++  const steps = Array.isArray(request.args?.steps) ? request.args.steps : [];
++  const failedStep = (failedStepId
++    ? steps.find(step => textOrUndefined(step?.id) === failedStepId)
++    : undefined)
++    ?? (failedTool ? steps.find(step => textOrUndefined(step?.tool) === failedTool) : undefined);
++  const failedArgs = failedStep?.args && typeof failedStep.args === 'object' && !Array.isArray(failedStep.args)
++    ? failedStep.args
++    : {};
++  const context = visualContext(request);
++  return fingerprint({
++    problem_id: context.problem_id ?? null,
++    method_class: request.args?.method_class ?? null,
++    brush_role: request.args?.paint_strategy?.brush_role ?? null,
++    preset_name: request.args?.paint_strategy?.preset_name ?? null,
++    failed_step: {
++      tool: textOrUndefined(failedStep?.tool) ?? failedTool ?? null,
++      method_id: failedStep?.method_id ?? null,
++      args: failedArgs,
++    },
++  });
++}
++
++function repeatedPrepareFailureContext(records) {
++  let latest;
++  let latestIndex = -1;
++  for (let index = records.length - 1; index >= 0; index -= 1) {
++    const candidate = preVisualPrepareFailure(records[index]);
++    if (!candidate) continue;
++    latest = candidate;
++    latestIndex = index;
++    break;
++  }
++  if (!latest) return { count: 0, latest: null };
++  if (records.slice(latestIndex + 1).some(record => record.visual && completedArtisticExecution(record))) {
++    return { count: 0, latest: null };
++  }
++  let count = 0;
++  for (let index = latestIndex; index >= 0; index -= 1) {
++    const record = records[index];
++    const candidate = preVisualPrepareFailure(record);
++    if (candidate) {
++      if (candidate.failure_category !== latest.failure_category
++        || candidate.route_fingerprint !== latest.route_fingerprint) break;
++      count += 1;
++      continue;
++    }
++    if (record.visual && completedArtisticExecution(record)) break;
++  }
++  return { count, latest };
++}
++
++function looksLikeCompositionDebt(problem) {
++  if (!problem || problem.status === 'resolved') return false;
++  const fields = [
++    problem.problem_id,
++    problem.region,
++    problem.hypothesis,
++    problem.source_review_kind,
++    problem.source_review_level,
++  ].map(value => textOrUndefined(value)?.toLowerCase()).filter(Boolean);
++  return fields.some(value => /composition|whole[- ]?(?:frame|canvas)|large[- ]?mass|layout|spatial(?:[- ]?coverage)?/.test(value));
++}
+ function normalizeTrendSignal(value) {
+   if (typeof value !== 'string') return undefined;
+   const signal = value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+@@ -6248,6 +6477,8 @@ export class SessionStore {
+       meaningful_visual_passes: 0,
+       insufficient_visual_passes: 0,
+       consecutive_insufficient_visual_passes: 0,
++      consecutive_prepare_failures: 0,
++      latest_prepare_failure_operation_id: null,
+       external_actions_since_last_meaningful_visual_change: 0,
+       last_visual_operation_id: null,
+       last_visual_verdict_at: null,
+@@ -6264,11 +6495,25 @@ export class SessionStore {
+       suppliedRecords ?? projectionContext?.records ?? this.records(),
+       projectionContext
+     );
++    const prepareFailures = repeatedPrepareFailureContext(records);
++    const prepareFailureStall = prepareFailures.count >= WORKFLOW_STALL_PREPARE_FAILURE_LIMIT;
++    const prepareFailureReason = prepareFailureStall
++      ? `${prepareFailures.count} consecutive pre-visual preparation failures on the same executable route`
++      : null;
+     // A rolled-back or superseded frame cannot reset the meaningful-art anchor:
+     // that visual gain no longer exists in the authoritative Photoshop image.
+     const tracked = records.filter(r => r.visual && r.verdict?.significance?.execution_effect
+       && r.rolled_back !== true && r.current_frame_authority !== false);
+-    if (!tracked.length) return empty;
++    if (!tracked.length) {
++      return {
++        ...empty,
++        consecutive_prepare_failures: prepareFailures.count,
++        latest_prepare_failure_operation_id: prepareFailures.latest?.record?.id ?? null,
++        workflow_stall: prepareFailureStall,
++        stall_reasons: prepareFailureReason ? [prepareFailureReason] : [],
++        artistic_throughput: this.artisticThroughputMetrics(documentId, records, projectionContext),
++      };
++    }
+ 
+     const problems = new Map();
+     let resolutionEvents = 0;
+@@ -6322,6 +6567,7 @@ export class SessionStore {
+     if (consecutiveInsufficient >= WORKFLOW_STALL_INSUFFICIENT_LIMIT) {
+       stallReasons.push(`${consecutiveInsufficient} consecutive visually insufficient passes`);
+     }
++    if (prepareFailureReason) stallReasons.push(prepareFailureReason);
+     const resolvedIds = [...problems.entries()].filter(([, status]) => status === 'resolved').map(([id]) => id);
+     const openIds = [...problems.entries()].filter(([, status]) => status === 'open').map(([id]) => id);
+     return {
+@@ -6334,6 +6580,8 @@ export class SessionStore {
+       meaningful_visual_passes: meaningful,
+       insufficient_visual_passes: insufficient,
+       consecutive_insufficient_visual_passes: consecutiveInsufficient,
++      consecutive_prepare_failures: prepareFailures.count,
++      latest_prepare_failure_operation_id: prepareFailures.latest?.record?.id ?? null,
+       external_actions_since_last_meaningful_visual_change: externalActionsSince,
+       last_meaningful_visual_operation_id: lastMeaningful?.id,
+       last_visual_operation_id: lastVisual?.id ?? null,
+@@ -6353,7 +6601,13 @@ export class SessionStore {
+       projectionContext
+     );
+     const metrics = this.workflowMetrics(documentId, records, projectionContext);
+-    if (!metrics.workflow_stall) return { metrics, latest_ineffective_visual: null };
++    const prepareFailures = repeatedPrepareFailureContext(records);
++    const latestPrepareFailure = prepareFailures.count >= WORKFLOW_STALL_PREPARE_FAILURE_LIMIT
++      ? prepareFailures.latest
++      : null;
++    if (!metrics.workflow_stall) {
++      return { metrics, latest_ineffective_visual: null, latest_prepare_failure: null };
++    }
+     const tracked = records.filter(record => record.visual && record.verdict?.significance?.execution_effect
+       && record.rolled_back !== true && record.current_frame_authority !== false);
+     const lastMeaningful = [...tracked].reverse().find(record =>
+@@ -6370,7 +6624,19 @@ export class SessionStore {
+         && record.verdict.disposition === 'accept'
+         && significanceHasDetectedChange(record.verdict.significance));
+     });
+-    return { metrics, latest_ineffective_visual: latestIneffectiveVisual ?? null };
++    return {
++      metrics,
++      latest_ineffective_visual: latestIneffectiveVisual ?? null,
++      latest_prepare_failure: latestPrepareFailure ? {
++        operation_id: latestPrepareFailure.record.id,
++        problem_id: problemIdentity(latestPrepareFailure.record) ?? null,
++        failure_category: latestPrepareFailure.failure_category,
++        failed_step: latestPrepareFailure.failed_step,
++        failed_tool: latestPrepareFailure.failed_tool,
++        route_fingerprint: latestPrepareFailure.route_fingerprint,
++        repeated_count: prepareFailures.count,
++      } : null,
++    };
+   }
+   artisticRecoveryResolution(documentId, facts, projectionContext) {
+     const records = this.currentDocumentRecords(
+@@ -6909,11 +7175,19 @@ export class SessionStore {
+     if (cadence.blockers.workflow_stall) {
+       const stall = this.workflowStallStrategyContext(documentId, records, projectionContext);
+       const prior = stall.latest_ineffective_visual;
++      const prepareFailure = stall.latest_prepare_failure;
+       const targetProblemId = textOrUndefined(largestMustFix?.problem_id)
+         ?? activeProblemId
++        ?? textOrUndefined(prepareFailure?.problem_id)
+         ?? problemIdentity(prior)
+         ?? 'the largest unresolved defect';
+       const reasons = stall.metrics.stall_reasons.join('; ');
++      if (prepareFailure) {
++        const compositionAlternative = looksLikeCompositionDebt(largestMustFix)
++          ? ' Prefer a brush-independent bounded composition construction such as one owner-safe region block-in when it is admissible under the current ownership/scene-geometry contract; otherwise return to Art Director with the concrete preparation blocker.'
++          : ' Change the failed preparation route (preset/settings/brush role or method), or return a concrete systemic blocker if no valid route remains.';
++        return `workflow stall: ${prepareFailure.repeated_count} repeated pre-visual preparation failures at ${prepareFailure.failed_tool ?? prepareFailure.failed_step ?? 'preparation'} (${prepareFailure.failure_category}); do not retry the same failed preparation route.${compositionAlternative} (${reasons})`;
++      }
+       if (prior) {
+         return `workflow stall: make a causally distinct executable strategy change for ${targetProblemId}; equivalent retries are blocked; if no valid alternative exists, report an actionable blocker (${reasons})`;
+       }
+@@ -6941,7 +7215,12 @@ export class SessionStore {
+     if (largestMustFix && state.active_problem?.scale && SCALE_RANK[normalizeScale(state.active_problem.scale)] > SCALE_RANK[normalizeScale(largestMustFix.scale)]) {
+       return `review whole-frame priorities; unresolved ${largestMustFix.scale} must-fix ${largestMustFix.problem_id}`;
+     }
+-    if (cadence.decision_loop_stall) return 'decision-loop stall (advisory, no Guard execution block): dispatch next meaningful visual pass for the unresolved defect, or enter explicit bounded diagnostic mode; do not wait or request a manual tab switch';
++    if (cadence.decision_loop_stall) {
++      if (looksLikeCompositionDebt(largestMustFix)) {
++        return 'decision-loop stall (advisory, no Guard execution block): unresolved composition still needs visible large-mass coverage; dispatch one bounded brush-independent region block-in on a valid owner when the current ownership/scene-geometry contract admits it, otherwise return to Art Director with the concrete blocker; do not wait or repeat brush preparation';
++      }
++      return 'decision-loop stall (advisory, no Guard execution block): dispatch next meaningful visual pass for the unresolved defect, or enter explicit bounded diagnostic mode; do not wait or request a manual tab switch';
++    }
+     if (art?.status === 'active' && art?.directive_id) {
+       return `Painter: execute bounded task ${art.current_task_id ?? 'from directive'} under directive ${art.directive_id}`;
+     }
+@@ -7308,6 +7587,17 @@ export class SessionStore {
+         && deferredSource.rolled_back !== true
+       );
+       const workflowStall = this.workflowStallStrategyContext(documentId, currentDocumentRecords, projectionContext);
++      const prepareFailure = workflowStall.latest_prepare_failure;
++      if (workflowStall.metrics.workflow_stall && prepareFailure && !compilerDeferredContinuation) {
++        const candidateRoute = prepareFailureRouteFingerprint(
++          request, prepareFailure.failed_step, prepareFailure.failed_tool
++        );
++        if (candidateRoute && candidateRoute === prepareFailure.route_fingerprint) {
++          add(
++            `workflow_stall: repeated pre-visual preparation failure exhausted the exact route from ${prepareFailure.operation_id} (${prepareFailure.failure_category}); change the failed preparation preset/settings/brush role/method or choose another admissible executable method before retrying`
++          );
++        }
++      }
+       if (
+         workflowStall.metrics.workflow_stall
+         && workflowStall.latest_ineffective_visual
+diff --git a/src/core/object-construction.ts b/src/core/object-construction.ts
+index 4e47a258b97d0d253b9c47e249bff0c14873e38d..739e6b79b006866bd55d240abd56348ca17be633 100644
+--- a/src/core/object-construction.ts
++++ b/src/core/object-construction.ts
+@@ -978,10 +978,79 @@ export const CONSTRUCTION_PASS_SCHEMA = object(
+       },
+       ['red', 'green', 'blue']
+     ),
++    tonal_regions: {
++      type: 'array', maxItems: 31,
++      description: 'Optional cat-style colored subregions for THIS construction part only, in the same Photoshop layer and one History rollback unit. Each complete polygon must lie inside the constructed part; no other semantic owner may be painted.',
++      items: object({
++        id: { type: 'string' },
++        color: object({
++          red: { type: 'number', minimum: 0, maximum: 255 },
++          green: { type: 'number', minimum: 0, maximum: 255 },
++          blue: { type: 'number', minimum: 0, maximum: 255 },
++        }, ['red', 'green', 'blue']),
++        opacity: { type: 'number', exclusiveMinimum: 0, maximum: 100 },
++        points: { type: 'array', minItems: 3, maxItems: 256,
++          items: object({ x: { type: 'number', minimum: 0 }, y: { type: 'number', minimum: 0 } }, ['x', 'y']) },
++      }, ['color', 'points']),
++    },
+   },
+   ['part_id', 'color']
+ );
+ 
++function insideConstructedContour(point: { x: number; y: number }, polygon: Array<{ x: number; y: number }>): boolean {
++  let inside = false;
++  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
++    const a = polygon[j]!, b = polygon[i]!;
++    const cross = (point.x - a.x) * (b.y - a.y) - (point.y - a.y) * (b.x - a.x);
++    if (Math.abs(cross) <= 1e-7 && point.x >= Math.min(a.x, b.x) - 1e-7
++      && point.x <= Math.max(a.x, b.x) + 1e-7 && point.y >= Math.min(a.y, b.y) - 1e-7
++      && point.y <= Math.max(a.y, b.y) + 1e-7) return true;
++    if ((a.y > point.y) !== (b.y > point.y)
++      && point.x < ((b.x - a.x) * (point.y - a.y)) / (b.y - a.y) + a.x) inside = !inside;
++  }
++  return inside;
++}
++
++function boundedConstructionTonalRegions(
++  value: unknown, part: { id: string; contour: Array<{ x: number; y: number }> },
++  fail: (code: string, path: string, message: string) => never,
++): Array<Record<string, unknown>> {
++  if (value === undefined) return [];
++  if (!Array.isArray(value) || value.length > 31) fail('construction_tonal_regions_invalid', 'next_pass.construction.tonal_regions', 'Supply no more than 31 authored regions');
++  return (value as unknown[]).map((entry, index) => {
++    const path = `next_pass.construction.tonal_regions[${index}]`;
++    const region = entry as Record<string, unknown> | null;
++    const color = region?.color as Record<string, unknown> | undefined;
++    const points = region?.points;
++    const opacity = region?.opacity ?? 100;
++    if (!color || !['red','green','blue'].every(k => typeof color[k] === 'number'
++      && Number.isFinite(color[k]) && Number(color[k]) >= 0 && Number(color[k]) <= 255)
++      || typeof opacity !== 'number' || !Number.isFinite(opacity) || opacity <= 0 || opacity > 100
++      || !Array.isArray(points) || points.length < 3 || points.length > 256)
++      fail('construction_tonal_region_invalid', path, 'Supply a valid RGB color, opacity and 3–256 polygon points');
++    const contour = (points as unknown[]).map((p, k) => {
++      const xy = p as { x?: unknown; y?: unknown } | null;
++      if (!xy || typeof xy.x !== 'number' || typeof xy.y !== 'number'
++        || !Number.isFinite(xy.x) || !Number.isFinite(xy.y) || xy.x < 0 || xy.y < 0)
++        fail('construction_tonal_region_invalid', `${path}.points[${k}]`, 'Polygon points need finite nonnegative canvas coordinates');
++      return { x: xy!.x as number, y: xy!.y as number };
++    });
++    // Check the entire straight boundary (not only vertices) for concave parts.
++    for (let i = 0; i < contour.length; i++) {
++      const a = contour[i]!, b = contour[(i + 1) % contour.length]!;
++      for (let t = 0; t <= 16; t++) {
++        const f = t / 16;
++        if (!insideConstructedContour({ x: a.x + f * (b.x - a.x), y: a.y + f * (b.y - a.y) }, part.contour))
++          fail('construction_tonal_region_outside_part', `${path}.points`, `Colored region must remain inside the independent ${part.id} component`);
++      }
++    }
++    return {
++      id: typeof region?.id === 'string' && region.id.trim() ? region.id : `${part.id}-tone-${index + 1}`,
++      color, opacity, contours: [{ points: contour }],
++    };
++  });
++}
++
+ export function validateRigidRevision(previous: ConstructionModel, current: ConstructionModel, reshape: unknown = []) {
+   if (!Array.isArray(reshape) || reshape.length > 16 || reshape.some(id => typeof id !== 'string' || !previous.objects.some(o => o.id === id)))
+     throw new ConstructionError([{ code: 'construction_reshape_invalid', path: 'construction.reshape_object_ids', message: 'Explicitly name existing objects whose shape is intentionally being corrected' }]);
+@@ -1106,6 +1175,9 @@ export function expandConstructionPass(
+   if (raw.visual_intent === 'line' && renderMode === 'fill')
+     error('construction_rendering_intent_conflict', 'next_pass.construction.rendering.mode', 'A line intention cannot execute a fill; choose outline and its width.');
+   const outline = renderMode === 'outline';
++  if (outline && request.tonal_regions !== undefined)
++    error('construction_tonal_regions_require_fill', 'next_pass.construction.tonal_regions', 'Colored fill regions cannot be appended to an outline-only construction');
++  const tonalRegions = boundedConstructionTonalRegions(request.tonal_regions, part!, error);
+   const preset = rendering?.preset_name;
+   if (preset !== undefined && (typeof preset !== 'string' || !preset.trim()))
+     error('construction_preset_invalid', 'next_pass.construction.rendering.preset_name', 'Choose a nonempty installed preset name.');
+@@ -1243,6 +1315,7 @@ export function expandConstructionPass(
+           contours: [{ points: part!.contour, closed: true,
+             ...(part!.intersection_policy ? { intersection_policy: part!.intersection_policy } : {}) }],
+         },
++        ...tonalRegions.map(region => ({ ...region, layer_id: target })),
+       ],
+     },
+   });
+diff --git a/src/prompts/host-guidance.ts b/src/prompts/host-guidance.ts
+index 1b469ecdbb6223fe9908d76755953208507999e8..b2828545d74c32402ef0a435d50ee391f1547227 100644
+--- a/src/prompts/host-guidance.ts
++++ b/src/prompts/host-guidance.ts
+@@ -352,6 +352,12 @@ Multi-step etiquette
+ - SUBJECT-FIRST START: the first meaningful visual pass must contain the requested main subject
+   and its discriminative recognition cues. Establish its relationship to the setting/path/large
+   scene masses in the next bounded construction passes before polishing any one component.
++  Treat the selected composition as a whole-frame contract: preserve every explicit multiplicity,
++  major spatial relation and large-mass role committed by the selected hypothesis, plus any stronger
++  requirement from the original brief. Establish the required major
++  masses/clusters and their negative-space rhythm across early owner-specific passes before spending
++  a second refinement pass on one already-readable owner, unless the brief truly contains only that
++  one major mass. A rich same-owner tonal-regions pass does not substitute for missing sibling masses.
+   Do not spend an independent first task on an empty sky/fog/gradient or finish the background
+   before introducing the subject. Keep separately editable owners on separate layers; the
+   whole-scene milestone may span bounded passes, never one illegal multi-owner rollback unit.
+@@ -378,6 +384,28 @@ Multi-step etiquette
+ - For a new subject, use Recognition Block-In before ordinary refinement: derive 3–7
+   discriminative recognition features (small features may be high-priority), include one large
+   style cue when style is requested, and rough in the whole subject before polishing one contour.
++  When a compound component requires \`next_pass.construction\`, give its FIRST
++  fill pass several authored \`construction.tonal_regions\` inside the solved part
++  where justified by color/value design; they compile into ONE owned
++  \`photoshop_paint_regions\` action and one rollback unit. When suitable for the intended visual result, do not wait for a
++  separate cosmetic pass to give the component a readable form. Regions are
++  not permission to paint a second independent component or escape its contour.
++  For early structured-mass recognition work, an available executable method is
++  \`region-block-in\` / \`photoshop_paint_regions\`: author several purposeful, differently
++  colored closed regions within the SAME independently editable semantic component
++  when they clarify characteristic silhouette, internal value grouping and anatomy.
++  This is the demonstrated multi-region cat approach, not a requirement to draw
++  a monochrome primitive before its recognition cues. A complex subject may need
++  successive owner-specific passes; never flatten independently editable parts
++  into one layer or ignore the single-owner/rollback boundary. Preserve a user-
++  requested brush medium or stronger evidence for visible painterly marks, soft
++  volumes or atmospheric fields instead of substituting polygon art for them.
++  Choose scene-geometry applicability from the actual spatial brief/style before committed
++  construction. Do not accidentally classify every stylized/flat/continuous-field mass as a
++  coherent 3D compound object; when a style-authorized orthographic/flat/non-Euclidean projection
++  is the truthful model, declare that explicit opt-out once. When coherent 3D relations are real,
++  keep the durable geometry/bindings and satisfy them rather than weakening the safety contract.
++
+   \`photoshop_paint_regions\` is broad closed-mass scaffolding during
+   RECOGNITION_BLOCK_IN / COMPOSITION / SHAPE / GLOBAL_BLOCK_IN. Exit broad ADD block-in only when
+   the whole preview reads without relying on the prompt. At later stages region painting is legal
+@@ -405,6 +433,11 @@ Multi-step etiquette
+   then re-call \`photoshop_guard_set_art_run\` with the same process_dir and completed
+   \`brush_preflight\`. Brush-dependent painting is fail-closed until this durable preflight exists;
+   brush-independent region/fill construction is not blocked merely because brush_preflight is absent.
++  A role's probe_status=not-needed only waives that selective footprint probe when the preset is
++  already sufficiently evidenced; it never means the run-level brush_preflight is optional. Preset
++  names alone are not behavioral evidence. If the requested medium depends on brush marks, complete
++  inventory/role/effective-settings preflight before the first such mutation, while broad
++  brush-independent composition can continue through an admissible region/fill route.
+ - Route non-trivial strokes/dabs/region construction through \`photoshop_execute_visual_microplan\`.
+   On compact \`next_pass\`, Guard may choose the durable preflighted brush role by working scale
+   (or the optional \`brush_role\` hint) and compile \`paint_strategy\`. When that role has more than
+@@ -427,6 +460,12 @@ Multi-step etiquette
+ - If status reports \`workflow_stall\`, stop protocol churn and make a real executable strategy
+   change (method, scale, region, brush role or mutation structure) before another mutation.
+   Legacy \`replan\` prose is not an override. Required recovery reads/checkpoints remain allowed.
++  Two repeated microplan_prepare_failed results before any visual mutation exhaust that exact
++  preparation route. Do not keep selecting the same failing brush/preset/settings package. Apply the
++  named correction once; then change the preparation route or use another admissible executable
++  method. If unresolved composition/large-mass coverage is the blocker and brush setup is failing,
++  prefer one bounded brush-independent region block-in on a valid owner when the current
++  ownership/scene-geometry contract permits it; otherwise return a concrete blocker to the Director.
+ - HARD VISUAL CADENCE: after a visual preview has been inspected and its verdict recorded,
+   the next healthy canonical cycle must contain the next meaningful visual pass. Do not insert
+   routine status/get_state/document-list/schema/source/grep/extra-preview investigation between
+diff --git a/src/prompts/templates/digital-painting-control.ts b/src/prompts/templates/digital-painting-control.ts
+index 355ed5c66c0f4e304c372c02115fed40a816a66f..fa2beaa3dc17851f67007f9445adfb9d9aa51d6d 100644
+--- a/src/prompts/templates/digital-painting-control.ts
++++ b/src/prompts/templates/digital-painting-control.ts
+@@ -15,48 +15,14 @@ export const digitalPaintingControlTemplate: PhotoshopPromptTemplate = {
+   description:
+     'Guide arbitrary Photoshop subjects through multiscale visual checks, rollback and state-based completion.',
+   arguments: [
+-    {
+-      name: 'subject',
+-      description: 'What to draw or paint. Required.',
+-      required: true,
+-    },
+-    {
+-      name: 'style',
+-      description: 'Optional style direction, e.g. anime, ink sketch, painterly, charcoal, comic.',
+-      required: false,
+-    },
+-    {
+-      name: 'finish_level',
+-      description: 'Target finish level: sketch, study, or polished. Default: study.',
+-      required: false,
+-    },
+-    {
+-      name: 'constraints',
+-      description: 'User constraints: monochrome, layer count, canvas size or required features.',
+-      required: false,
+-    },
+-    {
+-      name: 'preferred_brushes',
+-      description:
+-        'Preferred pack/presets; preference never makes all brushes mandatory.',
+-      required: false,
+-    },
+-    {
+-      name: 'required_brushes',
+-      description:
+-        'Required exact presets: use meaningfully; report missing, never substitute.',
+-      required: false,
+-    },
+-    {
+-      name: 'stroke_budget',
+-      description: 'Approximate stroke count; soft default.',
+-      required: false,
+-    },
+-    {
+-      name: 'budget_mode',
+-      description: 'soft (default) or hard; hard must not exceed stroke_budget.',
+-      required: false,
+-    },
++    { name: 'subject', description: 'What to draw or paint. Required.', required: true },
++    { name: 'style', description: 'Optional style direction.', required: false },
++    { name: 'finish_level', description: 'sketch, study, or polished. Default: study.', required: false },
++    { name: 'constraints', description: 'User constraints or required features.', required: false },
++    { name: 'preferred_brushes', description: 'Preferred pack/presets; preference is not mandatory.', required: false },
++    { name: 'required_brushes', description: 'Required exact presets: report missing, never substitute.', required: false },
++    { name: 'stroke_budget', description: 'Approximate stroke count; soft default.', required: false },
++    { name: 'budget_mode', description: 'soft or hard; hard must not exceed stroke_budget.', required: false },
+   ],
+   handler: (args) => {
+     const subject = argString(args, 'subject', 'unspecified subject');
+@@ -68,19 +34,17 @@ export const digitalPaintingControlTemplate: PhotoshopPromptTemplate = {
+     const strokeBudget = Math.max(0, argInt(args, 'stroke_budget', 0));
+     const budgetMode = argEnum(args, 'budget_mode', BUDGET_MODES, 'soft');
+ 
+-    const budgetText =
+-      strokeBudget > 0
+-        ? budgetMode === 'hard'
+-          ? `Hard stroke cap: ${strokeBudget}; simplify to fit the user constraint.`
+-          : `Soft stroke budget: about ${strokeBudget} for scope/batching, not completion. Continue required correction.`
+-        : `No stroke cap; choose marks by visual need and requested finish.`;
++    const budgetText = strokeBudget > 0
++      ? budgetMode === 'hard'
++        ? `Hard stroke cap: ${strokeBudget}; simplify to fit.`
++        : `Soft stroke budget: about ${strokeBudget}; required correction may continue.`
++      : `No stroke cap; choose marks by visual need.`;
+ 
+-    const finishText =
+-      finishLevel === 'sketch'
+-        ? 'Sketch: readable silhouette/proportion/gesture and main values/colors; leave nonessential micro-detail.'
+-        : finishLevel === 'polished'
+-          ? 'Polished: resolve focal details, coherent edges/lines, deliberate accents and cleanup.'
+-          : 'Study: resolve main forms/depth/focal details/values/colors and cleanup, without micro-detail chasing.';
++    const finishText = finishLevel === 'sketch'
++      ? 'Sketch: readable silhouette/proportion/gesture and main values/colors; omit nonessential micro-detail.'
++      : finishLevel === 'polished'
++        ? 'Polished: resolve focal details, edges, accents and cleanup.'
++        : 'Study: resolve main forms/depth/focal detail/values/colors and cleanup.';
+ 
+     const text = [
+       PHOTOSHOP_DRAWING_ROUTE,
+@@ -101,12 +65,13 @@ export const digitalPaintingControlTemplate: PhotoshopPromptTemplate = {
+       `GUARD / CONTROLLER:`,
+       `- OPEN BRIEF: compare 4–6 candidates (at least four) from four problem families; reject duplicates/atmosphere-only premises. Choose subject+setting+action+spatial problem; ease never decides alone. Never browse or consult prior runs/lists or cross-run artistic memory. This is a one-time choice: no Guard gate and no subject-selection repeat inside the paint loop.`,
+       `- Hierarchy: COMPOSITION → SHAPE → VALUE → FORM → EDGE → MATERIAL → DETAIL. Do not advance while a lower-frequency must-fix remains.`,
+-      `- RECOGNITION BLOCK-IN: derive 3–7 discriminative cues (importance is not proportional to size) + style cue; rough the whole subject across sequential passes. The stage is NOT one pass. Until overview reads unaided, fix the largest barrier.`,
++      `- RECOGNITION BLOCK-IN: 3–7 discriminative features; small features may be high-priority. Rough whole across passes until overview reads unaided. Optional same-owner tonal_regions; explicit brush requirements win.`,
++
+       `- Choose REFERENCE REPRODUCTION, FREE COMPOSITION, or STYLIZED PAINTING; free composition establishes composition/light/depth/palette before detail.`,
+       `- Derive a minimal STYLE CONTRACT; judge USER BRIEF + STRUCTURAL READABILITY + STYLE CONTRACT. Style never excuses broken tangencies/occlusion.`,
+       `- ART RUN: bind one immutable processes/<subject>-process/<run>/ before paint; keep painting-state.json, frames/, checkpoints/, final/ there. accepted_frame != current_frame.`,
+       `- PASS LIMITS: one VisualMicroPlan = one rollback unit, <=1 new layer, 1–4 contiguous compatible mutations; preparation first. Limits come from actions; a pass is not an artistic stage.`,
+-      `- SUBJECT FIRST: first pixels include requested subject/recognition cues; next bounded owner passes establish setting/path/masses before refinement. No independent sky/fog/gradient first task. Director optional; initial value_check omitted or pending/observed=false on empty canvas.`,
++      `- SUBJECT FIRST: first pixels include subject/recognition cues; next owner passes establish setting/path/masses. Selected composition is a whole-frame contract: preserve multiplicity/relations, major masses/clusters and negative-space rhythm before refining an already-readable owner. tonal_regions never replace missing sibling masses. No sky/fog-only first task.`,
+       `- EDITABLE COMPONENTS: predeclare scene_ownership_plan objects/units. Compound containers have independent semantic owners/layers for adjustable parts (bed/blanket/pillow; window/glass/curtain; body/head/eyes). Build/review one component per pass; tiny inseparable accents stay. Plans extend additively; never flatten to evade ownership.`,
+       `- NO SOURCE DURING ART: use method selection.execution_contract.allowed_commands, input_schema and next_pass skeleton. If absent, retrieve exact public schema once via Guard capabilities(tool_names); never invent aliases or inspect src/tests/dist. Apply all field_correction_packet items together; Guard derives known technical pins but never invents art decisions. If still blocked, report cause. Confirmed closed target: reconcile(id,outcome=abandoned,document_closed_confirmed=true,reason).`,
+       `- LAYER SEPARATION CHECK: substantial independent object/material/light/plane uses create-new/temporary-hypothesis, never layer per stroke. protected_layer_ids protects accepted ids; protected_regions is descriptive only. Replacement needs replace_protected_layer_ids.`,
+@@ -117,7 +82,8 @@ export const digitalPaintingControlTemplate: PhotoshopPromptTemplate = {
+       ``,
+       `BRUSH PREFLIGHT / ROLE MAP:`,
+       `- Before first brush-dependent stroke/dab in a non-trivial run, do bounded brush inventory → role map → effective settings → selective probe → completed brush_preflight. Region/fill and unrelated preparation do not require it.`,
+-      `- photoshop_select_brush_preset returns fresh authoritative effective-settings readback; duplicate only if stale/changed/diagnostic. Guard may insert it from durable brush_preflight; do not repeat the preset.`,
++      `- probe_status=not-needed waives only a selective footprint probe; it never waives run-level brush_preflight. Preset names alone are not behavior evidence.`,
++      `- photoshop_select_brush_preset requires verified native preset identity plus fresh authoritative effective-settings readback; settings do not prove identity. preset_verification.source=unavailable is failed preparation: choose an evidenced preset/role or another admissible method; never repeat that setter route.`,
+       `- Keep a compact brush role map. Guard compiles paint_strategy (material → intent → role → preset → pressure); optional next_pass.brush_role disambiguates roles. Raw bypass is blocked; simulated pressure must exist in the stroke.`,
+       ``,
+       `MARK / STRUCTURE GUARDS:`,
+@@ -143,11 +109,11 @@ export const digitalPaintingControlTemplate: PhotoshopPromptTemplate = {
+       `- PRIMARY PROGRESS METRIC: resolved visual problems, not protocol activity. Resolve only after meaningful change + improvement + accept + target_resolved=yes; accept alone retains pixels, not resolution. trend_signals are negative recurring defects only.`,
+       `- HARD VISUAL EXECUTION-EVIDENCE GATE: meaningful|insufficient|unknown; unknown/no-op cannot be improvement. Delta proves execution; comparisons need comparable same-document BEFORE. SHA/delivery is identity, not art.`,
+       `- subtle_local is pre-declared for fine corrections: require the same focus region BEFORE and AFTER; small/local work requires matching focus evidence.`,
+-      `- WORKFLOW-STALL GATE: after 8 external actions without a meaningful visual change, or 2 visually insufficient passes, another mutation requires a structural executable strategy change. Legacy replan prose never bypasses the gate.`,
++      `- WORKFLOW-STALL GATE: after 8 external actions without meaningful visual change, 2 visually insufficient passes, or 2 same-route pre-visual prepare failures, require a causal executable change. Exhaust that exact preparation route until preset/settings/role/method changes; for missing composition prefer an admissible owner-safe region block-in. Legacy replan never bypasses the gate.`,
+       `- HARD VISUAL CADENCE: next canonical cycle = next meaningful visual pass. photoshop_get_state is not required between normal visual passes. Proven systemic failure → one compact diagnostic investigation → causal replan → next visual pass. decision_loop_stall at 90s is advisory, NOT a Guard failure; continue the largest unresolved visual correction unless a safety gate blocks.`,
+       `- Art Director plans; Painter uses adaptive cadence and judges brief/style pixels and repairs the main defect. At critic_role.required, switch to WHOLE-SCENE Critic; return previous_observation.critic_review and resume Painter in the same cycle. Exposed/user-authorized Core agents may delegate exact images/brief. No local model; roles are not calibrated authority.`,
+       `- PAINTER: local preview/verdict; no global re-plan per stroke; bind directive/task/scope/change_domains.`,
+-      `- METHOD CHOICE: use selected executable command, args schema and skeleton without extra status calls. Compound objects use authored constraints/IK; smooth contours use curve=smooth. Painterly passes use aligned reference or authored form_field/light with clip_exclusions. Rebuild changed rigid parts, retain brief/contact debt and independent layers. No fake references or source reads.`,
++      `- METHOD CHOICE: use the selected executable command/schema. Classify geometry honestly: flat/orthographic/non-Euclidean/continuous-field masses are not coherent-3D unless required; use the style-authorized projection opt-out when truthful, and keep strict bindings for coherent 3D. Compound objects use constraints/IK; smooth contours use curve=smooth. No fake references/source reads.`,
+       `- EARLY PLANNER RETURN on serious error, global value/composition drift, likeness/main-shape loss or unsafe directive; global edits need task permission.`,
+       `- Development capture: Guard archives a monotonic frame after each mutation/tiny bundle in frames/ with same-stem .txt commentary; split different regions/roles/stages.`,
+       `- SILENT STALL: silent_stall after 90s with known next required action or pending obligation and no job; read-only churn does not reset it.`,
+diff --git a/src/tools/guard-tools.ts b/src/tools/guard-tools.ts
+index 9584071b64757b4db7bc1cfb0922e6c71c1d0aa2..b48b44e8e1489efea10c8cc7a504f41952b2bd2c 100644
+--- a/src/tools/guard-tools.ts
++++ b/src/tools/guard-tools.ts
+@@ -1571,11 +1571,11 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
+       tool: {
+         name: 'photoshop_guard_brush_pack_profile',
+         description:
+-          'Plan/probe a brush pack, record observed media or stamp behavior, or build its preflight role map; probe_media draws a disposable sheet.',
++          'Plan/probe a brush pack, probe one ordinary installed Photoshop preset, record observed media or stamp behavior, or build its preflight role map; probe_media/probe_preset draw a disposable sheet and return exact JPEG evidence.',
+         inputSchema: {
+           type: 'object',
+           properties: {
+-            action: { type: 'string', enum: ['plan', 'probe_media', 'record_media', 'record_stamp', 'build_preflight'] },
++            action: { type: 'string', enum: ['plan', 'probe_media', 'probe_preset', 'record_media', 'record_stamp', 'build_preflight'] },
+             brush_pack_id: { type: 'string' },
+             preset_name: { type: 'string' },
+             occurrence_index: { type: 'number', minimum: 0 },
+@@ -1658,18 +1658,28 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
+       },
+       handler: async (args) => {
+         try {
+-          if (args.action === 'probe_media') {
+-            const result = await runtime.brushPackProbe(args);
++          if (args.action === 'probe_media' || args.action === 'probe_preset') {
++            const result = args.action === 'probe_media'
++              ? await runtime.brushPackProbe(args)
++              : await runtime.brushPresetProbe(args);
+             const evidence = result.evidence && typeof result.evidence === 'object'
+               ? result.evidence as Record<string, unknown>
+               : {};
++            if (args.action === 'probe_preset') {
++              const requestedPreset = typeof args.preset_name === 'string' ? args.preset_name.trim() : '';
++              const verifiedPreset = typeof result.preset_name === 'string' ? result.preset_name.trim() : '';
++              const evidencePreset = typeof evidence.preset_name === 'string' ? evidence.preset_name.trim() : '';
++              if (!requestedPreset || verifiedPreset !== requestedPreset || evidencePreset !== requestedPreset) {
++                throw new Error(`brush_preset_probe_identity_mismatch: requested=${requestedPreset || 'missing'}, verified=${verifiedPreset || 'missing'}, evidence=${evidencePreset || 'missing'}`);
++              }
++            }
+             const previewPath = typeof evidence.preview_path === 'string' ? evidence.preview_path : '';
+             const previewSha = typeof evidence.preview_sha256 === 'string' ? evidence.preview_sha256 : '';
+             const output = json(result);
+             if (previewPath && previewSha && existsSync(previewPath)) {
+               const bytes = readFileSync(previewPath);
+               const actualSha = createHash('sha256').update(bytes).digest('hex');
+-              if (actualSha !== previewSha) throw new Error('brush_pack_probe_materialized_sha_mismatch');
++              if (actualSha !== previewSha) throw new Error('brush_probe_materialized_sha_mismatch');
+               output.content.push({ type: 'image', data: bytes.toString('base64'), mimeType: 'image/jpeg' });
+             }
+             return output;
+@@ -1784,6 +1794,24 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
+                               additionalProperties: false,
+                             },
+                             effective_settings: { type: 'object', additionalProperties: true },
++                            probe_evidence: {
++                              type: 'object',
++                              description: 'Exact JPEG evidence returned by action=probe_preset for an ordinary installed preset. The candidate preset_name must match this verified native preset identity.',
++                              properties: {
++                                preset_name: { type: 'string' },
++                                preview_path: { type: 'string' },
++                                preview_sha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
++                                operation_id: { type: 'string' },
++                                runtime_instance_witness: { type: 'string' },
++                                receipt_path: { type: 'string' },
++                                receipt_sha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
++                              },
++                              required: [
++                                'preset_name', 'preview_path', 'preview_sha256', 'operation_id',
++                                'runtime_instance_witness', 'receipt_path', 'receipt_sha256',
++                              ],
++                              additionalProperties: false,
++                            },
+                             caveats: { type: 'array', items: { type: 'string' } },
+                           },
+                           required: ['preset_name', 'profile_id', 'evidence_score', 'mark_character', 'edge_behavior', 'buildup_behavior', 'useful_scale_range', 'rotation_meaningful', 'pressure_policy', 'dynamics_capability'],
+diff --git a/src/tools/painting-tools.ts b/src/tools/painting-tools.ts
+index 259c866191d5bc6bf875fc71fbdf2447ac47ba38..7f6c6f58d7ef1a4028a93e31c70e70af6f1e9caf 100644
+--- a/src/tools/painting-tools.ts
++++ b/src/tools/painting-tools.ts
+@@ -823,6 +823,13 @@ export function createPaintingTools(
+           type: 'object',
+           properties: {
+             name: { type: 'string', description: 'Exact Photoshop brush preset name' },
++            fallback_names: {
++              type: 'array',
++              maxItems: 3,
++              items: { type: 'string' },
++              description:
++                'Optional ordered alternative preset names. Alternatives are selection-only recovery attempts. A verified alternative is reported for replanning and never treated as the requested preset.',
++            },
+           },
+           required: ['name'],
+         },
+@@ -1267,33 +1274,128 @@ async function selectBrushPreset(
+       throw new Error('name is required');
+     }
+     const name = args.name.trim();
++    const fallbackNames: string[] = [];
++    if (args.fallback_names !== undefined) {
++      if (!Array.isArray(args.fallback_names)) throw new Error('fallback_names must be an array');
++      if (args.fallback_names.length > 3) throw new Error('fallback_names may contain at most 3 entries');
++      for (const [index, value] of args.fallback_names.entries()) {
++        if (typeof value !== 'string' || !value.trim()) {
++          throw new Error(`fallback_names[${index}] must be a non-empty string`);
++        }
++        const fallback = value.trim();
++        if (fallback !== name && !fallbackNames.includes(fallback)) fallbackNames.push(fallback);
++      }
++    }
+     await backendRouter.backendFor('brush.presets.select');
+-    const stableCommandId = currentStableCommandId();
+-    const result = await invokeUxpSelectBrushPreset(name, stableCommandId);
+-    if (!result.ok || !result.data) {
+-      throw new Error(result.error ?? 'uxp_select_brush_preset_failed');
++    const stableCommandBase = currentStableCommandId();
++    const candidates = [name, ...fallbackNames];
++    const attempts: Array<Record<string, unknown>> = [];
++    let lastParsed: Record<string, unknown> | undefined;
++    let lastEffectivePreset = '';
++    let lastCommandId: string | undefined;
++
++    for (let index = 0; index < candidates.length; index++) {
++      const candidate = candidates[index]!;
++      const stableCommandId = index === 0
++        ? stableCommandBase
++        : stableCommandBase ? `${stableCommandBase}:preset-fallback:${index}` : undefined;
++      const result = await invokeUxpSelectBrushPreset(candidate, stableCommandId);
++      if (!result.ok || !result.data) {
++        if (index === 0) throw new Error(result.error ?? 'uxp_select_brush_preset_failed');
++        attempts.push({
++          requested_preset: candidate,
++          outcome: 'transport-uncertain',
++          effective_preset: null,
++          ...(result.error ? { error: result.error } : {}),
++          ...(stableCommandId ? { stable_command_id: stableCommandId } : {}),
++        });
++        return brushSetterNotApplied(
++          'Brush preset fallback selection became uncertain; no painting is authorized',
++          {
++            setter_outcome: 'uncertain',
++            requested_preset: name,
++            effective_preset: lastEffectivePreset || null,
++            requires_replan: true,
++            selection_only_recovery: true,
++            preset_attempts: attempts,
++            ...(stableCommandBase ? { stable_command_id: stableCommandBase } : {}),
++          }
++        );
++      }
++
++      const parsed = result.data;
++      const effectivePreset = typeof parsed.preset === 'string' ? parsed.preset.trim() : '';
++      const verified = effectivePreset === candidate;
++      const verification = parsed.preset_verification && typeof parsed.preset_verification === 'object'
++        ? parsed.preset_verification as Record<string, unknown>
++        : undefined;
++      attempts.push({
++        requested_preset: candidate,
++        effective_preset: effectivePreset || null,
++        outcome: verified ? 'verified' : effectivePreset ? 'different-preset' : 'identity-unavailable',
++        ...(verification?.source ? { verification_source: verification.source } : {}),
++        ...(stableCommandId ? { stable_command_id: stableCommandId } : {}),
++      });
++      lastParsed = parsed;
++      lastEffectivePreset = effectivePreset;
++      lastCommandId = stableCommandId;
++
++      if (!verified) continue;
++      const commonDetails = {
++        requested_preset: name,
++        effective_preset: effectivePreset,
++        preset: parsed.preset,
++        settings: parsed.settings,
++        ...(parsed.brush_tip ? { brush_tip: parsed.brush_tip } : {}),
++        ...(parsed.preset_verification ? { preset_verification: parsed.preset_verification } : {}),
++        ...(parsed.setter_recovery ? { setter_recovery: parsed.setter_recovery } : {}),
++        ...(stableCommandBase ? { stable_command_id: stableCommandBase } : {}),
++      };
++      if (index === 0) {
++        return atomicSuccess(`Brush preset selected: ${name}`, {
++          setter_outcome: 'applied',
++          ...commonDetails,
++        });
++      }
++
++      // Selecting a fallback is a global brush-state mutation but never a pixel
++      // mutation. Keep the original request failed so Guard cannot silently
++      // paint under a substituted preset. The verified alternative is evidence
++      // for a new/replanned pass that explicitly names that preset.
++      return brushSetterNotApplied(
++        `Requested brush preset was not verified; alternative ${candidate} was selected and verified for replanning`,
++        {
++          setter_outcome: 'verified-alternative',
++          ...commonDetails,
++          verified_alternative_preset: candidate,
++          requires_replan: true,
++          selection_only_recovery: true,
++          preset_attempts: attempts,
++          ...(lastCommandId ? { fallback_command_id: lastCommandId } : {}),
++        }
++      );
+     }
+-    const parsed = result.data;
+-    const effectivePreset = typeof parsed.preset === 'string' ? parsed.preset.trim() : '';
+-    const setterOutcome = effectivePreset === name ? 'applied' : effectivePreset ? 'not-applied' : 'uncertain';
+-    const message = setterOutcome === 'applied'
+-        ? `Brush preset selected: ${name}`
+-        : setterOutcome === 'not-applied'
+-          ? `Brush preset setter completed but effective preset is ${effectivePreset}`
+-          : `Brush preset setter outcome is uncertain`;
+-    const details = {
++
++    const setterOutcome = lastEffectivePreset ? 'not-applied' : 'uncertain';
++    const message = setterOutcome === 'not-applied'
++      ? `Brush preset setter completed but effective preset is ${lastEffectivePreset}`
++      : 'Brush preset setter outcome is uncertain';
++    return brushSetterNotApplied(message, {
+       setter_outcome: setterOutcome,
+       requested_preset: name,
+-      effective_preset: effectivePreset || null,
+-      preset: parsed.preset,
+-      settings: parsed.settings,
+-      ...(parsed.preset_verification ? { preset_verification: parsed.preset_verification } : {}),
+-      ...(parsed.setter_recovery ? { setter_recovery: parsed.setter_recovery } : {}),
+-      ...(stableCommandId ? { stable_command_id: stableCommandId } : {}),
+-    };
+-    return setterOutcome === 'applied'
+-      ? atomicSuccess(message, details)
+-      : brushSetterNotApplied(message, details);
++      effective_preset: lastEffectivePreset || null,
++      preset: lastParsed?.preset,
++      settings: lastParsed?.settings,
++      ...(lastParsed?.brush_tip ? { brush_tip: lastParsed.brush_tip } : {}),
++      ...(lastParsed?.preset_verification ? { preset_verification: lastParsed.preset_verification } : {}),
++      ...(lastParsed?.setter_recovery ? { setter_recovery: lastParsed.setter_recovery } : {}),
++      ...(attempts.length > 1 ? {
++        requires_replan: true,
++        selection_only_recovery: true,
++        preset_attempts: attempts,
++      } : {}),
++      ...(stableCommandBase ? { stable_command_id: stableCommandBase } : {}),
++    });
+   } catch (error) {
+     return atomicFailureFromError(error);
+   }
+diff --git a/tests/brush-preset-probe-contract.test.ts b/tests/brush-preset-probe-contract.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..9e31edb7d7686c08564a93a3a742609705860a9d
+--- /dev/null
++++ b/tests/brush-preset-probe-contract.test.ts
+@@ -0,0 +1,159 @@
++import { createHash } from 'node:crypto';
++import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
++import { tmpdir } from 'node:os';
++import path from 'node:path';
++import { describe, expect, it } from 'vitest';
++import { createGuardTools } from '../src/tools/guard-tools.js';
++import { SessionStore } from '../src/core/guard/session-store.js';
++
++function probeTool(runtime: Record<string, unknown>) {
++  return createGuardTools(runtime as any)
++    .find(definition => definition.tool.name === 'photoshop_guard_brush_pack_profile')!;
++}
++
++describe('ordinary installed brush preset probe contract', () => {
++  it('exposes probe_preset and returns its verified JPEG as image content', async () => {
++    const dir = mkdtempSync(path.join(tmpdir(), 'paintpilot-probe-preset-'));
++    const previewPath = path.join(dir, 'probe.jpg');
++    const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xd9]);
++    writeFileSync(previewPath, jpeg);
++    const previewSha = createHash('sha256').update(jpeg).digest('hex');
++    const tool = probeTool({
++      brushPresetProbe: async () => ({
++        ok: true,
++        preset_name: 'Square Charcoal',
++        evidence: {
++          preset_name: 'Square Charcoal',
++          preview_path: previewPath,
++          preview_sha256: previewSha,
++          operation_id: `brush-preset-probe:${'a'.repeat(64)}`,
++          runtime_instance_witness: 'runtime-test',
++          receipt_path: path.join(dir, 'receipt.json'),
++          receipt_sha256: 'b'.repeat(64),
++        },
++      }),
++    });
++    const schema = tool.tool.inputSchema as any;
++    expect(schema.properties.action.enum).toContain('probe_preset');
++
++    const result = await tool.handler({ action: 'probe_preset', preset_name: 'Square Charcoal' });
++    expect(result.isError).not.toBe(true);
++    expect(result.content).toEqual(expect.arrayContaining([
++      expect.objectContaining({ type: 'image', mimeType: 'image/jpeg', data: jpeg.toString('base64') }),
++    ]));
++  });
++
++  it('never turns mismatched native identity into successful probe evidence', async () => {
++    const dir = mkdtempSync(path.join(tmpdir(), 'paintpilot-probe-mismatch-'));
++    const previewPath = path.join(dir, 'probe.jpg');
++    const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xd9]);
++    writeFileSync(previewPath, jpeg);
++    const previewSha = createHash('sha256').update(jpeg).digest('hex');
++    const tool = probeTool({
++      brushPresetProbe: async () => ({
++        ok: true,
++        preset_name: 'Different Brush',
++        evidence: {
++          preset_name: 'Different Brush',
++          preview_path: previewPath,
++          preview_sha256: previewSha,
++        },
++      }),
++    });
++
++    const result = await tool.handler({ action: 'probe_preset', preset_name: 'Square Charcoal' });
++    expect(result.isError).toBe(true);
++    expect(result.content.some(item => item.type === 'image')).toBe(false);
++    const textPart = result.content.find(item => item.type === 'text');
++    expect(textPart?.type === 'text' ? textPart.text : '').toContain('brush_preset_probe_identity_mismatch');
++  });
++
++  it('rejects live material preflight that still claims probe_status=not-needed', () => {
++    const workspace = mkdtempSync(path.join(tmpdir(), 'paintpilot-live-preflight-'));
++    const store = new SessionStore(path.join(workspace, 'controller'), { workspaceRoot: workspace });
++    expect(() => store.setArtRunState({
++      document_id: 42,
++      process_dir: 'processes/live-brush-process/run-01',
++      brush_preflight: {
++        completed: true,
++        inventory_observed: true,
++        inventory_total: 123,
++        runtime_instance_witness: 'runtime-live',
++        runtime_instance_verified: true,
++        roles: [{
++          role_id: 'material-brush',
++          purpose: 'Paint material-dependent broken mass.',
++          material_roles: ['paint'],
++          visual_intents: ['painted-mass', 'texture'],
++          preferred_preset: 'Square Charcoal',
++          alternative_presets: [],
++          effective_settings: {
++            size: 64, hardness: 50, roundness: 100, opacity: 100, flow: 100, spacing: 10,
++            use_pressure_size: false, use_pressure_opacity: false, airbrush: false,
++            smoothing_enabled: true, smoothing: 10,
++          },
++          working_scale: 'medium',
++          pressure_policy: 'none',
++          probe_status: 'not-needed',
++        }],
++      },
++    })).toThrow(/probe_status=not-needed is invalid/);
++  });
++
++  it('rejects probe evidence paths outside the canonical installed-preset evidence roots', () => {
++    const workspace = mkdtempSync(path.join(tmpdir(), 'paintpilot-evidence-path-'));
++    const recordRoot = path.join(workspace, 'brush-records');
++    mkdirSync(path.join(recordRoot, 'probes', 'installed-presets'), { recursive: true });
++    mkdirSync(path.join(recordRoot, 'probe-receipts', 'installed-presets'), { recursive: true });
++    const outsidePreview = path.join(recordRoot, 'outside.jpg');
++    const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xd9]);
++    writeFileSync(outsidePreview, jpeg);
++    const receiptPath = path.join(recordRoot, 'probe-receipts', 'installed-presets', 'receipt.json');
++    const receiptBytes = Buffer.from('{}', 'utf8');
++    writeFileSync(receiptPath, receiptBytes);
++    const prior = process.env.PHOTOSHOP_BRUSH_PACK_RECORD_DIR;
++    process.env.PHOTOSHOP_BRUSH_PACK_RECORD_DIR = recordRoot;
++    try {
++      const store = new SessionStore(path.join(workspace, 'controller'), { workspaceRoot: workspace });
++      expect(() => store.setArtRunState({
++        document_id: 42,
++        process_dir: 'processes/path-escape-process/run-01',
++        brush_preflight: {
++          completed: true,
++          inventory_observed: true,
++          inventory_total: 123,
++          runtime_instance_witness: 'runtime-live',
++          runtime_instance_verified: true,
++          roles: [{
++            role_id: 'material-brush', purpose: 'Paint texture.', material_roles: ['paint'], visual_intents: ['texture'],
++            preferred_preset: 'Square Charcoal', alternative_presets: [], working_scale: 'medium', pressure_policy: 'none', probe_status: 'pass',
++            effective_settings: {
++              size: 64, hardness: 50, roundness: 100, opacity: 100, flow: 100, spacing: 10,
++              use_pressure_size: false, use_pressure_opacity: false, airbrush: false, smoothing_enabled: true, smoothing: 10,
++            },
++            candidate_evidence: [{
++              preset_name: 'Square Charcoal', profile_id: 'profile:fixture', evidence_score: 10,
++              mark_character: ['broken'], edge_behavior: 'broken', buildup_behavior: 'granular',
++              useful_scale_range: { min_px: 8, max_px: 128 }, rotation_meaningful: false, pressure_policy: 'none',
++              dynamics_capability: {
++                native_pressure_size: false, native_pressure_opacity: false, simulated_pressure_size: false,
++                simulated_pressure_opacity: false, rotation_meaningful: false, spacing_tunable: true,
++                opacity_tunable: true, flow_tunable: true,
++              },
++              effective_settings: {}, caveats: [],
++              probe_evidence: {
++                preset_name: 'Square Charcoal', preview_path: outsidePreview,
++                preview_sha256: createHash('sha256').update(jpeg).digest('hex'),
++                operation_id: `brush-preset-probe:${'a'.repeat(64)}`, runtime_instance_witness: 'runtime-live',
++                receipt_path: receiptPath, receipt_sha256: createHash('sha256').update(receiptBytes).digest('hex'),
++              },
++            }],
++          }],
++        },
++      })).toThrow(/outside the installed-preset evidence directory/);
++    } finally {
++      if (prior === undefined) delete process.env.PHOTOSHOP_BRUSH_PACK_RECORD_DIR;
++      else process.env.PHOTOSHOP_BRUSH_PACK_RECORD_DIR = prior;
++    }
++  });
++});
+diff --git a/tests/brush-setter-readback.test.ts b/tests/brush-setter-readback.test.ts
+index 209259ed615cc6ce502000632ba24f0c82e428c7..c47dad3632a8174515697c3e665330f327f4c3ac 100644
+--- a/tests/brush-setter-readback.test.ts
++++ b/tests/brush-setter-readback.test.ts
+@@ -1,8 +1,9 @@
+ import { describe, expect, it, vi } from 'vitest';
+-import { invokeUxpSetBrush } from '../src/platform/uxp-bridge-client.js';
++import { invokeUxpSelectBrushPreset, invokeUxpSetBrush } from '../src/platform/uxp-bridge-client.js';
+ import { createPaintingTools } from '../src/tools/painting-tools.js';
+ 
+ vi.mock('../src/platform/uxp-bridge-client.js', () => ({
++  invokeUxpSelectBrushPreset: vi.fn(),
+   invokeUxpSetBrush: vi.fn(),
+ }));
+ 
+@@ -46,4 +47,87 @@ describe('native brush setter readback evidence', () => {
+     expect(verified.isError).not.toBe(true);
+     expect(body(verified)).toMatchObject({ ok: true, details: { setter_outcome: 'applied' } });
+   });
++
++  it('keeps a verified alternative preset selection-only and requires replanning before paint', async () => {
++    const router = { backendFor: vi.fn().mockResolvedValue({}) };
++    const selector = createPaintingTools({} as never, router as never)
++      .find(definition => definition.tool.name === 'photoshop_select_brush_preset')!;
++    vi.mocked(invokeUxpSelectBrushPreset)
++      .mockResolvedValueOnce({
++        ok: true,
++        data: {
++          preset: null,
++          settings: { size: 24 },
++          brush_tip: { name: 'Internal Charcoal Tip', source: 'current_tool_options_brush' },
++          preset_verification: { source: 'unavailable', observed_preset: null },
++        },
++      })
++      .mockResolvedValueOnce({
++        ok: true,
++        data: {
++          preset: 'Hard Round Pressure Size',
++          settings: { size: 24 },
++          preset_verification: {
++            source: 'photoshop_select_notification',
++            observed_preset: 'Hard Round Pressure Size',
++          },
++        },
++      });
++
++    const result = await selector.handler({
++      name: 'Square Charcoal',
++      fallback_names: ['Hard Round Pressure Size'],
++    });
++    expect(result.isError).toBe(true);
++    expect(body(result)).toMatchObject({
++      code: 'brush_setter_unverified',
++      details: {
++        setter_outcome: 'verified-alternative',
++        requested_preset: 'Square Charcoal',
++        effective_preset: 'Hard Round Pressure Size',
++        verified_alternative_preset: 'Hard Round Pressure Size',
++        requires_replan: true,
++        selection_only_recovery: true,
++        preset_attempts: [
++          { requested_preset: 'Square Charcoal', outcome: 'identity-unavailable' },
++          { requested_preset: 'Hard Round Pressure Size', outcome: 'verified' },
++        ],
++      },
++    });
++    expect(vi.mocked(invokeUxpSelectBrushPreset).mock.calls.map(call => call[0]))
++      .toEqual(['Square Charcoal', 'Hard Round Pressure Size']);
++  });
++
++  it('does not promote an alternative when its native preset identity is also unavailable', async () => {
++    const router = { backendFor: vi.fn().mockResolvedValue({}) };
++    const selector = createPaintingTools({} as never, router as never)
++      .find(definition => definition.tool.name === 'photoshop_select_brush_preset')!;
++    vi.mocked(invokeUxpSelectBrushPreset)
++      .mockResolvedValueOnce({
++        ok: true,
++        data: { preset: null, settings: { size: 24 }, preset_verification: { source: 'unavailable' } },
++      })
++      .mockResolvedValueOnce({
++        ok: true,
++        data: {
++          preset: null,
++          settings: { size: 24 },
++          brush_tip: { name: 'Hard Round', source: 'current_tool_options_brush' },
++          preset_verification: { source: 'unavailable' },
++        },
++      });
++
++    const result = await selector.handler({ name: 'Square Charcoal', fallback_names: ['Hard Round'] });
++    expect(result.isError).toBe(true);
++    expect(body(result)).toMatchObject({
++      code: 'brush_setter_unverified',
++      details: {
++        setter_outcome: 'uncertain',
++        requested_preset: 'Square Charcoal',
++        effective_preset: null,
++        requires_replan: true,
++        selection_only_recovery: true,
++      },
++    });
++  });
+ });
+diff --git a/tests/compact-contract-regressions.test.ts b/tests/compact-contract-regressions.test.ts
+index bf8a8405cb167ca9b2a1e533f2b6d49bd2240a76..a085306fb4721df948e5842145b8dea3b6680858 100644
+--- a/tests/compact-contract-regressions.test.ts
++++ b/tests/compact-contract-regressions.test.ts
+@@ -600,7 +600,7 @@ describe('scene ownership normalization', () => {
+   });
+ });
+ 
+-function materialBrushPreflight(options: { filtered?: boolean; ambiguous?: boolean; scaleSeparated?: boolean; probeStatus?: 'pass' | 'cached' | 'not-needed'; candidateDynamics?: boolean } = {}) {
++function materialBrushPreflight(options: { filtered?: boolean; ambiguous?: boolean; scaleSeparated?: boolean; probeStatus?: 'pass' | 'cached' | 'not-needed'; candidateDynamics?: boolean; evidenceBoundPack?: boolean } = {}) {
+   const settings = {
+     size: 80, hardness: 65, roundness: 100, opacity: 75, flow: 55, spacing: 12,
+     use_pressure_size: true, use_pressure_opacity: false, airbrush: false,
+@@ -617,6 +617,7 @@ function materialBrushPreflight(options: { filtered?: boolean; ambiguous?: boole
+     working_scale: 'medium',
+     pressure_policy: 'native-preset',
+     probe_status: options.probeStatus ?? 'pass',
++    ...(options.evidenceBoundPack ? { profile_id: 'media-profile-sha256:fur-breakup-fixture' } : {}),
+     ...(options.candidateDynamics ? { candidate_evidence: [
+       {
+         preset_name: 'Fur Bristle', profile_id: 'profile:fur-bristle', evidence_score: 9,
+@@ -655,6 +656,7 @@ function materialBrushPreflight(options: { filtered?: boolean; ambiguous?: boole
+     completed: true,
+     inventory_observed: true,
+     inventory_total: 123,
++    ...(options.evidenceBoundPack ? { brush_pack_id: 'brush-pack-sha256:material-fixture' } : {}),
+     ...(options.filtered ? { inventory_query: 'Soft Round; Hard Round; Flat Blunt' } : {}),
+     roles,
+   };
+@@ -3234,7 +3236,7 @@ describe('public compact Guard contract regressions', () => {
+       process_dir: 'processes/material-fitness-process/run-01',
+       painting_profile: 'nontrivial_painting',
+       commentary_mode: 'technical',
+-      brush_preflight: materialBrushPreflight(),
++      brush_preflight: materialBrushPreflight({ candidateDynamics: true, evidenceBoundPack: true }),
+     });
+ 
+     const missingMaterial = await body(await f.cycle.handler({
+@@ -3315,6 +3317,8 @@ describe('public compact Guard contract regressions', () => {
+     });
+     expect(unexplainedChoice.error_codes).not.toContain('brush_preset_choice_reason_required');
+ 
++    const evidenceFitStroke = strokeAction('fur-stroke-fit-explicit') as Record<string, any>;
++    evidenceFitStroke.args.strokes[0].dynamics = { size: [8, 20] };
+     const valid = await body(await f.cycle.handler({
+       next_pass: {
+         request_key: 'fur-material-fit-explicit',
+@@ -3328,10 +3332,10 @@ describe('public compact Guard contract regressions', () => {
+         brush_preset_choice_reason: 'Dry Fur provides the more broken directional footprint needed for fur breakup at this scale.',
+         visual_intent: 'directional-mass',
+         impact_class: 'construct',
+-        actions: [
+-          { id: 'choose-dry-fur', tool: 'photoshop_select_brush_preset', args: { name: 'Dry Fur' } },
+-          strokeAction('fur-stroke-fit-explicit'),
+-        ],
++          actions: [
++            { id: 'choose-dry-fur', tool: 'photoshop_select_brush_preset', args: { name: 'Dry Fur' } },
++            evidenceFitStroke,
++          ],
+       },
+     }));
+     expect(valid.preflight_rejection).toBeUndefined();
+@@ -3414,7 +3418,7 @@ describe('public compact Guard contract regressions', () => {
+       process_dir: 'processes/candidate-pressure-process/run-01',
+       painting_profile: 'nontrivial_painting',
+       commentary_mode: 'technical',
+-      brush_preflight: materialBrushPreflight({ candidateDynamics: true }),
++      brush_preflight: materialBrushPreflight({ candidateDynamics: true, evidenceBoundPack: true }),
+     });
+ 
+     const basePass = {
+@@ -3466,7 +3470,7 @@ describe('public compact Guard contract regressions', () => {
+       process_dir: 'processes/preset-method-class-process/run-01',
+       painting_profile: 'nontrivial_painting',
+       commentary_mode: 'technical',
+-      brush_preflight: materialBrushPreflight(),
++      brush_preflight: materialBrushPreflight({ candidateDynamics: true, evidenceBoundPack: true }),
+     });
+ 
+     const action = strokeAction('preset-method-stroke') as Record<string, unknown>;
+diff --git a/tests/embedded-guard.test.ts b/tests/embedded-guard.test.ts
+index 27292b2f12c0eedfb1832ea2b183ba38f5e332cd..7e72aa2994c968976143059f51d7f2a3cd77498b 100644
+--- a/tests/embedded-guard.test.ts
++++ b/tests/embedded-guard.test.ts
+@@ -1835,7 +1835,7 @@ describe('embedded Photoshop Guard', () => {
+         role_id: 'broad-form',
+         purpose: 'Broad form construction',
+         material_roles: ['generic-form'],
+-        visual_intents: ['painted-mass'],
++        visual_intents: ['line'],
+         preferred_preset: 'Round Form Brush',
+         alternative_presets: [],
+         effective_settings: {
+@@ -2731,6 +2731,150 @@ describe('embedded Photoshop Guard', () => {
+     expect(runtime.store.read('post-closure-gate-next')).toBeUndefined();
+   });
+ 
++  it('routes a newly promoted global visual defect through durable closure before Director review', async () => {
++    const dir = mkdtempSync(path.join(tmpdir(), 'embedded-guard-director-transition-'));
++    dirs.push(dir);
++    const { registry } = fakeRegistry(dir);
++    const priorPreview = jpegMeta(dir, 'trend-before.jpg', 40);
++    const firstPreview = jpegMeta(dir, 'trend-first.jpg', 160);
++    const secondPreview = jpegMeta(dir, 'trend-second.jpg', 195);
++    let captureCount = 0;
++    const previewTool = registry.get('photoshop_get_preview')!;
++    previewTool.handler = async () => ({
++      content: [{ type: 'text', text: JSON.stringify(
++        [priorPreview, firstPreview, secondPreview][Math.min(captureCount++, 2)]
++      ) }],
++    });
++    const runtime = runtimeFor(registry, dir);
++    runtime.artRun({ document_id: 42, process_dir: 'processes/director-transition-process/run-01',
++      painting_profile: 'simple_graphic' });
++    const left = { left: 0, top: 0, right: 18, bottom: 20 };
++    const right = { left: 28, top: 25, right: 46, bottom: 47 };
++    const first = await runtime.cycle({ next_pass: {
++      request_key: 'director-transition-first', document_id: 42,
++      goal: 'Make the first visibly provisional shape.', region: 'left structure',
++      region_bounds: left, stage: 'GLOBAL_BLOCK_IN', scale: 'medium',
++      actions: [{ id: 'left-opacity', tool: 'photoshop_set_layer_opacity', args: { opacity: 50 } }],
++    } }) as any;
++    expect(first.preflight_rejection).toBeUndefined();
++    // The direct-mutation fake has no mark footprint; attach the exact
++    // region metadata that a real compiled visual microplan persists.
++    const firstRecord = runtime.store.read('director-transition-first')!;
++    runtime.store.write({ ...firstRecord, region_bounds: left });
++    const second = await runtime.cycle({
++      previous_operation_id: 'director-transition-first',
++      previous_observation: {
++        observed: 'The exact provisional left mark is primitive, but its first bounded mark has been placed.',
++        target: 'resolved', primitive_footprint: 'suspect',
++      },
++      next_pass: {
++        request_key: 'director-transition-second', document_id: 42,
++        goal: 'Add a separate provisional mass far from the first mark.', region: 'right structure',
++        region_bounds: right, stage: 'GLOBAL_BLOCK_IN', scale: 'medium',
++        actions: [{ id: 'right-opacity', tool: 'photoshop_set_layer_opacity', args: { opacity: 60 } }],
++      },
++    }) as any;
++    expect(second.preflight_rejection).toBeUndefined();
++    const secondRecord = runtime.store.read('director-transition-second')!;
++    runtime.store.write({ ...secondRecord, region_bounds: right });
++    expect(runtime.store.paintingState().documents['42']?.visual_problems?.['cumulative-trend-primitive-footprint-repeating'])
++      .toBeUndefined();
++    const attempted = await runtime.cycle({
++      previous_operation_id: 'director-transition-second',
++      previous_observation: {
++        observed: 'The exact frame now has two separate primitive areas and needs structural reconstruction.',
++        target: 'unresolved', primitive_footprint: 'suspect',
++        primary_mismatch: 'Repeated primitive shapes occupy two distant areas; repaint structural forms.',
++      },
++      next_pass: {
++        request_key: 'director-transition-head', document_id: 42,
++        goal: 'Build the anatomically convincing component instead of painting decorative texture.',
++        region: 'upper structure', region_bounds: { left: 18, top: 0, right: 40, bottom: 25 },
++        stage: 'GLOBAL_BLOCK_IN', scale: 'medium',
++        actions: [{ id: 'blocked-structural-opacity', tool: 'photoshop_set_layer_opacity', args: { opacity: 75 } }],
++      },
++    }) as any;
++    expect(attempted.preflight_rejection).toBeDefined();
++    expect(attempted.preflight_rejection?.errors.join('\n')).toMatch(/stage_priority_gate.*cumulative-trend-primitive-footprint-repeating/);
++    expect(attempted.preflight_rejection?.post_closure_semantic_revalidation).toBe(true);
++    expect(attempted.preflight_rejection?.durable_visual_finalization).toMatchObject({
++      problem_id: 'cumulative-trend-primitive-footprint-repeating',
++      previous_operation_id: 'director-transition-second',
++      previous_operation_closed: true,
++    });
++    expect(attempted.next_required_action).toMatch(/Do NOT repeat previous_operation_id.*photoshop_guard_art_director/);
++    expect(attempted.closed_previous.closed).toBe(true);
++    expect(runtime.store.read('director-transition-head')).toBeUndefined();
++    expect(runtime.store.read('director-transition-second')?.verdict?.target_resolved).toBe('no');
++    expect(runtime.store.read('director-transition-second')?.operation_ack).toBeDefined();
++    expect(runtime.store.paintingState().documents['42']?.visual_problems?.['cumulative-trend-primitive-footprint-repeating'])
++      .toMatchObject({ scale: 'global', status: 'open', severity: 'must-fix' });
++  });
++
++  it('durably closes an exact visual verdict when only its new whole-image glance blocks the paired next pass', async () => {
++    const dir = mkdtempSync(path.join(tmpdir(), 'embedded-guard-new-glance-transition-'));
++    dirs.push(dir);
++    const { registry } = fakeRegistry(dir);
++    const runtime = runtimeFor(registry, dir);
++    runtime.artRun({ document_id: 42, process_dir: 'processes/new-glance-transition-process/run-01',
++      painting_profile: 'simple_graphic' });
++
++    const first = await runtime.cycle({ next_pass: {
++      request_key: 'glance-boundary-source', document_id: 42,
++      goal: 'A whole-frame structural change requiring Director review after visual closure.',
++      stage: 'GLOBAL_BLOCK_IN', scale: 'medium', change_domains: ['silhouette'],
++      actions: [{ id: 'first-opacity', tool: 'photoshop_set_layer_opacity', args: { opacity: 55 } }],
++    } }) as any;
++    expect(first.preflight_rejection).toBeUndefined();
++    const source = runtime.store.read('glance-boundary-source') as any;
++    // The direct-opacity fake does not compile global-change microplan
++    // metadata; a real constructed visual pass persists these declared
++    // domains and Planner links on its visual operation record.
++    runtime.store.write({ ...source, change_domains: ['silhouette'],
++      planner_directive_id: 'glance-test-directive', planner_task_id: 'glance-task',
++      painter_scope: 'medium',
++    });
++    runtime.store.updatePaintingState(42, current => ({
++      ...current, art_director: {
++        directive_id: 'glance-test-directive', status: 'active',
++        review_after_microplans: 9, task_review_after_microplans: 9,
++        current_task_id: 'glance-task',
++        tasks: [{ task_id: 'glance-task', status: 'active',
++          allowed_scales: ['medium', 'small'], successful_microplans: 0 }],
++        whole_image_glance: { due: false, reason: null, history: [] },
++      },
++    }));
++    // The original source was submitted as a global silhouette pass. Its
++    // visual closure is required to create the exact SHA-bound glance.
++    expect((runtime.store.read('glance-boundary-source') as any)?.change_domains).toContain('silhouette');
++    const result = await runtime.cycle({ previous_operation_id: 'glance-boundary-source',
++      previous_observation: {
++        observed: 'The exact frame contains the new silhouette and still needs a whole-frame review.',
++        target: 'resolved', primary_mismatch: 'The local silhouette exists, but whole-frame relationships still require Director review.',
++      },
++      next_pass: {
++        request_key: 'glance-boundary-next', document_id: 42,
++        goal: 'Another bounded visual correction after the obligatory Director glance.',
++        stage: 'GLOBAL_BLOCK_IN', scale: 'medium',
++        actions: [{ id: 'second-opacity', tool: 'photoshop_set_layer_opacity', args: { opacity: 60 } }],
++      },
++    }) as any;
++    expect(result.preflight_rejection?.errors.join('\n')).toMatch(/whole_image_glance_required/);
++    expect(result.preflight_rejection?.post_closure_semantic_revalidation).toBe(true);
++    expect(result.closed_previous).toMatchObject({ closed: true, operation_id: 'glance-boundary-source' });
++    expect(result.preflight_rejection?.durable_visual_finalization).toMatchObject({
++      previous_operation_id: 'glance-boundary-source', previous_operation_closed: true,
++      review_kind: 'whole_image_glance', operation_id: 'glance-boundary-source',
++      execution: 'not-executed',
++    });
++    expect(runtime.store.read('glance-boundary-source')?.verdict).toBeDefined();
++    expect(runtime.store.read('glance-boundary-next')).toBeUndefined();
++    expect(runtime.store.paintingState().documents['42'].art_director?.whole_image_glance)
++      .toMatchObject({ due: true, reason: 'global_change',
++        required_operation_id: 'glance-boundary-source' });
++    expect(result.next_required_action).toMatch(/Do NOT close or replay.*photoshop_guard_art_director/);
++  });
++
+   it('compactly finalizes the last visual pass in one cycle_auto call and records latency components', async () => {
+     const dir = mkdtempSync(path.join(tmpdir(), 'embedded-guard-finalize-'));
+     dirs.push(dir);
+@@ -3483,6 +3627,7 @@ describe('embedded Photoshop Guard', () => {
+         completed: true,
+         inventory_observed: true,
+         inventory_total: 10,
++        brush_pack_id: 'brush-pack-sha256:auto-brush-fixture',
+         roles: [{
+           role_id: 'medium-form',
+           purpose: 'Broad form modelling',
+@@ -3490,6 +3635,34 @@ describe('embedded Photoshop Guard', () => {
+           visual_intents: ['directional-mass'],
+           preferred_preset: 'Round Form Brush',
+           alternative_presets: [],
++          profile_id: 'media-profile-sha256:auto-brush-round-form',
++          candidate_evidence: [{
++            preset_name: 'Round Form Brush',
++            profile_id: 'media-profile-sha256:auto-brush-round-form',
++            evidence_score: 10,
++            mark_character: ['directional'],
++            edge_behavior: 'variable',
++            buildup_behavior: 'layered',
++            useful_scale_range: { min_px: 24, max_px: 180 },
++            rotation_meaningful: false,
++            pressure_policy: 'none',
++            dynamics_capability: {
++              native_pressure_size: false,
++              native_pressure_opacity: false,
++              simulated_pressure_size: false,
++              simulated_pressure_opacity: false,
++              rotation_meaningful: false,
++              spacing_tunable: true,
++              opacity_tunable: true,
++              flow_tunable: true,
++            },
++            effective_settings: {
++              size: 120, hardness: 60, roundness: 100, opacity: 80, flow: 60, spacing: 10,
++              use_pressure_size: false, use_pressure_opacity: false, airbrush: false,
++              smoothing_enabled: true, smoothing: 10,
++            },
++            caveats: [],
++          }],
+           effective_settings: {
+             size: 120, hardness: 60, roundness: 100, opacity: 80, flow: 60, spacing: 10,
+             use_pressure_size: false, use_pressure_opacity: false, airbrush: false,
+diff --git a/tests/object-construction.test.ts b/tests/object-construction.test.ts
+index e8d630f893cb945be8b924aeaaab188622ea4fc0..0e5c297fbfc2805e504b967a50cb9cc2ffc29d54 100644
+--- a/tests/object-construction.test.ts
++++ b/tests/object-construction.test.ts
+@@ -374,6 +374,43 @@ it('rejects authored actions mixed with generated geometry and refuses an owner/
+     )
+   ).toThrow(ConstructionError);
+ });
++it('compiles cat-style tonal regions into the SAME constrained part and Photoshop rollback unit', async () => {
++  const square = { model_id: 'generic-color-panel', revision: 1, basis: 'Artist-drawn planar component',
++    objects: [{ id: 'panel', subject_kind: 'single-component', origin: [0, 0] }],
++    points: [
++      { id: 'a', object_id: 'panel', position: [10, 10], fixed: true },
++      { id: 'b', object_id: 'panel', position: [110, 10], fixed: true },
++      { id: 'c', object_id: 'panel', position: [110, 110], fixed: true },
++      { id: 'd', object_id: 'panel', position: [10, 110], fixed: true },
++    ], parts: [{ id: 'panel-part', object_id: 'panel', role: 'Editable colored panel',
++      outline: ['a', 'b', 'c', 'd'], curve: 'linear' }],
++    camera: { kind: 'orthographic', origin: [0, 0], scale: 1 } };
++  const tone = { id: 'cool-shadow', color: { red: 130, green: 160, blue: 180 }, opacity: 45,
++    points: [{ x: 20, y: 20 }, { x: 90, y: 20 }, { x: 65, y: 70 }] };
++  const request = { ...pass(square as any), construction: { model: square, part_id: 'panel-part',
++    color: { red: 225, green: 220, blue: 215 }, tonal_regions: [tone] } };
++  const expanded = expandConstructionPass(request, {}, () => null);
++  const paint = (expanded.pass.actions as any[]).find(s => s.tool === 'photoshop_paint_regions');
++  expect(paint.args.regions).toHaveLength(2);
++  expect(paint.args.regions[1]).toMatchObject({ id: 'cool-shadow', opacity: 45,
++    layer_id: '$steps.construction_layer.details.layerId' });
++  expect(paint.args.regions[0].layer_id).toBe(paint.args.regions[1].layer_id);
++  const owner = expandConstructionPass(request,
++    { logical_layer_owners: [{ hypothesis_id: 'panel-part', layer_id: 17 }] }, () => null);
++  const ownedPaint = (owner.pass.actions as any[])[0];
++  expect(ownedPaint.args).toMatchObject({ replace_contents: true,
++    regions: [{ layer_id: 17 }, { layer_id: 17 }] });
++  const f = compilerFixture();
++  const compiled = await compileGuardCycle({ next_pass: request }, f.store, f.registry);
++  expect(compiled.violations, JSON.stringify(compiled.violations)).toEqual([]);
++  expect(f.dispatch).not.toHaveBeenCalled();
++  expect(() => expandConstructionPass({ ...request, construction: { ...request.construction,
++    tonal_regions: [{ ...tone, points: [{ x: 20, y: 20 }, { x: 150, y: 20 }, { x: 65, y: 70 }] }] } },
++  {}, () => null)).toThrow('inside the independent');
++  expect(() => expandConstructionPass({ ...request, construction: { ...request.construction,
++    rendering: { mode: 'outline', size: 3 }, tonal_regions: [tone] } }, {}, () => null))
++    .toThrow('cannot be appended');
++});
+ it('reuses the durable model and exact physical component layer, refusing stale/conflicting revisions', () => {
+   const normalized = normalizeConstructionModel(model('crocodile')),
+     p = pass();
+diff --git a/tests/planner-painter.test.ts b/tests/planner-painter.test.ts
+index ecb737f3dccd716f1d482d189417fd932fe9e915..5aa3ea0e3060f979be302bbd3f412e230bb13c7f 100644
+--- a/tests/planner-painter.test.ts
++++ b/tests/planner-painter.test.ts
+@@ -3142,6 +3142,45 @@ describe('bounded correction of a global priority defect', () => {
+     return { s, plan, req };
+   }
+ 
++  it('accepts a durable multi-region cumulative global defect in Director and admits only its planned medium repair', () => {
++    const { s, plan, req } = fixture();
++    const trendId = 'cumulative-trend-primitive-footprint-repeating';
++    seedTrendSignal(s, 'trend-region-a', 3, {
++      bounds: { left: 25, top: 40, right: 150, bottom: 220 }, region: 'first scene component',
++    });
++    seedTrendSignal(s, 'trend-region-b', 4, {
++      bounds: { left: 700, top: 420, right: 900, bottom: 640 }, region: 'separate scene component',
++    });
++    const cumulative = (s as any).cumulativeTrendState(42);
++    const promoted = (s as any).promoteCumulativeTrendProblem(
++      42, s.paintingState().documents['42'], cumulative
++    );
++    expect(promoted.visual_problems[trendId]).toMatchObject({
++      scale: 'global', status: 'open', severity: 'must-fix',
++      promotion_reason: 'materially_separate_regions',
++    });
++    s.updatePaintingState(42, () => ({
++      ...promoted,
++      visual_problems: { [trendId]: promoted.visual_problems[trendId] },
++      art_director: undefined,
++    }));
++    plan.tasks[0].correction_target = { problem_id: trendId, region_bounds: roi };
++    // No fabricated Critic global rectangle: the original multi-region
++    // evidence stays separate, while this bounded plan declares its own scope.
++    expect(s.paintingState().documents['42'].visual_problems[trendId].review_region_bounds).toBeUndefined();
++    expect(() => s.setArtDirectorState({ document_id: 42, action: 'review', directive: plan })).not.toThrow();
++    const painter = structuredClone(req);
++    painter.args.addresses_problem_id = trendId;
++    painter.args.addresses_problem_ids = [trendId];
++    expect(() => s.plannerGate(42, painter)).not.toThrow();
++    expect(() => s.priorityGate(42, painter)).not.toThrow();
++    expect(s.paintingState().documents['42'].visual_problems[trendId])
++      .toMatchObject({ status: 'open', scale: 'global' });
++    const unplanned = structuredClone(painter);
++    unplanned.args.planner_task_id = 'unplanned-task';
++    expect(() => s.priorityGate(42, unplanned)).toThrow(/stage_priority_gate/);
++  });
++
+   it('admits a planned medium reconstruction through both gates without closing global debt', () => {
+     const { s, req } = fixture();
+     expect(() => s.plannerGate(42, req)).not.toThrow();
+diff --git a/tests/session-store-regressions.test.ts b/tests/session-store-regressions.test.ts
+index 5925ac11c2e38721638139a19085c5572002ce25..eeecab29c0d43abaf76c4b06853f909381301ad0 100644
+--- a/tests/session-store-regressions.test.ts
++++ b/tests/session-store-regressions.test.ts
+@@ -1797,7 +1797,7 @@ describe('Guard session-store regressions', () => {
+       problem_id: 'receiverSurface-flow', stage: 'FORM', scale: 'medium',
+     })).toThrow(/physical_stack_check_required/);
+ 
+-    const admitted = s.begin({
++    expect(() => s.begin({
+       ...request('preflighted-brush-plan', 'photoshop_execute_visual_microplan', {
+         document_id: 42,
+         plan_id: 'preflighted-brush-plan',
+@@ -1815,8 +1815,7 @@ describe('Guard session-store regressions', () => {
+       problem_id: 'receiverSurface-flow',
+       stage: 'SHAPE',
+       scale: 'medium',
+-    }).record;
+-    expect(admitted.phase).toBe('started');
++    })).toThrow(/brush_candidate_evidence_required/);
+   });
+ 
+   it('enforces an exclusive supplied brush pack for brush marks while leaving pack identity explicit for stamps', () => {
+@@ -2459,6 +2458,185 @@ describe('Guard session-store regressions', () => {
+     expect(partial.status().uncertain).toContain('e16-partial');
+   });
+ 
++  it('stalls repeated pre-visual preparation failures, blocks the exact failed route, and suggests a safe composition fallback', () => {
++    const s = store() as any;
++    s.setArtRunState({
++      document_id: 42,
++      process_dir: 'processes/session-regression-process/repeated-prepare-failure',
++      commentary_mode: 'technical',
++      painting_profile: 'simple_graphic',
++    });
++    s.setWorkflowLifecycle(42, 'active', 'test-painting');
++    s.updatePaintingState(42, (current: any) => ({
++      ...current,
++      active_problem: { problem_id: 'composition-coverage', scale: 'global' },
++      visual_problems: {
++        ...(current.visual_problems ?? {}),
++        'composition-coverage': {
++          problem_id: 'composition-coverage',
++          scale: 'global',
++          severity: 'must-fix',
++          status: 'open',
++          region: 'whole-canvas',
++          hypothesis: 'The selected composition still lacks its required large-mass spatial coverage.',
++        },
++      },
++    }));
++    const route = (id: string, preset = 'Broken Marker') => ({
++      ...request(id, 'photoshop_execute_visual_microplan', {
++        document_id: 42,
++        plan_id: id,
++        problem_id: 'composition-coverage',
++        region: 'whole-canvas',
++        stage: 'COMPOSITION',
++        scale: 'global',
++        method_class: 'paint',
++        action_class: 'ADD',
++        paint_strategy: { brush_role: 'broad-marker', preset_name: preset },
++        steps: [
++          { id: 'preset', tool: 'photoshop_select_brush_preset', args: { name: preset } },
++          { id: 'paint', tool: 'photoshop_paint_strokes', args: { strokes: [{ points: [{ x: 20, y: 20 }, { x: 80, y: 50 }] }] } },
++          { id: 'preview', tool: 'photoshop_get_preview', args: {} },
++        ],
++      }),
++      problem_id: 'composition-coverage',
++      region: 'whole-canvas',
++      stage: 'COMPOSITION',
++      scale: 'global',
++    });
++    const fail = (id: string, sequence: number, preset = 'Broken Marker') => {
++      const failed = route(id, preset);
++      s.write({
++        id,
++        tool: failed.tool,
++        args: failed.args,
++        problem_id: failed.problem_id,
++        region: failed.region,
++        stage: failed.stage,
++        scale: failed.scale,
++        sequence,
++        created_at: new Date(Date.UTC(2026, 9, 14, 17, 0, sequence)).toISOString(),
++        completed_at: new Date(Date.UTC(2026, 9, 14, 17, 0, sequence)).toISOString(),
++        phase: 'completed',
++        execution: 'not-executed',
++        visual: false,
++        failed: true,
++        result: { content: [{ type: 'text', text: JSON.stringify({
++          ok: false,
++          code: 'microplan_prepare_failed',
++          failure_category: 'brush_setter_unverified',
++          execution: 'not-executed',
++          terminal: true,
++          visual_mutation_started: false,
++          failed_step: 'preset',
++          steps: [{ id: 'preset', tool: 'photoshop_select_brush_preset', ok: false }],
++          preparation_execution: {
++            failed_step_class: 'preparation-only',
++            failed_step_execution: 'not-executed',
++            prior_side_effecting_preparation_completed: false,
++            side_effects_possible: false,
++          },
++        }) }] },
++      });
++    };
++
++    fail('prepare-fail-1', 1);
++    expect(s.workflowMetrics(42)).toMatchObject({ workflow_stall: false, consecutive_prepare_failures: 1 });
++    fail('prepare-fail-2', 2);
++    expect(s.workflowMetrics(42)).toMatchObject({ workflow_stall: true, consecutive_prepare_failures: 2 });
++    expect(s.documentNextRequiredAction(42)).toMatch(/repeated pre-visual preparation failures[\s\S]*region block-in/);
++
++    const sameErrors = s.collectPreflightErrors(route('prepare-fail-3')).join('\n');
++    expect(sameErrors).toMatch(/repeated pre-visual preparation failure exhausted the exact route/);
++    const changedErrors = s.collectPreflightErrors(route('prepare-fail-changed', 'Alternate Marker')).join('\n');
++    expect(changedErrors).not.toMatch(/repeated pre-visual preparation failure exhausted the exact route/);
++  });
++
++  it('resets repeated preparation-failure counting after a different failed route or a real visual pass', () => {
++    const s = store() as any;
++    s.setArtRunState({
++      document_id: 42,
++      process_dir: 'processes/session-regression-process/prepare-failure-reset',
++      commentary_mode: 'technical',
++      painting_profile: 'simple_graphic',
++    });
++    const writeFailure = (id: string, sequence: number, preset: string) => s.write({
++      id,
++      tool: 'photoshop_execute_visual_microplan',
++      args: {
++        document_id: 42,
++        problem_id: 'composition-reset',
++        method_class: 'paint',
++        paint_strategy: { brush_role: 'marker', preset_name: preset },
++        steps: [{ id: 'preset', tool: 'photoshop_select_brush_preset', args: { name: preset } }],
++      },
++      problem_id: 'composition-reset',
++      sequence,
++      created_at: new Date(Date.UTC(2026, 9, 14, 18, 0, sequence)).toISOString(),
++      completed_at: new Date(Date.UTC(2026, 9, 14, 18, 0, sequence)).toISOString(),
++      phase: 'completed',
++      execution: 'not-executed',
++      visual: false,
++      failed: true,
++      result: { content: [{ type: 'text', text: JSON.stringify({
++        ok: false,
++        code: 'microplan_prepare_failed',
++        failure_category: 'brush_setter_unverified',
++        visual_mutation_started: false,
++        failed_step: 'preset',
++        steps: [{ id: 'preset', tool: 'photoshop_select_brush_preset', ok: false }],
++      }) }] },
++    });
++
++    writeFailure('route-a-1', 1, 'Marker A');
++    writeFailure('route-b-1', 2, 'Marker B');
++    expect(s.workflowMetrics(42)).toMatchObject({ workflow_stall: false, consecutive_prepare_failures: 1 });
++    writeFailure('route-b-2', 3, 'Marker B');
++    expect(s.workflowMetrics(42)).toMatchObject({ workflow_stall: true, consecutive_prepare_failures: 2 });
++
++    writeProjectionRecord(s, { id: 'meaningful-after-prepare', documentId: 42, sequence: 4, visual: true, report: true, ack: true, verdict: true });
++    expect(s.workflowMetrics(42)).toMatchObject({ workflow_stall: false, consecutive_prepare_failures: 0 });
++  });
++
++  it('turns a 90-second composition decision-loop stall into a concrete brush-independent next action', () => {
++    const s = store() as any;
++    vi.useFakeTimers();
++    try {
++      vi.setSystemTime(new Date(Date.UTC(2026, 8, 20, 12, 5, 0)));
++      s.setArtRunState({
++        document_id: 42,
++        process_dir: 'processes/session-regression-process/composition-decision-loop-stall',
++        commentary_mode: 'technical',
++        painting_profile: 'simple_graphic',
++      });
++      s.setWorkflowLifecycle(42, 'active', 'test-painting');
++      writeProjectionRecord(s, {
++        id: 'composition-anchor', documentId: 42, sequence: 1,
++        visual: true, report: true, ack: true, verdict: true,
++      });
++      s.updatePaintingState(42, (current: any) => ({
++        ...current,
++        active_problem: { problem_id: 'composition-spatial-coverage', scale: 'global' },
++        visual_problems: {
++          ...(current.visual_problems ?? {}),
++          'composition-spatial-coverage': {
++            problem_id: 'composition-spatial-coverage',
++            scale: 'global',
++            severity: 'must-fix',
++            status: 'open',
++            region: 'whole-canvas',
++            hypothesis: 'Major scene masses are still missing from the selected composition.',
++          },
++        },
++      }));
++
++      expect(s.visualCadenceState(42).decision_loop_stall).toBe(true);
++      expect(s.documentNextRequiredAction(42)).toMatch(/decision-loop stall[\s\S]*region block-in/);
++    } finally {
++      vi.useRealTimers();
++    }
++  });
++
+   it('never classifies a successful visual mutation as not-executed', () => {
+     const s = store();
+     s.setArtRunState({
+diff --git a/tests/uxp-bootstrap.test.ts b/tests/uxp-bootstrap.test.ts
+index 19358624f36eb42646002edd2a71a79cc8c8c25a..2e6945acbb64b5b635fe714b38d888d039d0127b 100644
+--- a/tests/uxp-bootstrap.test.ts
++++ b/tests/uxp-bootstrap.test.ts
+@@ -131,9 +131,14 @@ describe('UXP bootstrap mutations', () => {
+   it('does not certify absent native brush settings merely because their defaults match', () => {
+     const harness = bootstrapHarness();
+     const snapshot = harness.normalizeBrushSettingsDescriptor({
+-      currentToolOptions: { brush: { diameter: { _unit: 'pixelsUnit', _value: 16 } } },
++      currentToolOptions: {
++        presetName: 'Hard Round',
++        brush: { name: 'Hard Round', diameter: { _unit: 'pixelsUnit', _value: 16 } },
++      },
+     });
+     expect(snapshot.settings).toMatchObject({ size: 16, hardness: 100, opacity: 100 });
++    expect(snapshot.preset).toBeUndefined();
++    expect(snapshot.brush_tip).toEqual({ name: 'Hard Round', source: 'current_tool_options_brush' });
+     expect(snapshot.observed_fields).toContain('size');
+     expect(snapshot.observed_fields).not.toContain('hardness');
+     expect(snapshot.observed_fields).not.toContain('opacity');
+@@ -196,7 +201,7 @@ describe('UXP bootstrap mutations', () => {
+     });
+   });
+ 
+-  it('rejects contradictory current-tool readback and native selection event', async () => {
++  it('rejects contradictory native brush-selection notifications', async () => {
+     let listener: ((event: string, descriptor: any) => void) | undefined;
+     const harness = bootstrapHarness({
+       notifications: {
+@@ -205,10 +210,11 @@ describe('UXP bootstrap mutations', () => {
+       },
+       batchPlay: async descriptors => descriptors.map(descriptor => {
+         if (descriptor._obj === 'select' && descriptor._target[0]._ref === 'brush') {
++          listener?.('select', { _target: [{ _ref: 'brush', _name: 'Installed Dry Brush' }] });
+           listener?.('select', { _target: [{ _ref: 'brush', _name: 'Different Brush' }] });
+         }
+         return descriptor._obj === 'get'
+-          ? { currentToolOptions: { brush: { name: 'Installed Dry Brush', diameter: 16 } } }
++          ? { currentToolOptions: { presetName: 'Installed Dry Brush', brush: { diameter: 16 } } }
+           : {};
+       }),
+     });
+@@ -242,20 +248,27 @@ describe('UXP bootstrap mutations', () => {
+     await expect(harness.selectBrushPreset({ name: 'Installed Dry Brush' })).rejects.toThrow('Preset unavailable');
+     expect(removed).toBe(4);
+   });
+-  it('selects the paint tool before the preset, verifies actual readback and preserves unknown', async () => {
++  it('selects the paint tool before the preset but never promotes currentToolOptions labels to preset identity', async () => {
+     let selected = 'previous-tool-brush';
+-    let readable = true;
+     const f = bootstrapHarness({ batchPlay: async descriptors => descriptors.map(descriptor => {
+       const target = descriptor._target?.[0]?._ref;
+       if (descriptor._obj === 'select' && target === 'paintbrushTool') selected = 'default-brush';
+       if (descriptor._obj === 'select' && target === 'brush') selected = descriptor._target[0]._name;
+-      if (descriptor._obj === 'get') return { currentToolOptions: { brush: {
+-        ...(readable ? { name: selected } : {}), diameter: 20 } } };
++      if (descriptor._obj === 'get') return { currentToolOptions: {
++        presetName: selected,
++        brush: { name: 'Internal Tip Name', diameter: 20 },
++      } };
+       return {};
+     }) });
+-    expect((await f.selectBrushPreset({ name: 'Installed Dry Brush' })).preset).toBe('Installed Dry Brush');
+-    readable = false;
+-    expect((await f.selectBrushPreset({ name: 'Installed Dry Brush' })).preset).toBeNull();
++    expect(await f.selectBrushPreset({ name: 'Installed Dry Brush' })).toMatchObject({
++      preset: null,
++      brush_tip: { name: 'Internal Tip Name' },
++      preset_verification: {
++        source: 'unavailable',
++        evidence: { brush_tip_name: 'Internal Tip Name' },
++      },
++    });
++    expect(selected).toBe('Installed Dry Brush');
+   });
+ 
+   it('captures the uniquely created identity even when modal/add return values are absent', async () => {
+diff --git a/tests/uxp-paint-opacity.test.ts b/tests/uxp-paint-opacity.test.ts
+index 6b192d107060d9e4d6d26a6c39dce1e1c4f98961..a27d5ef0d976c7b8beea628c1f1e3a165c28555b 100644
+--- a/tests/uxp-paint-opacity.test.ts
++++ b/tests/uxp-paint-opacity.test.ts
+@@ -67,9 +67,13 @@ it.each([false, true])('regression: native outline replaces only its pinned comp
+   await expect(api.paintRegions(wrong)).rejects.toThrow('paint_target_layer_unverified');
+ });
+ 
+-it('returns the native brush preset readback instead of echoing a requested but unapplied preset', async () => {
++it('does not promote preset-like brush settings readback or echo a requested preset', async () => {
+   const selects: unknown[] = [];
+-  const observed = { preset: 'Old Hard Brush', settings: { hardness: 100 } };
++  const observed = {
++    preset: 'Old Hard Brush',
++    brush_tip: { name: 'Old Hard Brush', source: 'current_tool_options_brush' },
++    settings: { hardness: 100 },
++  };
+   const api: any = runInNewContext(source + `
+     snapshotBrushSettings = async () => harness.observed;
+     ({ selectBrushPreset });`, {
+@@ -86,10 +90,17 @@ it('returns the native brush preset readback instead of echoing a requested but
+   });
+   const result = await api.selectBrushPreset({ name: 'Soft Round Brush' });
+   expect(selects).toHaveLength(1);
+-  expect(result).toMatchObject({ ok: true, preset: 'Old Hard Brush', settings: { hardness: 100 } });
+-  observed.preset = 'Soft Round Brush';
+-  expect(await api.selectBrushPreset({ name: 'Soft Round Brush' }))
+-    .toMatchObject({ preset: 'Soft Round Brush' });
++  expect(result).toMatchObject({
++    ok: true,
++    preset: null,
++    brush_tip: { name: 'Old Hard Brush', source: 'current_tool_options_brush' },
++    settings: { hardness: 100 },
++    preset_verification: {
++      source: 'unavailable',
++      observed_preset: null,
++      requested_match: null,
++    },
++  });
+ });
+ 
+ function fixture(opacity = 100, flow = 100, useNativePathStroke = false) {
+diff --git a/uxp-plugin/main.js b/uxp-plugin/main.js
+index 234e231070a3600ea6277b6f42f17f6c5076286c..639bb7d348a94b65264d2d4f36efe1bf543ce6e9 100644
+--- a/uxp-plugin/main.js
++++ b/uxp-plugin/main.js
+@@ -1233,13 +1233,12 @@ function normalizeBrushSettingsDescriptor(descriptor) {
+     return numeric == null ? fallback : numeric;
+   }
+ 
+-  const presetName = [
+-    brush.name,
+-    brush._name,
+-    opts.presetName,
+-    opts.brushPreset,
+-    opts.brushName,
+-  ].find((value) => typeof value === 'string' && value.trim().length > 0);
++  // `currentToolOptions.brush` describes the active sampled brush/tip on many
++  // Photoshop builds, not the user-visible presetManager entry. Even
++  // preset-looking sibling labels are not a documented active-preset identity
++  // contract, so this readback intentionally never certifies a preset name.
++  const brushTipName = [brush.name, brush._name]
++    .find((value) => typeof value === 'string' && value.trim().length > 0);
+ 
+   // A fallback is useful for painting-state initialization, but it is not
+   // evidence that Photoshop actually read back a requested setter value.
+@@ -1271,7 +1270,12 @@ function normalizeBrushSettingsDescriptor(descriptor) {
+   return {
+     ok: true,
+     observed_fields: observedFields,
+-    ...(presetName ? { preset: presetName.trim() } : {}),
++    ...(brushTipName ? {
++      brush_tip: {
++        name: brushTipName.trim(),
++        source: 'current_tool_options_brush',
++      },
++    } : {}),
+     settings: {
+       size: valueOr(brush.diameter, 1),
+       hardness: valueOr(brush.hardness, 100),
+@@ -1471,7 +1475,7 @@ async function selectBrushPreset(params = {}) {
+   let resolveBrushSelect;
+   const brushSelectObserved = new Promise(resolve => { resolveBrushSelect = resolve; });
+   const onSelect = (event, descriptor) => {
+-    if (!observing || event !== 'select') return;
++    if (!observing || (event !== 'select' && descriptor?._obj !== 'select')) return;
+     const targets = Array.isArray(descriptor?._target) ? descriptor._target : [descriptor?._target];
+     const brush = targets.find(target => target?._ref === 'brush');
+     if (brush) {
+@@ -1489,7 +1493,11 @@ async function selectBrushPreset(params = {}) {
+   };
+   try {
+     if (typeof action.addNotificationListener === 'function' && typeof action.removeNotificationListener === 'function') {
+-      try { await action.addNotificationListener(['select'], onSelect); listenerInstalled = true; }
++      // Alchemist/UXP action recording exposes the user-visible brush preset
++      // name on the native select action. Listen to all action notifications
++      // and filter the descriptor because some hosts do not deliver tool/UI
++      // selection through a narrowly subscribed `select` listener.
++      try { await action.addNotificationListener(['all'], onSelect); listenerInstalled = true; }
+       catch { /* Effective-state readback remains available without events. */ }
+     }
+     const returned = await core.executeAsModal(
+@@ -1520,27 +1528,33 @@ async function selectBrushPreset(params = {}) {
+     // for the actual event rather than treating a fixed 100ms sleep as proof
+     // that no evidence will arrive. The deadline bounds unavailable events;
+     // neither path retries selection or mutates document/layer pixels.
+-    if (!current.preset && listenerInstalled && !observedSelection)
++    if (listenerInstalled && !observedSelection)
+       await Promise.race([brushSelectObserved, new Promise(resolve => setTimeout(resolve, 500))]);
+-    const conflictingEvidence = conflictingSelectNotifications || Boolean(
+-      current.preset && observedSelection && current.preset !== observedSelection
+-    );
+-    // Two native identity sources disagreeing is not confirmation of either.
+-    // Guard must refuse the pass rather than painting with a guessed preset.
+-    const preset = conflictingEvidence ? null : current.preset ?? observedSelection;
++    const notificationPreset = typeof observedSelection === 'string' && observedSelection.trim()
++      ? observedSelection.trim()
++      : null;
++    const conflictingEvidence = conflictingSelectNotifications;
++    // An absent notification is unknown, not evidence that the requested name
++    // became active. Multiple contradictory notifications are equally unsafe.
++    const preset = conflictingEvidence ? null : notificationPreset;
++    const verificationSource = conflictingEvidence
++      ? 'conflicting_evidence'
++      : notificationPreset
++        ? 'photoshop_select_notification'
++        : 'unavailable';
+     return { ok: true, preset: preset ?? null, settings: current.settings,
+-      preset_verification: { source: conflictingEvidence ? 'conflicting_evidence'
+-        : current.preset ? 'current_tool_options'
+-        : observedSelection ? 'photoshop_select_notification' : 'unavailable',
++      ...(current.brush_tip ? { brush_tip: current.brush_tip } : {}),
++      preset_verification: { source: verificationSource,
+         observed_preset: preset ?? null,
+-        ...(conflictingEvidence ? {
+-          current_tool_options_preset: current.preset ?? null,
+-          select_notification_preset: observedSelection,
+-        } : {}) } };
++        requested_match: preset == null ? null : preset === name,
++        evidence: {
++          select_notification_preset: notificationPreset,
++          brush_tip_name: current.brush_tip?.name ?? null,
++        } } };
+   } finally {
+     observing = false;
+     if (listenerInstalled) {
+-      try { await action.removeNotificationListener(['select'], onSelect); }
++      try { await action.removeNotificationListener(['all'], onSelect); }
+       catch { /* A cleanup error cannot erase the actual selection evidence. */ }
+     }
+   }

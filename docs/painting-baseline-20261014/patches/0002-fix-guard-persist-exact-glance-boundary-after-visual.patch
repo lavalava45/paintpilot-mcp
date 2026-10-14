@@ -1,0 +1,158 @@
+From 5fdd34059ea6082a1d718fdea73f3853e1360459 Mon Sep 17 00:00:00 2001
+From: lavalava45 <119440005+lavalava45@users.noreply.github.com>
+Date: Tue, 13 Oct 2026 20:31:26 +0300
+Subject: [PATCH 2/6] fix(guard): persist exact glance boundary after visual
+ closure
+
+(cherry picked from commit b54faf8103195e6719ac74e5a4bb4db4c0598be6)
+---
+ src/core/guard/runtime.ts    | 47 ++++++++++++++++++++++++--
+ tests/embedded-guard.test.ts | 64 ++++++++++++++++++++++++++++++++++++
+ 2 files changed, 109 insertions(+), 2 deletions(-)
+
+diff --git a/src/core/guard/runtime.ts b/src/core/guard/runtime.ts
+index 205ace1645cb10f047ba46f54b7c232c6b82da65..cc3e1e86ef166093c66911d443e1bf5a3caf36e6 100644
+--- a/src/core/guard/runtime.ts
++++ b/src/core/guard/runtime.ts
+@@ -2504,11 +2504,28 @@ export class EmbeddedGuardRuntime {
+                 )
+               ) as { problem_id: string } | undefined
+               : undefined;
+-            if (!newlyPromotedGlobal) this.store.restoreClosureState(closureSnapshot);
++            // A global-change/stage-boundary glance is also generated only
++            // *after* the exact previous visual verdict is classified.
++            // Rolling that valid closure back makes an already reviewed
++            // Director appear to require the same frame indefinitely.
++            // Persist the verdict and return a read-only Director review
++            // instruction; never dispatch the requested next mutation.
++            const pendingGlance = projectedDocument?.art_director?.whole_image_glance;
++            const newlyDueGlance = closedPrevious.closed && previousOperationId && !unsafeClosureDebt
++              && beforeClosureDocument?.art_director?.whole_image_glance?.due !== true
++              && pendingGlance?.due === true
++              && pendingGlance.required_operation_id === previousOperationId
++              && typeof pendingGlance.required_frame_sha256 === 'string'
++              && postClosureCheck.violations.length > 0
++              && postClosureCheck.violations.every((issue: any) =>
++                String(issue.message ?? '').includes('whole_image_glance_required:')
++              )
++              ? pendingGlance : undefined;
++            if (!newlyPromotedGlobal && !newlyDueGlance) this.store.restoreClosureState(closureSnapshot);
+             const envelope = buildPreflightRejectionEnvelope(
+               postClosureCheck.nextOperation ?? nextOperation,
+               postClosureCheck.rejection,
+-              { closed_previous: newlyPromotedGlobal ? closedPrevious : { closed: false } }
++              { closed_previous: newlyPromotedGlobal || newlyDueGlance ? closedPrevious : { closed: false } }
+             );
+             const body = envelope.preflight_rejection;
+             envelope.preflight_rejection = body && typeof body === 'object'
+@@ -2545,6 +2562,32 @@ export class EmbeddedGuardRuntime {
+               };
+               (envelope.preflight_rejection as Record<string, unknown>).previous_operation_closed = true;
+               envelope.next_required_action = guidance;
++            } else if (newlyDueGlance) {
++              const guidance = `The previous exact visual verdict was finalized and created a whole-image review boundary for operation_id=${previousOperationId}, frame_sha256=${newlyDueGlance.required_frame_sha256}, trigger=${newlyDueGlance.reason}. `
++                + 'Do NOT close or replay that operation again. Review the exact frame with photoshop_guard_art_director action=review and whole_image_glance matching the required operation_id, frame_sha256 and trigger; '
++                + 'include a truthful relationship_audit for any required_relations. Only then retry the rejected next pass as a fresh cycle. No next Photoshop mutation was dispatched.';
++              const rejection = envelope.preflight_rejection as Record<string, any>;
++              envelope.preflight_rejection = {
++                ...rejection,
++                durable_visual_finalization: {
++                  previous_operation_id: previousOperationId,
++                  previous_operation_closed: true,
++                  review_kind: 'whole_image_glance',
++                  operation_id: previousOperationId,
++                  frame_sha256: newlyDueGlance.required_frame_sha256,
++                  trigger: newlyDueGlance.reason,
++                  required_relations: newlyDueGlance.required_relations ?? [],
++                  execution: 'not-executed',
++                },
++                compact_correction_recipe: {
++                  ...(rejection.compact_correction_recipe ?? {}),
++                  repeat_same_semantic_cycle: false,
++                  previous_operation_closed: true,
++                  first_response: 'review the durable exact-frame whole-image glance with Art Director; do not repeat the previous operation',
++                },
++                next_required_action: guidance,
++              };
++              envelope.next_required_action = guidance;
+             }
+             envelope.cycle_latency = {
+               protocol: 'photoshop.guard.cycle_latency.v1',
+diff --git a/tests/embedded-guard.test.ts b/tests/embedded-guard.test.ts
+index 446e922c4474bf7d14d27805251fab295dcab8b8..6c648710925f5b31f09672242d98d0aa585c0eb0 100644
+--- a/tests/embedded-guard.test.ts
++++ b/tests/embedded-guard.test.ts
+@@ -2811,6 +2811,70 @@ describe('embedded Photoshop Guard', () => {
+       .toMatchObject({ scale: 'global', status: 'open', severity: 'must-fix' });
+   });
+ 
++  it('durably closes an exact visual verdict when only its new whole-image glance blocks the paired next pass', async () => {
++    const dir = mkdtempSync(path.join(tmpdir(), 'embedded-guard-new-glance-transition-'));
++    dirs.push(dir);
++    const { registry } = fakeRegistry(dir);
++    const runtime = runtimeFor(registry, dir);
++    runtime.artRun({ document_id: 42, process_dir: 'processes/new-glance-transition-process/run-01',
++      painting_profile: 'simple_graphic' });
++
++    const first = await runtime.cycle({ next_pass: {
++      request_key: 'glance-boundary-source', document_id: 42,
++      goal: 'A whole-frame structural change requiring Director review after visual closure.',
++      stage: 'GLOBAL_BLOCK_IN', scale: 'medium', change_domains: ['silhouette'],
++      actions: [{ id: 'first-opacity', tool: 'photoshop_set_layer_opacity', args: { opacity: 55 } }],
++    } }) as any;
++    expect(first.preflight_rejection).toBeUndefined();
++    const source = runtime.store.read('glance-boundary-source') as any;
++    // The direct-opacity fake does not compile global-change microplan
++    // metadata; a real constructed visual pass persists these declared
++    // domains and Planner links on its visual operation record.
++    runtime.store.write({ ...source, change_domains: ['silhouette'],
++      planner_directive_id: 'glance-test-directive', planner_task_id: 'glance-task',
++      painter_scope: 'medium',
++    });
++    runtime.store.updatePaintingState(42, current => ({
++      ...current, art_director: {
++        directive_id: 'glance-test-directive', status: 'active',
++        review_after_microplans: 9, task_review_after_microplans: 9,
++        current_task_id: 'glance-task',
++        tasks: [{ task_id: 'glance-task', status: 'active',
++          allowed_scales: ['medium', 'small'], successful_microplans: 0 }],
++        whole_image_glance: { due: false, reason: null, history: [] },
++      },
++    }));
++    // The original source was submitted as a global silhouette pass. Its
++    // visual closure is required to create the exact SHA-bound glance.
++    expect((runtime.store.read('glance-boundary-source') as any)?.change_domains).toContain('silhouette');
++    const result = await runtime.cycle({ previous_operation_id: 'glance-boundary-source',
++      previous_observation: {
++        observed: 'The exact frame contains the new silhouette and still needs a whole-frame review.',
++        target: 'resolved', primary_mismatch: 'The local silhouette exists, but whole-frame relationships still require Director review.',
++      },
++      next_pass: {
++        request_key: 'glance-boundary-next', document_id: 42,
++        goal: 'Another bounded visual correction after the obligatory Director glance.',
++        stage: 'GLOBAL_BLOCK_IN', scale: 'medium',
++        actions: [{ id: 'second-opacity', tool: 'photoshop_set_layer_opacity', args: { opacity: 60 } }],
++      },
++    }) as any;
++    expect(result.preflight_rejection?.errors.join('\n')).toMatch(/whole_image_glance_required/);
++    expect(result.preflight_rejection?.post_closure_semantic_revalidation).toBe(true);
++    expect(result.closed_previous).toMatchObject({ closed: true, operation_id: 'glance-boundary-source' });
++    expect(result.preflight_rejection?.durable_visual_finalization).toMatchObject({
++      previous_operation_id: 'glance-boundary-source', previous_operation_closed: true,
++      review_kind: 'whole_image_glance', operation_id: 'glance-boundary-source',
++      execution: 'not-executed',
++    });
++    expect(runtime.store.read('glance-boundary-source')?.verdict).toBeDefined();
++    expect(runtime.store.read('glance-boundary-next')).toBeUndefined();
++    expect(runtime.store.paintingState().documents['42'].art_director?.whole_image_glance)
++      .toMatchObject({ due: true, reason: 'global_change',
++        required_operation_id: 'glance-boundary-source' });
++    expect(result.next_required_action).toMatch(/Do NOT close or replay.*photoshop_guard_art_director/);
++  });
++
+   it('compactly finalizes the last visual pass in one cycle_auto call and records latency components', async () => {
+     const dir = mkdtempSync(path.join(tmpdir(), 'embedded-guard-finalize-'));
+     dirs.push(dir);
+-- 
+2.55.0.windows.5
+

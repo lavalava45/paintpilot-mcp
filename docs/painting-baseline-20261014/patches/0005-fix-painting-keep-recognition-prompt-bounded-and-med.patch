@@ -1,0 +1,26 @@
+From 7392a44b37d7ef45a51623c4ae24558681b3871d Mon Sep 17 00:00:00 2001
+From: lavalava45 <119440005+lavalava45@users.noreply.github.com>
+Date: Wed, 14 Oct 2026 16:18:21 +0000
+Subject: [PATCH 5/6] fix(painting): keep recognition prompt bounded and
+ medium-aware
+
+---
+ src/prompts/templates/digital-painting-control.ts | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/prompts/templates/digital-painting-control.ts b/src/prompts/templates/digital-painting-control.ts
+index 2252cde937434afece9b66fe89640de15c0079ec..b0f2b4daca187255aeb4d25d0cd6c76c1448349e 100644
+--- a/src/prompts/templates/digital-painting-control.ts
++++ b/src/prompts/templates/digital-painting-control.ts
+@@ -101,7 +101,7 @@ export const digitalPaintingControlTemplate: PhotoshopPromptTemplate = {
+       `GUARD / CONTROLLER:`,
+       `- OPEN BRIEF: compare 4–6 candidates (at least four) from four problem families; reject duplicates/atmosphere-only premises. Choose subject+setting+action+spatial problem; ease never decides alone. Never browse or consult prior runs/lists or cross-run artistic memory. This is a one-time choice: no Guard gate and no subject-selection repeat inside the paint loop.`,
+       `- Hierarchy: COMPOSITION → SHAPE → VALUE → FORM → EDGE → MATERIAL → DETAIL. Do not advance while a lower-frequency must-fix remains.`,
+-      `- RECOGNITION BLOCK-IN: derive 3–7 discriminative cues (importance is not proportional to size) + style cue; rough the whole subject across sequential passes. The stage is NOT one pass. Until overview reads unaided, fix the largest barrier. A construction fill MAY include same-owner tonal_regions when suitable for the brief; preserve brush-only and painterly requirements.`,
++      `- RECOGNITION BLOCK-IN: 3–7 discriminative features; small features may be high-priority. Rough whole across passes until overview reads unaided. Optional same-owner tonal_regions; explicit brush requirements win.`,
+ 
+       `- Choose REFERENCE REPRODUCTION, FREE COMPOSITION, or STYLIZED PAINTING; free composition establishes composition/light/depth/palette before detail.`,
+       `- Derive a minimal STYLE CONTRACT; judge USER BRIEF + STRUCTURAL READABILITY + STYLE CONTRACT. Style never excuses broken tangencies/occlusion.`,
+-- 
+2.55.0.windows.5
+

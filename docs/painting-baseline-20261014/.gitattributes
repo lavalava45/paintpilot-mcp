@@ -1,0 +1,3 @@
+# Preserve the exact bytes of historical Git patches on Windows checkouts.
+# These are archived source artifacts, not editable normalized text.
+*.patch -text

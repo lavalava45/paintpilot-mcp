@@ -1,0 +1,232 @@
+From aef526964f0971822c2367f9051475cb0078db5a Mon Sep 17 00:00:00 2001
+From: lavalava45 <119440005+lavalava45@users.noreply.github.com>
+Date: Wed, 14 Oct 2026 00:22:00 +0300
+Subject: [PATCH 3/6] feat(painting): build color-value regions in first owned
+ construction
+
+(cherry picked from commit 51a3fee3f9d909fab7d54d203c071a66427bb89f)
+---
+ AGENTS.md                                     | 11 +++
+ src/core/object-construction.ts               | 73 +++++++++++++++++++
+ src/prompts/host-guidance.ts                  | 17 +++++
+ .../templates/digital-painting-control.ts     |  3 +-
+ tests/object-construction.test.ts             | 37 ++++++++++
+ 5 files changed, 140 insertions(+), 1 deletion(-)
+
+diff --git a/AGENTS.md b/AGENTS.md
+index 18fcf27df6becea6e52d2cbac308ee3682cef687..6e14cedc410c801cd367e0d13e5ab59d1a7975c6 100644
+--- a/AGENTS.md
++++ b/AGENTS.md
+@@ -119,6 +119,17 @@ Establish the setting/path/large masses in the following bounded passes before r
+ do not begin with an independent atmosphere-only/gradient task. Preserve editable owner layers
+ and the bounded pass contract. Director is optional; its first task should cover whole-scene
+ recognition/composition with global/medium scope and the relevant subject/context zones.
++For early structured-mass recognition, consider the tested multi-color
++`photoshop_paint_regions` approach: several intentional closed color/value regions
++inside one independently editable component/layer, rather than one monochrome
++primitive awaiting decoration. This preference does not bypass compound-part
++ownership, one-owner Guard passes, or user/style-required brush/soft media.
++When a first pass must use `construction`, its optional `tonal_regions` allow
++several authored, contained colored masses inside the solved selected part in
++the same Guard rollback unit. Prefer meaningful form/value turns to a flat
++one-color construction followed by decorative cleanup; never use tonal regions
++to flatten independently editable parts.
++
+ 
+ Component ownership applies to every rendering profile, including simple_graphic and initial
+ block-in. Do not put an entire person/animal/furniture/window on one persistent layer and promise
+diff --git a/src/core/object-construction.ts b/src/core/object-construction.ts
+index 4e47a258b97d0d253b9c47e249bff0c14873e38d..739e6b79b006866bd55d240abd56348ca17be633 100644
+--- a/src/core/object-construction.ts
++++ b/src/core/object-construction.ts
+@@ -978,10 +978,79 @@ export const CONSTRUCTION_PASS_SCHEMA = object(
+       },
+       ['red', 'green', 'blue']
+     ),
++    tonal_regions: {
++      type: 'array', maxItems: 31,
++      description: 'Optional cat-style colored subregions for THIS construction part only, in the same Photoshop layer and one History rollback unit. Each complete polygon must lie inside the constructed part; no other semantic owner may be painted.',
++      items: object({
++        id: { type: 'string' },
++        color: object({
++          red: { type: 'number', minimum: 0, maximum: 255 },
++          green: { type: 'number', minimum: 0, maximum: 255 },
++          blue: { type: 'number', minimum: 0, maximum: 255 },
++        }, ['red', 'green', 'blue']),
++        opacity: { type: 'number', exclusiveMinimum: 0, maximum: 100 },
++        points: { type: 'array', minItems: 3, maxItems: 256,
++          items: object({ x: { type: 'number', minimum: 0 }, y: { type: 'number', minimum: 0 } }, ['x', 'y']) },
++      }, ['color', 'points']),
++    },
+   },
+   ['part_id', 'color']
+ );
+ 
++function insideConstructedContour(point: { x: number; y: number }, polygon: Array<{ x: number; y: number }>): boolean {
++  let inside = false;
++  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
++    const a = polygon[j]!, b = polygon[i]!;
++    const cross = (point.x - a.x) * (b.y - a.y) - (point.y - a.y) * (b.x - a.x);
++    if (Math.abs(cross) <= 1e-7 && point.x >= Math.min(a.x, b.x) - 1e-7
++      && point.x <= Math.max(a.x, b.x) + 1e-7 && point.y >= Math.min(a.y, b.y) - 1e-7
++      && point.y <= Math.max(a.y, b.y) + 1e-7) return true;
++    if ((a.y > point.y) !== (b.y > point.y)
++      && point.x < ((b.x - a.x) * (point.y - a.y)) / (b.y - a.y) + a.x) inside = !inside;
++  }
++  return inside;
++}
++
++function boundedConstructionTonalRegions(
++  value: unknown, part: { id: string; contour: Array<{ x: number; y: number }> },
++  fail: (code: string, path: string, message: string) => never,
++): Array<Record<string, unknown>> {
++  if (value === undefined) return [];
++  if (!Array.isArray(value) || value.length > 31) fail('construction_tonal_regions_invalid', 'next_pass.construction.tonal_regions', 'Supply no more than 31 authored regions');
++  return (value as unknown[]).map((entry, index) => {
++    const path = `next_pass.construction.tonal_regions[${index}]`;
++    const region = entry as Record<string, unknown> | null;
++    const color = region?.color as Record<string, unknown> | undefined;
++    const points = region?.points;
++    const opacity = region?.opacity ?? 100;
++    if (!color || !['red','green','blue'].every(k => typeof color[k] === 'number'
++      && Number.isFinite(color[k]) && Number(color[k]) >= 0 && Number(color[k]) <= 255)
++      || typeof opacity !== 'number' || !Number.isFinite(opacity) || opacity <= 0 || opacity > 100
++      || !Array.isArray(points) || points.length < 3 || points.length > 256)
++      fail('construction_tonal_region_invalid', path, 'Supply a valid RGB color, opacity and 3–256 polygon points');
++    const contour = (points as unknown[]).map((p, k) => {
++      const xy = p as { x?: unknown; y?: unknown } | null;
++      if (!xy || typeof xy.x !== 'number' || typeof xy.y !== 'number'
++        || !Number.isFinite(xy.x) || !Number.isFinite(xy.y) || xy.x < 0 || xy.y < 0)
++        fail('construction_tonal_region_invalid', `${path}.points[${k}]`, 'Polygon points need finite nonnegative canvas coordinates');
++      return { x: xy!.x as number, y: xy!.y as number };
++    });
++    // Check the entire straight boundary (not only vertices) for concave parts.
++    for (let i = 0; i < contour.length; i++) {
++      const a = contour[i]!, b = contour[(i + 1) % contour.length]!;
++      for (let t = 0; t <= 16; t++) {
++        const f = t / 16;
++        if (!insideConstructedContour({ x: a.x + f * (b.x - a.x), y: a.y + f * (b.y - a.y) }, part.contour))
++          fail('construction_tonal_region_outside_part', `${path}.points`, `Colored region must remain inside the independent ${part.id} component`);
++      }
++    }
++    return {
++      id: typeof region?.id === 'string' && region.id.trim() ? region.id : `${part.id}-tone-${index + 1}`,
++      color, opacity, contours: [{ points: contour }],
++    };
++  });
++}
++
+ export function validateRigidRevision(previous: ConstructionModel, current: ConstructionModel, reshape: unknown = []) {
+   if (!Array.isArray(reshape) || reshape.length > 16 || reshape.some(id => typeof id !== 'string' || !previous.objects.some(o => o.id === id)))
+     throw new ConstructionError([{ code: 'construction_reshape_invalid', path: 'construction.reshape_object_ids', message: 'Explicitly name existing objects whose shape is intentionally being corrected' }]);
+@@ -1106,6 +1175,9 @@ export function expandConstructionPass(
+   if (raw.visual_intent === 'line' && renderMode === 'fill')
+     error('construction_rendering_intent_conflict', 'next_pass.construction.rendering.mode', 'A line intention cannot execute a fill; choose outline and its width.');
+   const outline = renderMode === 'outline';
++  if (outline && request.tonal_regions !== undefined)
++    error('construction_tonal_regions_require_fill', 'next_pass.construction.tonal_regions', 'Colored fill regions cannot be appended to an outline-only construction');
++  const tonalRegions = boundedConstructionTonalRegions(request.tonal_regions, part!, error);
+   const preset = rendering?.preset_name;
+   if (preset !== undefined && (typeof preset !== 'string' || !preset.trim()))
+     error('construction_preset_invalid', 'next_pass.construction.rendering.preset_name', 'Choose a nonempty installed preset name.');
+@@ -1243,6 +1315,7 @@ export function expandConstructionPass(
+           contours: [{ points: part!.contour, closed: true,
+             ...(part!.intersection_policy ? { intersection_policy: part!.intersection_policy } : {}) }],
+         },
++        ...tonalRegions.map(region => ({ ...region, layer_id: target })),
+       ],
+     },
+   });
+diff --git a/src/prompts/host-guidance.ts b/src/prompts/host-guidance.ts
+index 1b469ecdbb6223fe9908d76755953208507999e8..7eff384212208aee7d1a392ce71977fa2a08f88d 100644
+--- a/src/prompts/host-guidance.ts
++++ b/src/prompts/host-guidance.ts
+@@ -378,6 +378,23 @@ Multi-step etiquette
+ - For a new subject, use Recognition Block-In before ordinary refinement: derive 3–7
+   discriminative recognition features (small features may be high-priority), include one large
+   style cue when style is requested, and rough in the whole subject before polishing one contour.
++  When a compound component requires \`next_pass.construction\`, give its FIRST
++  fill pass several authored \`construction.tonal_regions\` inside the solved part
++  where justified by color/value design; they compile into ONE owned
++  \`photoshop_paint_regions\` action and one rollback unit. When suitable for the intended visual result, do not wait for a
++  separate cosmetic pass to give the component a readable form. Regions are
++  not permission to paint a second independent component or escape its contour.
++  For early structured-mass recognition work, an available executable method is
++  \`region-block-in\` / \`photoshop_paint_regions\`: author several purposeful, differently
++  colored closed regions within the SAME independently editable semantic component
++  when they clarify characteristic silhouette, internal value grouping and anatomy.
++  This is the demonstrated multi-region cat approach, not a requirement to draw
++  a monochrome primitive before its recognition cues. A complex subject may need
++  successive owner-specific passes; never flatten independently editable parts
++  into one layer or ignore the single-owner/rollback boundary. Preserve a user-
++  requested brush medium or stronger evidence for visible painterly marks, soft
++  volumes or atmospheric fields instead of substituting polygon art for them.
++
+   \`photoshop_paint_regions\` is broad closed-mass scaffolding during
+   RECOGNITION_BLOCK_IN / COMPOSITION / SHAPE / GLOBAL_BLOCK_IN. Exit broad ADD block-in only when
+   the whole preview reads without relying on the prompt. At later stages region painting is legal
+diff --git a/src/prompts/templates/digital-painting-control.ts b/src/prompts/templates/digital-painting-control.ts
+index 355ed5c66c0f4e304c372c02115fed40a816a66f..2252cde937434afece9b66fe89640de15c0079ec 100644
+--- a/src/prompts/templates/digital-painting-control.ts
++++ b/src/prompts/templates/digital-painting-control.ts
+@@ -101,7 +101,8 @@ export const digitalPaintingControlTemplate: PhotoshopPromptTemplate = {
+       `GUARD / CONTROLLER:`,
+       `- OPEN BRIEF: compare 4–6 candidates (at least four) from four problem families; reject duplicates/atmosphere-only premises. Choose subject+setting+action+spatial problem; ease never decides alone. Never browse or consult prior runs/lists or cross-run artistic memory. This is a one-time choice: no Guard gate and no subject-selection repeat inside the paint loop.`,
+       `- Hierarchy: COMPOSITION → SHAPE → VALUE → FORM → EDGE → MATERIAL → DETAIL. Do not advance while a lower-frequency must-fix remains.`,
+-      `- RECOGNITION BLOCK-IN: derive 3–7 discriminative cues (importance is not proportional to size) + style cue; rough the whole subject across sequential passes. The stage is NOT one pass. Until overview reads unaided, fix the largest barrier.`,
++      `- RECOGNITION BLOCK-IN: derive 3–7 discriminative cues (importance is not proportional to size) + style cue; rough the whole subject across sequential passes. The stage is NOT one pass. Until overview reads unaided, fix the largest barrier. A construction fill MAY include same-owner tonal_regions when suitable for the brief; preserve brush-only and painterly requirements.`,
++
+       `- Choose REFERENCE REPRODUCTION, FREE COMPOSITION, or STYLIZED PAINTING; free composition establishes composition/light/depth/palette before detail.`,
+       `- Derive a minimal STYLE CONTRACT; judge USER BRIEF + STRUCTURAL READABILITY + STYLE CONTRACT. Style never excuses broken tangencies/occlusion.`,
+       `- ART RUN: bind one immutable processes/<subject>-process/<run>/ before paint; keep painting-state.json, frames/, checkpoints/, final/ there. accepted_frame != current_frame.`,
+diff --git a/tests/object-construction.test.ts b/tests/object-construction.test.ts
+index e8d630f893cb945be8b924aeaaab188622ea4fc0..0e5c297fbfc2805e504b967a50cb9cc2ffc29d54 100644
+--- a/tests/object-construction.test.ts
++++ b/tests/object-construction.test.ts
+@@ -374,6 +374,43 @@ it('rejects authored actions mixed with generated geometry and refuses an owner/
+     )
+   ).toThrow(ConstructionError);
+ });
++it('compiles cat-style tonal regions into the SAME constrained part and Photoshop rollback unit', async () => {
++  const square = { model_id: 'generic-color-panel', revision: 1, basis: 'Artist-drawn planar component',
++    objects: [{ id: 'panel', subject_kind: 'single-component', origin: [0, 0] }],
++    points: [
++      { id: 'a', object_id: 'panel', position: [10, 10], fixed: true },
++      { id: 'b', object_id: 'panel', position: [110, 10], fixed: true },
++      { id: 'c', object_id: 'panel', position: [110, 110], fixed: true },
++      { id: 'd', object_id: 'panel', position: [10, 110], fixed: true },
++    ], parts: [{ id: 'panel-part', object_id: 'panel', role: 'Editable colored panel',
++      outline: ['a', 'b', 'c', 'd'], curve: 'linear' }],
++    camera: { kind: 'orthographic', origin: [0, 0], scale: 1 } };
++  const tone = { id: 'cool-shadow', color: { red: 130, green: 160, blue: 180 }, opacity: 45,
++    points: [{ x: 20, y: 20 }, { x: 90, y: 20 }, { x: 65, y: 70 }] };
++  const request = { ...pass(square as any), construction: { model: square, part_id: 'panel-part',
++    color: { red: 225, green: 220, blue: 215 }, tonal_regions: [tone] } };
++  const expanded = expandConstructionPass(request, {}, () => null);
++  const paint = (expanded.pass.actions as any[]).find(s => s.tool === 'photoshop_paint_regions');
++  expect(paint.args.regions).toHaveLength(2);
++  expect(paint.args.regions[1]).toMatchObject({ id: 'cool-shadow', opacity: 45,
++    layer_id: '$steps.construction_layer.details.layerId' });
++  expect(paint.args.regions[0].layer_id).toBe(paint.args.regions[1].layer_id);
++  const owner = expandConstructionPass(request,
++    { logical_layer_owners: [{ hypothesis_id: 'panel-part', layer_id: 17 }] }, () => null);
++  const ownedPaint = (owner.pass.actions as any[])[0];
++  expect(ownedPaint.args).toMatchObject({ replace_contents: true,
++    regions: [{ layer_id: 17 }, { layer_id: 17 }] });
++  const f = compilerFixture();
++  const compiled = await compileGuardCycle({ next_pass: request }, f.store, f.registry);
++  expect(compiled.violations, JSON.stringify(compiled.violations)).toEqual([]);
++  expect(f.dispatch).not.toHaveBeenCalled();
++  expect(() => expandConstructionPass({ ...request, construction: { ...request.construction,
++    tonal_regions: [{ ...tone, points: [{ x: 20, y: 20 }, { x: 150, y: 20 }, { x: 65, y: 70 }] }] } },
++  {}, () => null)).toThrow('inside the independent');
++  expect(() => expandConstructionPass({ ...request, construction: { ...request.construction,
++    rendering: { mode: 'outline', size: 3 }, tonal_regions: [tone] } }, {}, () => null))
++    .toThrow('cannot be appended');
++});
+ it('reuses the durable model and exact physical component layer, refusing stale/conflicting revisions', () => {
+   const normalized = normalizeConstructionModel(model('crocodile')),
+     p = pass();
+-- 
+2.55.0.windows.5
+

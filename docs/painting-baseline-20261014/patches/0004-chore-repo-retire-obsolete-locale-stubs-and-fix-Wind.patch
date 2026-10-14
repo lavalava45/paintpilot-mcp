@@ -1,0 +1,240 @@
+From f96d4ad4112fe267d40803c1acd5384e17621462 Mon Sep 17 00:00:00 2001
+From: lavalava45 <119440005+lavalava45@users.noreply.github.com>
+Date: Wed, 14 Oct 2026 16:13:31 +0000
+Subject: [PATCH 4/6] chore(repo): retire obsolete locale stubs and fix Windows
+ checkout docs
+
+---
+ .env.example                        | 22 ++++++++--------------
+ .gitattributes                      |  4 ++++
+ CHANGELOG.md                        | 13 +++++++++++++
+ INSTALL.md                          |  6 +++---
+ README.de.md                        | 10 ----------
+ README.es.md                        | 10 ----------
+ README.ja.md                        | 10 ----------
+ README.md                           |  2 +-
+ README.tr.md                        | 10 ----------
+ README.zh-CN.md                     | 10 ----------
+ docs/development.md                 |  2 +-
+ scripts/verify-product-identity.mjs |  1 -
+ 12 files changed, 30 insertions(+), 70 deletions(-)
+ create mode 100644 .gitattributes
+ delete mode 100644 README.de.md
+ delete mode 100644 README.es.md
+ delete mode 100644 README.ja.md
+ delete mode 100644 README.tr.md
+ delete mode 100644 README.zh-CN.md
+
+diff --git a/.env.example b/.env.example
+index 095cd8b2803ae790d0e5f22ad01b33eca4f75a13..a7edb321a753323f6100ce673379f45ce84a454a 100644
+--- a/.env.example
++++ b/.env.example
+@@ -1,15 +1,9 @@
+-# Optional: disable anonymous usage analytics
+-# ANALYTICS_DISABLED=1
+-# POSTHOG_DISABLED=1
+-
+-# Rybbit (defaults are embedded in src/analytics/config.ts)
+-# RYBBIT_API_KEY=rb_your_ingest_key
+-# RYBBIT_HOST=https://hey.sideguard.io
+-# RYBBIT_SITE_ID=5e488c650441
+-
+-# Beta team content sharing (prompts/responses) is controlled via the UI consent
+-# modal and Settings → Privacy — there is no separate env flag.
+-
+-# Existing server options
+-# PHOTOSHOP_PATH=/Applications/Adobe Photoshop 2025/Adobe Photoshop 2025.app/Contents/MacOS/Adobe Photoshop 2025
++# Windows-only Photoshop MCP / PaintPilot runtime configuration examples.
++# Set PHOTOSHOP_PATH only when automatic Photoshop discovery does not work.
++# PHOTOSHOP_PATH=C:\Program Files\Adobe\Adobe Photoshop 2026\Photoshop.exe
++#
++# Logging: 0=DEBUG, 1=INFO, 2=WARN, 3=ERROR.
+ # LOG_LEVEL=1
++#
++# For Chat On Steroids, use dist/cos-plugin.js. It enables required Guard
++# mode automatically; arbitrary inherited analytics variables are not used.
+diff --git a/.gitattributes b/.gitattributes
+new file mode 100644
+index 0000000000000000000000000000000000000000..a0a3a41325da22323f9ddbee6851f681e4b059fa
+--- /dev/null
++++ b/.gitattributes
+@@ -0,0 +1,4 @@
++# Retained licenses use byte-exact LF; NOTICE attestations use byte-exact CRLF.
++licenses/*-LICENSE.txt -text
++licenses/Apache-2.0.txt -text
++licenses/*-NOTICE.txt text eol=crlf
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 8a261ae9e87890481a6afe8093f03d36ef7e98f1..b590c557eb9745c37d05f9a00bb1e9b6edadd9d1 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -1,5 +1,18 @@
+ # Changelog
+ 
++- 2026-10-14 — **Reconcile release-candidate Guard fixes with the maintained painter.**
++  Reapplied RC commits `83dc5bb` and `b54faf8` to the refactored
++  `digital-painting` runtime. A valid exact-frame closure that exposes a new
++  global priority or whole-image glance now remains durable when the paired next
++  pass is rejected; the rejected mutation is not dispatched. Also carried
++  forward the optional, independently owned construction `tonal_regions`
++  capability from `51a3fee`, with no automatic first-pass polygon policy:
++  explicit brush media and artwork-specific method choice remain authoritative.
++  Removed five discontinued translated README placeholders, refreshed the
++  Windows-only environment example, repository clone paths and documented
++  current tool count. The RC's historical local art evidence is preserved
++  separately; these engineering changes are not artistic Beta acceptance.
++
+ - 2026-10-14 — **SessionStore P1-B: bounded Painter continuation recommendations.**
+   Added typed, pure `src/core/guard/continuation-admissibility.ts` and own
+   regression suite. `artisticContinuationContext().next_candidates` now
+diff --git a/INSTALL.md b/INSTALL.md
+index 36a249150f3c9c3addbce102e8a135e2147cef0c..018f857c2c064b43ef6fb969826cf4e9a366b4f4 100644
+--- a/INSTALL.md
++++ b/INSTALL.md
+@@ -27,7 +27,7 @@ URL, then run:
+ 
+ ```bash
+ git clone <repository-url>
+-cd photoshop-mcp-digital-painting
++cd paintpilot-mcp
+ ```
+ 
+ Keep the checkout in a stable directory that will not be deleted by a package
+@@ -111,7 +111,7 @@ Pass `PHOTOSHOP_PATH` in the stdio transport environment when automatic detectio
+ ```
+ 
+ After rebuilding/updating the project, refresh the Chat On Steroids Plugins schema through
+-the normal host UI. The accepted native catalog is **130 tools total / 14 Guard tools**.
++the normal host UI. The current native catalog is **132 tools total / 15 Guard tools**.
+ A stale legacy 64-tool snapshot is not a limitation of this server.
+ 
+ For local development, distinguish **schema refresh** from **process restart**:
+@@ -196,7 +196,7 @@ npm run test:measurement-tools
+ npm run test:landmark-ergonomics
+ ```
+ 
+-The MCP server should expose the **130-tool / 14-Guard-tool** Digital Painting Edition catalog, including:
++The MCP server should expose the **132-tool / 15-Guard-tool** Digital Painting Edition catalog, including:
+ 
+ ```text
+ photoshop_list_brush_presets
+diff --git a/README.de.md b/README.de.md
+deleted file mode 100644
+index 1413cf28cebfb51492f876b025cd90feda5270fb..0000000000000000000000000000000000000000
+--- a/README.de.md
++++ /dev/null
+@@ -1,10 +0,0 @@
+-# Photoshop MCP — Digital Painting Edition
+-
+-This localized page is not currently maintained. Use the canonical English documentation:
+-
+-- [README.md](README.md) — project overview and current product identity
+-- [INSTALL.md](INSTALL.md) — installation
+-- [NOTICE](NOTICE) — historical origin and licensing provenance
+-- [lavalava45/photoshop-mcp-digital-painting](https://github.com/lavalava45/paintpilot-mcp) — project repository
+-
+-The project is independently maintained and is not affiliated with or endorsed by Adobe Inc.
+diff --git a/README.es.md b/README.es.md
+deleted file mode 100644
+index 1413cf28cebfb51492f876b025cd90feda5270fb..0000000000000000000000000000000000000000
+--- a/README.es.md
++++ /dev/null
+@@ -1,10 +0,0 @@
+-# Photoshop MCP — Digital Painting Edition
+-
+-This localized page is not currently maintained. Use the canonical English documentation:
+-
+-- [README.md](README.md) — project overview and current product identity
+-- [INSTALL.md](INSTALL.md) — installation
+-- [NOTICE](NOTICE) — historical origin and licensing provenance
+-- [lavalava45/photoshop-mcp-digital-painting](https://github.com/lavalava45/paintpilot-mcp) — project repository
+-
+-The project is independently maintained and is not affiliated with or endorsed by Adobe Inc.
+diff --git a/README.ja.md b/README.ja.md
+deleted file mode 100644
+index 1413cf28cebfb51492f876b025cd90feda5270fb..0000000000000000000000000000000000000000
+--- a/README.ja.md
++++ /dev/null
+@@ -1,10 +0,0 @@
+-# Photoshop MCP — Digital Painting Edition
+-
+-This localized page is not currently maintained. Use the canonical English documentation:
+-
+-- [README.md](README.md) — project overview and current product identity
+-- [INSTALL.md](INSTALL.md) — installation
+-- [NOTICE](NOTICE) — historical origin and licensing provenance
+-- [lavalava45/photoshop-mcp-digital-painting](https://github.com/lavalava45/paintpilot-mcp) — project repository
+-
+-The project is independently maintained and is not affiliated with or endorsed by Adobe Inc.
+diff --git a/README.md b/README.md
+index 58bf3509f7a11ca154832f4bdbbaa087cc30b057..899b761788291c50e9702fa1cf2e8883f9a2819a 100644
+--- a/README.md
++++ b/README.md
+@@ -215,7 +215,7 @@ Clone and build:
+ 
+ ```bash
+ git clone https://github.com/lavalava45/paintpilot-mcp.git
+-cd photoshop-mcp-digital-painting
++cd paintpilot-mcp
+ pnpm install --frozen-lockfile
+ npm run build:server
+ ```
+diff --git a/README.tr.md b/README.tr.md
+deleted file mode 100644
+index 1413cf28cebfb51492f876b025cd90feda5270fb..0000000000000000000000000000000000000000
+--- a/README.tr.md
++++ /dev/null
+@@ -1,10 +0,0 @@
+-# Photoshop MCP — Digital Painting Edition
+-
+-This localized page is not currently maintained. Use the canonical English documentation:
+-
+-- [README.md](README.md) — project overview and current product identity
+-- [INSTALL.md](INSTALL.md) — installation
+-- [NOTICE](NOTICE) — historical origin and licensing provenance
+-- [lavalava45/photoshop-mcp-digital-painting](https://github.com/lavalava45/paintpilot-mcp) — project repository
+-
+-The project is independently maintained and is not affiliated with or endorsed by Adobe Inc.
+diff --git a/README.zh-CN.md b/README.zh-CN.md
+deleted file mode 100644
+index 1413cf28cebfb51492f876b025cd90feda5270fb..0000000000000000000000000000000000000000
+--- a/README.zh-CN.md
++++ /dev/null
+@@ -1,10 +0,0 @@
+-# Photoshop MCP — Digital Painting Edition
+-
+-This localized page is not currently maintained. Use the canonical English documentation:
+-
+-- [README.md](README.md) — project overview and current product identity
+-- [INSTALL.md](INSTALL.md) — installation
+-- [NOTICE](NOTICE) — historical origin and licensing provenance
+-- [lavalava45/photoshop-mcp-digital-painting](https://github.com/lavalava45/paintpilot-mcp) — project repository
+-
+-The project is independently maintained and is not affiliated with or endorsed by Adobe Inc.
+diff --git a/docs/development.md b/docs/development.md
+index 233f044ea295d0f848c7d807a9858aa31304c8a6..9dd71db294396229bc1e36e2accaea519e94808b 100644
+--- a/docs/development.md
++++ b/docs/development.md
+@@ -24,7 +24,7 @@ the superseded October 9 COS schema synchronization investigation is retained
+ 
+ ```bash
+ git clone <repository-url>
+-cd photoshop-mcp-digital-painting
++cd paintpilot-mcp
+ pnpm install --frozen-lockfile
+ npm run build
+ ```
+diff --git a/scripts/verify-product-identity.mjs b/scripts/verify-product-identity.mjs
+index b008a9d985cb5a0aa73dcc2c1726fc0819988911..1224114f2bc82d36d723a83cf85d3fdcaf1f6731 100644
+--- a/scripts/verify-product-identity.mjs
++++ b/scripts/verify-product-identity.mjs
+@@ -75,7 +75,6 @@ for (const path of examples) {
+ const primaryIdentityFiles = [
+   'package.json', 'server.json', 'mcpb/manifest.json', 'README.md', 'INSTALL.md',
+   'CONTRIBUTING.md', 'RELEASE_CHECKLIST.md', 'llms.txt', 'AGENTS.md',
+-  'README.de.md', 'README.es.md', 'README.ja.md', 'README.tr.md', 'README.zh-CN.md',
+   'docs/architecture.md', 'docs/development.md', 'docs/available-tools.md',
+   'docs/painting-policy/foundations.md', 'docs/mascot.md', 'src/prompts/host-guidance.ts',
+ ];
+-- 
+2.55.0.windows.5
+
