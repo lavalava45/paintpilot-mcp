@@ -171,22 +171,14 @@ tags/bundles, not permanent competing development branches.
   comparison) and digital-painting-local-history-20260914 (13
   branch-only commits at initial comparison). Verify each live SHA and
   provenance, create permanent archival tag/bundle and recovery proof.
-- [ ] **Review and approve GitHub branch cleanup (not executed):** the
-  2026-10-15 remote API + Git ancestry audit found **11 fully contained**
-  candidates (zero unique commits): `develop`, `docs/readme-badges-hero-cache`,
-  `docs/simplified-readme`, `feat/102-tools-expansion`,
-  `feat/118-atomic-tools-docs-sync`,
-  `feat/carousel-watermark-passport-colorize`,
-  `feat/custom-api-provider-pr3`, `feat/rybbit-analytics`,
-  `feat/seo-ai-optimization`, `fix/issue-29`, and
-  `fix/open-issues-triage-17-18-19`. **Two diverged branches are NOT deletion
-  candidates yet:** `affix/readme-i18n-8c08` (16 unique commits) and
-  `docs/consolidate-readme` (1 unique commit). Preserve unique history with
-  a reviewed archival tag/bundle first. For the 11 candidates, confirm no
-  downstream consumers beyond GitHub, recheck PRs, permissions, protections
-  and exact SHAs, obtain explicit batch approval, then delete individually.
-  Full SHA/divergence audit manifest is saved offline at
-  `E:/Downloads/devspace-test/_archives/paintpilot-temp-folders-closure-20261015/remote-branch-audit-20261015.json`.
+- [ ] **Preserve and decide the two remaining divergent GitHub branches:**
+  `affix/readme-i18n-8c08` (16 unique commits, tip `934669d`) and
+  `docs/consolidate-readme` (1 unique commit, tip `60e7756`).
+  Review their provenance and relevant historical content, create verified
+  archival tags/bundles, then propose a separate decision about deleting the
+  branch names. Neither branch is currently approved for deletion.
+  Exact remote history and branch-deletion receipts are archived at
+  `E:/Downloads/devspace-test/_archives/paintpilot-temp-folders-closure-20261015/`.
 - [ ] **One deployed runtime:** verify COS plugin launch path, MCP build
   fingerprint, loaded UXP source and Git checkout agree after future
   deployments. Do not infer creative equivalence from deployment health.

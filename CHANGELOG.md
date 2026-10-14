@@ -2,6 +2,25 @@
 
 ## 2026-10-15 — Roadmap reconciliation and Git branch consolidation
 
+- **Deleted all 11 user-approved, fully contained legacy GitHub branches.**
+  Rechecked each exact remote SHA and proved all tips were ancestors of
+  `digital-painting` with zero unique commits before removal:
+  `develop`; `docs/readme-badges-hero-cache`,
+  `docs/simplified-readme`; `feat/102-tools-expansion`,
+  `feat/118-atomic-tools-docs-sync`,
+  `feat/carousel-watermark-passport-colorize`,
+  `feat/custom-api-provider-pr3`, `feat/rybbit-analytics`,
+  `feat/seo-ai-optimization`; `fix/issue-29` and
+  `fix/open-issues-triage-17-18-19`. Confirmed zero repository PRs,
+  GitHub rulesets or protected branch flags, and the unchanged
+  `digital-painting` default branch. Deleted each remote ref with an
+  exact-SHA lease and verified each absence; then `git fetch --prune`
+  removed stale remote-tracking refs. GitHub now has exactly three branches:
+  `digital-painting`, `affix/readme-i18n-8c08` (16 unique commits) and
+  `docs/consolidate-readme` (1 unique commit). The two divergent branches
+  were not modified; no history was rewritten. Before/after exact SHA
+  records and per-branch verification receipts are preserved locally in
+  `E:/Downloads/devspace-test/_archives/paintpilot-temp-folders-closure-20261015/github-11-branch-deletion-20261015.json`.
 - **Retired the last auxiliary Git worktree and five legacy experiment
   folders, with independent archival verification.** The detached
   `work/paintpilot-baseline-verify-20261014` checkout at frozen `3689249`
@@ -33,8 +52,8 @@
   GitHub workflow/release scripts. A per-branch manifest with exact SHAs
   and comparisons is saved locally at
   `E:/Downloads/devspace-test/_archives/paintpilot-temp-folders-closure-20261015/remote-branch-audit-20261015.json`.
-  Deleting the 11 candidates and preserving the two unique histories remain
-  open work requiring explicit authorization; no remote ref was mutated.
+  This was the inventory before the subsequent 11 deletions recorded above.
+  Archival review of the two divergent histories remains open.
 - **Converted the post-first-city archive branch to an annotated Git tag.**
   Created `artist-post-first-city-20261014` at exact commit
   `fac85eab4c978f65614da268243ae1d8747f9ec0`, containing the six
