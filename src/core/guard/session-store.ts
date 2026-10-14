@@ -2413,15 +2413,19 @@ export class SessionStore {
       language: normalized.config.language,
       commentary_mode: normalized.config.commentary_mode,
       commentary_detail: normalized.config.commentary_detail,
+      painting_profile: normalized.config.painting_profile,
     };
     const sources = {
       language: normalized.sources.language === 'stored' ? 'user_config' : 'default',
       commentary_mode: normalized.sources.commentary_mode === 'stored' ? 'user_config' : 'default',
       commentary_detail: normalized.sources.commentary_detail === 'stored' ? 'user_config' : 'default',
+      painting_profile: normalized.sources.painting_profile === 'stored' ? 'user_config' : 'default',
     };
     const warnings = [...normalized.warnings];
     const validDocumentId = Number.isSafeInteger(documentId) && documentId > 0 ? documentId : undefined;
     const documentState = validDocumentId ? state.documents?.[String(validDocumentId)] : undefined;
+    const activeRunPaintingProfile = documentState?.process_dir && ART_RUN_PAINTING_PROFILES.has(documentState.painting_profile)
+      ? documentState.painting_profile : null;
     if (documentState?.commentary_mode !== undefined) {
       const stickyMode = textOrUndefined(documentState.commentary_mode)?.toLowerCase();
       if (stickyMode && ART_RUN_COMMENTARY_MODES.has(stickyMode)) {
@@ -2446,10 +2450,13 @@ export class SessionStore {
         language: normalized.config.language,
         commentary_mode: normalized.config.commentary_mode,
         commentary_detail: normalized.config.commentary_detail,
+        painting_profile: normalized.config.painting_profile,
       },
       effective,
       sources,
       warnings,
+      active_run_painting_profile: activeRunPaintingProfile,
+      painting_profile_applies_to: 'next_art_run',
       document_id: validDocumentId ?? null,
       updated_at: normalized.config.updated_at ?? null,
     };
@@ -2461,6 +2468,8 @@ export class SessionStore {
       language: resolved.effective.language,
       commentary_mode: resolved.effective.commentary_mode,
       commentary_detail: resolved.effective.commentary_detail,
+      painting_profile_selection: resolved.configured.painting_profile,
+      active_run_painting_profile: resolved.active_run_painting_profile,
       sources: resolved.sources,
       ...(resolved.warnings.length ? { warnings: resolved.warnings } : {}),
     };
@@ -2609,7 +2618,6 @@ export class SessionStore {
       throw new Error('Art run requires a positive document_id');
     }
     this.assertDocumentIdentityVerified(documentId);
-    const { normalized, target } = this.resolveProcessDir(input?.process_dir, { create: true });
     const paintingState = this.paintingState();
     const existing = paintingState.documents?.[String(documentId)];
     const userConfig = normalizeUserConfig(paintingState.user_config).config;
@@ -2627,7 +2635,29 @@ export class SessionStore {
     const detail = textOrUndefined(input?.commentary_detail)?.toLowerCase()
       ?? existingDetail
       ?? userConfig.commentary_detail;
-    const paintingProfile = textOrUndefined(input?.painting_profile)?.toLowerCase()
+    // A panel-selected profile is authoritative for a NEW run; it does not
+    // silently rewrite a bound run's profile or bypass Guard transition gates.
+    // In auto, the artist's explicit profile is retained (historical fallback:
+    // nontrivial_painting). A conflicting explicit model choice fails visibly.
+    const profilePreference = userConfig.painting_profile;
+    const requestedProfile = textOrUndefined(input?.painting_profile)?.toLowerCase();
+    const newRun = !existing?.process_dir;
+    // A manual selection is captured on the art run itself so changing the
+    // global panel preference cannot retrospectively unlock or mutate it.
+    const runProfileSelection = newRun ? profilePreference : existing?.painting_profile_selection ?? 'auto';
+    if (newRun && profilePreference !== 'auto' && requestedProfile && requestedProfile !== profilePreference) {
+      throw new Error(
+        `painting_profile conflicts with Photoshop panel selection: selected=${profilePreference} requested=${requestedProfile}; `
+        + 'choose the selected profile or change the panel before starting a new art run'
+      );
+    }
+    if (!newRun && runProfileSelection !== 'auto' && requestedProfile && requestedProfile !== runProfileSelection) {
+      throw new Error(
+        `painting_profile is locked by the Photoshop panel for this art run: selected=${runProfileSelection} requested=${requestedProfile}; `
+        + 'start a new art run to use a different manually selected profile'
+      );
+    }
+    const paintingProfile = (newRun && profilePreference !== 'auto' ? profilePreference : requestedProfile)
       ?? existing?.painting_profile
       ?? 'nontrivial_painting';
     if (!ART_RUN_COMMENTARY_MODES.has(mode)) {
@@ -2639,6 +2669,7 @@ export class SessionStore {
     if (!ART_RUN_PAINTING_PROFILES.has(paintingProfile)) {
       throw new Error('painting_profile must be nontrivial_painting|simple_graphic');
     }
+    const { normalized, target } = this.resolveProcessDir(input?.process_dir, { create: true });
     if (existing?.process_dir && existing.process_dir !== normalized) {
       throw new Error(
         `process_dir is immutable for document ${documentId}; current run is already bound to ${existing.process_dir}`
@@ -2736,6 +2767,7 @@ export class SessionStore {
       process_dir: normalized,
       ...(input.original_brief !== undefined ? { original_brief: input.original_brief.trim() } : {}),
       painting_profile: paintingProfile,
+      ...(newRun ? { painting_profile_selection: runProfileSelection } : {}),
       ...(!current.project_started_at && paintingProfile === 'nontrivial_painting'
         && (!current.current_frame?.operation_id || (current.document_instance?.bootstrap_tool === 'photoshop_create_document'
           && current.current_frame.operation_id === current.document_instance.bootstrap_operation_id))

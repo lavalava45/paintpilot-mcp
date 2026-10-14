@@ -1,5 +1,28 @@
 # Changelog
 
+- 2026-10-15 — **Photoshop UXP panel painting-profile selector (source-level).**
+  Added a persistent three-position setting beside the video/commentary
+  controls: `simple_graphic` (graphic/marker), `nontrivial_painting`
+  (complex/experimental), and `auto` (artist chooses). Extended the existing
+  versioned `/settings/user-config` validation, readback and durable
+  controller state. On a **new** art run, an explicit panel choice is
+  authoritative: conflicting model selection fails visibly and cannot
+  create an orphan project directory; `auto` accepts either supported
+  profile, retaining `nontrivial_painting` as the fallback when omitted.
+  A manually selected profile is locked for its new run; auto runs keep
+  the guarded optional upgrade, and already bound runs are never silently
+  changed or downgraded. Guard
+  presentation/status exposes the chosen setting and active run profile.
+  English/Russian UXP labels and focused persistence/preference/HTML
+  regression tests were added. This is engineering work, not independent
+  evidence of artistic quality. Focused 8/8 tests and final
+  `npm run verify:canonical` **PASS (176 test files / 1,918 tests)**,
+  plus TypeScript/UXP syntax verification. Live deployment health correctly
+  reports `deployment_mcp_restart_required` and
+  `deployment_uxp_reload_required`: the active artist has an open Photoshop
+  document, so runtime restarts/reloads and visual panel acceptance are
+  intentionally deferred to a safe work boundary (see painting roadmap).
+
 ## 2026-10-15 — Roadmap reconciliation and Git branch consolidation
 
 - **Deleted all 11 user-approved, fully contained legacy GitHub branches.**

@@ -42,6 +42,11 @@ const UI_COPY = {
     videoLabel: 'Enable video recording',
     videoLoading: 'Loading recording state…',
     configTitle: 'Configuration',
+    paintingProfileLabel: 'Painting profile (new runs)',
+    paintingProfileAuto: 'Auto — artist chooses',
+    paintingProfileSimple: 'simple_graphic — graphic / markers',
+    paintingProfileNontrivial: 'nontrivial_painting — complex / experimental',
+    paintingProfileNextRun: ' · applies to next art run',
     languageLabel: 'Report language',
     languageAuto: 'auto',
     languageRu: 'Russian',
@@ -94,6 +99,11 @@ const UI_COPY = {
     videoLabel: 'Включить видеозапись',
     videoLoading: 'Состояние записи загружается…',
     configTitle: 'Конфигурация',
+    paintingProfileLabel: 'Профиль рисования (новая работа)',
+    paintingProfileAuto: 'Авто — выбирает художник',
+    paintingProfileSimple: 'simple_graphic — графика / фломастеры',
+    paintingProfileNontrivial: 'nontrivial_painting — сложный / экспериментальный',
+    paintingProfileNextRun: ' · для следующей работы',
     languageLabel: 'Язык отчётов',
     languageAuto: 'авто',
     languageRu: 'русский',
@@ -161,6 +171,10 @@ function applyPanelLocale() {
     videoTraceLabel: 'videoLabel',
     videoTraceStatus: 'videoLoading',
     userConfigTitle: 'configTitle',
+    userConfigPaintingProfileLabel: 'paintingProfileLabel',
+    userConfigPaintingProfileAuto: 'paintingProfileAuto',
+    userConfigPaintingProfileSimple: 'paintingProfileSimple',
+    userConfigPaintingProfileNontrivial: 'paintingProfileNontrivial',
     userConfigLanguageLabel: 'languageLabel',
     userConfigLanguageAuto: 'languageAuto',
     userConfigLanguageRu: 'languageRu',
@@ -195,6 +209,7 @@ let lastUserConfigEffective = {
   language: 'auto',
   commentary_mode: 'mixed',
   commentary_detail: 'normal',
+  painting_profile: 'auto',
 };
 let closeNotificationBound = false;
 const pendingResultDeliveries = new Map();
@@ -219,6 +234,7 @@ function bridgeUiElements() {
     ffmpegPath: dom?.getElementById('ffmpegPath') ?? null,
     photoshopWindowStatus: dom?.getElementById('photoshopWindowStatus') ?? null,
     userConfigLanguage: dom?.getElementById('userConfigLanguage') ?? null,
+    userConfigPaintingProfile: dom?.getElementById('userConfigPaintingProfile') ?? null,
     userConfigCommentaryMode: dom?.getElementById('userConfigCommentaryMode') ?? null,
     userConfigCommentaryDetail: dom?.getElementById('userConfigCommentaryDetail') ?? null,
     userConfigStatus: dom?.getElementById('userConfigStatus') ?? null,
@@ -282,6 +298,7 @@ function setBridgeUiConnected(connected) {
     text,
     checkbox,
     userConfigLanguage,
+    userConfigPaintingProfile,
     userConfigCommentaryMode,
     userConfigCommentaryDetail,
   } = bridgeUiElements();
@@ -289,7 +306,7 @@ function setBridgeUiConnected(connected) {
   if (text) text.textContent = connected ? uiText('connected') : uiText('disconnected');
   if (checkbox && !videoTraceUpdateInFlight) checkbox.disabled = !connected;
   if (!userConfigUpdateInFlight) {
-    for (const select of [userConfigLanguage, userConfigCommentaryMode, userConfigCommentaryDetail]) {
+    for (const select of [userConfigLanguage, userConfigPaintingProfile, userConfigCommentaryMode, userConfigCommentaryDetail]) {
       if (select) select.disabled = !connected;
     }
   }
@@ -347,17 +364,19 @@ async function updateVideoTraceSetting(enabled) {
 function setUserConfigControlsDisabled(disabled) {
   const {
     userConfigLanguage,
+    userConfigPaintingProfile,
     userConfigCommentaryMode,
     userConfigCommentaryDetail,
   } = bridgeUiElements();
-  for (const select of [userConfigLanguage, userConfigCommentaryMode, userConfigCommentaryDetail]) {
+  for (const select of [userConfigLanguage, userConfigPaintingProfile, userConfigCommentaryMode, userConfigCommentaryDetail]) {
     if (select) select.disabled = disabled;
   }
 }
 
-function applyUserConfigState(state, saved = false) {
+function applyUserConfigState(state, saved = false, changedField = null) {
   const {
     userConfigLanguage,
+    userConfigPaintingProfile,
     userConfigCommentaryMode,
     userConfigCommentaryDetail,
     userConfigStatus,
@@ -365,6 +384,9 @@ function applyUserConfigState(state, saved = false) {
   const effective = state?.effective ?? {};
   if (userConfigLanguage && ['auto', 'ru', 'en'].includes(effective.language)) {
     userConfigLanguage.value = effective.language;
+  }
+  if (userConfigPaintingProfile && ['auto', 'simple_graphic', 'nontrivial_painting'].includes(state?.configured?.painting_profile)) {
+    userConfigPaintingProfile.value = state.configured.painting_profile;
   }
   if (userConfigCommentaryMode && ['technical', 'artistic', 'mixed'].includes(effective.commentary_mode)) {
     userConfigCommentaryMode.value = effective.commentary_mode;
@@ -374,6 +396,7 @@ function applyUserConfigState(state, saved = false) {
   }
   lastUserConfigEffective = {
     language: userConfigLanguage?.value ?? lastUserConfigEffective.language,
+    painting_profile: userConfigPaintingProfile?.value ?? lastUserConfigEffective.painting_profile,
     commentary_mode: userConfigCommentaryMode?.value ?? lastUserConfigEffective.commentary_mode,
     commentary_detail: userConfigCommentaryDetail?.value ?? lastUserConfigEffective.commentary_detail,
   };
@@ -386,7 +409,9 @@ function applyUserConfigState(state, saved = false) {
   }
   const sources = state?.sources ?? {};
   const sticky = sources.commentary_mode === 'art_run' || sources.commentary_detail === 'art_run';
-  userConfigStatus.textContent = (saved ? uiText('configSaved') : uiText('configLoaded')) + (sticky ? uiText('activeRunApplied') : '');
+  userConfigStatus.textContent = (saved ? uiText('configSaved') : uiText('configLoaded'))
+    + (sticky && changedField !== 'painting_profile' ? uiText('activeRunApplied') : '')
+    + (state?.active_run_painting_profile ? uiText('paintingProfileNextRun') : '');
   userConfigStatus.className = 'detail config-status';
 }
 
@@ -424,6 +449,7 @@ async function updateUserConfigSetting(field, value) {
   const elements = bridgeUiElements();
   const selectByField = {
     language: elements.userConfigLanguage,
+    painting_profile: elements.userConfigPaintingProfile,
     commentary_mode: elements.userConfigCommentaryMode,
     commentary_detail: elements.userConfigCommentaryDetail,
   };
@@ -443,7 +469,7 @@ async function updateUserConfigSetting(field, value) {
       body: JSON.stringify({ [field]: value }),
     });
     const state = await readUserConfigResponse(response);
-    applyUserConfigState(state, true);
+    applyUserConfigState(state, true, field);
   } catch (error) {
     select.value = previous;
     if (elements.userConfigStatus) {
@@ -461,16 +487,18 @@ function setupBridgePanelUi() {
   const {
     checkbox,
     userConfigLanguage,
+    userConfigPaintingProfile,
     userConfigCommentaryMode,
     userConfigCommentaryDetail,
   } = bridgeUiElements();
-  if (!checkbox && !userConfigLanguage && !userConfigCommentaryMode && !userConfigCommentaryDetail) return;
+  if (!checkbox && !userConfigLanguage && !userConfigPaintingProfile && !userConfigCommentaryMode && !userConfigCommentaryDetail) return;
   if (checkbox && !videoTraceUiBound) {
     checkbox.addEventListener('change', () => updateVideoTraceSetting(checkbox.checked));
     videoTraceUiBound = true;
   }
-  if (!userConfigUiBound && userConfigLanguage && userConfigCommentaryMode && userConfigCommentaryDetail) {
+  if (!userConfigUiBound && userConfigLanguage && userConfigPaintingProfile && userConfigCommentaryMode && userConfigCommentaryDetail) {
     userConfigLanguage.addEventListener('change', () => updateUserConfigSetting('language', userConfigLanguage.value));
+    userConfigPaintingProfile.addEventListener('change', () => updateUserConfigSetting('painting_profile', userConfigPaintingProfile.value));
     userConfigCommentaryMode.addEventListener('change', () => updateUserConfigSetting('commentary_mode', userConfigCommentaryMode.value));
     userConfigCommentaryDetail.addEventListener('change', () => updateUserConfigSetting('commentary_detail', userConfigCommentaryDetail.value));
     userConfigUiBound = true;

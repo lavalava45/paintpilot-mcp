@@ -231,6 +231,16 @@ Multi-step etiquette
   execution dependency of brush-based strokes/dabs, not of unrelated preparation or region/fill
   operations. On a nontrivial run, complete/persist brush_preflight before the first operation
   that actually uses that dependency.
+- Observe presentation_context.painting_profile_selection before binding a NEW art run.
+  Photoshop's panel offers simple_graphic, nontrivial_painting, or auto.
+  For an explicit panel selection, use that exact profile in
+  photoshop_guard_set_art_run; a conflicting new-run profile is rejected.
+  In auto, choose either valid profile according to the user's brief and
+  declare it explicitly (omission retains the legacy nontrivial_painting default).
+  The panel selection applies only to the NEXT new run. A manual profile is
+  then locked for that run (no artist-initiated upgrade/downgrade); auto runs
+  retain the existing guarded monotonic upgrade option. Do not use the panel
+  to bypass brush-preflight or transition gates.
 - Do not spend a grayscale/value-analysis round on a fresh blank nontrivial canvas. The first
   meaningful value check belongs after composition/large-mass construction has produced an
   actual frame to judge.

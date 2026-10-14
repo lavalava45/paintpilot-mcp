@@ -37,6 +37,28 @@ VisualMicroPlan example.
 
 ## Runtime architecture
 
+### Painting profile selection in the Photoshop panel
+
+The **MCP Bridge** panel (alongside video recording, language and commentary
+controls) has a persistent **Painting profile** selector:
+
+| Panel setting | Meaning |
+| --- | --- |
+| `simple_graphic` — graphic / markers | Force the simpler graphic/marker workflow for a **new** art run. |
+| `nontrivial_painting` — complex / experimental | Force the stronger construction, material and brush-preflight workflow for a **new** art run. |
+| **Auto — artist chooses** | Artist selects either supported profile from the original brief when binding a new run. If omitted, the prior `nontrivial_painting` default still applies. |
+
+The selector is stored in the existing versioned controller user configuration
+and travels through `/settings/user-config`. Guard status exposes
+`presentation_context.painting_profile_selection`. At new-run setup an
+explicit panel choice takes precedence over an agent's conflicting request:
+the Guard rejects mismatches instead of silently disregarding the panel.
+The setting does **not** retroactively modify an already bound art run;
+the panel shows that the choice applies to the next run. A manually pinned
+profile stays fixed throughout that run; an auto-selected run may use only
+the previously permitted guarded monotonic upgrade. Existing layer/History,
+brush-preflight and recovery safety rules remain in force.
+
 ```text
 compact artistic pass
   → Guard cycle compiler

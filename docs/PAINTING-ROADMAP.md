@@ -182,6 +182,14 @@ tags/bundles, not permanent competing development branches.
 - [ ] **One deployed runtime:** verify COS plugin launch path, MCP build
   fingerprint, loaded UXP source and Git checkout agree after future
   deployments. Do not infer creative equivalence from deployment health.
+- [ ] **Activate the three-option painting-profile selector at a safe pause:**
+  after the current Photoshop art run finishes, restart only the COS Digital
+  Painting Edition child and reload only the MCP Bridge UXP plugin. Require
+  `npm run deployment:health` to report `current`, then verify that the panel
+  saves/restores `auto`, `simple_graphic`, and `nontrivial_painting` and
+  that manual choice is enforced for a *new* art run without modifying the
+  current document or previous Guard state. Source/canonical tests passed;
+  do not restart in the middle of ongoing painting.
 - [ ] **Obtain per-batch approval**, retire idle worktrees, delete only
   approved branch refs (local and remote), check GitHub default and origin/HEAD,
   run git fsck and canonical/provenance/deployment gates, and record the

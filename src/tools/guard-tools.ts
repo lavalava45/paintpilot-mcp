@@ -1688,7 +1688,7 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
       tool: {
         name: 'photoshop_guard_set_art_run',
         description:
-          'Bind document and immutable process_dir; record the original brief and brush_preflight, required for the default nontrivial_painting profile.',
+          'Bind document and immutable process_dir. Honor presentation_context.painting_profile_selection from the Photoshop panel for NEW art runs; auto allows an explicit choice based on the brief and defaults to nontrivial_painting if omitted. Brush preflight is required before dependent brush operations.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -1716,7 +1716,7 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
               type: 'string',
               enum: ['nontrivial_painting', 'simple_graphic'],
               default: 'nontrivial_painting',
-              description: 'nontrivial_painting requires brush_preflight and guarded microplans; simple_graphic can upgrade when these are supplied.',
+              description: 'Honor the Photoshop panel profile for a new run: simple_graphic or nontrivial_painting. If the panel says auto, select according to the brief; omission defaults to nontrivial_painting. Existing runs keep their profile/Guard transition rules.',
             },
             profile_transition_reason: {
               type: 'string',

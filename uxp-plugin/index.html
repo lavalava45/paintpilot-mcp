@@ -71,6 +71,19 @@
         height: 22px;
         font-size: 11px;
       }
+      .config-row.profile-row {
+        display: block;
+        margin: 7px 0;
+      }
+      .config-row.profile-row span {
+        display: block;
+        margin-bottom: 4px;
+      }
+      .config-row.profile-row select {
+        width: 100%;
+        min-width: 0;
+        height: 24px;
+      }
       .config-status {
         margin-top: 4px;
         min-height: 14px;
@@ -90,6 +103,14 @@
     </label>
     <div id="videoTraceStatus" class="detail">Loading recording state…</div>
     <div id="userConfigTitle" class="section-title">Configuration</div>
+    <label class="config-row profile-row">
+      <span id="userConfigPaintingProfileLabel">Painting profile (new runs)</span>
+      <select id="userConfigPaintingProfile" disabled>
+        <option id="userConfigPaintingProfileAuto" value="auto">Auto — artist chooses</option>
+        <option id="userConfigPaintingProfileSimple" value="simple_graphic">simple_graphic — graphic / markers</option>
+        <option id="userConfigPaintingProfileNontrivial" value="nontrivial_painting">nontrivial_painting — complex</option>
+      </select>
+    </label>
     <label class="config-row">
       <span id="userConfigLanguageLabel">Report language</span>
       <select id="userConfigLanguage" disabled>

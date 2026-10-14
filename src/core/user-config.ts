@@ -4,16 +4,19 @@ export const USER_CONFIG_DEFAULTS = {
   language: 'auto',
   commentary_mode: 'mixed',
   commentary_detail: 'normal',
+  painting_profile: 'auto',
 } as const;
 
 export type UserConfigLanguage = 'auto' | 'ru' | 'en';
 export type UserConfigCommentaryMode = 'technical' | 'artistic' | 'mixed';
 export type UserConfigCommentaryDetail = 'short' | 'normal' | 'detailed';
+export type UserConfigPaintingProfile = 'auto' | 'simple_graphic' | 'nontrivial_painting';
 
 export type UserConfigValues = {
   language: UserConfigLanguage;
   commentary_mode: UserConfigCommentaryMode;
   commentary_detail: UserConfigCommentaryDetail;
+  painting_profile: UserConfigPaintingProfile;
 };
 
 export type StoredUserConfig = UserConfigValues & {
@@ -34,6 +37,7 @@ const ALLOWED = {
   language: new Set<UserConfigLanguage>(['auto', 'ru', 'en']),
   commentary_mode: new Set<UserConfigCommentaryMode>(['technical', 'artistic', 'mixed']),
   commentary_detail: new Set<UserConfigCommentaryDetail>(['short', 'normal', 'detailed']),
+  painting_profile: new Set<UserConfigPaintingProfile>(['auto', 'simple_graphic', 'nontrivial_painting']),
 };
 
 function recordOrNull(value: unknown): Record<string, unknown> | null {
@@ -58,6 +62,7 @@ export function normalizeUserConfig(value: unknown): NormalizedUserConfig {
     language: 'default',
     commentary_mode: 'default',
     commentary_detail: 'default',
+    painting_profile: 'default',
   };
 
   if (raw && raw.config_version !== undefined && raw.config_version !== USER_CONFIG_VERSION) {
@@ -85,6 +90,13 @@ export function normalizeUserConfig(value: unknown): NormalizedUserConfig {
   if (detailCandidate && detailCandidate !== commentaryDetail) warnings.push(`invalid commentary_detail ${detailCandidate}; using normal`);
   else if (detailCandidate) sources.commentary_detail = 'stored';
 
+  const profileCandidate = normalizedString(raw?.painting_profile);
+  const paintingProfile = profileCandidate && ALLOWED.painting_profile.has(profileCandidate as UserConfigPaintingProfile)
+    ? profileCandidate as UserConfigPaintingProfile
+    : USER_CONFIG_DEFAULTS.painting_profile;
+  if (profileCandidate && profileCandidate !== paintingProfile) warnings.push(`invalid painting_profile ${profileCandidate}; using auto`);
+  else if (profileCandidate) sources.painting_profile = 'stored';
+
   const updatedAt = validStoredTimestamp(raw?.updated_at);
   return {
     config: {
@@ -92,6 +104,7 @@ export function normalizeUserConfig(value: unknown): NormalizedUserConfig {
       language,
       commentary_mode: commentaryMode,
       commentary_detail: commentaryDetail,
+      painting_profile: paintingProfile,
       ...(updatedAt ? { updated_at: updatedAt } : {}),
     },
     sources,
@@ -113,7 +126,7 @@ export function parseUserConfigPatch(value: unknown): Partial<UserConfigValues> 
   if (!raw) throw new UserConfigValidationError('user config patch must be an object');
 
   const patch: Partial<UserConfigValues> = {};
-  const allowedKeys = new Set<UserConfigField>(['language', 'commentary_mode', 'commentary_detail']);
+  const allowedKeys = new Set<UserConfigField>(['language', 'commentary_mode', 'commentary_detail', 'painting_profile']);
   for (const key of Object.keys(raw)) {
     if (!allowedKeys.has(key as UserConfigField)) {
       throw new UserConfigValidationError(`unsupported user config field: ${key}`);
@@ -142,6 +155,14 @@ export function parseUserConfigPatch(value: unknown): Partial<UserConfigValues> 
       throw new UserConfigValidationError('commentary_detail must be short|normal|detailed');
     }
     patch.commentary_detail = candidate as UserConfigCommentaryDetail;
+  }
+
+  if (raw.painting_profile !== undefined) {
+    const candidate = normalizedString(raw.painting_profile);
+    if (!candidate || !ALLOWED.painting_profile.has(candidate as UserConfigPaintingProfile)) {
+      throw new UserConfigValidationError('painting_profile must be auto|simple_graphic|nontrivial_painting');
+    }
+    patch.painting_profile = candidate as UserConfigPaintingProfile;
   }
 
   if (Object.keys(patch).length === 0) {
