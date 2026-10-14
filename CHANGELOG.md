@@ -1,5 +1,29 @@
 # Changelog
 
+- 2026-10-14 — **Isolated compact compiler refactor commit (13 independent helpers).**
+  Extracted edge bindings, stroke/batch budgets, initial-layer tone,
+  action-class/replace admission, method/tool admissibility, physical stack,
+  concrete layer targets, semantic owner metadata, envelope/document gates,
+  mutation budgets, review-region requirements, construction-role admission,
+  and brush-material preflight into 13 `src/core/guard/compact-*.ts` helpers,
+  with 13 focused owning test files. Built on clean `53dd8e9`, not on the
+  large uncommitted feature/hardening worktree. Preserved the **HEAD**
+  caller's scale restriction when extracting concrete layer targets; kept
+  unrelated Guard policy, owner/revision, runtime, and dispatch changes out.
+  **Separate worktree proof:** `npx tsc --noEmit` PASS; 17 focused test files
+  **192/192 PASS**; full `npm run verify:canonical` **PASS** with 149 files,
+  **1588/1588 tests**, lint 0 errors (84 warnings), Guard contract, packaging,
+  policies, provenance, evidence ledger and documentation gates PASS. Five
+  Windows-checkout CRLF-transformed retained license notices were restored
+  byte-for-byte from the same HEAD in the temporary verification worktree;
+  none are part of this commit. The fourteenth `compact-change-domains` helper
+  and its current-tree compiler admission changes are **not included**:
+  the matching old HEAD had no equivalent inline validation, so committing
+  them as a pure refactor would alter behavior. The larger working tree's
+  14-module/1906-test integration gate is a different, still-uncommitted state.
+  No Photoshop/UXP mutation, reset, live acceptance or publication.
+
+
 - 2026-10-10 — **P0-E.26 offline COS Goal/Loop continuation boundary fix, activation pending.** Verified the *running* COS process is `chat-on-steroids-OUR-RELEASE-2.1.32/release/win-unpacked/Chat On Steroids.exe`; its actual `node.exe` MCP child launches this PaintPilot repo's `dist/cos-plugin.js`. Read the exact Goal/Loop / Automatic Continue source in that same 2.1.32 checkout. The host's Goal helper previously received the canonical assistant/user transcript and only **counts** of local tool calls, not an attributed Guard `next_state`; after a Painter final, it could incorrectly accept a helper `stop` as `no-reply` / reached-goal despite `continue_required`. This is a demonstrated source-path vulnerability consistent with the overnight symptom, not a validated trace of every historical session.
 
   Modified COS checkout (not the running packaged binary): added `src/main/painting-guard-continuation.ts` with bounded exact-turn/chat/attribution MCP-Guard-receipt classification; connected it to both existing `src/main/goal.ts` Goal/Loop after-turn and finish follow-up paths. It sends **only fixed host-authored** `unresolved|blocked` status guidance to the decision helper; no raw tool args/results, new model, scheduler, side-channel or separate loop. An unsupported `stop` with verified unfinished Guard debt gets at most one corrected decision request; a second refusal is shown as settled, non-retryable `painting_guard_unresolved_no_action`, avoiding endless identical API/ChatGPT retries. Wrong turn/chat, unattributed, truncated, failing or forged argument-only evidence is not continuation authority. A technical save/pass closure cannot prove the whole artwork finished; rejected/uncertain Guard execution can only direct safe reconciliation or expose a blocker. Explicit user Off/STOP and existing source-turn/outbox ownership remain supreme. Updated `src/shared/goal-errors.ts`, new targeted receipt tests and two end-to-end mocked Goal STOP/continue tests.

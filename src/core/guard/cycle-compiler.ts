@@ -22,9 +22,6 @@ import {
 } from '../painting-method-palette.js';
 import { UXP_BRIDGE_REVISION } from './protocol-version.js';
 import {
-  VISUAL_MICROPLAN_ACTION_CLASSES,
-  VISUAL_MICROPLAN_MAX_LAYER_CREATIONS,
-  VISUAL_MICROPLAN_MAX_MUTATIONS,
   VISUAL_MICROPLAN_MUTATION_TOOLS,
   resolveVisualMicroPlanMutationBudget,
   visualMicroPlanMethodClassForStep,
@@ -44,7 +41,27 @@ import {
   paintingStageRank,
 } from '../painting-stage-policy.js';
 import { normalizeMaterialResponsePlan, type MaterialResponsePlan } from '../material-response.js';
-import { parseEdgeIntents } from '../edge-control.js';
+import { collectCompactEdgeBindingViolations } from './compact-edge-bindings.js';
+import { collectCompactStrokeBudgetViolations } from './compact-stroke-budget.js';
+import {
+  compactMutationLimitViolation,
+  compactAdaptiveBudgetViolation,
+  compactLayerCreationLimitViolation,
+} from './compact-pass-budget-gates.js';
+import { isInitialLayerTone } from './compact-initial-layer-tone.js';
+import { resolveCompactActionClass } from './compact-action-class.js';
+import { collectCompactMethodAdmissibility } from './compact-method-admissibility.js';
+import { collectCompactPhysicalStackViolations } from './compact-physical-stack.js';
+import { collectConcreteMutationLayerIds, indexDurableOwnersByLayerId } from './compact-layer-targets.js';
+import { collectCompactOwnerMetadataViolations } from './compact-owner-metadata.js';
+import { collectCompactReviewRegionViolations } from './compact-review-region-gates.js';
+import { collectCompactConstructionRoleViolations } from './compact-construction-role-gates.js';
+import { resolveCompactBrushMaterialPreflight } from './compact-brush-material-preflight.js';
+import {
+  collectCompactRequiredEnvelopeViolations,
+  collectCompactDocumentGateViolations,
+  collectCompactDirectBundleViolations,
+} from './compact-envelope-gates.js';
 import {
   normalizeSceneOwnershipPlan,
   extendSceneOwnershipPlan,
@@ -52,7 +69,6 @@ import {
   sceneComponentScopeIssue,
   type SceneOwnershipPlan,
 } from '../scene-ownership-plan.js';
-import { strokeExecutionBudget } from '../../tools/painting-tools.js';
 import { geometryOptOutAuthorityIssue, normalizeSceneGeometryModel, type SceneGeometryModel } from '../scene-geometry-model.js';
 import {
   assertLightingColorBindingMatchesScene,
@@ -808,81 +824,14 @@ function compileCompactPass(
   const actions = Array.isArray(raw.actions)
     ? normalizeGuardActionIds(raw.actions as Array<Record<string, unknown>>)
     : [];
-  let edgeIntents: ReturnType<typeof parseEdgeIntents> = [];
-  let edgeIntentsValid = true;
-  try {
-    edgeIntents = parseEdgeIntents(raw.edges);
-  } catch (error) {
-    edgeIntentsValid = false;
-    violations.push(violation(
-      'next_operation',
-      'compact_edge_intents_invalid',
-      error instanceof Error ? error.message : String(error)
-    ));
-  }
-  if (edgeIntentsValid) {
-    const declaredEdgeIds = new Set(edgeIntents.map(intent => intent.boundaryId));
-    const referencedEdgeIds = new Set<string>();
-    actions.forEach((action, actionIndex) => {
-      if (!VISUAL_MICROPLAN_MUTATION_TOOLS.has(text(action.tool) ?? '')) return;
-      if (action.edge_boundary_ids === undefined) return;
-      if (!Array.isArray(action.edge_boundary_ids)) {
-        violations.push(violation(
-          'next_operation',
-          'compact_edge_boundary_ids_invalid',
-          `next_pass.actions[${actionIndex}].edge_boundary_ids must be an array of declared boundary ids`,
-          { action_index: actionIndex }
-        ));
-        return;
-      }
-      const boundIds: string[] = [];
-      action.edge_boundary_ids.forEach((value, boundaryIndex) => {
-        const boundaryId = text(value);
-        if (!boundaryId) {
-          violations.push(violation(
-            'next_operation',
-            'compact_edge_boundary_ids_invalid',
-            `next_pass.actions[${actionIndex}].edge_boundary_ids[${boundaryIndex}] must be a non-empty string`,
-            { action_index: actionIndex, boundary_index: boundaryIndex }
-          ));
-          return;
-        }
-        if (!declaredEdgeIds.has(boundaryId)) {
-          violations.push(violation(
-            'next_operation',
-            'compact_edge_boundary_unknown',
-            `next_pass.actions[${actionIndex}].edge_boundary_ids references undeclared boundary_id ${boundaryId}`,
-            { action_index: actionIndex, boundary_id: boundaryId }
-          ));
-          return;
-        }
-        referencedEdgeIds.add(boundaryId);
-        boundIds.push(boundaryId);
-      });
-      if (boundIds.length && !text(action.method_id)) {
-        violations.push(violation(
-          'next_operation',
-          'compact_edge_method_required',
-          `next_pass.actions[${actionIndex}] must declare method_id when edge_boundary_ids are present`,
-          { action_index: actionIndex, boundary_ids: boundIds }
-        ));
-      }
-    });
-    for (const intent of edgeIntents) {
-      if (!referencedEdgeIds.has(intent.boundaryId)) {
-        violations.push(violation(
-          'next_operation',
-          'compact_edge_intent_unbound',
-          `next_pass.edges boundary_id ${intent.boundaryId} must bind to at least one visual mutation through edge_boundary_ids`,
-          { boundary_id: intent.boundaryId }
-        ));
-      }
-    }
-  }
-  if (!requestKey || !goal || (!restoreAnchorOperationId && !actions.length)) {
-    if (!requestKey) violations.push(violation('next_operation', 'compact_request_key_required', 'next_pass.request_key must be a non-empty string'));
-    if (!goal) violations.push(violation('next_operation', 'compact_goal_required', 'next_pass.goal must be a non-empty string'));
-    if (!restoreAnchorOperationId && !actions.length) violations.push(violation('next_operation', 'compact_actions_required', 'next_pass.actions must contain executable actions'));
+  const { violations: edgeViolations, edgeIntents, edgeIntentsValid } =
+    collectCompactEdgeBindingViolations(raw.edges, actions);
+  violations.push(...edgeViolations);
+  const envelopeViolations = collectCompactRequiredEnvelopeViolations({
+    requestKey, goal, restoreAnchorOperationId, actionCount: actions.length,
+  });
+  violations.push(...envelopeViolations);
+  if (envelopeViolations.length) {
     // Missing envelope metadata must not hide independently repairable nested
     // arguments. Inspect all supplied actions without any Photoshop preparation.
     violations.push(...collectSuppliedActionViolations(actions, documentId, registry));
@@ -951,7 +900,7 @@ function compileCompactPass(
     }
   }
   const problemId = text(raw.problem_id) ?? text(raw.addresses_problem_id) ?? requestKey;
-  const existingRequestRecord = store.read?.(requestKey);
+  const existingRequestRecord = store.read?.(requestKey as string);
   const existingReviewProfile = existingRequestRecord?.visual_review_profile
     && typeof existingRequestRecord.visual_review_profile === 'object'
     && !Array.isArray(existingRequestRecord.visual_review_profile)
@@ -961,31 +910,13 @@ function compileCompactPass(
   const onlyAction = actions.length === 1 ? actions[0] : undefined;
   const onlyTool = onlyAction ? text(onlyAction.tool) : undefined;
   const bootstrap = !!onlyTool && COMPACT_DOCUMENT_BOOTSTRAP_TOOLS.has(onlyTool);
-  if (!bootstrap && (!Number.isSafeInteger(documentId) || Number(documentId) <= 0)) {
-    violations.push(violation(
-      'next_operation',
-      'compact_pass_document_required',
-      'next_pass.document_id is required for every non-bootstrap Photoshop pass'
-    ));
-    return { violations };
-  }
-  if (bootstrap && documentId !== undefined) {
-    violations.push(violation(
-      'next_operation',
-      'compact_bootstrap_document_forbidden',
-      'next_pass.document_id must be omitted for photoshop_create_document/photoshop_open_image because the target document does not exist yet'
-    ));
-  }
+  const documentGateViolations = collectCompactDocumentGateViolations(documentId, bootstrap);
+  violations.push(...documentGateViolations);
+  if (!bootstrap && documentGateViolations.length) return { violations };
 
-  const visualMicroplanMutationCount = actions.filter(step =>
-    VISUAL_MICROPLAN_MUTATION_TOOLS.has(text(step.tool) ?? '')
-  ).length;
-  if (actions.length > 1 && visualMicroplanMutationCount === 0) {
-    violations.push(violation(
-      'next_operation',
-      'compact_pass_multiple_direct_operations',
-      'next_pass cannot bundle multiple direct Photoshop operations into one durable Guard operation; submit each direct operation as its own guarded pass (for example, save PSD and PNG in two sequential passes)'
-    ));
+  const directBundleViolations = collectCompactDirectBundleViolations(actions);
+  violations.push(...directBundleViolations);
+  if (directBundleViolations.length) {
     return { violations };
   }
 
@@ -1254,42 +1185,15 @@ function compileCompactPass(
 
   const mutationSteps = actions.filter(step => VISUAL_MICROPLAN_MUTATION_TOOLS.has(text(step.tool) ?? ''));
   const knownMethods = new Map(paintingMethodCapabilities(registry).map(capability => [capability.id, capability]));
-  for (const step of mutationSteps) {
-    const methodId = text(step.method_id);
-    if (!methodId) continue;
-    if (Array.isArray(raw.avoid_method_ids) && raw.avoid_method_ids.includes(methodId)) {
-      violations.push(violation('next_operation', 'artistic_method_unavailable', `Executed method_id=${methodId} is explicitly excluded.`));
-    }
-    const semanticMethod = knownMethods.get(methodId);
-    if (semanticMethod && semanticMethod.primaryTool !== text(step.tool)
-      && !(methodId === 'continuous-color-field' && text(step.tool) === 'photoshop_fill_layer')) {
-      violations.push(violation(
-        'next_operation',
-        'step_method_tool_mismatch',
-        `method_id=${methodId} requires primary tool ${semanticMethod.primaryTool}, not ${text(step.tool) ?? 'missing'}`
-      ));
-    }
-  }
-  const methodClasses = [...new Set(mutationSteps.map(step => compactStepMethodClass(step, registry)).filter(Boolean))] as string[];
-  if (methodClasses.length > 1) {
-    violations.push(violation(
-      'next_operation',
-      'compact_pass_mixed_method_class',
-      `next_pass actions contain incompatible mutation method classes: ${methodClasses.join(', ')}; split them into bounded passes`
-    ));
-  }
-  if (mutationSteps.length > VISUAL_MICROPLAN_MAX_MUTATIONS) {
-    violations.push(violation(
-      'next_operation',
-      'compact_pass_visual_mutation_limit',
-      `next_pass may contain at most ${VISUAL_MICROPLAN_MAX_MUTATIONS} visual mutations; split the artistic stage into sequential Guard passes`,
-      {
-        requested_mutations: mutationSteps.length,
-        allowed_mutations: VISUAL_MICROPLAN_MAX_MUTATIONS,
-        splittable: true,
-      }
-    ));
-  }
+  const { methodClasses, violations: methodViolations } = collectCompactMethodAdmissibility({
+    mutationSteps,
+    avoidMethodIds: raw.avoid_method_ids,
+    knownMethods,
+    methodClassForStep: step => compactStepMethodClass(step, registry),
+  });
+  violations.push(...methodViolations);
+  const hardMutationLimit = compactMutationLimitViolation(mutationSteps.length);
+  if (hardMutationLimit) violations.push(hardMutationLimit);
   const methodClass = methodClasses[0];
   if (methodClass === 'filter') {
     if (mutationSteps.length !== 1 || text(mutationSteps[0]?.tool) !== 'photoshop_apply_gaussian_blur'
@@ -1316,30 +1220,8 @@ function compileCompactPass(
     .map(step => compactRiskForMethod(compactStepMethodClass(step, registry)))
     .sort((a, b) => ['low', 'moderate', 'high'].indexOf(b) - ['low', 'moderate', 'high'].indexOf(a))[0]
     ?? 'low';
-  const explicitActionClass = text(raw.action_class)?.toUpperCase();
-  if (explicitActionClass && !VISUAL_MICROPLAN_ACTION_CLASSES.includes(explicitActionClass as never)) {
-    violations.push(violation(
-      'next_operation',
-      'compact_action_class_invalid',
-      `next_pass.action_class must be one of ${VISUAL_MICROPLAN_ACTION_CLASSES.join('|')}`
-    ));
-  }
-  if (Array.isArray(raw.replace_protected_layer_ids) && raw.replace_protected_layer_ids.length > 0 && !explicitActionClass) {
-    violations.push(violation(
-      'next_operation',
-      'compact_replace_action_required',
-      'replace_protected_layer_ids requires explicit next_pass.action_class=REPLACE or ERASE'
-    ));
-  }
-  const actionClass = explicitActionClass
-    ?? (methodClass === 'rollback' ? 'ROLLBACK' : methodClass === 'erase' ? 'ERASE' : 'ADD');
-  for (const step of mutationSteps) if (step.tool === 'photoshop_paint_regions' && (step.args as Record<string, unknown>)?.replace_contents === true) {
-    const layer = Number((raw.logical_layer as any)?.layer_id);
-    const declaredRegions = (step.args as Record<string, unknown>).regions as Array<Record<string, unknown>>;
-    if (actionClass !== 'REPLACE' || !Number.isSafeInteger(layer) || layer <= 0
-      || !declaredRegions?.length || declaredRegions.some(r => r.layer_id !== layer))
-      violations.push(violation('next_operation', 'component_rebuild_target_required', 'Replacing contents requires explicit REPLACE, one durable owned layer and every region pinned to that same layer. Never clear an implicit active target.'));
-  }
+  const { actionClass, violations: actionClassViolations } = resolveCompactActionClass({ raw, methodClass, mutationSteps });
+  violations.push(...actionClassViolations);
 
   const context = store.compactPassContext?.(Number(documentId), projectionContext) ?? {};
   const { stage, stageReset } = resolveCompactStageTransition(
@@ -1370,27 +1252,11 @@ function compileCompactPass(
     affectedRelationCount: Array.isArray(raw.affected_relations) ? raw.affected_relations.length : 0,
     affectedQualityCount: Array.isArray(raw.affected_qualities) ? raw.affected_qualities.length : 0,
   });
-  if (mutationSteps.length > adaptiveMutationBudget.allowedMutations) {
-    violations.push(violation(
-      'next_operation',
-      'compact_pass_adaptive_mutation_budget_exceeded',
-      `next_pass requests ${mutationSteps.length} visual mutations but adaptive budget allows ${adaptiveMutationBudget.allowedMutations} (${adaptiveMutationBudget.reason}); split/defer the remaining actions before dispatch`,
-      {
-        requested_mutations: mutationSteps.length,
-        allowed_mutations: adaptiveMutationBudget.allowedMutations,
-        splittable: true,
-        budget_reason: adaptiveMutationBudget.reason,
-      }
-    ));
-  }
+  const adaptiveMutationLimit = compactAdaptiveBudgetViolation(mutationSteps.length, adaptiveMutationBudget);
+  if (adaptiveMutationLimit) violations.push(adaptiveMutationLimit);
   const createSteps = actions.filter(step => text(step.tool) === 'photoshop_create_layer');
-  if (createSteps.length > VISUAL_MICROPLAN_MAX_LAYER_CREATIONS) {
-    violations.push(violation(
-      'next_operation',
-      'compact_pass_multiple_layer_creation',
-      `next_pass may create at most ${VISUAL_MICROPLAN_MAX_LAYER_CREATIONS} logical layer; the current VisualMicroPlan represents one rollback unit`
-    ));
-  }
+  const layerCreationLimit = compactLayerCreationLimitViolation(createSteps.length);
+  if (layerCreationLimit) violations.push(layerCreationLimit);
 
   const createStep = createSteps.length === 1 ? createSteps[0] : undefined;
   const createArgs = createStep?.args && typeof createStep.args === 'object' && !Array.isArray(createStep.args)
@@ -1846,43 +1712,14 @@ function compileCompactPass(
     const issue = sceneComponentScopeIssue(sceneOwnershipPlan, text(rawLogicalLayer?.hypothesis_id) ?? '');
     if (issue) violations.push(violation('next_operation', issue.code, issue.message, issue.details));
   }
-  let expandedStrokeBatches = 0;
-  for (const action of actions) {
-    if (action.tool !== 'photoshop_paint_strokes' || !action.args || typeof action.args !== 'object') continue;
-    try {
-      const budget = strokeExecutionBudget(action.args as Record<string, unknown>);
-      expandedStrokeBatches += budget.auto_batches;
-      if (!budget.allowed) violations.push(violation('next_operation', 'stroke_batch_budget_exceeded', budget.message, budget));
-    } catch { /* Atomic stroke validation retains its precise format errors. */ }
-  }
+  violations.push(...collectCompactStrokeBudgetViolations(actions, violations));
 
-  if (expandedStrokeBatches > 8 && !violations.some(item => item.code === 'stroke_batch_budget_exceeded')) {
-    violations.push(violation('next_operation', 'stroke_batch_budget_exceeded',
-      `This pass expands to ${expandedStrokeBatches} AUTO batches across stroke actions; split the same-component work into passes of at most 8 total batches, keeping preview reserve.`,
-      { auto_batches: expandedStrokeBatches, max_auto_batches: 8 }));
-  }
-
-  if (semanticCreateMetadataRequired && !rawLayerSeparation) {
-    violations.push(violation(
-      'next_operation',
-      'semantic_layer_owner_missing',
-      `semantic_layer_owner_missing: semantic painting layer creation must declare next_pass.layer_separation_check in every rendering profile`
-    ));
-  }
-  if ((semanticCreateMetadataRequired || declaredRequiresIsolation) && !rawLogicalLayer) {
-    violations.push(violation(
-      'next_operation',
-      'semantic_layer_owner_missing',
-      `semantic_layer_owner_missing: independently editable nontrivial painting work must declare one stable next_pass.logical_layer semantic owner`
-    ));
-  }
-  if (rawLogicalLayer && !rawLayerSeparation) {
-    violations.push(violation(
-      'next_operation',
-      'semantic_layer_owner_missing',
-      'semantic_layer_owner_missing: new ownership, structural change or rollback reassessment requires next_pass.layer_separation_check; unchanged known-owner continuation can inherit it'
-    ));
-  }
+  violations.push(...collectCompactOwnerMetadataViolations({
+    semanticCreateMetadataRequired,
+    declaredRequiresIsolation,
+    hasLayerSeparation: !!rawLayerSeparation,
+    hasLogicalLayer: !!rawLogicalLayer,
+  }));
 
   const layerSeparationCheck = rawLayerSeparation ?? (createStep ? {
     change_kind: 'other',
@@ -1903,18 +1740,7 @@ function compileCompactPass(
     rawLogicalLayer.layer_name = layerName;
   }
 
-  const ownerByLayerId = new Map(
-    owners.flatMap(owner => {
-      const projected = Array.isArray(owner.physical_layer_ids)
-        ? owner.physical_layer_ids.map(Number).filter(id => Number.isSafeInteger(id) && id > 0)
-        : [];
-      const current = Number(owner.layer_id);
-      const ids = projected.length
-        ? projected
-        : (Number.isSafeInteger(current) && current > 0 ? [current] : []);
-      return ids.map(id => [id, owner] as [number, Record<string, unknown>]);
-    })
-  );
+  const ownerByLayerId = indexDurableOwnersByLayerId(owners);
   const logicalDecision = plannedLogicalDecision;
   const logicalHypothesisId = text(logicalLayer?.hypothesis_id);
   if (logicalLayer && logicalHypothesisId
@@ -2012,23 +1838,8 @@ function compileCompactPass(
   // correction contract exists. Dynamic $steps references are intentionally
   // ignored here because create-new ownership is resolved atomically at runtime.
   const mutationTargetLayerIds = new Set<number>();
-  const collectConcreteLayerIds = (value: unknown, key?: string): void => {
-    if (Array.isArray(value)) {
-      for (const entry of value) collectConcreteLayerIds(entry, key);
-      return;
-    }
-    if (!value || typeof value !== 'object') {
-      if ((key === 'layer_id' || key === 'layerId') && Number.isSafeInteger(Number(value)) && Number(value) > 0) {
-        mutationTargetLayerIds.add(Number(value));
-      }
-      return;
-    }
-    for (const [childKey, child] of Object.entries(value as Record<string, unknown>)) {
-      collectConcreteLayerIds(child, childKey);
-    }
-  };
   if (logicalHypothesisId && ['medium', 'global'].includes((scale ?? '').toLowerCase())) {
-    for (const step of mutationSteps) collectConcreteLayerIds(step.args);
+    for (const id of collectConcreteMutationLayerIds(mutationSteps)) mutationTargetLayerIds.add(id);
     const projectedIds = Array.isArray(scopedOwner?.physical_layer_ids)
       ? scopedOwner.physical_layer_ids.map(Number).filter(id => Number.isSafeInteger(id) && id > 0)
       : (Number.isSafeInteger(Number(scopedOwner?.layer_id)) ? [Number(scopedOwner?.layer_id)] : []);
@@ -2712,73 +2523,22 @@ function compileCompactPass(
   const depthRelations = Array.isArray(logicalLayer?.depth_relations)
     ? logicalLayer.depth_relations.filter(entry => entry && typeof entry === 'object' && !Array.isArray(entry)) as Array<Record<string, unknown>>
     : [];
-  const physicalMetadataRequired = context.painting_profile === 'nontrivial_painting'
-    && !!createStep
-    && !!logicalLayer;
-  if (physicalMetadataRequired && (!physicalRole || !opacityRole)) {
-    violations.push(violation(
-      'next_operation',
-      'physical_stack_metadata_required',
-      'physical_stack_metadata_required: every new semantic layer in a nontrivial painting must declare logical_layer.physical_role and opacity_role so opaque structure cannot silently become a transparent/effect layer'
-    ));
-  }
-  if (
-    context.painting_profile === 'nontrivial_painting'
-    && ['create-new', 'temporary-hypothesis'].includes(logicalDecision ?? '')
-    && physicalRole
-    && physicalSignatureRoles.has(physicalRole)
-    && (paintingStageRank(stage) ?? -1) >= 3
-  ) {
-    violations.push(violation(
-      'next_operation',
-      'physical_stack_structural_change_requires_shape',
-      `physical_stack_structural_change_requires_shape: new ${physicalRole} owner ${logicalHypothesisId ?? 'unknown'} cannot be introduced at ${stage}; return to SHAPE with an explicit structural stage_reset, rebuild occlusion, then re-pass the physical stack gate`
-    ));
-  }
-  for (const relation of depthRelations) {
-    const relationKind = text(relation.relation)?.toLowerCase();
-    const targetHypothesisId = text(relation.target_hypothesis_id);
-    const targetOwner = targetHypothesisId ? ownerByHypothesis.get(targetHypothesisId) : undefined;
-    if (!targetHypothesisId || !targetOwner) {
-      violations.push(violation(
-        'next_operation',
-        'physical_stack_target_missing',
-        `physical_stack_target_missing: depth relation for ${logicalHypothesisId ?? 'unknown'} references semantic owner ${targetHypothesisId ?? 'missing'} which is not durably established`
-      ));
-      continue;
-    }
-    if (['create-new', 'temporary-hypothesis'].includes(logicalDecision ?? '') && createStep) {
-      const targetLayerId = Number(targetOwner.layer_id);
-      const aboveLayerId = Number(createArgs.above_layer_id);
-      const belowLayerId = Number(createArgs.below_layer_id);
-      if (relationKind === 'in-front-of' && aboveLayerId !== targetLayerId) {
-        violations.push(violation(
-          'next_operation',
-          'physical_stack_layer_order_mismatch',
-          `physical_stack_layer_order_mismatch: ${logicalHypothesisId} is declared in-front-of ${targetHypothesisId}; photoshop_create_layer must use above_layer_id=${targetLayerId}`
-        ));
-      } else if (relationKind === 'behind' && belowLayerId !== targetLayerId) {
-        violations.push(violation(
-          'next_operation',
-          'physical_stack_layer_order_mismatch',
-          `physical_stack_layer_order_mismatch: ${logicalHypothesisId} is declared behind ${targetHypothesisId}; photoshop_create_layer must use below_layer_id=${targetLayerId}`
-        ));
-      }
-    }
-  }
-
-  if (context.painting_profile === 'nontrivial_painting' && (paintingStageRank(stage) ?? -1) >= 4) {
-    const unresolvedTemporaryOwners = owners.filter(owner =>
-      owner.temporary === true && text(owner.rollback_value)?.toLowerCase() !== 'low'
-    );
-    if (unresolvedTemporaryOwners.length) {
-      violations.push(violation(
-        'next_operation',
-        'semantic_layer_stage_gate',
-        `semantic_layer_stage_gate: committed ${stage} refinement is blocked while temporary semantic owners remain unresolved: ${unresolvedTemporaryOwners.map(owner => text(owner.hypothesis_id)).filter(Boolean).join(', ')}`
-      ));
-    }
-  }
+  violations.push(...collectCompactPhysicalStackViolations({
+    paintingProfile: context.painting_profile,
+    hasCreateStep: !!createStep,
+    hasLogicalLayer: !!logicalLayer,
+    logicalDecision,
+    physicalRole,
+    opacityRole,
+    physicalSignatureRoles,
+    stage,
+    stageRank: paintingStageRank(stage) ?? -1,
+    logicalHypothesisId,
+    depthRelations,
+    ownerByHypothesis,
+    createArgs,
+    owners,
+  }));
 
   let selectedPreset = actions
     .filter(step => text(step.tool) === 'photoshop_select_brush_preset')
@@ -2887,21 +2647,16 @@ function compileCompactPass(
   // A constant initial coat authors no perspective or object geometry. Infer
   // this from the executable fill and its newly created target, never the goal
   // prose. Selection/target safety and exact-image review remain unchanged.
-  const initialLayerTone = context.has_visual_frame !== true
-    && actionClass === 'ADD'
-    && !!createStep
-    && plannedLogicalDecision === 'create-new'
-    && !constructionRole
-    && !constructionTier
-    && logicalLayer?.construction_change !== true
-    && !logicalLayer?.surface_frame
-    && !logicalLayer?.geometry_binding
-    && !logicalLayer?.parent_hypothesis_id
-    && (!Array.isArray(logicalLayer?.depth_relations) || logicalLayer.depth_relations.length === 0)
-    && mutationSteps.length === 1
-    && text(mutationSteps[0]?.tool) === 'photoshop_fill_layer'
-    && text((mutationSteps[0]?.args as Record<string, unknown> | undefined)?.layer_id)
-      === `$steps.${text(createStep.id)}.details.layerId`;
+  const initialLayerTone = isInitialLayerTone({
+    hasVisualFrame: context.has_visual_frame,
+    actionClass,
+    createStep,
+    logicalDecision: plannedLogicalDecision,
+    constructionRole,
+    constructionTier,
+    logicalLayer,
+    mutationSteps,
+  });
   if (initialLayerTone) {
     normalizations.push({
       code: 'initial_layer_tone_geometry_deferred',
@@ -3048,20 +2803,11 @@ function compileCompactPass(
       }
     }
   }
-  if (broadNontrivialRegionAdd && !constructionRole) {
-    violations.push(violation(
-      'next_operation',
-      'broad_region_construction_role_required',
-      'broad nontrivial region ADD work must declare construction_role before choosing photoshop_paint_regions; use structured-mass for genuine form-bearing closed mass or the applicable continuous/soft/environmental role'
-    ));
-  }
-  if (broadNontrivialRegionAdd && constructionRole && !requestedMaterialRole) {
-    violations.push(violation(
-      'next_operation',
-      'construction_role_material_role_required',
-      `construction_role=${constructionRole} requires next_pass.material_role so the semantic construction is fixed before mechanism selection`
-    ));
-  }
+  violations.push(...collectCompactConstructionRoleViolations({
+    broadNontrivialRegionAdd,
+    constructionRole,
+    requestedMaterialRole,
+  }));
   // Vertex count cannot distinguish legitimate planar construction from a flat
   // pictogram. Geometry validity stays executable; form quality belongs to the
   // ordinary exact-frame review, not a fifth-point preflight workaround.
@@ -3203,52 +2949,14 @@ function compileCompactPass(
   if (methodClass === 'paint' || methodClass === 'preset-brush') {
     const rankedStage = paintingStageRank(stage);
     const materialFitnessRequired = rankedStage !== undefined && rankedStage >= 4 && roles.length > 0;
-    // E.7c: material role is compiler-owned when the durable brush preflight makes
-    // it unambiguous. Filter by the already-resolved visual intent (and an explicit
-    // brush role, when supplied), then derive only when every compatible role names
-    // the same single material. Ambiguous inventories remain fail-closed below.
-    if (materialFitnessRequired && !requestedMaterialRole) {
-      const compatibleRoles = roles.filter(role => {
-        const roleId = text(role.role_id);
-        const intents = Array.isArray(role.visual_intents)
-          ? role.visual_intents.map(value => text(value)?.toLowerCase()).filter(Boolean)
-          : [];
-        return (!explicitBrushRole || roleId === explicitBrushRole)
-          && roleMatchesRequestedScale(role)
-          && (!visualIntent || intents.includes(visualIntent.toLowerCase()));
-      });
-      const compatibleMaterials = [...new Set(compatibleRoles.flatMap(role =>
-        Array.isArray(role.material_roles) ? role.material_roles.map(text).filter(Boolean) as string[] : []
-      ))];
-      const everyCompatibleRoleIsSingleMaterial = compatibleRoles.length > 0
-        && compatibleRoles.every(role => {
-          const materials = Array.isArray(role.material_roles)
-            ? [...new Set(role.material_roles.map(text).filter(Boolean))]
-            : [];
-          return materials.length === 1 && materials[0] === compatibleMaterials[0];
-        });
-      if (compatibleMaterials.length === 1 && everyCompatibleRoleIsSingleMaterial) {
-        requestedMaterialRole = compatibleMaterials[0];
-        normalizations.push({
-          code: 'material_role_normalized',
-          message: `Derived material_role=${requestedMaterialRole} from the unambiguous durable brush preflight.`,
-        });
-      }
-    }
-    if (materialFitnessRequired && !requestedMaterialRole) {
-      violations.push(violation(
-        'next_operation',
-        'brush_material_role_required',
-        `substantial ${stage} brush work requires next_pass.material_role so Guard can match the installed/preflighted brush inventory to the requested material instead of choosing a generic first role`
-      ));
-    }
-    if (materialFitnessRequired && context.brush_inventory_scope === 'filtered') {
-      violations.push(violation(
-        'next_operation',
-        'brush_inventory_scope_insufficient',
-        'substantial form/material/detail brush work requires a full installed-inventory or evidence-bound brush-pack preflight; a filtered familiar-preset lookup is insufficient'
-      ));
-    }
+    // Keep this normalization and both fail-closed gates before candidate selection.
+    const materialPreflight = resolveCompactBrushMaterialPreflight({
+      materialFitnessRequired, requestedMaterialRole, explicitBrushRole, requestedBrushScale,
+      visualIntent, stage, brushInventoryScope: context.brush_inventory_scope, roles,
+    });
+    requestedMaterialRole = materialPreflight.requestedMaterialRole;
+    normalizations.push(...materialPreflight.normalizations);
+    violations.push(...materialPreflight.violations);
 
     const candidates = roles.filter(role => {
       const materials = Array.isArray(role.material_roles) ? role.material_roles.map(text).filter(Boolean) : [];
@@ -3405,20 +3113,11 @@ function compileCompactPass(
       ? text(context.active_problem_scale)
       : undefined,
   });
-  if (requiresLocalInspection && !regionBounds) {
-    violations.push(violation(
-      'next_operation',
-      'compact_local_region_bounds_required',
-      'local/small/subtle visual passes require next_pass.region_bounds so Guard can generate matching BEFORE/AFTER focus previews'
-    ));
-  }
-  if (visualReviewProfile.require_region && !regionBounds && !requiresLocalInspection) {
-    violations.push(violation(
-      'next_operation',
-      'compact_review_region_bounds_required',
-      `${visualReviewProfile.level} visual review requires next_pass.region_bounds in source-document pixels; Guard will not invent a crop center`
-    ));
-  }
+  violations.push(...collectCompactReviewRegionViolations({
+    requiresLocalInspection,
+    hasRegionBounds: !!regionBounds,
+    reviewProfile: visualReviewProfile,
+  }));
   if (regionBounds && visualReviewProfile.require_region) {
     const firstMutationIndex = actions.findIndex(step => VISUAL_MICROPLAN_MUTATION_TOOLS.has(text(step.tool) ?? ''));
     if (firstMutationIndex >= 0) {
