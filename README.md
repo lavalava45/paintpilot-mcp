@@ -30,6 +30,16 @@ The mascot image is not an upstream Photoshop MCP asset and does not represent A
 
 See [`docs/mascot.md`](docs/mascot.md) for the story of the holdout run that produced him.
 
+## See it in action — a 60-second painting process
+
+[![Final frame of a Photoshop painting session showing a seated violinist by a window](assets/showcase/violinist-demo-preview.jpg)](assets/showcase/paintpilot-reddit-violinist-60s.mp4)
+
+**[Watch the 60-second MP4 demo](assets/showcase/paintpilot-reddit-violinist-60s.mp4)** (59.6 s, 1280 × 720, H.264, no audio).
+
+A curated recording of **actual agent-driven Photoshop painting operations**: constructing a seated violinist, the instrument, the room and its lighting, then making local refinements. The video was edited from a longer recorded process; it is **not** a real-time, uninterrupted recording or an independently certified artistic result.
+
+The [showcase and editing notes](docs/showcase.md) explain the source process, the selected segments and the reproducible [FFmpeg/Python montage script](scripts/dev/build-reddit-violinist-demo.py). No generative-video model was used to synthesize the clip.
+
 ## What the project provides
 
 Digital Painting Edition combines broad Photoshop automation with a focused painting and visual-control layer for brush-driven work:

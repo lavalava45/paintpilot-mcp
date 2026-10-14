@@ -1,5 +1,18 @@
 # Changelog
 
+- 2026-10-14 — **Public painting-process showcase video for Reddit/GitHub.**
+  Published an exact copy of the previously produced 59.633-second
+  `paintpilot-reddit-violinist-60s.mp4` under `assets/showcase/`, alongside
+  a thumbnail extracted from that video. Linked the demonstration from the
+  English and Russian READMEs and added bilingual showcase documentation
+  describing the real Photoshop source recording and montage limitations.
+  Preserved the actual Python/FFmpeg 10-segment editing script under
+  `scripts/dev/build-reddit-violinist-demo.py` (only corrected a misleading
+  comment and unused imports). The original 913.6-second session footage,
+  process trace and per-operation clips stay in ignored local `processes/`;
+  this is a curated edit, not a continuous live/Beta acceptance capture.
+
+
 - 2026-10-14 — **Consolidated project source snapshot for GitHub synchronization (not a Beta release).**
   Preserved the two isolated P0 Guard refactoring commits (13 pure helper extractions
   and the separately reviewed `compact-change-domains` admission fix) alongside
