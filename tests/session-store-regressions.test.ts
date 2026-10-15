@@ -66,6 +66,66 @@ describe('Operation journal file persistence contract', () => {
   });
 });
 
+describe('Saved user-config projection contract', () => {
+  it('uses sticky run settings for commentary, leaves language and next-run profile user-configured, and reuses supplied state', () => {
+    const s = store();
+    s.setUserConfig({ language: 'en', commentary_mode: 'technical',
+      commentary_detail: 'short', painting_profile: 'simple_graphic' });
+    const state = s.paintingState();
+    state.documents['42'] = { document_id: 42, process_dir: 'processes/projection/run',
+      language: 'ru', commentary_mode: ' MIXED ', commentary_detail: ' DETAILED ',
+      painting_profile: 'nontrivial_painting' };
+    const read = vi.spyOn(s, 'paintingState').mockImplementation(() => {
+      throw new Error('supplied projection must not read persisted state again');
+    });
+    const resolved = s.userConfig(42, state);
+    expect(read).not.toHaveBeenCalled();
+    expect(resolved).toMatchObject({
+      document_id: 42,
+      configured: { language: 'en', commentary_mode: 'technical', commentary_detail: 'short',
+        painting_profile: 'simple_graphic' },
+      effective: { language: 'en', commentary_mode: 'mixed', commentary_detail: 'detailed',
+        painting_profile: 'simple_graphic' },
+      sources: { language: 'user_config', commentary_mode: 'art_run', commentary_detail: 'art_run',
+        painting_profile: 'user_config' },
+      active_run_painting_profile: 'nontrivial_painting',
+      painting_profile_applies_to: 'next_art_run',
+      warnings: [],
+    });
+    expect(s.presentationContext(42, state)).toMatchObject({
+      protocol: 'photoshop.presentation_context.v1', language: 'en',
+      commentary_mode: 'mixed', commentary_detail: 'detailed',
+      painting_profile_selection: 'simple_graphic',
+      active_run_painting_profile: 'nontrivial_painting',
+    });
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it('ignores invalid sticky run settings without persisting changes or accepting an invalid active profile', () => {
+    const s = store();
+    s.setUserConfig({ language: 'ru', commentary_mode: 'technical',
+      commentary_detail: 'normal', painting_profile: 'simple_graphic' });
+    const state = s.paintingState();
+    state.documents['42'] = { document_id: 42, process_dir: 'processes/projection/run',
+      commentary_mode: 'unsupported', commentary_detail: 123, painting_profile: 'invalid-profile' };
+    const before = readFileSync(s.paintingStateFile());
+    const config = s.userConfig(42, state);
+    expect(config).toMatchObject({
+      effective: { language: 'ru', commentary_mode: 'technical', commentary_detail: 'normal',
+        painting_profile: 'simple_graphic' },
+      sources: { commentary_mode: 'user_config', commentary_detail: 'user_config' },
+      active_run_painting_profile: null,
+      warnings: [
+        'invalid sticky commentary_mode ignored; using user config/default',
+        'invalid sticky commentary_detail ignored; using user config/default',
+      ],
+    });
+    expect(s.userConfig(0, state)).toMatchObject({ document_id: null,
+      active_run_painting_profile: null, warnings: [] });
+    expect(readFileSync(s.paintingStateFile())).toEqual(before);
+  });
+});
+
 describe('E.17 artistic frame commentary', () => {
   it('renders the sidecar without writing a file and matches the SessionStore write boundary exactly', () => {
     const s = store() as any;
