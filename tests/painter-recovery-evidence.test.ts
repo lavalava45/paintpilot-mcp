@@ -198,6 +198,14 @@ describe('identity recovery terminal journal regression', () => {
     expect(f.runtime.store.artRunState(42, undefined)?.current_frame).toBeNull();
     expect(f.preview).not.toHaveBeenCalled();
   });
+  it('allows a bounded recovery projection during explicit same-document confirmation for an established art run', async () => {
+    const f = fixture(); f.restart();
+    const recovered: any = await f.runtime.resumeWithRecovery({ document_id: 42, same_document_confirmed: true, projection: 'recovery' });
+    expect(recovered.identity_recovery).toMatchObject({ status: 'confirmed', frame_sha256: f.sha });
+    expect(recovered.projection).toBe('recovery');
+    expect(JSON.stringify(recovered).length).toBeLessThan(16000);
+    expect(f.runtime.store.artRunState(42, undefined)?.document_instance.identity_pending).toBeUndefined();
+  });
 
   it('does not recover no-frame documents with edited history or prior Guard visual mutations', async () => {
     const edited = fixture(); edited.makePristine(); edited.restart();
@@ -225,7 +233,31 @@ describe('identity recovery terminal journal regression', () => {
     expect(f.preview).toHaveBeenCalledTimes(1);
     expect(abandonedRecords.map(record => readFileSync(f.runtime.store.file(record.id), 'utf8'))).toEqual(before);
   });
-  it.each([undefined, { outcome: 'unknown' }])('keeps genuinely unresolved or malformed-resolution work blocking and exposes its exact identity (%j)', async resolved => {
+  it('can verify same-document identity despite an unresolved selection timeout, while retaining the non-replayable operation barrier', async () => {
+    const f = fixture(); f.restart();
+    f.runtime.store.observeDocumentInstance(42, witness('restarted'));
+    const record = { id: 'brush-timeout', tool: 'photoshop_select_brush_preset', args: { document_id: 42, name: 'Square Charcoal' },
+      phase: 'uncertain', failed: true, sequence: 1, created_at: '2026-10-15T14:28:58.000Z' };
+    f.runtime.store.write(record);
+    const before = readFileSync(f.runtime.store.file(record.id), 'utf8');
+    const recovered: any = await f.runtime.resumeWithRecovery({ document_id: 42, same_document_confirmed: true });
+    expect(recovered.identity_recovery).toMatchObject({ status: 'confirmed', frame_sha256: f.sha });
+    expect(f.runtime.store.artRunState(42)?.document_instance.identity_pending).toBeUndefined();
+    expect(f.runtime.store.read(record.id)).toMatchObject({ phase: 'uncertain' });
+    expect(readFileSync(f.runtime.store.file(record.id), 'utf8')).toBe(before);
+    expect(recovered.uncertain).toContain(record.id);
+    expect(f.preview).toHaveBeenCalledTimes(1);
+  });
+  it('rejects same-document identity recovery with an unresolved selection timeout when preserved pixels do not match', async () => {
+    const f = fixture(); f.restart(); f.runtime.store.observeDocumentInstance(42, witness('restarted'));
+    f.runtime.store.write({ id: 'brush-timeout', tool: 'photoshop_select_brush_preset', args: { document_id: 42 }, phase: 'uncertain', failed: true,
+      sequence: 2, created_at: '2026-10-15T14:28:58.000Z' });
+    f.changePreview();
+    await expect(f.runtime.resumeWithRecovery({ document_id: 42, same_document_confirmed: true })).rejects.toThrow('document_identity_frame_mismatch');
+    expect(f.runtime.store.artRunState(42)?.document_instance.identity_pending).toBeTruthy();
+    expect(f.runtime.store.read('brush-timeout')?.phase).toBe('uncertain');
+  });
+  it.each([undefined, { outcome: 'unknown' }])('keeps genuinely unresolved work quarantined while permitting independent document identity verification (%j)', async resolved => {
     const f = fixture(); f.restart();
     f.runtime.store.observeDocumentInstance(42, witness('restarted'));
     const record = { id: 'real-unresolved', tool: 'photoshop_set_layer_opacity', args: { document_id: 42, opacity: 50 },
@@ -235,21 +267,19 @@ describe('identity recovery terminal journal regression', () => {
     expect(status.uncertain).toContain('real-unresolved');
     expect(status.identity_recovery_blockers).toEqual([expect.objectContaining({ kind: 'operation', operation_id: 'real-unresolved', document_id: 42 })]);
     const resume = createGuardTools(f.runtime).find(tool => tool.tool.name === 'photoshop_guard_resume')!;
-    const response = await resume.handler({ document_id: 42, same_document_confirmed: true });
-    const failure: any = JSON.parse((response.content[0] as any).text);
-    expect(failure).toMatchObject({ code: 'document_identity_recovery_busy', mutation_replay_permitted: false,
-      identity_recovery_blockers: status.identity_recovery_blockers,
-      next_public_call: { tool: 'photoshop_guard_reconcile', args: { id: 'real-unresolved', capture_evidence: true } } });
     const subset: any = await f.runtime.resumeWithRecovery({ document_id: 42, projection: 'recovery' });
     expect(subset).toMatchObject({ mutation_allowed: false, resume_mode: 'identity_unverified', identity_recovery_blockers: status.identity_recovery_blockers });
-    expect(subset.next_public_call).toEqual(failure.next_public_call);
+    expect(subset.next_public_call).toEqual({ tool: 'photoshop_guard_resume', args: { document_id: 42, same_document_confirmed: true } });
     const ownership: any = await f.runtime.resumeWithRecovery({ document_id: 42, projection: 'ownership', owner_id: 'road' });
-    expect(ownership.next_public_call).toEqual(failure.next_public_call);
+    expect(ownership.next_public_call).toEqual(subset.next_public_call);
     expect(ownership.identity_recovery_blockers).toEqual(status.identity_recovery_blockers);
     expect(subset.document.next_required_action).toBe(subset.next_required_action);
-    expect(subset.next_required_action).not.toContain('same_document_confirmed=true');
-    expect(f.preview).not.toHaveBeenCalled();
-    expect(f.runtime.store.artRunState(42, undefined)?.document_instance.identity_pending).toBeTruthy();
+    const response = await resume.handler({ document_id: 42, same_document_confirmed: true });
+    const result: any = JSON.parse((response.content[0] as any).text);
+    expect(result.identity_recovery).toMatchObject({ status: 'confirmed', frame_sha256: f.sha });
+    expect(result.uncertain).toContain('real-unresolved');
+    expect(f.preview).toHaveBeenCalledTimes(1);
+    expect(f.runtime.store.artRunState(42, undefined)?.document_instance.identity_pending).toBeUndefined();
   });
   it('retains the global active-job guard and names the job to poll before identity confirmation', async () => {
     const f = fixture(); f.restart(); f.runtime.store.observeDocumentInstance(42, witness('restarted'));

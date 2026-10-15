@@ -60,4 +60,12 @@ describe('commentary mode content contract', () => {
     expect(text).toContain('Use presentation_context.language');
     expect(text).not.toContain('Artist voice is natural Russian');
   });
+  it('replans an unverified optional named preset as a separately verified generic BRUSH method', () => {
+    const guide = paintingGuideText();
+    expect(guide).toContain('preset_verification.source=unavailable');
+    expect(guide).toContain('hard-brush-line');
+    expect(guide).toContain('photoshop_set_brush');
+    expect(guide).toContain('photoshop_paint_strokes');
+    expect(guide).toContain('required exact preset');
+  });
 });

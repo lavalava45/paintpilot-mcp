@@ -113,6 +113,21 @@ it('adds a lamp to the same durable plan but forbids remapping, deletion, owner 
   expect(before.units).toHaveLength(2);
 });
 
+it('replans an existing single-part object into separately owned components without replacing its layer', () => {
+  const before = normalizeSceneOwnershipPlan({ plan_id: 'station', units: [unit('train-body')],
+    objects: [{ object_id: 'train', kind: 'single-part', subject_kind: 'single-component',
+      component_semantic_ids: ['train-body'] }] });
+  const delta = { units: [unit('train-window')], objects: [{ object_id: 'train',
+    kind: 'compound-object', subject_kind: 'custom-compound',
+    component_semantic_ids: ['train-body', 'train-window'] }] };
+  const replanned = completeSceneOwnershipContinuation(before, delta);
+  expect(extendSceneOwnershipPlan(before, replanned)).toEqual(replanned);
+  expect(replanned.units.find(row => row.semantic_id === 'train-body')).toEqual(before.units[0]);
+  expect(() => extendSceneOwnershipPlan(before, normalizeSceneOwnershipPlan({ ...replanned,
+    units: replanned.units.map(row => row.semantic_id === 'train-window'
+      ? { ...row, owner_id: 'train-body' } : row) }))).toThrow();
+});
+
 it('completes a sparse next-pass ownership extension without rewriting any durable component', () => {
   const before = normalizeSceneOwnershipPlan({ plan_id: 'mykonos',
     units: [unit('left-wall'), unit('right-wall')],
@@ -179,6 +194,31 @@ it('uses durable ownership completion at the actual Guard next_pass compiler bou
   expect(cycle.normalizations.map(n => n.code)).toContain('scene_ownership_continuation_completed');
   expect(cycle.violations.filter(v => v.code.startsWith('scene_ownership'))).toEqual([]);
   expect(cycle.violations, JSON.stringify(cycle.violations)).toEqual([]);
+  expect(dispatched).toBe(0);
+
+  const firstPart = normalizeSceneOwnershipPlan({ plan_id: 'station', units: [unit('train-body')],
+    objects: [{ object_id: 'train', kind: 'single-part', subject_kind: 'single-component',
+      component_semantic_ids: ['train-body'] }] });
+  const replannedCycle = await compileGuardCycle({ next_pass: {
+    ...({ request_key: 'train-window', problem_id: 'train-window', document_id: 42,
+      goal: 'Add a separately editable train window', stage: 'GLOBAL_BLOCK_IN', scale: 'global' }),
+    scene_ownership_plan: { units: [unit('train-window')], objects: [{ object_id: 'train',
+      kind: 'compound-object', subject_kind: 'custom-compound',
+      component_semantic_ids: ['train-body', 'train-window'] }] },
+    logical_layer: { decision: 'create-new', hypothesis_id: 'train-window',
+      hypothesis: 'Independent window', rollback_value: 'moderate',
+      expected_independent_rollback: true, layer_name: 'Train window' },
+    layer_separation_check: { change_kind: 'new-object', substantial: true,
+      rollback_value: 'moderate', independent_adjustment_expected: true },
+    actions: [{ id: 'window-layer', tool: 'photoshop_create_layer', args: { name: 'Train window' } },
+      { id: 'window-paint', tool: 'photoshop_paint_regions', args: { regions: [{
+        id: 'window', layer_id: '$steps.window-layer.details.layerId',
+        color: { red: 10, green: 100, blue: 210 },
+        contours: [{ points: [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 50 }] }],
+      }] } }],
+  } }, { ...store, compactPassContext: () => ({ painting_profile: 'simple_graphic',
+    scene_ownership_plan: firstPart, logical_layer_owners: [], stage: 'GLOBAL_BLOCK_IN', has_visual_frame: true }) }, registry);
+  expect(replannedCycle.violations.filter(v => v.code.startsWith('scene_ownership'))).toEqual([]);
   expect(dispatched).toBe(0);
 });
 

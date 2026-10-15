@@ -132,3 +132,60 @@ export function artisticContinuation(state: any, lastRecord?: any): string | und
       : 'the largest unresolved form/proportion/light defect'
   }. Repeated primitive form needs reconstruction, not more accents. Preserve intermediate saves; stop only for an explicit user pause/stop or a concrete blocker. Never claim whole-image completion from a save receipt.`;
 }
+
+/**
+ * Read-only, document-scoped completion signal for MCP hosts. A transport
+ * success, completed local pass, PSD save or stopped cadence is not approval to
+ * claim that the original painting brief is finished. This projection consumes
+ * existing Guard evidence; it never invents an independent completion ledger.
+ */
+export function wholeBriefCompletionContract(state: any, guardAction: string) {
+  const reasons = documentArtisticDebt(state);
+  const brief = typeof state?.original_brief === 'string' ? state.original_brief : '';
+  const briefSha = brief.trim() ? createHash('sha256').update(brief).digest('hex') : null;
+  const frameSha = typeof state?.current_frame?.sha256 === 'string' ? state.current_frame.sha256 : null;
+  const review = state?.painting_completion;
+  if (!state?.process_dir) reasons.push('art_run_missing');
+  if (!briefSha) reasons.push('original_brief_missing');
+  if (!frameSha) reasons.push('current_frame_missing');
+  if (frameSha && state?.current_frame?.accepted !== true)
+    reasons.push('current_frame_not_accepted');
+  if (briefSha && frameSha && (!review || review.scope !== 'whole-brief'
+    || review.frame_sha256 !== frameSha || review.brief_sha256 !== briefSha))
+    reasons.push('whole_brief_review_required');
+  else if (review && COMPLETION_CRITERIA.some(key => review.criteria?.[key] !== 'pass'))
+    reasons.push('whole_brief_criteria_unmet');
+
+  const uniqueReasons = [...new Set(reasons)];
+  const guardPending = guardAction !== 'ready'
+    && !(/^Art Director directive .+ completed; issue the next directive or end the painting stage$/.test(guardAction));
+  if (guardPending) uniqueReasons.push('guard_action_pending');
+  if (state?.document_instance?.identity_pending) uniqueReasons.push('document_identity_unverified');
+  const blocked = state?.document_instance?.identity_pending === true
+    || /\b(reconcile|uncertain|rollback|poll|recovery|identity|not-executed)\b/i.test(guardAction);
+  const allowed = uniqueReasons.length === 0;
+  const nextAction = guardPending ? guardAction
+    : uniqueReasons.includes('art_run_missing') || uniqueReasons.includes('original_brief_missing')
+      ? 'Bind the existing document art run and unchanged original user brief with photoshop_guard_set_art_run; no Photoshop pixel mutation is needed.'
+      : artisticContinuation(state)
+          ?? (uniqueReasons.includes('whole_brief_review_required')
+            ? 'Review the exact current whole frame against original_brief; record painting_completion with all six honest criteria in the existing Guard review. No new painting mutation is required for review metadata alone.'
+            : uniqueReasons.length ? 'Resolve the listed whole-brief completion debts in a bounded reviewed pass, or report the concrete blocker without claiming completion.'
+              : 'Whole-brief completion is confirmed for the current frame; no further painting is required.');
+  return {
+    protocol: 'paintpilot.whole-brief-completion.v1',
+    status: allowed ? 'completed' : blocked ? 'blocked' : 'incomplete',
+    completion_allowed: allowed,
+    evidence: {
+      brief_sha256: briefSha,
+      current_frame_sha256: frameSha,
+      review_frame_sha256: typeof review?.frame_sha256 === 'string' ? review.frame_sha256 : null,
+      review_kind: 'painter_self_assessment',
+    },
+    reasons: uniqueReasons,
+    next_required_action: nextAction,
+    host_turn_policy: allowed
+      ? 'The artist may report the whole brief complete, limited to the current reviewed frame.'
+      : 'Do not report the whole painting finished. Continue via the existing host Goal if enabled, or state the exact pending work/blocker. Never retry an uncertain mutation or override user Stop.',
+  };
+}

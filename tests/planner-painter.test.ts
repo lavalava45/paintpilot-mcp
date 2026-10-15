@@ -755,6 +755,9 @@ describe('Art Director / Painter controller contract', () => {
       source_operations: ['trend-local-1', 'trend-local-2'],
     });
     expect(problem.supporting_regions).toHaveLength(2);
+    expect(promoted.cumulative_trend_guard).toMatchObject({
+      strategy_switch_required: true, state: 'strategy_switch_required',
+    });
     expect(promoted.active_problem.problem_id).toBe(problem.problem_id);
     expect((s as any).largestOpenMustFix(promoted.visual_problems)).toMatchObject({
       problem_id: problem.problem_id,
@@ -773,6 +776,63 @@ describe('Art Director / Painter controller contract', () => {
         problem_id: 'background-tone',
       },
     }))).toBeNull();
+  });
+
+  it('does not demand method switching from two visibly improving footprint-suspect passes', () => {
+    const s = store();
+    seedTrendSignal(s, 'improving-primitive-1', 1);
+    seedTrendSignal(s, 'improving-primitive-2', 2);
+    for (const id of ['improving-primitive-1', 'improving-primitive-2']) {
+      const record = s.read(id)!;
+      record.verdict.verdict = 'improvement';
+      record.verdict.target_resolved = 'yes';
+      s.write(record);
+    }
+    const trend = (s as any).cumulativeTrendState(42);
+    expect(trend.triggered).toBe(false);
+    const promoted = (s as any).promoteCumulativeTrendProblem(42,
+      s.paintingState().documents['42'] ?? {}, trend);
+    expect(promoted.visual_problems?.['cumulative-trend-primitive-footprint-repeating']).toBeUndefined();
+  });
+
+  it('does not globalize a completed simple moon with an unfinished animal torso', () => {
+    const s = store();
+    seedTrendSignal(s, 'moon-complete', 1, {
+      region: 'moon', bounds: { left: 800, top: 145, right: 1015, bottom: 365 },
+    });
+    seedTrendSignal(s, 'torso-unresolved', 2, {
+      region: 'torso', bounds: { left: 245, top: 756, right: 706, bottom: 1125 },
+    });
+    const moon = s.read('moon-complete')!;
+    moon.verdict.disposition = 'accept';
+    moon.verdict.target_resolved = 'yes';
+    s.write(moon);
+    const trend = (s as any).cumulativeTrendState(42);
+    expect(trend.repeated_signals.find((item: any) => item.signal === 'primitive-footprint-repeating')).toBeUndefined();
+    expect(trend.triggered).toBe(false);
+  });
+
+  it('retains explicit signal-bound Critic defects even when bounded operations were accepted', () => {
+    const s = store();
+    seedTrendSignal(s, 'critic-moon', 1, {
+      bounds: { left: 800, top: 145, right: 1015, bottom: 365 },
+      findingTrendSignals: ['primitive-footprint-repeating'], region: 'moon',
+    });
+    seedTrendSignal(s, 'critic-torso', 2, {
+      bounds: { left: 245, top: 756, right: 706, bottom: 1125 },
+      findingTrendSignals: ['primitive-footprint-repeating'], region: 'torso',
+    });
+    for (const id of ['critic-moon', 'critic-torso']) {
+      const record = s.read(id)!;
+      record.verdict.disposition = 'accept';
+      record.verdict.target_resolved = 'yes';
+      s.write(record);
+    }
+    const trend = (s as any).cumulativeTrendState(42);
+    expect(trend.repeated_signals.find((item: any) => item.signal === 'primitive-footprint-repeating')?.count).toBe(2);
+    const promoted = (s as any).promoteCumulativeTrendProblem(42,
+      s.paintingState().documents['42'] ?? {}, trend);
+    expect(promoted.visual_problems['cumulative-trend-primitive-footprint-repeating'].scale).toBe('global');
   });
 
   it('schedules one dependency-aware primary blocker while retaining the rest as backlog', () => {
@@ -3105,14 +3165,16 @@ describe('bounded correction of a global priority defect', () => {
     const req = painterRequest({
       problem_id: 'left-part-rebuild', strategy_family: 'structural-rebuild',
       args: { problem_id: 'left-part-rebuild', addresses_problem_id: cumulativeId,
-        region_bounds: region, change_domains: ['depth-structure'] },
+        region_bounds: region, change_domains: ['depth-structure'],
+        steps: [{ tool: 'photoshop_paint_strokes', args: { strokes: [{
+          points: [{ x: 60, y: 120 }, { x: 120, y: 200 }] }] } }] },
     });
     req.args.planner_directive_id = director.directive_id;
     expect(() => s.plannerGate(42, req)).not.toThrow();
     expect(s.priorityGate(42, req)).toBeNull();
     expect(s.paintingState().documents['42'].visual_problems[cumulativeId].status).toBe('open');
     req.args.region_bounds = { ...region, right: 450 };
-    expect(() => s.priorityGate(42, req)).toThrow(/stage_priority_gate/);
+    expect(() => s.priorityGate(42, req)).toThrow(/strategy_switch_required.*bounded/);
     req.args.region_bounds = region;
     req.args.change_domains = ['local-tone'];
     expect(() => s.priorityGate(42, req)).toThrow(/stage_priority_gate/);

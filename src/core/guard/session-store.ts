@@ -8,7 +8,7 @@ import { criticObligationState } from './critic-obligations.js';
 import { editableScopeRequest, validateEditableScopeReview, persistEditableScopeReview, editableOwnerScopeIssue } from './editable-scope.js';
 import { normalizeBrushAllowedScales } from './brush-scale-fit.js';
 import { brushUseKey, boundedBrushTrial } from './brush-role-extension.js';
-import { artisticContinuation, documentArtisticDebt, bindPaintingCompletion } from './document-artistic-debt.js';
+import { artisticContinuation, documentArtisticDebt, bindPaintingCompletion, wholeBriefCompletionContract } from './document-artistic-debt.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
@@ -1876,6 +1876,9 @@ function trendSupportForRecord(record, signal) {
   const representativeRegion = unionTrendRegions(reviewRegions) ?? operationRegion;
   return {
     operation_id: record.id,
+    ineffective: record.verdict?.significance?.execution_effect === 'insufficient'
+      || record.verdict?.verdict === 'neutral'
+      || record.verdict?.verdict === 'regression',
     sequence: Number.isSafeInteger(record.sequence) ? record.sequence : 0,
     verdict_at: record.verdict?.at ?? null,
     evidence_identity: fingerprint({
@@ -3077,6 +3080,10 @@ export class SessionStore {
     const pending = bindings.filter(b => !b.constructed || b.needs_rebuild);
     if (pending.length) return `Continue next_pass.construction for pending components: ${pending.slice(0,8).map(b => `${b.model_id}@${b.revision}/${b.owner_id}`).join(', ')}. A saved file does not close stale/unconstructed geometry; inspect each delivered component.`;
     return artisticContinuation(state) ?? technical;
+  }
+  wholeBriefCompletion(documentId, projectionContext) {
+    const state = (projectionContext?.paintingState ?? this.paintingState()).documents?.[String(documentId)];
+    return wholeBriefCompletionContract(state, this.closeOnlyNextRequiredAction(documentId, projectionContext));
   }
   assertProjectSavePath(documentId, file) {
     const projectDir = this.projectDirectory(documentId);
@@ -5399,6 +5406,76 @@ export class SessionStore {
     if (!projectionContext && rawDoc && JSON.stringify(reconciledDoc) !== JSON.stringify(rawDoc)) {
       doc = this.updatePaintingState(documentId, () => reconciledDoc) ?? reconciledDoc;
     }
+    // A repeated, reviewed primitive-footprint defect is a behavioral gate,
+    // not just advisory debt. Reject further polygon passes even when their
+    // colors, number of contours, strategy labels or problem IDs change.
+    const primitiveDebt = doc?.visual_problems?.['cumulative-trend-primitive-footprint-repeating'];
+    const footprintRelated = context.problem_id === primitiveDebt?.problem_id
+      || context.addresses_problem_ids.includes(primitiveDebt?.problem_id)
+      || (primitiveDebt?.region && context.region === primitiveDebt.region)
+      || primitiveDebt?.scale === 'global';
+    if (primitiveDebt?.status === 'open' && primitiveDebt.strategy_switch_required === true
+      && footprintRelated && context.stage !== 'GLOBAL_BLOCK_IN') {
+      const steps = request.tool === 'photoshop_execute_visual_microplan'
+        ? request.args?.steps : [{ tool: request.tool, args: request.args }];
+      const paintTools = Array.isArray(steps)
+        ? steps.filter(step => /^photoshop_(paint_|fill_|draw_)/.test(step?.tool ?? ''))
+        : [];
+      const hasPolygon = paintTools.some(step => step.tool === 'photoshop_paint_regions');
+      if (hasPolygon || !paintTools.length) {
+        throw new Error('strategy_switch_required: repeated primitive-footprint-repeating after two reviewed passes; further polygon/fill-based work is blocked. Obtain Art Director review and test a causally different executable painting method in the selected Photoshop profile; changing color, polygon counts or strategy labels is not a method switch.');
+      }
+      const director = doc.art_director;
+      const task = director?.tasks?.find(row => row.task_id === context.planner_task_id);
+      if (!task || task.status !== 'active' || !task.correction_target
+        || task.correction_target.problem_id !== primitiveDebt.problem_id
+        || !task.construction_plan?.representation_strategy) {
+        throw new Error('strategy_switch_required: Art Director must review the repeated footprint defect and authorize an explicitly bounded alternative method before its experimental pass.');
+      }
+      const sourceIds = new Set(primitiveDebt.source_operations ?? []);
+      const sourceSequence = Math.max(0, ...lineageRecords
+        .filter(record => sourceIds.has(record.id))
+        .map(record => Number(record.sequence) || 0));
+      const experiments = sourceIds.size ? lineageRecords.filter(record => record.visual && record.verdict
+        && Number(record.sequence) > sourceSequence
+        && (record.problem_id === primitiveDebt.problem_id
+          || requestProblemLinks(record).includes(primitiveDebt.problem_id))
+        && this.recordHasCurrentFrameAuthority(record, doc, lineageRecords)) : [];
+      const lastExperiment = experiments.at(-1);
+      const methodFamily = record => {
+        const actions = record.tool === 'photoshop_execute_visual_microplan'
+          ? record.args?.steps : [{ tool: record.tool }];
+        return Array.isArray(actions)
+          ? [...new Set(actions.filter(step => /^photoshop_(paint_|fill_|draw_)/.test(step?.tool ?? ''))
+            .map(step => step.tool))].sort().join('|') : '';
+      };
+      const proposedFamily = [...new Set(paintTools.map(step => step.tool))].sort().join('|');
+      const acceptedExperiment = lastExperiment?.verdict?.verdict === 'improvement'
+        && lastExperiment?.verdict?.disposition === 'accept';
+      if (acceptedExperiment && methodFamily(lastExperiment) !== proposedFamily) {
+        throw new Error('strategy_switch_required: the accepted experiment proves only its executed method, not a new untested tool family.');
+      }
+      if (lastExperiment && !acceptedExperiment) {
+        const previousContext = visualContext(lastExperiment);
+        if (methodFamily(lastExperiment) === proposedFamily
+          || !context.planner_directive_id
+          || context.planner_directive_id === previousContext.planner_directive_id
+          || context.planner_task_id === previousContext.planner_task_id) {
+          throw new Error('strategy_switch_required: experiment showed no accepted improvement; Art Director must authorize a new task and different executable method.');
+        }
+      }
+      // After an accepted visual experiment the verified family may continue;
+      // every unverified alternative must begin in a bounded correction crop.
+      if (!acceptedExperiment) {
+        const experimentBounds = operationTrendRegion(request);
+        if (!experimentBounds || !['medium', 'small'].includes(context.scale)
+          || !task.correction_target.region_bounds
+          || !regionContains(task.correction_target.region_bounds, experimentBounds)
+          || boundedCorrectionMutationIssue(request, experimentBounds)) {
+          throw new Error('strategy_switch_required: a bounded medium/small experiment with actual brush coordinates inside the Director correction target is required before further painting.');
+        }
+      }
+    }
     const obligations = criticObligationState(doc);
     const attempted = obligations.find(row => row.status !== 'pass' &&
       (context.problem_id === row.id || context.addresses_problem_ids.includes(row.id)));
@@ -5464,6 +5541,14 @@ export class SessionStore {
       if (record.verdict?.global_readability === 'degraded') signals.add('global-readability-degraded');
       if (record.verdict?.primitive_footprint === 'suspect') signals.add('primitive-footprint-repeating');
       for (const signal of signals) {
+        // A primitive-shaped element that passed its bounded visual objective
+        // is not evidence of an unresolved *artistic* primitive-footprint
+        // trend. Do not discard a genuinely negative, signal-bound Critic
+        // finding merely because the operation was otherwise accepted.
+        if (signal === 'primitive-footprint-repeating'
+          && record.verdict?.target_resolved === 'yes'
+          && (record.verdict?.disposition === 'accept' || record.verdict?.verdict === 'improvement')
+          && !trendFindingRegions(record, signal).length) continue;
         const problemId = `cumulative-trend-${signal}`.slice(0, 80);
         const cutoff = Number(documentState?.visual_problems?.[problemId]?.resolution_cutoff_sequence ?? 0);
         const sequence = Number.isSafeInteger(record.sequence) ? record.sequence : 0;
@@ -5505,6 +5590,8 @@ export class SessionStore {
         cumulative_trend_guard: {
           ...trendState,
           triggered: false,
+          strategy_switch_required: false,
+          state: 'inactive',
           suppressed_by_resolution_epoch: Number(existing?.resolution_epoch ?? 0),
           resolution_cutoff_sequence: cutoff,
         },
@@ -5524,6 +5611,8 @@ export class SessionStore {
       signal,
       evidence_identity: support.evidence_identity,
     }));
+    const strategySwitchRequired = signal === 'primitive-footprint-repeating'
+      && supports.filter(support => support.ineffective === true).length >= 2;
     problems[problemId] = {
       ...(existing ?? {}),
       problem_id: problemId,
@@ -5534,6 +5623,7 @@ export class SessionStore {
       hypothesis: `Repeated visual trend detected across classified passes: ${signal}. Resolve the evidence-supported ${scope.scale} defect before dependent finer work.`,
       trend_signal: signal,
       trend_count: supports.length,
+      strategy_switch_required: strategySwitchRequired,
       source_operations: supports.map(support => support.operation_id),
       supporting_regions: supportingRegions,
       supporting_evidence: supportingEvidence,
@@ -5548,6 +5638,8 @@ export class SessionStore {
       priority_review_required: true,
       cumulative_trend_guard: {
         triggered: true,
+        strategy_switch_required: strategySwitchRequired,
+        state: strategySwitchRequired ? 'strategy_switch_required' : 'inactive',
         problem_id: problemId,
         signal,
         count: supports.length,
@@ -10012,6 +10104,9 @@ export class SessionStore {
       cumulative_trend_guard: {
         ...(current.cumulative_trend_guard ?? {}),
         triggered: !!survivingTrendProblem,
+        strategy_switch_required: survivingTrendProblem?.trend_signal === 'primitive-footprint-repeating',
+        state: survivingTrendProblem?.trend_signal === 'primitive-footprint-repeating'
+          ? 'strategy_switch_required' : 'inactive',
         ...(survivingTrendProblem ? {
           problem_id: survivingTrendProblem.problem_id,
           signal: survivingTrendProblem.trend_signal,
@@ -12193,6 +12288,7 @@ export class SessionStore {
         visual_cadence: cadence,
         continuation_watch: continuationWatch,
         resolved_visual_problems: metrics.resolved_visual_problems,
+        whole_brief_completion: this.wholeBriefCompletion(id, projectionContext),
         next_required_action: this.documentNextRequiredAction(id, all, projectionContext),
       }];
     }));

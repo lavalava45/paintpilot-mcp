@@ -17,6 +17,8 @@ it('bounds UTF-8 status without losing exact review, recovery, checkpoint or act
   const dir = fixture();
   const binding = { hypothesis_id: 'mug', layer_id: 7, geometry_binding: { owner_id: 'mug', revision: 8 } };
   const doc = { document_id: 42, current_frame: { operation_id: 'paint', sha256: 'exact', path: 'frame.jpg' },
+    whole_brief_completion: { protocol: 'paintpilot.whole-brief-completion.v1', status: 'incomplete',
+      completion_allowed: false, reasons: ['whole_brief_review_required'], next_required_action: 'Review exact current frame' },
     accepted_frame: { operation_id: 'before', sha256: 'before-exact' }, visual_barrier: { operation_id: 'paint' },
     checkpoint_due_before_next_visual_mutation: true, active_problem: 'mug', logical_layer_owners: [binding],
     next_required_action: 'Review paint', scene_geometry_model: { rationale: 'геометрия'.repeat(20_000) } };

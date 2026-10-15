@@ -20,6 +20,7 @@ import {
   bindPaintingCompletion,
   COMPLETION_CRITERIA,
   artisticContinuation,
+  wholeBriefCompletionContract,
 } from '../src/core/guard/document-artistic-debt.js';
 import { SessionStore } from '../src/core/guard/session-store.js';
 import {
@@ -528,6 +529,54 @@ it('requires current whole-brief assessment, independent of local success and sa
     'six public criteria'
   );
   expect(() => bindPaintingCompletion(review, {}, 'frame-1')).toThrow('original_brief');
+});
+
+it('publishes a fail-closed whole-brief completion decision across saves, false finish, recovery and Stop', () => {
+  const state: any = {
+    process_dir: 'processes/castle-process/study',
+    construction_policy: 'enforced',
+    original_brief: 'A detailed castle in fog with coherent lighting and independently editable roofs',
+    current_frame: { sha256: 'frame-1', accepted: true },
+    last_critique: { target_resolved: 'yes' },
+    workflow_lifecycle: { status: 'stopped', reason: 'close_only_finalization' },
+  };
+  const unfinished = wholeBriefCompletionContract(state, 'ready');
+  expect(unfinished).toMatchObject({
+    protocol: 'paintpilot.whole-brief-completion.v1',
+    status: 'incomplete', completion_allowed: false,
+    reasons: expect.arrayContaining(['whole_brief_review_required']),
+  });
+  expect(unfinished.host_turn_policy).toContain('Do not report');
+
+  state.painting_completion = bindPaintingCompletion({
+    scope: 'whole-brief', summary: 'Whole scene inspected against the original request',
+    criteria: Object.fromEntries(COMPLETION_CRITERIA.map(key => [key, 'pass'])),
+  }, state, 'frame-1');
+  expect(wholeBriefCompletionContract(state, 'ready')).toMatchObject({
+    status: 'completed', completion_allowed: true, reasons: [],
+  });
+  // A save/technical closure is not a second artistic acceptance.
+  state.workflow_lifecycle.reason = 'close_only_save';
+  expect(wholeBriefCompletionContract(state, 'ready').completion_allowed).toBe(true);
+  state.current_frame.sha256 = 'frame-2';
+  expect(wholeBriefCompletionContract(state, 'ready')).toMatchObject({
+    status: 'incomplete', completion_allowed: false,
+    reasons: expect.arrayContaining(['whole_brief_review_required']),
+  });
+  state.current_frame.sha256 = 'frame-1';
+  state.painting_completion.criteria.form_proportions = 'unknown';
+  expect(wholeBriefCompletionContract(state, 'ready').reasons).toContain('whole_brief_criteria_unmet');
+  state.painting_completion.criteria.form_proportions = 'pass';
+  expect(wholeBriefCompletionContract(state, 'reconcile uncertain operation op-7')).toMatchObject({
+    status: 'blocked', completion_allowed: false,
+    reasons: expect.arrayContaining(['guard_action_pending']),
+    next_required_action: 'reconcile uncertain operation op-7',
+  });
+  // A user-authorized Stop is not evidence of completion; the host may honor
+  // Stop without presenting an unfinished painting as finished.
+  state.workflow_lifecycle.reason = 'user_stop';
+  state.painting_completion = undefined;
+  expect(wholeBriefCompletionContract(state, 'ready').completion_allowed).toBe(false);
 });
 
 it('adds whole-brief assessment after save without repainting or overwriting the last verdict', () => {

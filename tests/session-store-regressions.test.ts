@@ -4233,6 +4233,79 @@ describe('Guard session-store regressions', () => {
     expect(s.paintingState().documents['42'].visual_problems[problem.problem_id].status).toBe('open');
   });
 
+  it('requires a real method switch after repeated primitive footprint; renaming or recoloring polygons is not a switch', () => {
+    const s = store() as any;
+    const problem = { problem_id: 'cumulative-trend-primitive-footprint-repeating',
+      trend_signal: 'primitive-footprint-repeating', trend_count: 2,
+      strategy_switch_required: true,
+      scale: 'global', severity: 'must-fix', status: 'open' };
+    s.reconcileTrendEvidenceToCurrentFrame = (doc: unknown) => doc;
+    s.reconcileDerivedProblemEvidenceToCurrentFrame = (doc: unknown) => doc;
+    s.updatePaintingState(42, state => ({ ...state, painting_profile: 'simple_graphic',
+      visual_problems: { [problem.problem_id]: problem },
+      cumulative_trend_guard: { triggered: true, signal: 'primitive-footprint-repeating', count: 2 },
+      art_director: { status: 'active', current_task_id: 'switch',
+        tasks: [{ task_id: 'switch', status: 'active',
+          construction_plan: { representation_strategy: 'Now call these polygons brushwork' } }] },
+    }));
+    const request = (stage: string, steps: object[]) => ({
+      tool: 'photoshop_execute_visual_microplan', document_id: 42, stage, scale: 'global',
+      problem_id: problem.problem_id, addresses_problem_ids: [problem.problem_id],
+      args: { steps },
+    });
+    const polygon = { tool: 'photoshop_paint_regions', args: { regions: [{ color: '#ff0000' }] } };
+    for (let i = 0; i < 5; i++) expect(() => s.priorityGate(42,
+      request('REFINEMENT', [{ ...polygon, args: { regions: [{ color: `#ff00${i}0` }] } }]))).toThrow(/strategy_switch_required/);
+    expect(() => s.priorityGate(42, request('GLOBAL_BLOCK_IN', [polygon]))).not.toThrow(/strategy_switch_required/);
+    const brush = { tool: 'photoshop_paint_strokes', args: { strokes: [{ points: [{ x: 1, y: 1 }, { x: 10, y: 10 }] }] } };
+    expect(() => s.priorityGate(42, request('REFINEMENT', [brush]))).toThrow(/strategy_switch_required: Art Director/);
+    s.updatePaintingState(42, state => ({ ...state, art_director: {
+      ...state.art_director, tasks: [{ task_id: 'switch', status: 'active',
+        correction_target: { problem_id: problem.problem_id,
+          region_bounds: { left: 0, top: 0, right: 50, bottom: 50 } },
+        construction_plan: { representation_strategy: 'Test organic brush strokes instead of polygons' } }],
+    } }));
+    const experimentalBrush = { ...request('REFINEMENT', [brush]), planner_task_id: 'switch', scale: 'medium',
+      region_bounds: { left: 0, top: 0, right: 50, bottom: 50 } };
+    expect(() => s.priorityGate(42, experimentalBrush)).not.toThrow(/strategy_switch_required/);
+    expect(s.paintingState().documents['42'].painting_profile).toBe('simple_graphic');
+    const unbounded = { ...experimentalBrush, region_bounds: undefined };
+    expect(() => s.priorityGate(42, unbounded)).toThrow(/strategy_switch_required.*bounded/i);
+    const failedTrial = { id: 'brush-trial', document_id: 42, sequence: 3,
+      tool: 'photoshop_execute_visual_microplan', problem_id: problem.problem_id,
+      args: { steps: [brush], planner_task_id: 'switch' }, visual: true,
+      preview: { sha256: 'brush-trial-frame' }, verdict: { verdict: 'neutral', disposition: 'accept' } };
+    s.updatePaintingState(42, current => ({ ...current, visual_problems: {
+      [problem.problem_id]: { ...problem, source_operations: ['failed-1', 'failed-2'] },
+    } }));
+    s.records = () => [
+      { id: 'failed-1', sequence: 1, visual: true },
+      { id: 'failed-2', sequence: 2, visual: true }, failedTrial,
+    ];
+    s.recordHasCurrentFrameAuthority = () => true;
+    expect(() => s.priorityGate(42, experimentalBrush)).toThrow(/strategy_switch_required.*experiment.*improv/i);
+    const alternate = { tool: 'photoshop_paint_dabs', args: { dabs: [{ x: 5, y: 5 }] } };
+    s.updatePaintingState(42, current => ({ ...current, art_director: {
+      ...current.art_director, tasks: [{ task_id: 'switch-2', status: 'active',
+        correction_target: { problem_id: problem.problem_id,
+          region_bounds: { left: 0, top: 0, right: 50, bottom: 50 } },
+        construction_plan: { representation_strategy: 'Replace linear brushwork with textured brush dabs' } }],
+    } }));
+    const alternateExperiment = { ...experimentalBrush, planner_task_id: 'switch-2',
+      planner_directive_id: 'review-after-failed-experiment', args: { steps: [alternate] } };
+    expect(() => s.priorityGate(42, alternateExperiment)).not.toThrow(/strategy_switch_required/);
+    s.updatePaintingState(42, current => ({ ...current, art_director: {
+      ...current.art_director, tasks: [{ task_id: 'switch', status: 'active',
+        correction_target: { problem_id: problem.problem_id,
+          region_bounds: { left: 0, top: 0, right: 50, bottom: 50 } },
+        construction_plan: { representation_strategy: 'Organic brush strokes' } }],
+    } }));
+    failedTrial.verdict.verdict = 'improvement';
+    expect(() => s.priorityGate(42, experimentalBrush)).not.toThrow(/strategy_switch_required/);
+    const expandedBrush = { ...experimentalBrush, scale: 'global', region_bounds: undefined };
+    expect(() => s.priorityGate(42, expandedBrush)).not.toThrow(/strategy_switch_required/);
+  });
+
   it('projects E.17c completion debt only from insufficient scene geometry or completion-relevant stale E.18 bindings', () => {
     const s = store();
     writeProjectionPaintingState(s, [42]);

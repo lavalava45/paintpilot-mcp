@@ -1275,7 +1275,7 @@ function normalizeBrushSettingsDescriptor(descriptor) {
   const observedFields = [];
   for (const [field, value] of Object.entries({
     size: brush.diameter,
-    hardness: brush.hardness,
+    hardness: brush.dtipsHardness ?? brush.hardness,
     angle: brush.angle,
     roundness: brush.roundness,
     spacing: brush.spacing,
@@ -1302,7 +1302,7 @@ function normalizeBrushSettingsDescriptor(descriptor) {
     ...(presetName ? { preset: presetName.trim() } : {}),
     settings: {
       size: valueOr(brush.diameter, 1),
-      hardness: valueOr(brush.hardness, 100),
+      hardness: valueOr(brush.dtipsHardness ?? brush.hardness, 100),
       angle: valueOr(brush.angle, 0),
       roundness: valueOr(brush.roundness, 100),
       spacing: valueOr(brush.spacing, 25),
@@ -1421,16 +1421,30 @@ async function applyBrushSettingsModal(settings = {}, options = {}) {
   if (!toolOptions || typeof toolOptions !== 'object' || !brush || typeof brush !== 'object') {
     throw new Error('brush_settings_unavailable_for_write');
   }
+  const formatOf = value => value && typeof value === 'object' && '_value' in value
+    ? { type: 'unit', unit: typeof value._unit === 'string' ? value._unit : 'unknown' }
+    : { type: typeof value };
+  const nativeFormat = value => ({
+    brush_obj: typeof value?._obj === 'string' ? value._obj : null,
+    tip_type: typeof value?.dtipsType === 'string' ? value.dtipsType
+      : value?.dtipsType && typeof value.dtipsType === 'object' ? JSON.stringify(value.dtipsType).slice(0, 160) : null,
+    diameter: formatOf(value?.diameter),
+    dtipsHardness: formatOf(value?.dtipsHardness),
+    hardness: formatOf(value?.hardness),
+    spacing: formatOf(value?.spacing),
+  });
+  const beforeFormat = nativeFormat(brush);
 
   if (settings.size !== undefined) {
     brush.diameter = { _unit: 'pixelsUnit', _value: Number(settings.size) };
   }
   if (settings.hardness !== undefined) {
-    // Photoshop's currentToolOptions brush descriptor exposes hardness as a
-    // plain numeric value (the legacy Action Manager path also writes it as a
-    // double, not a percentUnit). Supplying a unit object is accepted by
-    // batchPlay but silently leaves the effective hardness unchanged.
-    brush.hardness = Number(settings.hardness);
+    // Photoshop 2030 exposes native tip hardness as dtipsHardness; writing
+    // an unrelated brush.hardness field cannot be verified by that readback.
+    // Preserve legacy hardness only where it is the actually observed key.
+    if (Object.prototype.hasOwnProperty.call(brush, 'dtipsHardness'))
+      brush.dtipsHardness = Number(settings.hardness);
+    else brush.hardness = Number(settings.hardness);
   }
   if (settings.angle !== undefined) {
     brush.angle = { _unit: 'angleUnit', _value: Number(settings.angle) };
@@ -1464,7 +1478,7 @@ async function applyBrushSettingsModal(settings = {}, options = {}) {
     toolOptions.smoothingValue = smoothing;
   }
 
-  await action.batchPlay(
+  const writeResponses = await action.batchPlay(
     [{
       _obj: 'set',
       _target: [{ _ref: 'paintbrushTool' }],
@@ -1473,7 +1487,50 @@ async function applyBrushSettingsModal(settings = {}, options = {}) {
     }],
     { synchronousExecution: true }
   );
-  return snapshotBrushSettings({ synchronousExecution: true });
+  const writeError = Array.isArray(writeResponses)
+    ? writeResponses.find(response => response?._obj === 'error') : undefined;
+  if (writeError) throw new Error(`brush_settings_native_set_error:${String(writeError.message ?? 'unknown').slice(0, 160)}`);
+  let [readback] = await action.batchPlay([currentToolOptionsDescriptor()], { synchronousExecution: true });
+  let observed = normalizeBrushSettingsDescriptor(readback);
+  const geometricFields = ['size', 'hardness', 'spacing'];
+  const needsGeometryRecovery = geometricFields.some(field => settings[field] !== undefined
+    && (!observed.observed_fields.includes(field) || Math.abs(Number(observed.settings[field]) - Number(settings[field])) > 1e-6));
+  let geometryRecovery = { attempted: false, verified: !needsGeometryRecovery };
+  if (needsGeometryRecovery) {
+    // Some Photoshop versions accept the complete paintbrushTool descriptor but
+    // apply only opacity/flow, silently ignoring nested tip geometry. Address
+    // the active brush directly (Action Manager brush target) and read back the
+    // effective geometry. Do not infer success from a non-error set response.
+    const geometry = {
+      _obj: 'brush',
+      diameter: Number(settings.size ?? observed.settings.size),
+      hardness: Number(settings.hardness ?? observed.settings.hardness),
+      spacing: { _unit: 'percentUnit', _value: Number(settings.spacing ?? observed.settings.spacing) },
+    };
+    const responses = await action.batchPlay([{
+      _obj: 'set',
+      _target: [{ _ref: 'brush', _enum: 'ordinal', _value: 'targetEnum' }],
+      to: geometry,
+      _options: { dialogOptions: 'silent' },
+    }], { synchronousExecution: true });
+    const error = Array.isArray(responses) ? responses.find(response => response?._obj === 'error') : null;
+    [readback] = await action.batchPlay([currentToolOptionsDescriptor()], { synchronousExecution: true });
+    observed = normalizeBrushSettingsDescriptor(readback);
+    const verified = geometricFields.every(field => settings[field] === undefined
+      || (observed.observed_fields.includes(field)
+        && Math.abs(Number(observed.settings[field]) - Number(settings[field])) <= 1e-6));
+    geometryRecovery = { attempted: true, verified,
+      ...(error ? { native_error: String(error.message ?? 'unknown').slice(0, 160) } : {}),
+    };
+  }
+  return { ...observed, setter_diagnostics: {
+    response_types: Array.isArray(writeResponses)
+      ? writeResponses.slice(0, 4).map(response => typeof response?._obj === 'string' ? response._obj : 'unknown') : [],
+    native_brush_keys: Object.keys(brush).slice(0, 36).sort(),
+    native_before: beforeFormat,
+    native_after: nativeFormat(readback?.currentToolOptions?.brush),
+    geometry_recovery: geometryRecovery,
+  } };
 }
 
 async function writeBrushSettings(params = {}) {
@@ -1496,9 +1553,24 @@ async function selectBrushPreset(params = {}) {
   let listenerInstalled = false;
   let observing = true;
   let snapshot;
+  const diagnostics = { select_response_types: [], notification_events: [],
+    current_tool_option_keys: [], brush_option_keys: [], independent_readback: null };
+  const optionKeys = descriptor => {
+    const opts = descriptor?.currentToolOptions;
+    diagnostics.current_tool_option_keys = opts && typeof opts === 'object'
+      ? Object.keys(opts).slice(0, 32).sort() : [];
+    diagnostics.brush_option_keys = opts?.brush && typeof opts.brush === 'object'
+      ? Object.keys(opts.brush).slice(0, 32).sort() : [];
+  };
   let resolveBrushSelect;
   const brushSelectObserved = new Promise(resolve => { resolveBrushSelect = resolve; });
   const onSelect = (event, descriptor) => {
+    if (observing && diagnostics.notification_events.length < 12) {
+      const refs = (Array.isArray(descriptor?._target) ? descriptor._target : [descriptor?._target])
+        .map(target => typeof target?._ref === 'string' ? target._ref : null);
+      diagnostics.notification_events.push({ event: String(event).slice(0, 48), target_refs: refs.slice(0, 8),
+        descriptor_keys: descriptor && typeof descriptor === 'object' ? Object.keys(descriptor).slice(0, 20).sort() : [] });
+    }
     if (!observing || event !== 'select') return;
     const targets = Array.isArray(descriptor?._target) ? descriptor._target : [descriptor?._target];
     const brush = targets.find(target => target?._ref === 'brush');
@@ -1535,6 +1607,8 @@ async function selectBrushPreset(params = {}) {
         ],
         { synchronousExecution: true }
       );
+      diagnostics.select_response_types = Array.isArray(responses)
+        ? responses.slice(0, 8).map(response => typeof response?._obj === 'string' ? response._obj : 'unknown') : [];
       const failure = responses.find(response => response?._obj === 'error');
       if (failure) throw new Error(failure.message ?? 'brush_preset_select_failed');
       snapshot = await snapshotBrushSettings({ synchronousExecution: true });
@@ -1550,6 +1624,18 @@ async function selectBrushPreset(params = {}) {
     // neither path retries selection or mutates document/layer pixels.
     if (!current.preset && listenerInstalled && !observedSelection)
       await Promise.race([brushSelectObserved, new Promise(resolve => setTimeout(resolve, 500))]);
+    if (!current.preset && !observedSelection) {
+      try {
+        const [raw] = await action.batchPlay([currentToolOptionsDescriptor()], READ_BATCHPLAY_OPTIONS);
+        optionKeys(raw);
+        const readback = normalizeBrushSettingsDescriptor(raw);
+        diagnostics.independent_readback = { preset: readback.preset ?? null,
+          observed_fields: Array.isArray(readback.observed_fields) ? readback.observed_fields.slice(0, 20) : [] };
+      } catch (error) {
+        diagnostics.independent_readback = { preset: null,
+          error: String(error?.message ?? error).slice(0, 160) };
+      }
+    }
     const conflictingEvidence = conflictingSelectNotifications || Boolean(
       current.preset && observedSelection && current.preset !== observedSelection
     );
@@ -1561,6 +1647,7 @@ async function selectBrushPreset(params = {}) {
         : current.preset ? 'current_tool_options'
         : observedSelection ? 'photoshop_select_notification' : 'unavailable',
         observed_preset: preset ?? null,
+        ...(!preset ? { native_diagnostics: diagnostics } : {}),
         ...(conflictingEvidence ? {
           current_tool_options_preset: current.preset ?? null,
           select_notification_preset: observedSelection,

@@ -257,6 +257,46 @@ describe('UXP bootstrap mutations', () => {
     readable = false;
     expect((await f.selectBrushPreset({ name: 'Installed Dry Brush' })).preset).toBeNull();
   });
+  it('captures bounded native diagnostic evidence when Square Charcoal identity is unavailable', async () => {
+    const harness = bootstrapHarness({ batchPlay: async descriptors => descriptors.map(descriptor =>
+      descriptor._obj === 'get'
+        ? { currentToolOptions: { brush: { diameter: 24, spacing: 16 }, flow: 70 } }
+        : { _obj: 'select', acknowledged: true }
+    ) });
+    const result = await harness.selectBrushPreset({ name: 'Square Charcoal' });
+    expect(result.preset).toBeNull();
+    expect(result.preset_verification.source).toBe('unavailable');
+    expect(result.preset_verification.native_diagnostics).toMatchObject({
+      select_response_types: ['select', 'select'],
+      current_tool_option_keys: ['brush', 'flow'],
+      brush_option_keys: ['diameter', 'spacing'],
+      independent_readback: { preset: null },
+    });
+  });
+  it('never invokes unsupported active brush Get that raises Photoshop modal errors', async () => {
+    const queries: any[] = [];
+    const h = bootstrapHarness({ batchPlay: async descriptors => descriptors.map(d => {
+      if (d._obj === 'get' && d._target?.[0]?._ref === 'brush') {
+        queries.push(d);
+        return { _obj: 'error', message: 'The command Get is not currently available' };
+      }
+      return d._obj === 'get' ? { currentToolOptions: { brush: { diameter: 52 } } } : {};
+    }) });
+    const result = await h.selectBrushPreset({ name: 'Square Charcoal' });
+    expect(queries).toHaveLength(0);
+    expect(result.preset).toBeNull();
+    expect(result.preset_verification.source).toBe('unavailable');
+    expect(result.preset_verification.native_diagnostics.active_brush_query).toBeUndefined();
+  });
+  it('reads native dtipsHardness instead of inventing a default hardness', () => {
+    const harness = bootstrapHarness();
+    const native = harness.normalizeBrushSettingsDescriptor({ currentToolOptions: {
+      brush: { diameter: { _unit: 'pixelsUnit', _value: 52 }, dtipsHardness: 65, spacing: { _unit: 'percentUnit', _value: 19 } },
+      opacity: 75, flow: 55,
+    } });
+    expect(native.settings).toMatchObject({ size: 52, hardness: 65, spacing: 19 });
+    expect(native.observed_fields).toContain('hardness');
+  });
 
   it('captures the uniquely created identity even when modal/add return values are absent', async () => {
     const harness = bootstrapHarness({ dropModalReturn: true, dropDocumentReturn: true });

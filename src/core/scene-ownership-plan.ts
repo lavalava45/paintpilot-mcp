@@ -325,8 +325,16 @@ export function extendSceneOwnershipPlan(durable: SceneOwnershipPlan, supplied?:
   for (const object of durable.objects ?? []) {
     const next = supplied.objects?.find(row => row.object_id === object.object_id);
     if (!next) conflict(`objects[${object.object_id}]`, object, undefined);
-    if (next!.kind !== object.kind) conflict(`objects[${object.object_id}].kind`, object.kind, next!.kind);
-    if (object.subject_kind && next!.subject_kind !== object.subject_kind)
+    // A first-pass single part may be decomposed into an independently owned
+    // compound without moving or relabelling its already committed component.
+    const safeDecomposition = object.kind === 'single-part' && next!.kind === 'compound-object'
+      && next!.component_semantic_ids.length > object.component_semantic_ids.length
+      && object.component_semantic_ids.every(id => next!.component_semantic_ids.includes(id))
+      && object.component_semantic_ids.every(id => durable.units.find(unit => unit.semantic_id === id)?.editability === 'independent');
+    if (next!.kind !== object.kind && !safeDecomposition)
+      conflict(`objects[${object.object_id}].kind`, object.kind, next!.kind);
+    if (object.subject_kind && next!.subject_kind !== object.subject_kind
+      && !(safeDecomposition && object.subject_kind === 'single-component'))
       conflict(`objects[${object.object_id}].subject_kind`, object.subject_kind, next!.subject_kind);
     for (const id of object.component_semantic_ids)
       if (!next!.component_semantic_ids.includes(id))

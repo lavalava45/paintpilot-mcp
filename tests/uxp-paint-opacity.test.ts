@@ -92,6 +92,68 @@ it('returns the native brush preset readback instead of echoing a requested but 
     .toMatchObject({ preset: 'Soft Round Brush' });
 });
 
+it('writes dtipsHardness on the native brush descriptor and verifies size, hardness and spacing', async () => {
+  let toolOptions: any = { brush: {
+    _obj: 'brush', diameter: { _unit: 'pixelsUnit', _value: 52 },
+    dtipsHardness: 100, spacing: { _unit: 'percentUnit', _value: 2 },
+  }, opacity: 75, flow: 55 };
+  let written: any;
+  const api: any = runInNewContext(source + '\n({ applyBrushSettingsModal })', {
+    require: (name: string) => name === 'uxp' ? { entrypoints: { setup() {} }, storage: {} }
+      : name === 'photoshop' ? { app: {}, constants: {}, core: {}, action: {
+        batchPlay: async (commands: any[]) => commands.map(command => {
+          if (command._obj === 'get') return { currentToolOptions: toolOptions };
+          if (command._obj === 'set') { written = command.to; toolOptions = command.to; }
+          return {};
+        }),
+      } } : {},
+  });
+  const result = await api.applyBrushSettingsModal({ size: 12, hardness: 65, spacing: 19 }, { activateBrushTool: false });
+  expect(written.brush.dtipsHardness).toBe(65);
+  expect(written.brush.hardness).toBeUndefined();
+  expect(result.settings).toMatchObject({ size: 12, hardness: 65, spacing: 19 });
+  expect(result.observed_fields).toEqual(expect.arrayContaining(['size', 'hardness', 'spacing']));
+  expect(result.setter_diagnostics.native_before).toMatchObject({
+    brush_obj: 'brush', diameter: { type: 'unit', unit: 'pixelsUnit' },
+    dtipsHardness: { type: 'number' }, spacing: { type: 'unit', unit: 'percentUnit' },
+  });
+  expect(result.setter_diagnostics.native_after).toMatchObject({
+    diameter: { type: 'unit', unit: 'pixelsUnit' }, spacing: { type: 'unit', unit: 'percentUnit' },
+  });
+});
+
+it('uses native brush-target geometry setter when paintbrushTool silently changes only opacity/flow', async () => {
+  let toolOptions: any = { brush: { _obj: 'brush', diameter: 52, dtipsHardness: 48,
+    spacing: { _unit: 'percentUnit', _value: 2 } }, opacity: 70, flow: 60 };
+  const writes: any[] = [];
+  const api: any = runInNewContext(source + '\n({ applyBrushSettingsModal })', {
+    require: (name: string) => name === 'uxp' ? { entrypoints: { setup() {} }, storage: {} }
+      : name === 'photoshop' ? { app: {}, constants: {}, core: {}, action: {
+        batchPlay: async (commands: any[]) => commands.map(command => {
+          if (command._obj === 'get') return { currentToolOptions: structuredClone(toolOptions) };
+          if (command._obj === 'set') {
+            writes.push(command);
+            if (command._target?.[0]?._ref === 'paintbrushTool') {
+              toolOptions.opacity = command.to.opacity;
+              toolOptions.flow = command.to.flow;
+            } else if (command._target?.[0]?._ref === 'brush') {
+              toolOptions.brush.diameter = command.to.diameter;
+              toolOptions.brush.dtipsHardness = command.to.hardness;
+              toolOptions.brush.spacing = command.to.spacing;
+            }
+          }
+          return {};
+        }),
+      } } : {},
+  });
+  const result = await api.applyBrushSettingsModal({ size: 12, hardness: 65, spacing: 19, opacity: 73, flow: 62 }, { activateBrushTool: false });
+  expect(writes.map(command => command._target?.[0]?._ref)).toEqual(['paintbrushTool', 'brush']);
+  expect(writes[1].to).toMatchObject({ _obj: 'brush', diameter: 12, hardness: 65,
+    spacing: { _unit: 'percentUnit', _value: 19 } });
+  expect(result.settings).toMatchObject({ size: 12, hardness: 65, spacing: 19, opacity: 73, flow: 62 });
+  expect(result.setter_diagnostics.geometry_recovery).toMatchObject({ attempted: true, verified: true });
+});
+
 function fixture(opacity = 100, flow = 100, useNativePathStroke = false) {
   const initial = { size: 40, opacity, flow, hardness: 65, use_pressure_opacity: true };
   let brush = { ...initial };

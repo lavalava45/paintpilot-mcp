@@ -2792,6 +2792,13 @@ describe('embedded Photoshop Guard', () => {
     }) as any;
 
     expect(finalized.mode).toBe('photoshop-mcp-cycle-finalization');
+    // A completed local operation is not proof of the entire painting.
+    expect(finalized.next_state).toBe('continue_required');
+    expect(finalized.whole_brief_completion).toMatchObject({
+      protocol: 'paintpilot.whole-brief-completion.v1',
+      status: 'incomplete', completion_allowed: false,
+      reasons: expect.arrayContaining(['art_run_missing', 'original_brief_missing']),
+    });
     expect(finalized.closed_previous).toMatchObject({
       closed: true,
       operation_id: 'finalize-last-visual',
@@ -2819,6 +2826,7 @@ describe('embedded Photoshop Guard', () => {
       .toBeGreaterThanOrEqual(finalized.finalization_latency.status_projection_ms);
     expect(finalizationActiveJobsSpy).toHaveBeenCalledTimes(1);
     finalizationActiveJobsSpy.mockRestore();
+    expect((runtime.status() as any).documents['42'].whole_brief_completion.completion_allowed).toBe(false);
     expect(runtime.store.read('finalize-invalid-next-too')).toBeUndefined();
     const closedStatus = runtime.status() as any;
     expect(closedStatus.pending_reports).not.toContain('finalize-last-visual');

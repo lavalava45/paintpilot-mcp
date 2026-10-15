@@ -79,6 +79,13 @@ until review of the deferred changes and archive-retention decisions is complete
   material or light correction through the proper priority/prerequisite
   route, including after save and retained Critic re-evaluation. Keep
   unrelated scene/global debt open. Avoid repeated identical corrections.
+- [ ] **Live strategy-switch acceptance:** after two independently reviewed
+  `primitive-footprint-repeating` failures, verify the artist cannot perform
+  five more polygon-only post-block-in passes. Observe Art Director diagnosis,
+  a genuinely different bounded Photoshop brush experiment, exact-image
+  improvement review and continued painting only after an accepted result.
+  Preserve legitimate `GLOBAL_BLOCK_IN`, unrelated regions, existing layers
+  and the user's locked Photoshop-panel profile.
 - [ ] Re-evaluate the Mykonos scene on real pixels for negative-space/
   composition and occlusion/depth before further paving.
 - [ ] Test a bounded correction addressing a Critic problem plus a Director
@@ -151,7 +158,7 @@ and [component-rendering contract](component-rendering.md).
 | --- | --- |
 | Runtime exposure, reconnect, uncertain-operation recovery | A real failure blocks normal safe painting. [E.24 / E.17 / E.8c](PAINTING-WORK-DETAILS.md#e24) |
 | Further perspective, transforms, History and mask transactions | Specific live defect and native safety evidence. [E.25 / E.18 / E.11 / E.6](PAINTING-WORK-DETAILS.md#e25) |
-| Goal/Loop continuation | Explicit user request, never automatic enablement. [E.26](PAINTING-WORK-DETAILS.md#e26) |
+| Goal/Loop continuation | PaintPilot's whole-brief completion signal is implemented offline; actual enabled-Goal host continuation/Stop/no-replay acceptance remains open. Never enable Goal automatically. [E.26](PAINTING-WORK-DETAILS.md#e26) |
 | Independent artistic evaluation / Critic calibration | Real multi-scene human labels and perceptual acceptance. [P1-B / P0-D](PAINTING-WORK-DETAILS.md#p1-b) |
 | Supplied brush/stamp packs | Actual user-provided pack plus art need. [P0-E.7](PAINTING-WORK-DETAILS.md#supplied-packs) |
 | Local warp, extended transactions, pressure studies | Reproduced benefit and native safeguards. [E.27](PAINTING-WORK-DETAILS.md#e27) |

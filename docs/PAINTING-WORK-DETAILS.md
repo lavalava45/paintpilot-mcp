@@ -31,6 +31,24 @@ Do not change user settings, run live painting or alter an active artwork merely
 **Conditional on a user-authorized unattended Goal/Loop run; live acceptance remains open.**
 Ordinary painting does not depend on Goal/Loop being enabled. Do not change user preferences.
 
+**Ownership clarification (2026-10-15):** PaintPilot MCP now derives a single
+`paintpilot.whole-brief-completion.v1` signal from its existing current-frame,
+original-brief, whole-scene review, open artistic debts and technical Guard
+obligations. Read `photoshop_guard_status.documents[document_id].whole_brief_completion`
+before claiming the **entire** work is finished; a close-only `cycle_auto`
+response also carries the signal. A PSD save, completed pass or interrupted
+workflow cannot set `completion_allowed=true`. An uncertain operation is
+`blocked` and must be reconciled without replay; user Stop is honored as a
+pause, never represented as finished artwork. Painter's host instructions
+require this read at the final-answer boundary.
+
+COS remains a **generic, opt-in host scheduler** for continuing model turns.
+PaintPilot MCP cannot itself schedule a new ChatGPT turn after a final answer.
+The old COS-specific PaintPilot Guard patch E.26 must remain a transitional
+fallback until a real enabled-Goal run demonstrates equivalent continuation,
+completion, user Stop and uncertain/no-replay recovery. No live acceptance or
+host patch removal is implied by the offline MCP tests.
+
 **Only remaining functional acceptance:**
 1. On the *actual running host/child*, with Goal deliberately enabled for
    the test, carry an authenticated Guard continue_required/unfinished whole

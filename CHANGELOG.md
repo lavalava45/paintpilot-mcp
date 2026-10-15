@@ -1,5 +1,156 @@
 # Changelog
 
+- 2026-10-15 — **Move whole-painting completion ownership into PaintPilot Guard (E.26 architecture).**
+  Reuse the existing `painting_completion` exact-frame/original-brief evidence and
+  artistic debt model; derive `paintpilot.whole-brief-completion.v1` with
+  `completion_allowed`, status, binding hashes, debt reasons and next action
+  for each document in `photoshop_guard_status` and in close-only
+  `photoshop_guard_cycle_auto`. Closing/saving a local pass no longer reports
+  `next_state=closed` when the whole brief remains unconfirmed. An uncertain
+  operation is blocked without replay; explicit user Stop is a pause rather
+  than an artistic completion. The MCP host instructions now require checking
+  the exact document contract before saying the whole picture is finished.
+  This adds no Photoshop mutations, no second scheduler and no new autonomous
+  critic. Local mock-backed acceptance and connected COS Goal scheduling are
+  distinct: do not remove the temporary COS E.26 fallback until a real host
+  transition proves the latter.
+
+- 2026-10-15 — **Verified generic BRUSH recovery when installed preset names cannot be read back.**
+  Real Photoshop MCP evidence for Hard Round/Soft Round shows native brush tip settings change while the preset identity remains `null` with `preset_verification.source=unavailable`. This cannot certify the named preset. `photoshop_select_brush_preset` now returns a bounded `safe_generic_brush_replan` recommendation on failed identity verification (including single-preset failures): only when the requested preset is optional, start a NEW Guard pass with `hard-brush-line`, `photoshop_set_brush` and fresh native size/hardness/spacing readback before `photoshop_paint_strokes`, without another named preset selection. Exact required presets still fail closed; unknown/timeout operations may not be replayed. Painter instructions forbid cycling through more unverified names. RED→GREEN selection-failure and prompt regressions added. This is a recovery route, NOT a claim that Photoshop can report active preset identity. The underlying generic brush draw/readback/pixel-change/reversible cleanup were previously verified using live Photoshop MCP; a new artist roof-detail pass remains to be evaluated separately.
+
+- 2026-10-15 — **Brush tip geometry fixed and verified against live Photoshop MCP.**
+  The original native `paintbrushTool` batchPlay setter sometimes applied
+  opacity/flow but silently ignored tip diameter/hardness/spacing. UXP now
+  inspects actual post-write readback and, only when the requested geometry is
+  not observed, uses a bounded Action Manager `set` directly on active `brush`
+  with diameter/hardness/spacing together; reads back again and never infers
+  success from the command response. Native format diagnostics retain field
+  types/units before and after. `uxp-paint-opacity` RED→GREEN regression models
+  a Photoshop host that applies only opacity/flow on the initial target.
+  **Live proof:** Guard operation `brush_target_geometry_live_20261015_1921_v1`
+  returned `setter_outcome=applied`, `geometry_recovery.attempted=true`,
+  `verified=true` with native values 12px / 65% / 19% (previously 52 / 48 / 2);
+  a separate `photoshop_get_brush_settings` confirmed them. Operation
+  `brush_target_geometry_restore_20261015_1924_v1` returned the original
+  52px / 48% / 2%; independent readback confirmed restoration. Pinned 1400px
+  JPEG preview SHA remained exactly
+  `be3e3427004eab6e32fe9092767c77af868de194346bd95b95f9e32b1f23c3ea`.
+  No pixel mutation or stroke. `verify:canonical` PASS (177 suites, 1934 tests).
+  Also fix oversized Guard identity recovery by allowing `projection=recovery`
+  with explicit `same_document_confirmed`, retaining exact pixel/owner proof
+  and the non-replayable uncertain-operation barrier. Native preset-name
+  selection for Square Charcoal remains unverified. Deployment: current UXP
+  source marker confirmed, but CoS MCP child still needs Restart to pick up
+  the latest built Guard code; live geometry testing used the prior compatible
+  MCP server with the new UXP.
+
+- 2026-10-15 — **Break UXP-reconnect identity/reconcile deadlock without replay (offline).**
+  RED→GREEN `painter-recovery-evidence` regression reproduced an unresolved
+  `photoshop_select_brush_preset` timeout where `guard_reconcile` required
+  document identity but `guard_resume` refused identity proof until reconcile.
+  Guard now requires active jobs to be polled first but allows explicitly
+  user-confirmed same-document identity verification despite terminal uncertain
+  operations, using its unchanged strict saved-frame SHA and native layer/owner
+  comparisons. The old operation remains uncertain, blocked and non-replayable
+  until separately reconciled from fresh state/preview. Pixel mismatch remains
+  quarantined. Also removed the experimental unsupported Action Manager `get`
+  of brush target that triggered a Photoshop modal "Get not available" dialog;
+  added a regression forbidding this query. Exact Square Charcoal preset identity
+  remains unavailable from the two authoritative native sources and is NOT
+  synthesized from a requested name or appearance.
+  Offline verification: `npm run verify:canonical` PASS (177 suites,
+  1932 tests), focused recovery/UXP/brush tests 98/98 PASS. Deployment health
+  correctly requires coordinated CoS plugin Restart and UXP Reload; live Guard
+  recovery and precise brush-preset identity have NOT passed host acceptance.
+
+- 2026-10-15 — **Independent active-brush identity investigation (offline).**
+  Added a bounded, read-only Action Manager `get` for active `brush` as a
+  diagnostic branch only when native preset name and select notifications are
+  unavailable. Receipt reports descriptor keys, possible name/ID, and errors
+  under `preset_verification.native_diagnostics.active_brush_query`, always
+  with `identity_authoritative=false`. No candidate field is treated as
+  verified identity, and the existing `brush_setter_unverified` blocking
+  behavior remains unchanged. A RED→GREEN UXP regression proves the query
+  executes and cannot certify the requested name; targeted 55/55 PASS.
+  Requires real-host diagnostic evidence before proposing identity matching.
+
+- 2026-10-15 — **Native Photoshop 2030 brush tip hardness read/write (offline).**
+  Reproduced the live October 15 numeric setter evidence: native brush uses
+  `dtipsHardness`, but UXP read/write targeted `hardness`. RED→GREEN tests now
+  verify native `dtipsHardness` normalization, preserving observed-field truth,
+  and the corresponding modal setter path. The setter uses `dtipsHardness`
+  when present, retains legacy `hardness` support otherwise, checks explicit
+  Action Manager error responses, and attaches bounded `setter_diagnostics`
+  to MCP receipts. Existing Guard mismatch protection remains unchanged.
+  `verify:canonical` PASS (177 files, 1929 tests); no real Photoshop mutation,
+  plugin reload, or commit. The prior host's unchanged diameter/spacing and
+  unverified Square Charcoal identity are NOT claimed fixed and need a fresh
+  controlled native retest.
+
+- 2026-10-15 — **Native UXP brush-identity diagnostics (offline, no paint).**
+  A new RED→GREEN `tests/uxp-bootstrap.test.ts` reproduces `Square Charcoal`
+  preset readback with `preset=null`, `source=unavailable`. On unknown identity,
+  UXP now reports bounded `preset_verification.native_diagnostics`: actual
+  `select` response types, native notification event/target/key shapes,
+  `currentToolOptions` and brush field names, and an independent post-modal
+  readback (including its error if unavailable). Neither responses nor the
+  request name are interpreted as proof of preset selection; uncertain brush
+  selection continues to fail closed and blocks pixel drawing. Ordinary
+  verified selection needs no extra native read. Focused tests 52/52 PASS;
+  `verify:canonical` PASS (177 files, 1927 tests). The real host's diagnostic
+  payload and Square Charcoal root cause still require a safe paired UXP
+  activation and read-only brush selection inspection, not a resumed stroke.
+
+- 2026-10-15 — **Selective verified brush-preset fallback restored (offline).**
+  Audited current native UXP preset identity and brush-settings readback before
+  selectively restoring only the `fac85ea` selector's bounded `fallback_names`
+  support (maximum three alternatives), distinct stable command IDs, and
+  `preset_attempts` evidence. An explicitly verified alternative remains a
+  failed original selection (`brush_setter_unverified`) with
+  `verified_alternative_preset`, `selection_only_recovery` and `requires_replan`;
+  it never authorizes the queued paint operation or silently substitutes the
+  brush. Unknown identity or transport uncertainty still fails closed, and
+  existing native size/hardness/spacing readback rules remain intact.
+  RED→GREEN `tests/brush-preset-fallback.test.ts` covers confirmed substitute,
+  unknown substitute and fallback limit. `verify:canonical` PASS: 177 test
+  files, 1926 tests. No UXP edits, artist prompt/Guard policy changes,
+  Photoshop mutation, runtime restart, commit or historical operation replay.
+  Live Square Charcoal identity and pixel acceptance remain unverified.
+
+- 2026-10-15 — **Context-aware primitive trend aggregation (offline).**
+  The existing detector remains unchanged, but cumulative
+  `primitive-footprint-repeating` now excludes an accepted, boundedly resolved
+  primitive-shaped result unless Critic supplied an explicit signal-bound
+  negative region finding. A completed simple moon no longer combines with an
+  unresolved tiger torso to create a spurious global must-fix; two unresolved
+  footprints and explicitly reviewed multi-region defects still escalate.
+  RED→GREEN regressions cover accepted simple forms, improving passes and
+  authoritative contrary Critic evidence. `verify:canonical` PASS; live S01
+  artistic verification remains pending. No Photoshop runtime restart.
+
+- 2026-10-15 — **Guard behavior after repeated primitive-footprint defects (offline).**
+  Promoted two current-frame-supported, ineffective `primitive-footprint-repeating` findings
+  into explicit `strategy_switch_required` trend state. The visual mutation gate
+  now rejects further polygon/region-based passes in affected post-block-in
+  work regardless of recoloring, contour counts or renamed strategy labels.
+  A different executable brush tool requires an active Art Director correction
+  task and a bounded medium/small trial with verified coordinates. Following
+  exact-current-frame review, an accepted improvement admits continuation
+  only with the tested tool family; an unsuccessful trial requires a new
+  Director task/directive and different executable method. Unrelated localized
+  work, normal `GLOBAL_BLOCK_IN`, and the panel-selected painting profile are
+  preserved. Added RED→GREEN regression coverage for five repeated attempts,
+  Director authorization, bounds, failure and accepted improvement. Full
+  `verify:canonical` **PASS (176 test files / 1,921 tests)**. Real Photoshop
+  artistic A/B acceptance is still pending; running MCP was not restarted.
+
+- 2026-10-15 — **Safe scene ownership replan (offline).** A durable `single-part`
+  declaration may grow into a `compound-object` when the original independently
+  editable semantic owner remains bound and additional components receive
+  unique owners; remapping and flattening remain forbidden. Tested through
+  both ownership validation and Guard next-pass compilation. No document
+  recreation or live pixel mutation was performed.
+
 - 2026-10-15 — **Photoshop UXP panel painting-profile selector (source-level).**
   Added a persistent three-position setting beside the video/commentary
   controls: `simple_graphic` (graphic/marker), `nontrivial_painting`

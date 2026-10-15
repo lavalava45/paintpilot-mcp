@@ -928,11 +928,15 @@ export class EmbeddedGuardRuntime {
     if (pendingId && this.store.artRunState(pendingId, undefined)?.document_instance?.identity_pending) {
       const state = this.store.resume(pendingId);
       const blockers = state.identity_recovery_blockers as Array<Record<string, unknown>>;
-      const next = blockers.length ? this.identityRecoveryNextCall(blockers)
+      // Identity must be proven before evidence capture for unresolved operations.
+      // Pending jobs still need polling; terminal-but-uncertain operations remain
+      // quarantined while the separate pixel/owner identity proof is collected.
+      const jobs = blockers.filter(blocker => blocker.kind === 'job');
+      const next = jobs.length ? this.identityRecoveryNextCall(jobs)
         : { tool: 'photoshop_guard_resume', args: { document_id: pendingId, same_document_confirmed: true } };
-      const action = blockers.length
-        ? 'Poll/reconcile the identified unresolved work through next_public_call, then confirm identity. Do not replay or inspect source.'
-        : 'After user confirmation of the same open document, call photoshop_guard_resume with same_document_confirmed=true; fresh pixel/owner evidence is collected internally. Do not replay, reset the art run, or inspect sources.';
+      const action = jobs.length
+        ? 'Poll the active job before identity recovery; never replay it.'
+        : 'After user confirmation of the same open document, call photoshop_guard_resume with same_document_confirmed=true; exact pixel/owner identity evidence is collected internally. Unresolved operations remain quarantined and must then be reconciled without replay.';
       return { ...state, resume_mode: 'identity_unverified',
         ...(state.document && typeof state.document === 'object'
           ? { document: { ...state.document as Record<string, unknown>, next_required_action: action, mutation_allowed: false } } : {}),
@@ -985,11 +989,15 @@ export class EmbeddedGuardRuntime {
 
   async resumeWithRecovery(input: Record<string, unknown>): Promise<Record<string, unknown>> {
     const documentId = Number(input.document_id);
+    const project = (result: Record<string, unknown>) => input.projection === undefined ? result : {
+      ...guardResumeSubset(result, String(input.projection), typeof input.owner_id === 'string' ? input.owner_id : undefined),
+      ...(result.identity_recovery ? { identity_recovery: result.identity_recovery } : {}),
+    };
     if (input.projection !== undefined) {
-      if (!positiveDocumentId(documentId) || input.same_document_confirmed === true || input.director_fields !== undefined) {
+      if (!positiveDocumentId(documentId) || input.director_fields !== undefined) {
         throw new Error('Public projection requires document_id and a separate identity/Director recovery call');
       }
-      return guardResumeSubset(this.resume(documentId), String(input.projection), typeof input.owner_id === 'string' ? input.owner_id : undefined);
+      if (input.same_document_confirmed !== true) return project(this.resume(documentId));
     }
     if (Array.isArray(input.director_fields)) {
       if (!positiveDocumentId(documentId) || input.same_document_confirmed === true) throw new Error('director_fields requires document_id and a separate recovery call');
@@ -1011,7 +1019,7 @@ export class EmbeddedGuardRuntime {
     let unlock: (() => void) | undefined;
     try {
       unlock = this.store.lock();
-      const blockers = this.store.identityRecoveryBlockers();
+      const blockers = this.store.identityRecoveryBlockers().filter(blocker => blocker.kind === 'job');
       if (blockers.length) {
         const next = this.identityRecoveryNextCall(blockers);
         throw Object.assign(new GuardContractError('document_identity_recovery_busy',
@@ -1024,7 +1032,7 @@ export class EmbeddedGuardRuntime {
       if (Number(document?.id) !== documentId) throw new Error('document_identity_target_mismatch');
       const observation = this.store.observeDocumentInstance(documentId, document?.instanceWitness);
       if (observation.status !== 'identity_unverified') {
-        if (observation.status === 'match' || observation.status === 'bound') return this.resume(documentId);
+        if (observation.status === 'match' || observation.status === 'bound') return project(this.resume(documentId));
         throw new Error('document_identity_recovery_rejected: the live document was replaced or its witness is missing');
       }
       const saved = this.store.artRunState(documentId, undefined);
@@ -1078,9 +1086,9 @@ export class EmbeddedGuardRuntime {
               // current_frame remains absent while holding the Guard state lock.
               this.store.confirmDocumentSession(documentId, document?.instanceWitness, undefined);
               this.capabilitySnapshotCache.delete(documentId);
-              return { ...this.resume(documentId), identity_recovery: {
+              return project({ ...this.resume(documentId), identity_recovery: {
                 status: 'confirmed', state_preserved: true, recovery_mode: 'pristine_bootstrap', frame_sha256: null,
-              } };
+              } });
             }
           }
         }
@@ -1135,7 +1143,7 @@ export class EmbeddedGuardRuntime {
       }
       this.store.confirmDocumentSession(documentId, document?.instanceWitness, frame.sha256);
       this.capabilitySnapshotCache.delete(documentId);
-      return { ...this.resume(documentId), identity_recovery: { status: 'confirmed', state_preserved: true, frame_sha256: frame.sha256 } };
+      return project({ ...this.resume(documentId), identity_recovery: { status: 'confirmed', state_preserved: true, frame_sha256: frame.sha256 } });
     } finally { unlock?.(); release(); }
   }
 
@@ -2525,12 +2533,20 @@ export class EmbeddedGuardRuntime {
               capturedAt: Date.now(),
             });
             const nextRequiredAction = this.store.closeOnlyNextRequiredAction(documentId, finalizationProjection);
+            const wholeBriefCompletion = Number.isSafeInteger(documentId) && documentId > 0
+              ? this.store.wholeBriefCompletion(documentId, finalizationProjection) : null;
             const response = {
               mode: 'photoshop-mcp-cycle-finalization',
               closed_previous: compactClosedPrevious(closedPrevious),
               cycle_latency: previousRecord?.latency ?? null,
-              next_state: nextRequiredAction === 'ready' ? 'closed' : 'continue_required',
-              next_required_action: nextRequiredAction,
+              // A locally closed operation is not a completed painting. Only the
+              // current frame-bound whole-brief Guard proof authorizes that claim.
+              next_state: wholeBriefCompletion
+                ? wholeBriefCompletion.completion_allowed ? 'closed' : 'continue_required'
+                : nextRequiredAction === 'ready' ? 'closed' : 'continue_required',
+              next_required_action: wholeBriefCompletion?.completion_allowed === false
+                ? wholeBriefCompletion.next_required_action : nextRequiredAction,
+              ...(wholeBriefCompletion ? { whole_brief_completion: wholeBriefCompletion } : {}),
               guard_transport: 'embedded_mcp',
               ...(compilerNormalizations.length ? { compiler_normalizations: compilerNormalizations } : {}),
             };
