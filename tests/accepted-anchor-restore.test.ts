@@ -361,6 +361,21 @@ describe('Task 21a one-action accepted-anchor recovery', () => {
     expect(f.runtime.store.visualBarrier(42)).toBeTruthy();
   });
 
+  it('rejects out-of-scope semantic snapshot fields without retiring history', async () => {
+    const f = restoreFixture({ semanticState: { current_stage: 'FORM' } });
+    f.runtime.store.updatePaintingState(42, current => {
+      const changed = structuredClone(current);
+      changed.primary_artistic_anchor.restore_snapshot.semantic_state.fields.commentary_mode = 'technical';
+      return changed;
+    });
+    await expect(f.runtime.cycle({ next_pass: { request_key: 'restore-forged-scoped-fields', document_id: 42,
+      goal: 'Restore the retained anchor without accepting extra mutable state.', restore_anchor_operation_id: 'anchor-op' } }))
+      .rejects.toThrow('semantic_snapshot_mismatch');
+    expect(f.runtime.store.read('later-second-pass').rolled_back).not.toBe(true);
+    expect(f.runtime.store.read('restore-forged-scoped-fields').verdict).toBeUndefined();
+    expect(f.runtime.store.visualBarrier(42)).toBeTruthy();
+  });
+
   it('restores mutable scene facts from the exact anchor while keeping current preferences and failure history', async () => {
     const retained = { current_stage: 'FORM', active_scale: 'medium', active_problem: { problem_id: 'retained-form' },
       visual_problems: { 'retained-form': { status: 'open' } }, owner_representation_state: { subject: { state: 'scaffold-debt' } },
