@@ -5,6 +5,9 @@ Current build, validation and troubleshooting guide for **Photoshop MCP — Digi
 Illustrated conceptual documentation is published in [English](en/README.md) and
 [Russian](ru/README.md). Both language trees share historical image evidence,
 while executable contracts remain in these technical docs and source schemas.
+For proposed applications see the paired [English use-case guide](en/use-cases.md)
+and [Russian guide](ru/use-cases.md). These are artistic pilot briefs, not
+new API contracts, accepted product templates or promises of print readiness.
 
 ← Back to [README](../README.md)
 

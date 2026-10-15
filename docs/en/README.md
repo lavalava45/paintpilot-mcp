@@ -2,12 +2,16 @@
 
 [Русская версия](../ru/README.md) · [Project README](../../README.md)
 
-> **Status: 10 October 2026.** These articles explain PaintPilot's architecture,
+> **Documentation updated: 16 October 2026.** These articles explain PaintPilot's architecture,
 > artistic method, observed failures and unresolved acceptance. Source-level
 > implementations and green tests are not a claim of independently verified
 > artistic quality. Consult the [roadmap](../PAINTING-ROADMAP.md) for open gates.
 
 ## Reading paths
+
+**What can I make?** [Practical use cases](use-cases.md) cover music
+artwork, posters, podcast assets, books, storyboards, game concepts,
+existing PSD refinement, recorded process videos and bounded client pilots.
 
 **Start here:** [How it works](how-it-works.md) →
 [Painting method](painting-method.md) →
@@ -25,6 +29,7 @@
 
 | Article | Main question |
 | --- | --- |
+| [Practical use cases](use-cases.md) | What to make, how to scope pilot briefs, and what must still be reviewed |
 | [How it works](how-it-works.md) | How a brief becomes bounded Photoshop edits and evidence-bound review |
 | [Painting method](painting-method.md) | How recognition, construction, light, materials and selective detail develop |
 | [Guard and recovery](guard-and-recovery.md) | How uncertain execution, ownership and rollback avoid blind replay |

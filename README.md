@@ -7,6 +7,9 @@
 [Technical architecture](docs/architecture.md) ·
 [Current roadmap](docs/PAINTING-ROADMAP.md).
 
+**Ideas for real projects:** [album artwork, music-release campaigns, posters, game art, and iterative PSD editing](docs/en/use-cases.md).
+These are scoped pilot workflows, not guarantees of unattended professional-quality delivery.
+
 Independently maintained MCP system for AI-driven digital painting and evidence-bound Photoshop automation on Windows.
 
 **Project:** [lavalava45/photoshop-mcp-digital-painting](https://github.com/lavalava45/paintpilot-mcp)<br>

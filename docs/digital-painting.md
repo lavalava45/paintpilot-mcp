@@ -9,6 +9,26 @@ acceptance. Conceptual illustrated documentation:
 This document maps the painting system to its implementation. It is **not an allowlist of tools**
 and is not loaded as the agent's runtime painting prompt.
 
+## Creative use cases are compositions of capabilities
+
+See the [Russian](ru/use-cases.md) and [English](en/use-cases.md)
+practical use-case guides for music artwork, promotional layouts, editorial
+illustrations, storyboards, game concepts and revisions to existing PSDs.
+They do not introduce new MCP tools or bypass Guard. A request such as
+“draw an album cover” requires a visual brief, explicit canvas/output
+requirements, appropriate layer ownership, actual visual review, text
+verification and a separate successful export. Different aspect ratios
+require individual composition checks; an export receipt cannot prove
+retail-platform conformity or print readiness.
+
+Supported concepts include scene construction, painting tools, layers,
+transforms, text, preview/review, save/export and optional process recording.
+The specific set available in **a running session** still comes from the
+current public capabilities snapshot and compatible UXP bridge, not
+from examples in the guide. A missing UXP bridge, unresolved operation
+or unverified required brush preset must not become a speculative mutation
+or automatic fallback.
+
 The absence of a Photoshop capability from this page does not forbid its use. The executable
 surface is determined by the current runtime `ToolRegistry`, public tool schema and generated
 capability information—not by a manually maintained Markdown list.

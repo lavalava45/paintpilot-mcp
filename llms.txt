@@ -68,6 +68,8 @@ planning guidance, not independent evidence or a bypass of mutation safety.
 
 - [README](https://github.com/lavalava45/paintpilot-mcp/blob/digital-painting/README.md)
 - [Русский README](https://github.com/lavalava45/paintpilot-mcp/blob/digital-painting/README.ru.md)
+- [Creative use cases (English)](https://github.com/lavalava45/paintpilot-mcp/blob/digital-painting/docs/en/use-cases.md)
+- [Сценарии применения (русский)](https://github.com/lavalava45/paintpilot-mcp/blob/digital-painting/docs/ru/use-cases.md)
 - [Illustrated English documentation](https://github.com/lavalava45/paintpilot-mcp/blob/digital-painting/docs/en/README.md)
 - [Иллюстрированная документация на русском](https://github.com/lavalava45/paintpilot-mcp/blob/digital-painting/docs/ru/README.md)
 - [Install](https://github.com/lavalava45/paintpilot-mcp/blob/digital-painting/INSTALL.md)

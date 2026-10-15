@@ -30,6 +30,12 @@ For implementation rules and limitations see
 and [Russian illustrated series](ru/README.md). Both intentionally reuse the original
 historical JPEG evidence instead of presenting retouched imagery as fresh tests.
 
+**Application patterns:** [English use cases](en/use-cases.md) and
+[Russian use cases](ru/use-cases.md) show how ordinary creative briefs can
+combine existing guarded capabilities, editable PSDs, exact review and
+verified save/export. The application label (album cover, poster or game prop)
+never changes document identity, admissibility or recovery contracts.
+
 
 Engineering source of truth for **Photoshop MCP — Digital Painting Edition**: host integration,
 embedded Guard, semantic tool dispatch, UXP transport, preview/evidence flow, prompt layer and the

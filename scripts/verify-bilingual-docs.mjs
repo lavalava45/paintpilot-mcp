@@ -7,7 +7,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const chapters = [
   'README.md', 'how-it-works.md', 'painting-method.md', 'guard-and-recovery.md',
   'visual-verification.md', 'runtime-adaptation.md', 'findings.md',
-  'process-revision-perspective-color.md', 'evaluation.md',
+  'process-revision-perspective-color.md', 'evaluation.md', 'use-cases.md',
 ];
 const errors = [];
 const imageSets = { ru: new Set(), en: new Set() };
