@@ -8,6 +8,7 @@ import { paintingDevelopmentProvenance } from './painting-development-provenance
 import { ANCHOR_SEMANTIC_FIELDS, ANCHOR_FINISH_FIELDS, replaceSnapshotFields, captureFrameSemanticSnapshot, validateFrameSemanticSnapshot, restoreFrameSemantics } from './frame-semantic-state.js';
 import { summarizePaintingMethodUsage } from './painting-method-usage.js';
 import { atomicJson, readDurableOperation, writeDurableOperation, scanDurableOperations } from './session-file-storage.js';
+import { captureClosureFiles, restoreClosureFiles } from './closure-snapshot-files.js';
 import { sidecarLanguage, commentaryText, prePassCommentary, lowerInitial, sentenceWithoutTerminalPunctuation, artisticObservedResult, completedArtisticSentence, artisticToolDescription, renderCommentarySidecar } from './painting-commentary-presentation.js';
 import { criticObligationState } from './critic-obligations.js';
 import { editableScopeRequest, validateEditableScopeReview, persistEditableScopeReview, editableOwnerScopeIssue } from './editable-scope.js';
@@ -5190,32 +5191,11 @@ export class SessionStore {
     if (typeof commentaryPath === 'string' && commentaryPath) paths.add(commentaryPath);
     return {
       id,
-      files: [...paths].map(file => {
-        const existed = fs.existsSync(file);
-        return {
-          file,
-          existed,
-          ...(existed ? { bytes: fs.readFileSync(file).toString('base64') } : {}),
-        };
-      }),
+      files: captureClosureFiles(paths),
     };
   }
   restoreClosureState(snapshot) {
-    if (!snapshot?.files) return false;
-    for (const entry of snapshot.files) {
-      const existed = entry.existed ?? typeof entry.bytes === 'string';
-      if (!existed) {
-        try { fs.unlinkSync(entry.file); }
-        catch (error) { if (error.code !== 'ENOENT') throw error; }
-        continue;
-      }
-      if (typeof entry.bytes !== 'string') {
-        throw new Error(`Corrupt closure snapshot for ${entry.file}: missing bytes`);
-      }
-      fs.mkdirSync(path.dirname(entry.file), { recursive: true });
-      fs.writeFileSync(entry.file, Buffer.from(entry.bytes, 'base64'));
-    }
-    return true;
+    return restoreClosureFiles(snapshot);
   }
   recordLatency(id, patch = {}) {
     const record = this.read(id);

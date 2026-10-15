@@ -1842,6 +1842,56 @@ describe('Guard session-store regressions', () => {
     expect(existsSync(commentaryPath)).toBe(false);
   });
 
+  it('captures closure file paths in the established order and retains source journal bytes', () => {
+    const s = store();
+    const root = path.dirname(s.directory);
+    const commentPath = path.join(root, 'frames', 'ordered.txt');
+    s.write({ id: 'closure-source', sequence: 1, phase: 'completed', created_at: '2026-10-01T00:00:00Z',
+      args: { document_id: 42 } });
+    s.write({ id: 'closure-target', sequence: 2, phase: 'completed', created_at: '2026-10-01T00:00:01Z',
+      args: { document_id: 42 }, undo_source_operation_id: 'closure-source',
+      preview: { commentary_path: commentPath } });
+    const snap = s.snapshotClosureState('closure-target');
+    expect(snap.id).toBe('closure-target');
+    expect(snap.files.map(entry => entry.file)).toEqual([
+      s.file('closure-target'), s.paintingStateFile(), s.file('closure-source'),
+      s.visualBarrierFile(42), commentPath,
+    ]);
+    const source = snap.files[2];
+    expect(source.existed).toBe(true);
+    expect(Buffer.from(source.bytes!, 'base64')).toEqual(readFileSync(s.file('closure-source')));
+    expect(snap.files[3]).toEqual({ file: s.visualBarrierFile(42), existed: false });
+    expect(snap.files[4]).toEqual({ file: commentPath, existed: false });
+  });
+
+  it('restores legacy byte-only snapshots repeatedly and stops at the same corrupt entry', () => {
+    const s = store();
+    const root = path.dirname(s.directory);
+    const existingPath = path.join(root, 'closure-existing.bin');
+    const createdPath = path.join(root, 'closure-created.bin');
+    const corruptPath = path.join(root, 'closure-corrupt.bin');
+    const original = Buffer.from([0, 255, 10, 13, 0, 97]);
+    const legacySnapshot = {
+      files: [{ file: existingPath, bytes: original.toString('base64') }, { file: createdPath, existed: false }],
+    };
+    writeFileSync(existingPath, 'mutated');
+    writeFileSync(createdPath, 'created');
+    expect(s.restoreClosureState(legacySnapshot)).toBe(true);
+    expect(s.restoreClosureState(legacySnapshot)).toBe(true);
+    expect(readFileSync(existingPath)).toEqual(original);
+    expect(existsSync(createdPath)).toBe(false);
+    expect(s.restoreClosureState(undefined)).toBe(false);
+
+    writeFileSync(existingPath, 'changed again');
+    expect(() => s.restoreClosureState({ files: [
+      legacySnapshot.files[0],
+      { file: corruptPath, existed: true },
+      { file: createdPath, existed: false },
+    ] })).toThrow(`Corrupt closure snapshot for ${corruptPath}: missing bytes`);
+    expect(readFileSync(existingPath)).toEqual(original);
+    expect(existsSync(createdPath)).toBe(false);
+  });
+
   it('allows a region-only scaffold before brush discovery, but not a mixed brush pass', () => {
     const s = store();
     s.setArtRunState({ document_id: 42, process_dir: 'processes/early-scaffold-process/run-01',
