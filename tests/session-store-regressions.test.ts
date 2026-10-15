@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -27,6 +27,44 @@ function store() {
     workspaceRoot: dir,
   });
 }
+
+describe('Operation journal file persistence contract', () => {
+  it('retains stamped pretty-JSON bytes, atomic replacement and one durable file per operation id', () => {
+    const s = store() as any;
+    const record = { id: 'same-id', phase: 'completed', created_at: '2026-10-01T00:00:00Z',
+      sequence: 1, tool: 'photoshop_get_state', args: { document_id: 42 } };
+    expect(s.read('same-id')).toBeUndefined();
+    s.write(record);
+    const file = s.file('same-id');
+    expect(readFileSync(file, 'utf8')).toBe(JSON.stringify({
+      ...record, runtime_state_version: RUNTIME_STATE_VERSION,
+    }, null, 2));
+    s.write({ ...record, phase: 'reviewed' });
+    expect(s.read('same-id')).toMatchObject({ id: 'same-id', phase: 'reviewed',
+      runtime_state_version: RUNTIME_STATE_VERSION });
+    expect(s.records()).toHaveLength(1);
+    expect(readdirSync(path.dirname(file))).toEqual(['same-id.json']);
+  });
+
+  it('preserves journal sorting, strict version/shape validation and missing-file behavior', () => {
+    const s = store() as any;
+    for (const [id, sequence] of [['later', 3], ['earlier', 1], ['middle', 2]] as const) {
+      s.write({ id, sequence, phase: 'completed', created_at: '2026-10-01T00:00:00Z' });
+    }
+    expect(s.records().map((row: any) => row.id)).toEqual(['earlier', 'middle', 'later']);
+    expect(s.read('missing')).toBeUndefined();
+    const invalid = s.file('invalid-version');
+    writeFileSync(invalid, JSON.stringify({ id: 'invalid-version', phase: 'completed',
+      created_at: '2026-10-01T00:00:00Z', runtime_state_version: -1 }));
+    expect(() => s.read('invalid-version')).toThrow();
+    expect(() => s.records()).toThrow();
+    rmSync(invalid);
+    const missingField = s.file('missing-field');
+    writeFileSync(missingField, JSON.stringify({ id: 'missing-field',
+      runtime_state_version: RUNTIME_STATE_VERSION, phase: 'completed' }));
+    expect(() => s.records()).toThrow('Corrupt operation journal: missing-field.json');
+  });
+});
 
 describe('E.17 artistic frame commentary', () => {
   it('renders the sidecar without writing a file and matches the SessionStore write boundary exactly', () => {

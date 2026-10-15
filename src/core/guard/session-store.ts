@@ -7,6 +7,7 @@ import { adviseTaskContinuation } from './continuation-admissibility.js';
 import { paintingDevelopmentProvenance } from './painting-development-provenance.js';
 import { ANCHOR_SEMANTIC_FIELDS, ANCHOR_FINISH_FIELDS, replaceSnapshotFields, captureFrameSemanticSnapshot, validateFrameSemanticSnapshot, restoreFrameSemantics } from './frame-semantic-state.js';
 import { summarizePaintingMethodUsage } from './painting-method-usage.js';
+import { atomicJson, readDurableOperation, writeDurableOperation, scanDurableOperations } from './session-file-storage.js';
 import { sidecarLanguage, commentaryText, prePassCommentary, lowerInitial, sentenceWithoutTerminalPunctuation, artisticObservedResult, completedArtisticSentence, artisticToolDescription, renderCommentarySidecar } from './painting-commentary-presentation.js';
 import { criticObligationState } from './critic-obligations.js';
 import { editableScopeRequest, validateEditableScopeReview, persistEditableScopeReview, editableOwnerScopeIssue } from './editable-scope.js';
@@ -69,7 +70,6 @@ import {
   normalizePreFinalHostileReview,
 } from './artistic-contract.js';
 import {
-  assertCurrentRuntimeRecord,
   assertCurrentRuntimeStateDirectory,
   runtimeStateSchemaError,
 } from './runtime-state.js';
@@ -1132,14 +1132,7 @@ function strategyChanged(request, prior) {
   if (!prior) return true;
   return visualStrategyFingerprint(request) !== visualStrategyFingerprint(prior);
 }
-export function atomicJson(file, data) {
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  const temp = `${file}.${randomUUID()}.tmp`;
-  const fd = fs.openSync(temp, 'wx');
-  try { fs.writeFileSync(fd, JSON.stringify(data, null, 2)); fs.fsyncSync(fd); }
-  finally { fs.closeSync(fd); }
-  fs.renameSync(temp, file);
-}
+export { atomicJson } from './session-file-storage.js';
 export function alive(pid) {
   if (!Number.isSafeInteger(pid) || pid < 1) throw new Error('Invalid lock owner; inspect the lock manually');
   try { process.kill(pid, 0); return true; }
@@ -5152,15 +5145,11 @@ export class SessionStore {
     };
   }
   read(id) {
-    try {
-      const record = JSON.parse(fs.readFileSync(this.file(id), 'utf8'));
-      assertCurrentRuntimeRecord(record, id);
-      return this.applyReviewResponseTiming(record);
-    } catch (e) { if (e.code === 'ENOENT') return undefined; throw e; }
+    return readDurableOperation(this.file(id), id, record => this.applyReviewResponseTiming(record));
   }
   write(record) {
     this.applyReviewResponseTiming(record);
-    atomicJson(this.file(record.id), { ...record, runtime_state_version: RUNTIME_STATE_VERSION });
+    writeDurableOperation(this.file(record.id), record);
     this.reviewResponseTimings.delete(record.id);
   }
   applyReviewResponseTiming(record) {
@@ -5853,14 +5842,7 @@ export class SessionStore {
     };
   }
   records() {
-    const dir = path.join(this.directory, 'operations');
-    if (!fs.existsSync(dir)) return [];
-    return fs.readdirSync(dir).filter(f => f.endsWith('.json')).map(f => {
-      const r = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
-      assertCurrentRuntimeRecord(r, f);
-      if (!r.id || !r.phase || !r.created_at) throw new Error(`Corrupt operation journal: ${f}`);
-      return this.applyReviewResponseTiming(r);
-    }).sort((a, b) => (a.sequence && b.sequence ? a.sequence - b.sequence : a.created_at.localeCompare(b.created_at)) || a.id.localeCompare(b.id));
+    return scanDurableOperations(this.directory, record => this.applyReviewResponseTiming(record));
   }
   workflowMetrics(documentId, suppliedRecords, projectionContext) {
     const empty = {
