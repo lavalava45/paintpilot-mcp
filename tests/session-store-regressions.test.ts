@@ -1109,6 +1109,41 @@ describe('Guard session-store regressions', () => {
       outcome_usage: { accepted: 2 },
     });
   });
+  it('keeps method usage outcome precedence, root problem identity and preview-only counts stable', () => {
+    const record = (id, overrides = {}) => ({
+      id, phase: 'completed', visual: true, tool: 'photoshop_execute_visual_microplan',
+      args: { document_id: 42, stage: 'MATERIAL', steps: [] },
+      ...overrides,
+    });
+    const records = [
+      record('preview-only', {
+        problem_id: '  root-problem  ',
+        args: { document_id: 42, stage: 'MATERIAL', problem_id: 'ignored-argument-problem',
+          steps: [{ tool: 'photoshop_get_preview' }] },
+      }),
+      record('failed', {
+        failed: true,
+        args: { document_id: 42, stage: 'SHAPE', method_class: 'BRUSH',
+          steps: [{ tool: 'photoshop_paint_strokes' }, { tool: 'photoshop_paint_dabs' }] },
+      }),
+      record('rolled-back', {
+        failed: true, rolled_back: true,
+        args: { document_id: 42, stage: 'MATERIAL', method_class: 'brush',
+          steps: [{ tool: 'photoshop_paint_dabs' }] },
+      }),
+      record('pending', { phase: 'pending', args: { document_id: 42, steps: [{ tool: 'photoshop_fill_layer' }] } }),
+    ];
+
+    expect(paintingMethodUsage(records, 42)).toMatchObject({
+      visual_microplan_operations: 3,
+      mutation_operations: 2,
+      distinct_tools_used: 2,
+      tool_usage: { photoshop_paint_dabs: 2, photoshop_paint_strokes: 1 },
+      method_class_usage: { brush: 2 },
+      problem_usage: { 'root-problem': 1 },
+      outcome_usage: { failed: 1, 'rolled-back': 1, unreviewed: 1 },
+    });
+  });
   it('uses mutation-risk checkpoint debt instead of planarForm-clock age or a fixed visual-pass count', () => {
     const s = store();
     for (let sequence = 1; sequence <= 7; sequence++) {

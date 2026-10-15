@@ -5,6 +5,7 @@ import { requestProblemLinks } from './problem-links.js';
 import { correctionTargetFacts, plannedGlobalComponentCorrection } from './correction-admissibility.js';
 import { adviseTaskContinuation } from './continuation-admissibility.js';
 import { paintingDevelopmentProvenance } from './painting-development-provenance.js';
+import { summarizePaintingMethodUsage } from './painting-method-usage.js';
 import { criticObligationState } from './critic-obligations.js';
 import { editableScopeRequest, validateEditableScopeReview, persistEditableScopeReview, editableOwnerScopeIssue } from './editable-scope.js';
 import { normalizeBrushAllowedScales } from './brush-scale-fit.js';
@@ -1411,72 +1412,7 @@ export function visualStrategyFingerprint(request) {
 }
 
 export function paintingMethodUsage(records, documentId) {
-  const completed = records.filter(record =>
-    record
-    && record.phase === 'completed'
-    && record.visual === true
-    && record.tool === 'photoshop_execute_visual_microplan'
-    && record.args?.document_id === documentId
-  );
-  const increment = (target, key) => {
-    if (!key) return;
-    target[key] = (target[key] ?? 0) + 1;
-  };
-  const toolUsage = {};
-  const methodClassUsage = {};
-  const methodIdUsage = {};
-  const brushRoleUsage = {};
-  const brushPresetUsage = {};
-  const stageUsage = {};
-  const problemUsage = {};
-  const outcomeUsage = {};
-  let mutationOperations = 0;
-  for (const record of completed) {
-    const micro = record.args && typeof record.args === 'object' && !Array.isArray(record.args)
-      ? record.args : {};
-    const steps = Array.isArray(micro.steps) ? micro.steps : [];
-    const mutationSteps = steps.filter(step => step?.tool && step.tool !== 'photoshop_get_preview');
-    if (mutationSteps.length) mutationOperations += 1;
-    for (const step of mutationSteps) {
-      increment(toolUsage, textOrUndefined(step.tool));
-      increment(methodIdUsage, textOrUndefined(step.method_id));
-    }
-    increment(methodClassUsage, textOrUndefined(micro.method_class)?.toLowerCase());
-    increment(brushRoleUsage, textOrUndefined(micro.paint_strategy?.brush_role));
-    increment(brushPresetUsage, textOrUndefined(micro.paint_strategy?.preset_name));
-    increment(stageUsage, canonicalPaintingStage(micro.stage) ?? textOrUndefined(micro.stage));
-    increment(problemUsage, problemIdentity(record));
-    const outcome = record.rolled_back === true
-      ? 'rolled-back'
-      : record.failed === true
-        ? 'failed'
-        : record.verdict?.disposition === 'accept'
-          ? 'accepted'
-          : record.verdict?.disposition === 'rollback'
-            ? 'rollback-required'
-            : record.verdict ? 'reviewed-other' : 'unreviewed';
-    increment(outcomeUsage, outcome);
-  }
-  const sorted = source => Object.fromEntries(
-    Object.entries(source).sort((a, b) => Number(b[1]) - Number(a[1]) || a[0].localeCompare(b[0]))
-  );
-  return {
-    visual_microplan_operations: completed.length,
-    mutation_operations: mutationOperations,
-    distinct_tools_used: Object.keys(toolUsage).length,
-    distinct_method_classes_used: Object.keys(methodClassUsage).length,
-    distinct_method_ids_used: Object.keys(methodIdUsage).length,
-    distinct_brush_roles_used: Object.keys(brushRoleUsage).length,
-    distinct_brush_presets_used: Object.keys(brushPresetUsage).length,
-    tool_usage: sorted(toolUsage),
-    method_class_usage: sorted(methodClassUsage),
-    method_id_usage: sorted(methodIdUsage),
-    brush_role_usage: sorted(brushRoleUsage),
-    brush_preset_usage: sorted(brushPresetUsage),
-    stage_usage: sorted(stageUsage),
-    problem_usage: sorted(problemUsage),
-    outcome_usage: sorted(outcomeUsage),
-  };
+  return summarizePaintingMethodUsage(records, documentId, problemIdentity);
 }
 function strategyChanged(request, prior) {
   if (!prior) return true;
