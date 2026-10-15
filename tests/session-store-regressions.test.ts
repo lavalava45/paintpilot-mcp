@@ -28,6 +28,25 @@ function store() {
 }
 
 describe('E.17 artistic frame commentary', () => {
+  it.each(['ru', 'en'])('keeps the %s technical sidecar verbatim and excludes artistic tool narration', language => {
+    const s = store() as any;
+    s.presentationContext = () => ({ language, commentary_mode: 'technical', commentary_detail: 'detailed' });
+    const commentPath = path.join(dirs[dirs.length - 1], 'technical.txt');
+    const intent = language === 'ru' ? 'Нанести светлый мазок.' : 'Paint a light stroke.';
+    const record = { id: 'technical-pass', tool: 'photoshop_paint_strokes', phase: 'completed', visual: true,
+      artistic_commentary: intent,
+      args: { document_id: 42, size: 36, opacity: 40 },
+      preview: { commentary_path: commentPath, project_path: 'frame.jpg' },
+      report: { did: 'Exact action', why: 'Exact reason', result: 'Exact result' } };
+    expect(s.writeCommentarySidecar(record)).toBe(commentPath);
+    const output = readFileSync(commentPath, 'utf8');
+    expect(output).toContain(`${language === 'ru' ? 'Операция' : 'Operation'}: technical-pass`);
+    expect(output).toContain(intent);
+    expect(output).toContain(language === 'ru' ? 'Что сделал: Exact action' : 'Did: Exact action');
+    expect(output).toContain(language === 'ru' ? 'Зачем: Exact reason' : 'Why: Exact reason');
+    expect(output).toContain(language === 'ru' ? 'Результат: Exact result' : 'Result: Exact result');
+    expect(output).not.toContain(language === 'ru' ? 'В Photoshop я использую' : 'In Photoshop I use');
+  });
   it.each(['ru', 'en'].flatMap(language => ['short', 'normal', 'detailed'].map(detail => ({ language, detail }))))(
     'uses the saved primary language=$language throughout $detail commentary independently of verbosity', ({ language, detail }) => {
       const s = store() as any;
