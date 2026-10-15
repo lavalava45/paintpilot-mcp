@@ -7,6 +7,7 @@ import { adviseTaskContinuation } from './continuation-admissibility.js';
 import { paintingDevelopmentProvenance } from './painting-development-provenance.js';
 import { ANCHOR_SEMANTIC_FIELDS, ANCHOR_FINISH_FIELDS, replaceSnapshotFields, captureFrameSemanticSnapshot, validateFrameSemanticSnapshot, restoreFrameSemantics } from './frame-semantic-state.js';
 import { summarizePaintingMethodUsage } from './painting-method-usage.js';
+import { summarizeCycleLatency } from './cycle-latency-summary.js';
 import { atomicJson, readDurableOperation, writeDurableOperation, scanDurableOperations } from './session-file-storage.js';
 import { captureClosureFiles, restoreClosureFiles } from './closure-snapshot-files.js';
 import { ART_RUN_COMMENTARY_MODES, ART_RUN_COMMENTARY_DETAILS, ART_RUN_PAINTING_PROFILES, resolveSessionUserConfig } from './session-user-config-projection.js';
@@ -1781,12 +1782,6 @@ function throughputJournalEvidence(records) {
     else if (record.dispatched || record.phase === 'completed') unknown++;
   }
   return { actions, operations, unknown };
-}
-function percentile(values, fraction) {
-  const sorted = values.filter(value => typeof value === 'number' && Number.isFinite(value) && value >= 0).sort((a, b) => a - b);
-  if (!sorted.length) return null;
-  const index = Math.min(sorted.length - 1, Math.max(0, Math.ceil(sorted.length * fraction) - 1));
-  return sorted[index];
 }
 function reportedToolExecutionMs(record) {
   for (const body of parseTexts(record?.result)) {
@@ -5275,50 +5270,7 @@ export class SessionStore {
     const scoped = Number.isSafeInteger(documentId) && documentId > 0
       ? this.currentDocumentRecords(documentId, all, projectionContext)
       : all;
-    const records = scoped.filter(record => record?.latency);
-    const visualRecords = records.filter(record => record.visual);
-    const fields = [
-      'inter_call_unattributed_gap_ms',
-      'decision_model_gap_ms',
-      'guard_preflight_ms',
-      'photoshop_dispatch_wall_ms',
-      'automatic_checkpoint_wall_ms',
-      'recorder_prepare_ms',
-      'recorder_finalize_ms',
-      'recorder_settle_ms',
-      'recorder_stop_ms',
-      'recorder_postprocess_ms',
-      'photoshop_reported_execution_ms',
-      'preview_capture_materialization_ms',
-      'guard_response_to_review_request_ms',
-      'review_image_service_ms',
-      'review_image_service_prefix_ms',
-      'review_delivery_to_review_finished_marker_ms',
-      'review_finished_to_next_pass_ready_marker_ms',
-      'next_pass_ready_marker_to_guard_ms',
-      'review_delivery_to_next_guard_ms',
-      'visual_evaluation_verdict_gap_ms',
-      'report_ack_closure_ms',
-      'recovery_reconciliation_ms',
-      'guard_cycle_total_ms',
-      'semantic_cycle_wall_ms',
-    ];
-    const summarize = sampleRecords => Object.fromEntries(fields.map(field => {
-      const values = sampleRecords.map(record => record.latency?.[field])
-        .filter(value => typeof value === 'number' && Number.isFinite(value) && value >= 0);
-      return [field, {
-        samples: values.length,
-        median_ms: percentile(values, 0.5),
-        p95_ms: percentile(values, 0.95),
-      }];
-    }));
-    return {
-      protocol: 'photoshop.guard.cycle_latency_summary.v1',
-      operation_samples: records.length,
-      visual_operation_samples: visualRecords.length,
-      components: summarize(records),
-      visual_components: summarize(visualRecords),
-    };
+    return summarizeCycleLatency(scoped);
   }
   continuationTimelineExport(documentId, suppliedRecords, projectionContext) {
     if (!Number.isSafeInteger(documentId) || documentId <= 0) {

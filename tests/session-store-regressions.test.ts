@@ -28,6 +28,48 @@ function store() {
   });
 }
 
+describe('Latency summary projection contract', () => {
+  it('keeps nearest-rank median/p95, invalid samples, visual-only metrics and missing component shape', () => {
+    const s = store();
+    const values = [1, 2, 3, 20, -1, Number.NaN, Number.POSITIVE_INFINITY, '8'];
+    const records = values.map((value, index) => ({
+      id: `latency-${index}`, visual: index === 1 || index === 3 || index === 4,
+      latency: { guard_preflight_ms: value },
+    }));
+    records.push({ id: 'without-latency', visual: true } as any);
+    const result = s.latencySummary(undefined, records);
+    expect(result).toMatchObject({
+      protocol: 'photoshop.guard.cycle_latency_summary.v1',
+      operation_samples: 8,
+      visual_operation_samples: 3,
+      components: { guard_preflight_ms: { samples: 4, median_ms: 2, p95_ms: 20 },
+        semantic_cycle_wall_ms: { samples: 0, median_ms: null, p95_ms: null } },
+      visual_components: { guard_preflight_ms: { samples: 2, median_ms: 2, p95_ms: 20 } },
+    });
+    expect(Object.keys(result.components)).toEqual(Object.keys(result.visual_components));
+    expect(records[0].latency.guard_preflight_ms).toBe(1);
+  });
+
+  it('uses the supplied projection and excludes superseded or other-document records without rescans', () => {
+    const s = store();
+    const records = [
+      { id: 'old', args: { document_id: 42 }, sequence: 2, latency: { guard_preflight_ms: 100 } },
+      { id: 'current', args: { document_id: 42 }, sequence: 3, latency: { guard_preflight_ms: 7 }, visual: true },
+      { id: 'other', args: { document_id: 43 }, sequence: 4, latency: { guard_preflight_ms: 80 }, visual: true },
+    ];
+    const projection: any = { records, activeJobs: [], capturedAt: Date.now(),
+      paintingState: { documents: { '42': { document_instance: { superseded_through_sequence: 2 } } } } };
+    const reads = vi.spyOn(s, 'records');
+    const paintingReads = vi.spyOn(s, 'paintingState');
+    expect(s.latencySummary(42, records, projection)).toMatchObject({
+      operation_samples: 1, visual_operation_samples: 1,
+      components: { guard_preflight_ms: { samples: 1, median_ms: 7, p95_ms: 7 } },
+    });
+    expect(reads).not.toHaveBeenCalled();
+    expect(paintingReads).not.toHaveBeenCalled();
+  });
+});
+
 describe('Operation journal file persistence contract', () => {
   it('retains stamped pretty-JSON bytes, atomic replacement and one durable file per operation id', () => {
     const s = store() as any;
