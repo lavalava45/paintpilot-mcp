@@ -410,6 +410,69 @@ describe('E.17 artistic frame commentary', () => {
 });
 
 describe('E.8b continuation checkpoint', () => {
+  it('keeps an invalid document timeline empty without reading journal or state', () => {
+    const s = store();
+    const journal = vi.spyOn(s, 'records');
+    const state = vi.spyOn(s, 'paintingState');
+    expect(s.continuationTimelineExport(0)).toEqual({
+      protocol: 'photoshop.guard.continuation_timeline_export.v1',
+      document_id: null, document_incarnation: null, operations: [],
+    });
+    expect(journal).not.toHaveBeenCalled();
+    expect(state).not.toHaveBeenCalled();
+  });
+
+  it('preserves timeline boundary ordering, prefix-only review evidence, clamped/unknown intervals and in-memory projection', () => {
+    const s = store() as any;
+    s.currentDocumentIncarnationId = () => 'instance:42';
+    const latency = {
+      guard_accepted_at: '2026-10-01T00:00:10.000Z',
+      photoshop_started_at: '2026-10-01T00:00:09.000Z',
+      photoshop_operation_end_at: '2026-10-01T00:00:11.000Z',
+      response_ready_at: '2026-10-01T00:00:12.000Z',
+      next_cycle_received_at: '2026-10-01T00:00:15.000Z',
+      review_image_service_prefix_ms: 321,
+    };
+    const records = [
+      { id: 'prefix', args: { document_id: 42 }, visual: true, latency,
+        preview_attached_at: 'invalid-timestamp',
+        continuation_timing: { review_image_response_boundary_complete: false,
+          review_image_result_ready_at: '2026-10-01T00:00:13.000Z' } },
+      { id: 'not-timed', args: { document_id: 42 }, visual: false,
+        latency: { guard_preflight_ms: 5 } },
+      { id: 'untimed', args: { document_id: 42 }, visual: true },
+    ];
+    const context: any = { records, capturedAt: Date.now(), activeJobs: [],
+      paintingState: { documents: { '42': {} } } };
+    const reads = vi.spyOn(s, 'records');
+    const states = vi.spyOn(s, 'paintingState');
+    const output = s.continuationTimelineExport(42, records, context);
+    expect(reads).not.toHaveBeenCalled();
+    expect(states).not.toHaveBeenCalled();
+    expect(output.operations).toHaveLength(1);
+    expect(output.operations[0]).toMatchObject({
+      operation_id: 'prefix',
+      join_key: { document_id: 42, document_incarnation: 'instance:42', operation_id: 'prefix' },
+      milestone_intervals_ms: {
+        guard_accepted_to_photoshop_start: 0,
+        photoshop_start_to_operation_end: 2000,
+        operation_end_to_preview_ready: null,
+      },
+      inter_call_interval: {
+        start_at: '2026-10-01T00:00:12.000Z',
+        end_at: '2026-10-01T00:00:15.000Z',
+        duration_ms: 3000,
+        classification: 'unattributed_until_host_join',
+      },
+      diagnostic_partition: { review_image_service_prefix_ms: 321 },
+    });
+    expect(output.operations[0].boundary_events.map((event: any) => event.kind)).toEqual([
+      'guard_accepted', 'photoshop_start', 'operation_end', 'preview_ready',
+      'guard_response_ready', 'review_image_service_prefix_end', 'next_guard_continuation_received',
+    ]);
+    expect(output.operations[0].boundary_events.some((event: any) => event.kind === 'review_image_result_ready')).toBe(false);
+    expect(output.operations[0].guard_latency).toBe(latency);
+  });
   it('exports host-joinable Guard timing while leaving the inter-call gap unattributed', () => {
     const s = store() as any;
     s.currentDocumentIncarnationId = () => 'uxp:doc:42:incarnation-a';
