@@ -1049,6 +1049,35 @@ describe('Guard session-store regressions', () => {
       blockin_primitive_dominance: false,
     });
   });
+  it('counts accepted mark-making once per operation and excludes unrelated, failed, or future history', () => {
+    const record = (id, sequence, stage, steps) => ({
+      id, sequence, phase: 'completed', failed: false, visual: true,
+      tool: 'photoshop_execute_visual_microplan',
+      args: { document_id: 42, stage, steps },
+      verdict: { disposition: 'accept', artistic_value: { execution_changed: true } },
+    });
+    const block = record('block', 1, 'GLOBAL_BLOCK_IN', [{ tool: 'photoshop_paint_regions' }]);
+    const marks = record('marks', 5, 'MATERIAL', [
+      { tool: 'photoshop_paint_strokes' },
+      { tool: 'photoshop_paint_dabs' },
+      { tool: 'photoshop_paint_strokes' },
+    ]);
+    const records = [
+      null,
+      block,
+      { ...block, id: 'other-document', args: { ...block.args, document_id: 99 } },
+      { ...block, id: 'failed', failed: true },
+      { ...block, id: 'rejected', verdict: { disposition: 'correct', artistic_value: { execution_changed: true } } },
+      marks,
+      record('later', 6, 'DETAIL', [{ tool: 'photoshop_paint_stamp_instances' }]),
+    ];
+    expect(paintingDevelopmentProvenance(records, 42, 'marks')).toEqual({
+      region_construction_operations: 1,
+      post_blockin_markmaking_operations: 1,
+      post_blockin_markmaking_tools: ['photoshop_paint_dabs', 'photoshop_paint_strokes'],
+      blockin_primitive_dominance: false,
+    });
+  });
   it('summarizes effective tool, method and brush usage from durable visual operations', () => {
     const records = [
       { id: 'regions', phase: 'completed', visual: true, tool: 'photoshop_execute_visual_microplan', args: {

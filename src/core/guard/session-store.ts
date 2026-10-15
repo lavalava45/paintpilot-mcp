@@ -4,6 +4,7 @@ import { criticCorrectionIssue, advanceCriticCorrections, criticCorrectionContex
 import { requestProblemLinks } from './problem-links.js';
 import { correctionTargetFacts, plannedGlobalComponentCorrection } from './correction-admissibility.js';
 import { adviseTaskContinuation } from './continuation-admissibility.js';
+import { paintingDevelopmentProvenance } from './painting-development-provenance.js';
 import { criticObligationState } from './critic-obligations.js';
 import { editableScopeRequest, validateEditableScopeReview, persistEditableScopeReview, editableOwnerScopeIssue } from './editable-scope.js';
 import { normalizeBrushAllowedScales } from './brush-scale-fit.js';
@@ -98,6 +99,7 @@ import { attentionBindingStaleness, normalizeAttentionBinding, normalizePerceptu
 import { normalizeUserConfig, parseUserConfigPatch, USER_CONFIG_VERSION } from '../user-config.js';
 
 export const ROUTE = 'MCP host -> embedded Photoshop Guard -> project dist/index.js -> Photoshop';
+export { paintingDevelopmentProvenance };
 function hasCyrillic(value) {
   return /[А-Яа-яЁё]/.test(String(value ?? ''));
 }
@@ -1406,70 +1408,6 @@ export function visualStrategyFingerprint(request) {
     brush_role: micro.paint_strategy?.brush_role ?? null,
     mutations: structuralMutations.map(row => row.descriptor),
   });
-}
-
-export function paintingDevelopmentProvenance(records, documentId, currentFrameOperationId) {
-  const currentRecord = currentFrameOperationId
-    ? records.find(record => record?.id === currentFrameOperationId)
-    : undefined;
-  const sequenceCeiling = Number.isSafeInteger(currentRecord?.sequence)
-    ? Number(currentRecord.sequence)
-    : Number.MAX_SAFE_INTEGER;
-  let regionConstructionOperations = 0;
-  let postBlockinMarkmakingOperations = 0;
-  const postBlockinMarkmakingTools = new Set();
-  const blockInRegionStages = new Set([
-    'RECOGNITION_BLOCK_IN',
-    'GLOBAL_BLOCK_IN',
-    'COMPOSITION',
-    'SHAPE',
-  ]);
-
-  for (const record of records) {
-    if (!record || record.phase !== 'completed' || record.failed || !record.visual) continue;
-    if (record.args?.document_id !== documentId) continue;
-    if (Number.isSafeInteger(record.sequence) && Number(record.sequence) > sequenceCeiling) continue;
-    const executionChanged = record.verdict?.artistic_value?.execution_changed === true;
-    const accepted = record.verdict?.disposition === 'accept';
-    if (!executionChanged || !accepted) continue;
-    if (record.tool !== 'photoshop_execute_visual_microplan') continue;
-    const micro = record.args && typeof record.args === 'object' && !Array.isArray(record.args)
-      ? record.args
-      : {};
-    const steps = Array.isArray(micro.steps) ? micro.steps : [];
-    const mutationTools = steps
-      .map(step => textOrUndefined(step?.tool))
-      .filter(tool => tool && tool !== 'photoshop_get_preview');
-    const stage = canonicalPaintingStage(micro.stage);
-    const actionClass = textOrUndefined(micro.action_class)?.toUpperCase() ?? 'ADD';
-    if (
-      mutationTools.includes('photoshop_paint_regions')
-      && actionClass === 'ADD'
-      && blockInRegionStages.has(stage ?? '')
-    ) {
-      regionConstructionOperations += 1;
-    }
-
-    const stageRank = paintingStageRank(stage);
-    if (stageRank === undefined || stageRank < 4) continue;
-    const expressiveTools = new Set([
-      'photoshop_paint_strokes',
-      'photoshop_paint_dabs',
-      'photoshop_paint_stamp_instances',
-    ]);
-    const used = mutationTools.filter(tool => expressiveTools.has(tool));
-    if (used.length) {
-      postBlockinMarkmakingOperations += 1;
-      for (const tool of used) postBlockinMarkmakingTools.add(tool);
-    }
-  }
-
-  return {
-    region_construction_operations: regionConstructionOperations,
-    post_blockin_markmaking_operations: postBlockinMarkmakingOperations,
-    post_blockin_markmaking_tools: [...postBlockinMarkmakingTools].sort(),
-    blockin_primitive_dominance: regionConstructionOperations >= 2 && postBlockinMarkmakingOperations === 0,
-  };
 }
 
 export function paintingMethodUsage(records, documentId) {
