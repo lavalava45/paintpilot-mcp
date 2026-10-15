@@ -1,4 +1,6 @@
 // @ts-nocheck
+import path from 'node:path';
+import { deriveExecutionOutcome } from './artistic-contract.js';
 // Pure presentation helpers mechanically extracted from the legacy SessionStore.
 // Preserve their original untyped runtime contract until a separate typing change.
 function textOrUndefined(value) { return typeof value === 'string' && value.trim() ? value.trim() : undefined; }
@@ -198,4 +200,95 @@ function artisticToolDescription(record, language, detail = 'normal') {
   }
   return [sentence, ...new Set(parameters)].filter(Boolean).join(detail === 'detailed' ? '\n' : ' ');
 }
+export function renderCommentarySidecar(record, presentation) {
+  const preview = record?.preview;
+  const language = sidecarLanguage(
+    presentation.language,
+    record.artistic_commentary,
+    record.report?.did,
+    record.report?.why,
+    record.report?.result
+  );
+  const copy = language === 'ru'
+    ? {
+        frame: 'Кадр', operation: 'Операция', stage: 'Этап', region: 'Область',
+        before: 'Перед проходом:', after: 'После прохода:',
+        did: 'Что сделал', why: 'Зачем', result: 'Результат',
+        missing: 'Художественный комментарий перед проходом не был записан.',
+      }
+    : {
+        frame: 'Frame', operation: 'Operation', stage: 'Stage', region: 'Region',
+        before: 'Before pass:', after: 'After pass:',
+        did: 'Did', why: 'Why', result: 'Result',
+        missing: 'No pre-pass artistic commentary was recorded.',
+      };
+  const beforeCommentary = commentaryText(
+    prePassCommentary(record),
+    copy.missing
+  );
+  if (presentation.commentary_mode !== 'technical') {
+    const lines = [beforeCommentary];
+    const toolDescription = artisticToolDescription(record, language, presentation.commentary_detail);
+    if (toolDescription) lines.push(toolDescription);
+    if (record.report) {
+      const did = commentaryText(record.report.did, language === 'ru'
+        ? 'Выполнение прохода не подтверждено.' : 'Pass execution is unconfirmed.');
+      const compact = record.report.source === 'guard_compact_closure';
+      const completed = compact ? did : completedArtisticSentence(did, language);
+      const why = commentaryText(
+        record.report.why,
+        beforeCommentary
+      );
+      const result = commentaryText(
+        artisticObservedResult(record.verdict) ?? record.report.result,
+        language === 'ru'
+          ? 'Визуальный результат ещё не оценён.'
+          : 'The visual result is not yet assessed.'
+      );
+      lines.push(
+        '',
+        ...(!compact || deriveExecutionOutcome(record) !== 'completed' ? [completed] : []),
+        ...(!compact && why !== beforeCommentary ? [language === 'ru'
+          ? `Для того чтобы ${lowerInitial(sentenceWithoutTerminalPunctuation(why))}.`
+          : `This is to ${lowerInitial(sentenceWithoutTerminalPunctuation(why))}.`] : []),
+        compact ? result : language === 'ru'
+          ? `В результате ${lowerInitial(sentenceWithoutTerminalPunctuation(result))}.`
+          : `As a result, ${lowerInitial(sentenceWithoutTerminalPunctuation(result))}.`
+      );
+      if (record.verdict?.disposition === 'rollback') {
+        lines.push(language === 'ru'
+          ? 'Проход признан неудачным; выбран откат.'
+          : 'The pass was rejected; rollback was selected.');
+      }
+    }
+    if (presentation.commentary_mode === 'mixed') {
+      lines.push('', language === 'ru' ? 'Техническая запись:' : 'Technical record:',
+        `${copy.frame}: ${path.basename(preview.project_path ?? preview.materialized_path ?? '')}`,
+        `${copy.operation}: ${record.id}`,
+        ...(record.stage ? [`${copy.stage}: ${record.stage}`] : []),
+        ...(record.region ? [`${copy.region}: ${record.region}`] : []));
+    }
+    return `${lines.join('\n')}\n`;
+  }
+  const lines = [
+    `${copy.frame}: ${path.basename(preview.project_path ?? preview.materialized_path ?? '')}`,
+    `${copy.operation}: ${record.id}`,
+    ...(record.stage ? [`${copy.stage}: ${record.stage}`] : []),
+    ...(record.region ? [`${copy.region}: ${record.region}`] : []),
+    '',
+    copy.before,
+    beforeCommentary ?? copy.missing,
+  ];
+  if (record.report) {
+    lines.push(
+      '',
+      copy.after,
+      `${copy.did}: ${record.report.did}`,
+      `${copy.why}: ${record.report.why}`,
+      `${copy.result}: ${record.report.result}`
+    );
+  }
+  return `${lines.join('\n')}\n`;
+}
+
 export { sidecarLanguage, commentaryText, prePassCommentary, lowerInitial, sentenceWithoutTerminalPunctuation, artisticObservedResult, completedArtisticSentence, artisticToolDescription };

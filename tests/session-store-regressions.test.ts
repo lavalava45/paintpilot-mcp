@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { commentaryLanguageNotice, paintingDevelopmentProvenance, paintingMethodUsage, SessionStore } from '../src/core/guard/session-store.js';
+import { renderCommentarySidecar } from '../src/core/guard/painting-commentary-presentation.js';
 import { compileGuardCycle } from '../src/core/guard/cycle-compiler.js';
 import { ToolRegistry } from '../src/core/tool-registry.js';
 import { createJob, writeJobCompleted } from '../src/core/guard/async-job.js';
@@ -28,6 +29,57 @@ function store() {
 }
 
 describe('E.17 artistic frame commentary', () => {
+  it('renders the sidecar without writing a file and matches the SessionStore write boundary exactly', () => {
+    const s = store() as any;
+    const presentation = { language: 'en', commentary_mode: 'mixed', commentary_detail: 'normal' };
+    s.presentationContext = () => presentation;
+    const commentPath = path.join(dirs[dirs.length - 1], 'pure-render.txt');
+    const record = {
+      id: 'render-only', tool: 'photoshop_apply_gaussian_blur',
+      artistic_commentary: 'Soften the edges.',
+      args: { document_id: 42, radius: 3 },
+      preview: { commentary_path: commentPath, project_path: 'frame.jpg' },
+      report: { did: 'Softened edges.', why: 'Preserve depth.', result: 'Edges became softer.' },
+    };
+    const rendered = renderCommentarySidecar(record, presentation);
+    expect(existsSync(commentPath)).toBe(false);
+    expect(s.writeCommentarySidecar(record)).toBe(commentPath);
+    expect(readFileSync(commentPath, 'utf8')).toBe(rendered);
+  });
+  it.each(['technical', 'artistic', 'mixed'])('preserves the exact %s sidecar bytes including line endings', mode => {
+    const s = store() as any;
+    s.presentationContext = () => ({ language: 'ru', commentary_mode: mode, commentary_detail: 'normal' });
+    const commentPath = path.join(dirs[dirs.length - 1], 'exact-sidecar.txt');
+    const record = {
+      id: 'format', tool: 'photoshop_apply_gaussian_blur',
+      artistic_commentary: 'Смягчить края.',
+      args: { document_id: 42, radius: 5 },
+      preview: { commentary_path: commentPath, project_path: 'frame.jpg' },
+      report: { did: 'Смягчить края.', why: 'Смягчить края.', result: 'Края стали мягче.' },
+    };
+    const technical = [
+      'Кадр: frame.jpg', 'Операция: format', '',
+      'Перед проходом:', 'Смягчить края.', '',
+      'После прохода:', 'Что сделал: Смягчить края.',
+      'Зачем: Смягчить края.', 'Результат: Края стали мягче.',
+    ];
+    const artistic = [
+      'Смягчить края.',
+      'В Photoshop я использую размытие по Гауссу. Размытие по Гауссу: радиус 5 px.',
+      '', 'Я смягчил края.', 'В результате края стали мягче.',
+    ];
+    const expected = mode === 'technical' ? technical : mode === 'artistic' ? artistic
+      : [...artistic, '', 'Техническая запись:', 'Кадр: frame.jpg', 'Операция: format'];
+    expect(s.writeCommentarySidecar(record)).toBe(commentPath);
+    expect(readFileSync(commentPath, 'utf8')).toBe(expected.join('\n') + '\n');
+  });
+  it('does not resolve configuration or write a sidecar when commentary_path is absent', () => {
+    const s = store() as any;
+    const presentation = vi.fn(() => { throw new Error('must not query presentation'); });
+    s.presentationContext = presentation;
+    expect(s.writeCommentarySidecar({ id: 'without-path', args: { document_id: 42 }, preview: {} })).toBeUndefined();
+    expect(presentation).not.toHaveBeenCalled();
+  });
   it.each(['ru', 'en'])('keeps the %s technical sidecar verbatim and excludes artistic tool narration', language => {
     const s = store() as any;
     s.presentationContext = () => ({ language, commentary_mode: 'technical', commentary_detail: 'detailed' });
