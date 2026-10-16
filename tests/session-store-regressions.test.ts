@@ -28,6 +28,89 @@ function store() {
   });
 }
 
+describe('Compact frame and anchor reference projection contract', () => {
+  it('preserves six ordered reference fields, omission of extra metadata, default scopes, and supplied state without reads', () => {
+    const s = store();
+    const context = s.captureProjectionContext();
+    const doc: any = {
+      document_id: 42,
+      current_frame: { operation_id: 'current', sha256: 'a', path: 'current.jpg',
+        accepted: 1, acceptance_scope: undefined, goal_confirmation: undefined, private_flag: true },
+      accepted_frame: { operation_id: 'accepted', sha256: 'b', path: 'accepted.jpg',
+        acceptance_scope: undefined, goal_confirmation: undefined, private_flag: true },
+      confirmed_goal_frame: { operation_id: 'goal', sha256: 'c', path: 'goal.jpg' },
+      primary_artistic_anchor: { operation_id: 'primary', sha256: 'd', path: 'primary.jpg',
+        rationale: 'strong shape', directive_id: undefined, promoted_at: undefined },
+      alternative_artistic_anchors: [
+        { operation_id: 'alternative-a', sha256: 'e', path: 'a.jpg', rationale: 'color', directive_id: 'dir', promoted_at: 'at' },
+        { operation_id: 'alternative-b', sha256: 'f', path: 'b.jpg', rationale: 'perspective' },
+      ],
+      final_artistic_frame: { operation_id: 'final', sha256: 'g', path: 'final.jpg',
+        selection: undefined, selected_at: undefined, private_flag: true },
+    };
+    context.paintingState.documents['42'] = doc;
+    const scans = vi.spyOn(s, 'records');
+    const reads = vi.spyOn(s, 'paintingState');
+    const jobs = vi.spyOn(s, 'activeJobs');
+    const result = (s.statusCompact(context) as any).documents['42'];
+    const keys = ['current_frame', 'accepted_frame', 'confirmed_goal_frame',
+      'primary_artistic_anchor', 'alternative_artistic_anchors', 'final_artistic_frame'];
+    expect(Object.keys(result).filter(key => keys.includes(key))).toEqual(keys);
+    expect(result.current_frame).toEqual({
+      operation_id: 'current', sha256: 'a', path: 'current.jpg',
+      accepted: true, acceptance_scope: null, goal_confirmation: null,
+    });
+    expect(result.accepted_frame).toEqual({
+      operation_id: 'accepted', sha256: 'b', path: 'accepted.jpg',
+      acceptance_scope: 'legacy_unknown', goal_confirmation: 'legacy_unknown',
+    });
+    expect(result.confirmed_goal_frame).toEqual({
+      operation_id: 'goal', sha256: 'c', path: 'goal.jpg',
+      goal_confirmation: 'confirmed_by_visual_verdict',
+    });
+    expect(result.primary_artistic_anchor).toEqual({
+      operation_id: 'primary', sha256: 'd', path: 'primary.jpg',
+      rationale: 'strong shape', directive_id: null, promoted_at: null,
+    });
+    expect(result.alternative_artistic_anchors).toEqual([
+      { operation_id: 'alternative-a', sha256: 'e', path: 'a.jpg',
+        rationale: 'color', directive_id: 'dir', promoted_at: 'at' },
+      { operation_id: 'alternative-b', sha256: 'f', path: 'b.jpg',
+        rationale: 'perspective', directive_id: null, promoted_at: null },
+    ]);
+    expect(result.final_artistic_frame).toEqual({
+      operation_id: 'final', sha256: 'g', path: 'final.jpg', selection: null, selected_at: null,
+    });
+    expect(doc.current_frame.private_flag).toBe(true);
+    expect(scans).not.toHaveBeenCalled();
+    expect(reads).not.toHaveBeenCalled();
+    expect(jobs).not.toHaveBeenCalled();
+  });
+
+  it('retains null frame fallbacks and ignores non-array alternative anchors', () => {
+    const s = store();
+    const context = s.captureProjectionContext();
+    context.paintingState.documents['42'] = {
+      document_id: 42,
+      current_frame: null, accepted_frame: false, confirmed_goal_frame: null,
+      primary_artistic_anchor: undefined, alternative_artistic_anchors: { stray: true },
+      final_artistic_frame: null,
+    } as any;
+    const doc = (s.statusCompact(context) as any).documents['42'];
+    expect({
+      current_frame: doc.current_frame,
+      accepted_frame: doc.accepted_frame,
+      confirmed_goal_frame: doc.confirmed_goal_frame,
+      primary_artistic_anchor: doc.primary_artistic_anchor,
+      alternative_artistic_anchors: doc.alternative_artistic_anchors,
+      final_artistic_frame: doc.final_artistic_frame,
+    }).toEqual({
+      current_frame: null, accepted_frame: null, confirmed_goal_frame: null,
+      primary_artistic_anchor: null, alternative_artistic_anchors: [], final_artistic_frame: null,
+    });
+  });
+});
+
 describe('Artistic throughput observation projection contract', () => {
   it('preserves timing overlaps, outcome counts, scoped records and supplied state without rescans', () => {
     const s = store();
