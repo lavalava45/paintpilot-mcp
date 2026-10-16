@@ -13,6 +13,7 @@ import { projectCompilerAttemptAudit } from './compiler-attempt-audit-projection
 import { projectRecognitionMetrics } from './recognition-metrics-projection.js';
 import { projectArtisticThroughputObservations } from './artistic-throughput-observations.js';
 import { projectCompactFrameReferences } from './compact-frame-reference-projection.js';
+import { projectCompactBrushPreflight } from './compact-brush-preflight-projection.js';
 import { atomicJson, readDurableOperation, writeDurableOperation, scanDurableOperations } from './session-file-storage.js';
 import { captureClosureFiles, restoreClosureFiles } from './closure-snapshot-files.js';
 import { ART_RUN_COMMENTARY_MODES, ART_RUN_COMMENTARY_DETAILS, ART_RUN_PAINTING_PROFILES, resolveSessionUserConfig } from './session-user-config-projection.js';
@@ -11256,22 +11257,7 @@ export class SessionStore {
           validation: 'not-independently-validated',
         },
         unresolved_hard_brief_debt: this.unresolvedHardBriefDebt(id, projectionContext),
-        brush_preflight: doc.brush_preflight ? {
-          completed: !!doc.brush_preflight.completed,
-          inventory_observed: !!doc.brush_preflight.inventory_observed,
-          inventory_total: doc.brush_preflight.inventory_total ?? null,
-          inventory_scope: doc.brush_preflight.inventory_scope ?? null,
-          brush_pack_id: doc.brush_preflight.brush_pack_id ?? null,
-          roles: (doc.brush_preflight.roles ?? []).map(role => ({
-            role_id: role.role_id,
-            preferred_preset: role.preferred_preset,
-            material_roles: role.material_roles ?? [],
-            visual_intents: role.visual_intents ?? [],
-            pressure_policy: role.pressure_policy,
-            probe_status: role.probe_status,
-            profile_id: role.profile_id ?? null,
-          })),
-        } : null,
+        ...projectCompactBrushPreflight(doc),
         brush_pack_policy: doc.brush_pack_policy ?? null,
         art_director: doc.art_director ? {
           directive_id: doc.art_director.directive_id,

@@ -28,6 +28,63 @@ function store() {
   });
 }
 
+describe('Compact Brush Preflight projection contract', () => {
+  it('preserves preflight flags, role order, optional defaults and reference identity of nested collections', () => {
+    const s = store();
+    const context = s.captureProjectionContext();
+    const materials = ['wood', 'stone'];
+    const intents = ['dry-brush'];
+    const policy = { mode: 'exclusive', brush_pack_id: 'brush-pack-sha256:example' };
+    const source: any = {
+      completed: 'yes', inventory_observed: 0, inventory_total: 0,
+      brush_pack_id: 'brush-pack-sha256:example',
+      roles: [
+        { role_id: 'texture', preferred_preset: 'Charcoal', material_roles: materials,
+          visual_intents: intents, pressure_policy: 'dynamic', probe_status: 'verified',
+          profile_id: undefined, extra: 'not-exposed' },
+        { role_id: 'flat', preferred_preset: 'Flat', pressure_policy: 'fixed', probe_status: 'pending' },
+      ],
+      private_data: 'not-exposed',
+    };
+    context.paintingState.documents['42'] = { document_id: 42, brush_preflight: source, brush_pack_policy: policy };
+    const records = vi.spyOn(s, 'records');
+    const painting = vi.spyOn(s, 'paintingState');
+    const jobs = vi.spyOn(s, 'activeJobs');
+    const doc = (s.statusCompact(context) as any).documents['42'];
+    expect(doc.brush_preflight).toEqual({
+      completed: true, inventory_observed: false, inventory_total: 0,
+      inventory_scope: null, brush_pack_id: 'brush-pack-sha256:example',
+      roles: [
+        { role_id: 'texture', preferred_preset: 'Charcoal', material_roles: materials,
+          visual_intents: intents, pressure_policy: 'dynamic', probe_status: 'verified', profile_id: null },
+        { role_id: 'flat', preferred_preset: 'Flat', material_roles: [], visual_intents: [],
+          pressure_policy: 'fixed', probe_status: 'pending', profile_id: null },
+      ],
+    });
+    expect(doc.brush_preflight.roles[0].material_roles).toBe(materials);
+    expect(doc.brush_preflight.roles[0].visual_intents).toBe(intents);
+    expect(doc.brush_pack_policy).toBe(policy);
+    expect(Object.keys(doc).indexOf('brush_preflight')).toBeLessThan(Object.keys(doc).indexOf('brush_pack_policy'));
+    expect(source.private_data).toBe('not-exposed');
+    expect(records).not.toHaveBeenCalled();
+    expect(painting).not.toHaveBeenCalled();
+    expect(jobs).not.toHaveBeenCalled();
+  });
+
+  it('retains absent preflight fallback and malformed roles failure without normalization', () => {
+    const s = store();
+    const context = s.captureProjectionContext();
+    context.paintingState.documents['42'] = { document_id: 42, brush_preflight: null };
+    const empty = (s.statusCompact(context) as any).documents['42'];
+    expect(empty.brush_preflight).toBeNull();
+    expect(empty.brush_pack_policy).toBeNull();
+    context.paintingState.documents['42'] = {
+      document_id: 42, brush_preflight: { completed: false, roles: { invalid: true } },
+    } as any;
+    expect(() => s.statusCompact(context)).toThrow(TypeError);
+  });
+});
+
 describe('Compact frame and anchor reference projection contract', () => {
   it('preserves six ordered reference fields, omission of extra metadata, default scopes, and supplied state without reads', () => {
     const s = store();
