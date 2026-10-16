@@ -16,6 +16,7 @@ import { projectCompactFrameReferences } from './compact-frame-reference-project
 import { projectCompactBrushPreflight } from './compact-brush-preflight-projection.js';
 import { projectCompactCritiqueSummary } from './compact-critique-summary-projection.js';
 import { projectCompactArtDirector } from './compact-art-director-projection.js';
+import { projectCompactSilentStalls } from './compact-silent-stalls-projection.js';
 import { atomicJson, readDurableOperation, writeDurableOperation, scanDurableOperations } from './session-file-storage.js';
 import { captureClosureFiles, restoreClosureFiles } from './closure-snapshot-files.js';
 import { ART_RUN_COMMENTARY_MODES, ART_RUN_COMMENTARY_DETAILS, ART_RUN_PAINTING_PROFILES, resolveSessionUserConfig } from './session-user-config-projection.js';
@@ -11303,14 +11304,7 @@ export class SessionStore {
       }];
     }));
     const documentAction = Object.values(documents).map(doc => doc.next_required_action).find(action => action !== 'ready');
-    const silentStalls = Object.values(documents)
-      .filter(doc => doc.silent_stall)
-      .map(doc => ({
-        document_id: doc.document_id,
-        reason: doc.silent_stall_reason,
-        seconds_since_last_advancement: doc.seconds_since_last_advancement,
-        next_required_action: doc.next_required_action,
-      }));
+    const silentStalls = projectCompactSilentStalls(documents);
     return {
       route: ROUTE,
       mode: 'photoshop-mcp',

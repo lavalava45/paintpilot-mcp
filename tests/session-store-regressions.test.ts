@@ -28,6 +28,56 @@ function store() {
   });
 }
 
+describe('Compact silent stall diagnostics projection contract', () => {
+  it('preserves document order, truthy filtering, exact displayed fields and nested reference identity', () => {
+    const s = store();
+    const context = s.captureProjectionContext();
+    for (const id of [42, 43, 44]) {
+      context.paintingState.documents[String(id)] = { document_id: id } as any;
+    }
+    const reason = { code: 'unobserved-progress' };
+    vi.spyOn(s, 'continuationWatchState').mockImplementation((id: any) => ({
+      silent_stall: id === 42 ? 1 : id === 44 ? 'yes' : false,
+      silent_stall_reason: id === 42 ? reason : id === 44 ? 'waiting' : null,
+      seconds_since_last_advancement: id === 42 ? 0 : id === 44 ? null : 7,
+    }) as any);
+    vi.spyOn(s, 'documentNextRequiredAction').mockImplementation((id: any) => `action-${id}`);
+    const records = vi.spyOn(s, 'records');
+    const state = vi.spyOn(s, 'paintingState');
+    const jobs = vi.spyOn(s, 'activeJobs');
+    const status = s.statusCompact(context) as any;
+    expect(status.silent_stalls).toEqual([
+      { document_id: 42, reason, seconds_since_last_advancement: 0,
+        next_required_action: 'action-42' },
+      { document_id: 44, reason: 'waiting', seconds_since_last_advancement: null,
+        next_required_action: 'action-44' },
+    ]);
+    expect(status.silent_stalls[0].reason).toBe(reason);
+    expect(Object.keys(status.silent_stalls[0])).toEqual([
+      'document_id', 'reason', 'seconds_since_last_advancement', 'next_required_action',
+    ]);
+    expect(status.documents['43'].silent_stall).toBe(false);
+    expect(records).not.toHaveBeenCalled();
+    expect(state).not.toHaveBeenCalled();
+    expect(jobs).not.toHaveBeenCalled();
+  });
+
+  it('retains empty silent-stall output and does not alter next-action selection', () => {
+    const s = store();
+    const context = s.captureProjectionContext();
+    context.paintingState.documents['42'] = { document_id: 42 } as any;
+    vi.spyOn(s, 'continuationWatchState').mockReturnValue({
+      silent_stall: undefined, silent_stall_reason: undefined,
+      seconds_since_last_advancement: undefined,
+    } as any);
+    vi.spyOn(s, 'documentNextRequiredAction').mockReturnValue('next-pass');
+    const compact = s.statusCompact(context) as any;
+    expect(compact.silent_stalls).toEqual([]);
+    expect(compact.documents['42'].silent_stall).toBeUndefined();
+    expect(compact.next_required_action).toBe('next-pass');
+  });
+});
+
 describe('Compact Art Director status projection contract', () => {
   it('preserves director and task field order, defaults, shared array references, and independently cloned correction targets', () => {
     const s = store();
