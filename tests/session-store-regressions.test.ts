@@ -28,6 +28,84 @@ function store() {
   });
 }
 
+describe('Recognition metrics projection contract', () => {
+  it('preserves empty results for invalid ids and empty documents without reading the journal for invalid ids', () => {
+    const s = store();
+    const recordsSpy = vi.spyOn(s, 'records');
+    const stateSpy = vi.spyOn(s, 'paintingState');
+    const invalid = s.recognitionMetrics(0);
+    expect(invalid).toMatchObject({
+      tracking_started: false, tracking_started_at: null,
+      first_detected_visual_change_at: null, first_subject_recognizable_at: null,
+      first_subject_and_style_recognizable_at: null,
+      recognition_feature_destruction_passes: 0, recognition_features_lost: [],
+      recorded_operation_ms: 0, between_operation_gap_ms: 0,
+      reported_tool_execution_ms: 0, reported_tool_execution_operations: 0,
+    });
+    expect(recordsSpy).not.toHaveBeenCalled();
+    expect(stateSpy).not.toHaveBeenCalled();
+    const projection: any = { records: [], paintingState: { documents: { '42': {} } },
+      activeJobs: [], capturedAt: Date.now() };
+    expect(s.recognitionMetrics(42, [], projection)).toEqual(invalid);
+    expect(recordsSpy).not.toHaveBeenCalled();
+    expect(stateSpy).not.toHaveBeenCalled();
+  });
+
+  it('preserves scoped recognition milestones, preview-linked time, lost features and observed execution intervals', () => {
+    const s = store();
+    const date = seconds => `2026-10-01T00:00:${String(seconds).padStart(2, '0')}.000Z`;
+    const result = duration => ({ content: [{ type: 'text',
+      text: JSON.stringify({ execution_duration_ms: duration }) }] });
+    const records: any[] = [
+      { id: 'old-incarnation', sequence: 1, args: { document_id: 42 }, created_at: date(0),
+        completed_at: date(1), result: result(900) },
+      { id: 'start', sequence: 2, args: { document_id: 42 }, created_at: date(0),
+        completed_at: date(1), result: result(100) },
+      { id: 'preview', sequence: 3, args: { document_id: 42 }, created_at: date(2),
+        completed_at: date(4) },
+      { id: 'changed', sequence: 4, args: { document_id: 42 }, created_at: date(5),
+        completed_at: date(6), visual: true, result: result(25),
+        verdict: { preview_id: 'preview',
+          significance: { global: { mean_abs_rgb_delta: 0.002 } },
+          recognition: { subject: 'uncertain', style: 'uncertain',
+            lost_features: ['roof', 'door'] } } },
+      { id: 'subject', sequence: 5, args: { document_id: 42 }, created_at: date(7),
+        completed_at: date(8), visual: true,
+        result: { content: [{ type: 'text', text: JSON.stringify({
+          mutation_result: { details: { execution_duration_ms: 40 } },
+        }) }] },
+        verdict: { recognition: { subject: 'yes', style: 'no', lost_features: ['roof'] } } },
+      { id: 'subject-style', sequence: 6, args: { document_id: 42 }, created_at: date(10),
+        completed_at: date(11), visual: true,
+        verdict: { recognition: { subject: 'yes', style: 'yes', lost_features: [] } } },
+      { id: 'other-document', sequence: 7, args: { document_id: 43 }, created_at: date(11),
+        completed_at: date(12), visual: true,
+        verdict: { recognition: { subject: 'yes', style: 'yes' } } },
+    ];
+    const projection: any = { records, paintingState: { documents: {
+      '42': { document_instance: { superseded_through_sequence: 1 } },
+    } }, activeJobs: [], capturedAt: Date.now() };
+    const reads = vi.spyOn(s, 'records');
+    const states = vi.spyOn(s, 'paintingState');
+    const metrics = s.recognitionMetrics(42, records, projection);
+    expect(metrics).toMatchObject({
+      tracking_started: true, tracking_started_at: date(0),
+      first_detected_visual_change_at: date(4),
+      seconds_to_first_detected_visual_change: 4,
+      first_subject_recognizable_at: date(8), seconds_to_subject_recognizable: 8,
+      first_subject_and_style_recognizable_at: date(11),
+      seconds_to_subject_and_style_recognizable: 11,
+      recognition_feature_destruction_passes: 2,
+      recognition_features_lost_count: 3, recognition_features_lost: ['roof', 'door'],
+      recorded_operation_ms: 6000, between_operation_gap_ms: 5000,
+      reported_tool_execution_ms: 165, reported_tool_execution_operations: 3,
+    });
+    expect(reads).not.toHaveBeenCalled();
+    expect(states).not.toHaveBeenCalled();
+    expect(records[3].verdict.recognition.lost_features).toEqual(['roof', 'door']);
+  });
+});
+
 describe('Latency summary projection contract', () => {
   it('keeps nearest-rank median/p95, invalid samples, visual-only metrics and missing component shape', () => {
     const s = store();
