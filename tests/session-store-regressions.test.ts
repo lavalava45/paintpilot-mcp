@@ -28,6 +28,80 @@ function store() {
   });
 }
 
+describe('Artistic throughput observation projection contract', () => {
+  it('preserves timing overlaps, outcome counts, scoped records and supplied state without rescans', () => {
+    const s = store();
+    const recentEvents = [{ semantic_actions: 0, operation_id: 'first' }];
+    const records: any[] = [
+      { id: 'old', sequence: 1, args: { document_id: 42 }, visual: true,
+        latency: { guard_preflight_ms: 900 }, phase: 'completed' },
+      { id: 'first', sequence: 2, args: { document_id: 42 }, visual: true,
+        execution: 'not-executed', phase: 'failed', resolved: { outcome: 'partial' },
+        verdict: { verdict: 'regression' },
+        review_evidence: { status: 'artifact_missing_or_corrupt' },
+        latency: { guard_preflight_ms: 7, report_ack_closure_ms: 3, recovery_reconciliation_ms: 2,
+          photoshop_dispatch_wall_ms: 11, visual_evaluation_verdict_gap_ms: 30,
+          recorder_prepare_ms: 5, recorder_finalize_ms: 7, automatic_checkpoint_wall_ms: 40 } },
+      { id: 'second', sequence: 3, args: { document_id: 42 }, visual: true,
+        execution: 'not-executed', phase: 'completed',
+        visual_review: { delivery: { delivery_complete: false } },
+        latency: { guard_preflight_ms: 13, photoshop_dispatch_wall_ms: 25,
+          visual_evaluation_verdict_gap_ms: 4, recorder_prepare_ms: 2,
+          automatic_checkpoint_wall_ms: 12 } },
+      { id: 'other-document', sequence: 4, args: { document_id: 43 }, visual: true,
+        phase: 'completed', latency: { guard_preflight_ms: 100 } },
+    ];
+    const projection: any = { records, activeJobs: [], capturedAt: Date.now(),
+      paintingState: { documents: { '42': {
+        document_instance: { superseded_through_sequence: 1 },
+        artistic_throughput: { recent_events: recentEvents },
+      } } } };
+    const recordsSpy = vi.spyOn(s, 'records');
+    const stateSpy = vi.spyOn(s, 'paintingState');
+    const result = s.artisticThroughputMetrics(42, records, projection);
+    expect(result.timing).toMatchObject({
+      guard_bookkeeping_ms_observed: 25,
+      photoshop_dispatch_ms_observed: 36,
+      recorder_overhead_ms_observed: 14,
+      automatic_checkpoint_wall_ms_observed: 52,
+      automatic_checkpoint_dispatch_ms_observed: 36,
+      visual_evaluation_gap_ms_observed: 34,
+      guard_bookkeeping_share_of_measured_time: 0.2,
+    });
+    expect(result.outcomes).toEqual({
+      regression_passes: 1, recovery_or_uncertain_records: 1, evidence_integrity_failures: 2,
+    });
+    expect(result.recent_events).toBe(recentEvents);
+    expect(recordsSpy).not.toHaveBeenCalled();
+    expect(stateSpy).not.toHaveBeenCalled();
+  });
+
+  it('retains numeric coercion, negative checkpoint samples and absent timing semantics', () => {
+    const s = store();
+    const records: any[] = [{ id: 'coercion', args: { document_id: 42 }, sequence: 1,
+      phase: 'completed', execution: 'not-executed',
+      latency: { guard_preflight_ms: '5', photoshop_dispatch_wall_ms: 4,
+        automatic_checkpoint_wall_ms: -10, recorder_prepare_ms: -3,
+        visual_evaluation_verdict_gap_ms: Number.NaN } }];
+    const projection: any = { records, activeJobs: [], capturedAt: Date.now(),
+      paintingState: { documents: { '42': {} } } };
+    const result = s.artisticThroughputMetrics(42, records, projection);
+    expect(result.timing).toMatchObject({
+      guard_bookkeeping_ms_observed: 5,
+      photoshop_dispatch_ms_observed: 4,
+      recorder_overhead_ms_observed: 0,
+      automatic_checkpoint_wall_ms_observed: -10,
+      automatic_checkpoint_dispatch_ms_observed: 4,
+      visual_evaluation_gap_ms_observed: 0,
+      guard_bookkeeping_share_of_measured_time: 0.5556,
+    });
+    expect(result.outcomes).toEqual({
+      regression_passes: 0, recovery_or_uncertain_records: 0, evidence_integrity_failures: 0,
+    });
+    expect(s.artisticThroughputMetrics(42, [], projection).timing.guard_bookkeeping_share_of_measured_time).toBeNull();
+  });
+});
+
 describe('Recognition metrics projection contract', () => {
   it('preserves empty results for invalid ids and empty documents without reading the journal for invalid ids', () => {
     const s = store();

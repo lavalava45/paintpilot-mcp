@@ -11,6 +11,7 @@ import { summarizeCycleLatency } from './cycle-latency-summary.js';
 import { projectContinuationTimelineOperations } from './continuation-timeline-operations.js';
 import { projectCompilerAttemptAudit } from './compiler-attempt-audit-projection.js';
 import { projectRecognitionMetrics } from './recognition-metrics-projection.js';
+import { projectArtisticThroughputObservations } from './artistic-throughput-observations.js';
 import { atomicJson, readDurableOperation, writeDurableOperation, scanDurableOperations } from './session-file-storage.js';
 import { captureClosureFiles, restoreClosureFiles } from './closure-snapshot-files.js';
 import { ART_RUN_COMMENTARY_MODES, ART_RUN_COMMENTARY_DETAILS, ART_RUN_PAINTING_PROFILES, resolveSessionUserConfig } from './session-user-config-projection.js';
@@ -5546,31 +5547,7 @@ export class SessionStore {
     const accountingStatus = reasons.length ? 'stale'
       : journal.unknown || unowned || unmeasuredRecentActions || (reportedActions > 0 && journal.operations === 0)
         ? 'unverified' : 'consistent';
-    const sumLatency = field => records.reduce((sum, record) => {
-      const value = Number(record.latency?.[field]);
-      return Number.isFinite(value) && value >= 0 ? sum + value : sum;
-    }, 0);
-    const guardBookkeepingMs = sumLatency('guard_preflight_ms')
-      + sumLatency('report_ack_closure_ms')
-      + sumLatency('recovery_reconciliation_ms');
-    const photoshopDispatchMs = sumLatency('photoshop_dispatch_wall_ms');
-    const visualEvaluationMs = sumLatency('visual_evaluation_verdict_gap_ms');
-    const recorderOverheadMs = sumLatency('recorder_prepare_ms') + sumLatency('recorder_finalize_ms');
-    const checkpointRecords = records.filter(record => typeof record.latency?.automatic_checkpoint_wall_ms === 'number');
-    const checkpointWallMs = checkpointRecords.reduce((sum, record) => sum + record.latency.automatic_checkpoint_wall_ms, 0);
-    const checkpointDispatchMs = checkpointRecords.reduce((sum, record) => sum + (record.latency.photoshop_dispatch_wall_ms ?? 0), 0);
-    const measuredMs = guardBookkeepingMs + photoshopDispatchMs + visualEvaluationMs
-      + recorderOverheadMs + Math.max(0, checkpointWallMs - checkpointDispatchMs);
-    const regressions = records.filter(record => record.verdict?.verdict === 'regression').length;
-    const recoveryRecords = records.filter(record =>
-      record.phase !== 'completed'
-      || record.resolved?.outcome === 'partial'
-      || record.resolved?.outcome === 'not-executed'
-    ).length;
-    const evidenceFailures = records.filter(record =>
-      record.review_evidence?.status === 'artifact_missing_or_corrupt'
-      || record.visual_review?.delivery?.delivery_complete === false
-    ).length;
+    const observationProjection = projectArtisticThroughputObservations(records);
     return {
       protocol: 'photoshop.guard.artistic_throughput.v1',
       model_visible_guard_round_trips: Number(stored.model_visible_guard_round_trips ?? 0),
@@ -5600,21 +5577,8 @@ export class SessionStore {
       violation_accounting_by_scope_class_code: stored.violation_accounting_by_scope_class_code ?? {},
       artistic_actions_per_model_visible_guard_round_trip: accountingStatus === 'stale' || unmeasuredRecentActions ? null
         : reportedRounds > 0 ? Number((reportedActions / reportedRounds).toFixed(3)) : 0,
-      timing: {
-        guard_bookkeeping_ms_observed: guardBookkeepingMs,
-        photoshop_dispatch_ms_observed: photoshopDispatchMs,
-        recorder_overhead_ms_observed: recorderOverheadMs,
-        automatic_checkpoint_wall_ms_observed: checkpointWallMs,
-        automatic_checkpoint_dispatch_ms_observed: checkpointDispatchMs,
-        visual_evaluation_gap_ms_observed: visualEvaluationMs,
-        guard_bookkeeping_share_of_measured_time: measuredMs > 0 ? Number((guardBookkeepingMs / measuredMs).toFixed(4)) : null,
-        note: 'Recorder phase timings are children of recorder overhead; checkpoint dispatch is already in Photoshop dispatch. Do not sum these overlaps. Visual-evaluation gap remains externally unattributed host/model/user time; only measured components participate in this diagnostic share.',
-      },
-      outcomes: {
-        regression_passes: regressions,
-        recovery_or_uncertain_records: recoveryRecords,
-        evidence_integrity_failures: evidenceFailures,
-      },
+      timing: observationProjection.timing,
+      outcomes: observationProjection.outcomes,
       recent_events: Array.isArray(stored.recent_events) ? stored.recent_events : [],
       diagnostic_only: true,
     };
