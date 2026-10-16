@@ -28,6 +28,90 @@ function store() {
   });
 }
 
+describe('Compact Art Director status projection contract', () => {
+  it('preserves director and task field order, defaults, shared array references, and independently cloned correction targets', () => {
+    const s = store();
+    const context = s.captureProjectionContext();
+    const priorities = ['structure-first'];
+    const hypotheses = [{ id: 'candidate-a', angle: 'frontal' }];
+    const taskScales = ['OBJECT'];
+    const taskRelations = ['roof-to-wall'];
+    const correctionTarget = { layer: { id: 17, coords: [1, 2] } };
+    const source: any = {
+      directive_id: 'directive-17', revision: 3, status: 'active', goal: 'refine silhouette',
+      priorities, global_brief_completion_allowed: 1,
+      composition_exploration: { hypotheses, selected_id: 'candidate-a',
+        material_choice_unresolved: 1, normalized_from_legacy_mode: 'flat' },
+      tasks: [
+        { task_id: 'roof', summary: 'Repair perspective', status: 'active',
+          correction_target: correctionTarget, allowed_scales: taskScales,
+          affected_relations: taskRelations, perceptual_zone_ids: [], successful_microplans: undefined },
+        { task_id: 'clouds', summary: 'Render sky', status: 'planned', successful_microplans: 2 },
+      ],
+      private_data: 'not-presented',
+    };
+    context.paintingState.documents['42'] = {
+      document_id: 42, art_director: source, physical_stack_check: { status: 'observed' },
+    } as any;
+    const recordsSpy = vi.spyOn(s, 'records');
+    const stateSpy = vi.spyOn(s, 'paintingState');
+    const jobsSpy = vi.spyOn(s, 'activeJobs');
+    const doc = (s.statusCompact(context) as any).documents['42'];
+    expect(Object.keys(doc).indexOf('brush_pack_policy') + 1).toBe(Object.keys(doc).indexOf('art_director'));
+    expect(Object.keys(doc).indexOf('art_director') + 1).toBe(Object.keys(doc).indexOf('artistic_losses'));
+    const director = doc.art_director;
+    expect(Object.keys(director).slice(0, 6)).toEqual([
+      'directive_id', 'revision', 'status', 'goal', 'style_contract',
+      'prompt_conflict_preflight',
+    ]);
+    expect(director).toMatchObject({
+      directive_id: 'directive-17', revision: 3, status: 'active', goal: 'refine silhouette',
+      style_contract: null, strategy_validation: null,
+      global_brief_completion_allowed: true, completed_microplans: 0,
+      composition_exploration: {
+        selected_id: 'candidate-a', selection_reason: null,
+        material_choice_unresolved: true, normalized_from_legacy_mode: 'flat',
+      },
+      physical_stack_check: { status: 'observed' },
+      whole_image_glance: { due: false, reason: null, last_record: null, history: [] },
+      tasks: [
+        { task_id: 'roof', successful_microplans: 0, region: null, allowed_global_changes: [] },
+        { task_id: 'clouds', successful_microplans: 2, region: null, allowed_scales: [],
+          allowed_global_changes: [] },
+      ],
+    });
+    expect(director.priorities).toBe(priorities);
+    expect(director.composition_exploration.hypotheses).toBe(hypotheses);
+    expect(director.tasks[0].allowed_scales).toBe(taskScales);
+    expect(director.tasks[0].affected_relations).toBe(taskRelations);
+    expect(director.tasks[0]).not.toHaveProperty('perceptual_zone_ids');
+    expect(director.tasks[0].correction_target).toEqual(correctionTarget);
+    expect(director.tasks[0].correction_target).not.toBe(correctionTarget);
+    expect(director.tasks[0].correction_target.layer).not.toBe(correctionTarget.layer);
+    expect(director).not.toHaveProperty('private_data');
+    expect(source.private_data).toBe('not-presented');
+    expect(recordsSpy).not.toHaveBeenCalled();
+    expect(stateSpy).not.toHaveBeenCalled();
+    expect(jobsSpy).not.toHaveBeenCalled();
+  });
+
+  it('retains null and malformed task handling, and returns existing glance object without cloning', () => {
+    const s = store();
+    const context = s.captureProjectionContext();
+    context.paintingState.documents['42'] = { document_id: 42 } as any;
+    expect((s.statusCompact(context) as any).documents['42'].art_director).toBeNull();
+    const glance = { due: true, history: ['frame-1'] };
+    context.paintingState.documents['42'] = {
+      document_id: 42, art_director: { whole_image_glance: glance, tasks: [] },
+    } as any;
+    expect((s.statusCompact(context) as any).documents['42'].art_director.whole_image_glance).toBe(glance);
+    context.paintingState.documents['42'] = {
+      document_id: 42, art_director: { tasks: { malformed: true } },
+    } as any;
+    expect(() => s.statusCompact(context)).toThrow(TypeError);
+  });
+});
+
 describe('Compact critique summary projection contract', () => {
   it('preserves legacy unresolved critique defaults, optional fields, object references and key order', () => {
     const s = store();
