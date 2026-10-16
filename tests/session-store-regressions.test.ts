@@ -28,6 +28,90 @@ function store() {
   });
 }
 
+describe('Compact critique summary projection contract', () => {
+  it('preserves legacy unresolved critique defaults, optional fields, object references and key order', () => {
+    const s = store();
+    const context = s.captureProjectionContext();
+    const observations = ['The roof is out of alignment'];
+    const relations = ['roof-to-wall'];
+    const source: any = {
+      operation_id: 'visual-review-12',
+      verdict: 'regression',
+      disposition: 'reject',
+      target_resolved: 'no',
+      observations,
+      affected_relations: relations,
+      affected_qualities: [],
+      significance: { execution_effect: 'insufficient' },
+      extra_internal_evidence: { should_not_escape: true },
+    };
+    context.paintingState.documents['42'] = { document_id: 42, last_critique: source } as any;
+    const journal = vi.spyOn(s, 'records');
+    const painting = vi.spyOn(s, 'paintingState');
+    const jobs = vi.spyOn(s, 'activeJobs');
+    const result = (s.statusCompact(context) as any).documents['42'];
+    expect(Object.keys(result).indexOf('last_critique') + 1).toBe(Object.keys(result).indexOf('unresolved_visual_basis'));
+    expect(result.last_critique).toEqual({
+      operation_id: 'visual-review-12', verdict: 'regression', disposition: 'reject',
+      execution_outcome: 'uncertain', artistic_outcome: 'unresolved',
+      comparison_metric: null, target_resolved: 'no',
+      observations, primary_mismatch: null, uncertainty: null,
+      affected_relations: relations, global_readability: 'unknown',
+      goal_assessment: { status: 'unresolved' }, execution_effect: 'insufficient',
+    });
+    expect(result.unresolved_visual_basis).toEqual({
+      operation_id: 'visual-review-12', status: 'unresolved',
+      observations, primary_mismatch: null, uncertainty: null,
+    });
+    expect(result.last_critique.observations).toBe(observations);
+    expect(result.unresolved_visual_basis.observations).toBe(observations);
+    expect(result.last_critique.affected_relations).toBe(relations);
+    expect(result.last_critique).not.toHaveProperty('affected_qualities');
+    expect(result.last_critique).not.toHaveProperty('extra_internal_evidence');
+    expect(source.extra_internal_evidence).toEqual({ should_not_escape: true });
+    expect(journal).not.toHaveBeenCalled();
+    expect(painting).not.toHaveBeenCalled();
+    expect(jobs).not.toHaveBeenCalled();
+  });
+
+  it('preserves explicit overrides, uncertain and resolved interpretations, and absent critique nulls', () => {
+    const s = store();
+    const context = s.captureProjectionContext();
+    const source: any = {
+      operation_id: 'visual-review-13', target_resolved: 'uncertain',
+      execution_outcome: 'completed', artistic_outcome: 'needs-refinement',
+      goal_assessment: { status: 'manual-review' },
+      global_readability: 'clear',
+      affected_relations: [], affected_qualities: ['lighting'],
+    };
+    context.paintingState.documents['42'] = { document_id: 42, last_critique: source } as any;
+    const uncertain = (s.statusCompact(context) as any).documents['42'];
+    expect(uncertain.last_critique).toMatchObject({
+      execution_outcome: 'completed', artistic_outcome: 'needs-refinement',
+      global_readability: 'clear', goal_assessment: { status: 'manual-review' },
+      affected_qualities: ['lighting'],
+    });
+    expect(uncertain.last_critique.goal_assessment).toBe(source.goal_assessment);
+    expect(uncertain.last_critique).not.toHaveProperty('affected_relations');
+    expect(uncertain.unresolved_visual_basis).toMatchObject({
+      operation_id: 'visual-review-13', status: 'uncertain', observations: [],
+    });
+    context.paintingState.documents['42'] = {
+      document_id: 42, last_critique: { target_resolved: 'yes' },
+    } as any;
+    const resolved = (s.statusCompact(context) as any).documents['42'];
+    expect(resolved.last_critique).toMatchObject({
+      execution_outcome: 'uncertain', artistic_outcome: 'resolved',
+      goal_assessment: { status: 'legacy_claimed_resolved' },
+    });
+    expect(resolved.unresolved_visual_basis).toBeNull();
+    context.paintingState.documents['42'] = { document_id: 42 } as any;
+    const missing = (s.statusCompact(context) as any).documents['42'];
+    expect(missing.last_critique).toBeNull();
+    expect(missing.unresolved_visual_basis).toBeNull();
+  });
+});
+
 describe('Compact Brush Preflight projection contract', () => {
   it('preserves preflight flags, role order, optional defaults and reference identity of nested collections', () => {
     const s = store();

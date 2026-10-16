@@ -14,6 +14,7 @@ import { projectRecognitionMetrics } from './recognition-metrics-projection.js';
 import { projectArtisticThroughputObservations } from './artistic-throughput-observations.js';
 import { projectCompactFrameReferences } from './compact-frame-reference-projection.js';
 import { projectCompactBrushPreflight } from './compact-brush-preflight-projection.js';
+import { projectCompactCritiqueSummary } from './compact-critique-summary-projection.js';
 import { atomicJson, readDurableOperation, writeDurableOperation, scanDurableOperations } from './session-file-storage.js';
 import { captureClosureFiles, restoreClosureFiles } from './closure-snapshot-files.js';
 import { ART_RUN_COMMENTARY_MODES, ART_RUN_COMMENTARY_DETAILS, ART_RUN_PAINTING_PROFILES, resolveSessionUserConfig } from './session-user-config-projection.js';
@@ -11346,42 +11347,7 @@ export class SessionStore {
           })),
         largest_open_must_fix: this.largestOpenMustFix(doc.visual_problems) ?? null,
         priority_review_required: !!doc.priority_review_required,
-        last_critique: doc.last_critique ? {
-          operation_id: doc.last_critique.operation_id ?? null,
-          verdict: doc.last_critique.verdict,
-          disposition: doc.last_critique.disposition,
-          execution_outcome: doc.last_critique.execution_outcome ?? 'uncertain',
-          artistic_outcome: doc.last_critique.artistic_outcome ?? (
-            doc.last_critique.target_resolved === 'yes' ? 'resolved'
-              : doc.last_critique.target_resolved === 'no' ? 'unresolved'
-                : 'uncertain'
-          ),
-          comparison_metric: doc.last_critique.comparison_metric ?? null,
-          target_resolved: doc.last_critique.target_resolved,
-          observations: doc.last_critique.observations ?? [],
-          primary_mismatch: doc.last_critique.primary_mismatch ?? null,
-          uncertainty: doc.last_critique.uncertainty ?? null,
-          ...(Array.isArray(doc.last_critique.affected_relations) && doc.last_critique.affected_relations.length
-            ? { affected_relations: doc.last_critique.affected_relations }
-            : {}),
-          ...(Array.isArray(doc.last_critique.affected_qualities) && doc.last_critique.affected_qualities.length
-            ? { affected_qualities: doc.last_critique.affected_qualities }
-            : {}),
-          global_readability: doc.last_critique.global_readability ?? 'unknown',
-          goal_assessment: doc.last_critique.goal_assessment ?? {
-            status: doc.last_critique.target_resolved === 'yes' ? 'legacy_claimed_resolved' :
-              doc.last_critique.target_resolved === 'no' ? 'unresolved' :
-                doc.last_critique.target_resolved === 'uncertain' ? 'uncertain' : 'legacy_unknown',
-          },
-          execution_effect: doc.last_critique.significance?.execution_effect,
-        } : null,
-        unresolved_visual_basis: doc.last_critique && doc.last_critique.target_resolved !== 'yes' ? {
-          operation_id: doc.last_critique.operation_id ?? null,
-          status: doc.last_critique.target_resolved === 'uncertain' ? 'uncertain' : 'unresolved',
-          observations: doc.last_critique.observations ?? [],
-          primary_mismatch: doc.last_critique.primary_mismatch ?? null,
-          uncertainty: doc.last_critique.uncertainty ?? null,
-        } : null,
+        ...projectCompactCritiqueSummary(doc),
         visual_barrier: barrier,
         workflow_stall: metrics.workflow_stall,
         decision_loop_stall: cadence.decision_loop_stall,
