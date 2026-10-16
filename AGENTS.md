@@ -40,7 +40,7 @@ delivered scene against original_brief; setting, space/light and subject relatio
 when the last local component improved. Return previous_observation.critic_review using the exact
 request_id, five pass|fail|unknown criteria, and concrete visible/next_change for each failed criterion.
 Then resume Painter and submit the observation plus next_pass through the SAME ordinary cycle_auto.
-Checkpoints: after three substantial visual passes, every six further visual passes, stage changes
+Checkpoints for both `simple_graphic` and `nontrivial_painting`: after three substantial visual passes, every six further visual passes, stage changes
 and final completion. Unfinished initial masses may be kept; their scene findings persist through
 local successes and saves until the corresponding whole-scene criterion is actually reassessed pass.
 Unknown is not success. Small/detail does not require a second reviewer after every stroke.
@@ -55,6 +55,17 @@ balance (or justified non-applicability), next_change says what to preserve. Res
 leaning, motion, counterweights and brief-authorized stylization. Hidden/ambiguous support is
 unknown; a shadow or solved geometry is not visual proof. Fail needs a structural correction,
 and fail/unknown remains scene debt. Use the same delivered image and continuation.
+Every due Critic report also includes `visual_relationships` on the exact delivered
+AFTER: stable id, relation kind, named parts, brief/style-grounded expected
+relationship, concrete observed form/contact/relative scale, and pass/fail/
+unknown/not-applicable. A fail must include a matching named structural_defect
+in findings; recheck the same defect on repaired pixels before pass. For a
+compound person/animal in the declared scene plan, cover anatomy and support;
+for furniture, support. A deliberate floating/cropped scene may justify
+not-applicable, while hidden unfinished relations are unknown. Native geometry,
+IK, offsets and tool receipts cannot independently prove plausible anatomy.
+Do not request another image, mutate Photoshop just to review, or invent a
+separate vision evaluator.
 
 Optional delegation uses the real exposed Core agents API when the user authorized subagents:
 status once, message a suitable sleeping Critic or spawn once using optional_spawn. Send original

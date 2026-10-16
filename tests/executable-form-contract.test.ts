@@ -25,6 +25,7 @@ import {
 import { SessionStore } from '../src/core/guard/session-store.js';
 import { CHAT_CRITIC_CRITERIA, CHAT_CRITIC_PROTOCOL, CRITIC_CORRECTION_VERSION,
   SUPPORT_CONTACT_WEIGHT_REVIEW_VERSION } from '../src/core/guard/chat-critic.js';
+import { VISUAL_RELATIONSHIP_REVIEW_VERSION } from '../src/core/guard/visual-relationship-review.js';
 import {
   applyDeterministicPassRepairs,
   classifyViolation,
@@ -520,6 +521,10 @@ it('requires current whole-brief assessment, independent of local success and sa
     criteria: Object.fromEntries(CHAT_CRITIC_CRITERIA.map(key => [key, 'pass'])),
     support_review_version: SUPPORT_CONTACT_WEIGHT_REVIEW_VERSION,
     correction_version: CRITIC_CORRECTION_VERSION,
+    visual_relationship_review_version: VISUAL_RELATIONSHIP_REVIEW_VERSION,
+    visual_relationships: [{ id:'fixture-no-relation', kind:'none', part_ids:['test-frame'],
+      expected:'Contract-only synthetic image with no visible part-to-part relation.',
+      visible:'No relationship is rendered in this synthetic contract fixture.', status:'not-applicable' }],
   };
   expect(documentArtisticDebt(state, { visual: false, tool: 'photoshop_save_document' })).toEqual(
     []
@@ -575,6 +580,10 @@ it('publishes a fail-closed whole-brief completion decision across saves, false 
     criteria: Object.fromEntries(CHAT_CRITIC_CRITERIA.map(key => [key, 'pass'])),
     support_review_version: SUPPORT_CONTACT_WEIGHT_REVIEW_VERSION,
     correction_version: CRITIC_CORRECTION_VERSION,
+    visual_relationship_review_version: VISUAL_RELATIONSHIP_REVIEW_VERSION,
+    visual_relationships: [{ id:'fixture-no-relation', kind:'none', part_ids:['test-frame'],
+      expected:'Contract-only synthetic image with no visible part-to-part relation.',
+      visible:'No relationship is rendered in this synthetic contract fixture.', status:'not-applicable' }],
   };
   expect(wholeBriefCompletionContract(state, 'ready')).toMatchObject({
     status: 'completed', completion_allowed: true, reasons: [],
@@ -664,6 +673,10 @@ it('adds whole-brief assessment after save without repainting or overwriting the
       criteria: Object.fromEntries(CHAT_CRITIC_CRITERIA.map(key => [key, 'pass'])),
       support_review_version: SUPPORT_CONTACT_WEIGHT_REVIEW_VERSION,
       correction_version: CRITIC_CORRECTION_VERSION,
+      visual_relationship_review_version: VISUAL_RELATIONSHIP_REVIEW_VERSION,
+      visual_relationships: [{ id:'fixture-no-relation', kind:'none', part_ids:['test-frame'],
+        expected:'Contract-only synthetic image with no visible part-to-part relation.',
+        visible:'No relationship is rendered in this synthetic contract fixture.', status:'not-applicable' }],
     };
     expect(documentArtisticDebt(state)).toEqual([]);
     expect(source.verdict).toEqual({ disposition: 'accept' });

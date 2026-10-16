@@ -12,6 +12,7 @@ import { createGuardTools } from '../src/tools/guard-tools.js';
 import { compileGuardCycle } from '../src/core/guard/cycle-compiler.js';
 import { projectGuardDiagnostics } from '../src/core/guard/response-budget.js';
 import { selectedCriticCorrection, criticCorrectionIssue } from '../src/core/guard/critic-correction.js';
+import { VISUAL_RELATIONSHIP_REVIEW_VERSION } from '../src/core/guard/visual-relationship-review.js';
 import { openCriticObligation } from '../src/core/guard/critic-obligations.js';
 const dirs: string[] = [];
 it('regression: admits substantive brush construction on an existing semantic component for missing-object and form findings', () => {
@@ -38,9 +39,109 @@ const record = (n: number, stage = 'GLOBAL_BLOCK_IN'): any => ({ id: 'pass-'+n, 
 const records = (n: number) => Array.from({ length: n }, (_, i) => record(i+1));
 const reply = (request: any, fail = false): any => ({ request_id: request.request_id, reviewer: 'same-chat-role',
   criteria: Object.fromEntries(CHAT_CRITIC_CRITERIA.map(key => [key, fail && key === 'composition_context' ? 'fail' : 'pass'])),
+  // Other tests exercise protocol identity/obligations using no real subject pixels.
+  // Concrete figure/contact checks are asserted separately against named parts.
+  visual_relationships: [{ id: 'fixture-no-visible-relation', kind: 'none', part_ids: ['test-frame'],
+    expected: 'No visible relationship target is present in this contract-only synthetic frame.',
+    visible: 'This synthetic 2px white image cannot demonstrate meaningful anatomical or support relations.',
+    status: 'not-applicable' }],
   findings: [
     { criterion: 'contact_and_protection', visible: 'The subject rests on the floor; its feet meet it and its weight reads over that support.', next_change: 'Preserve the grounded contact and balanced pose while correcting other scene defects.' },
     ...(fail ? [{ criterion: 'composition_context', visible: 'The wall remains one flat field without spatial light.', next_change: 'Build large lit and shadow planes joining the room to the subject.' }] : [])] });
+
+it('requires actual AFTER-visible relationship evidence and rejects an unlinked anatomical failure', () => {
+  const s: any=state(), r=record(3), req=chatCriticRequest(r,s,records(3))!;
+  expect(req.visual_relationship_review_version).toBe(VISUAL_RELATIONSHIP_REVIEW_VERSION);
+  expect(req.visual_relationship_guidance).toContain('head-to-torso');
+  const base=reply(req);
+  expect(() => validateChatCritic({...base,visual_relationships:undefined},req,r,s)).toThrow(/visual_relationships_required/);
+  const tigerRelation={ id:'tiger-head-torso', kind:'anatomy', part_ids:['head','torso'],
+    expected:'The feline head must join a short neck and proportionate wide torso as specified in the brief.',
+    visible:'On the actual AFTER the raised head appears tiny compared with an unnaturally elongated upright neck.',
+    status:'fail' };
+  const failure={...base,visual_relationships:[tigerRelation],
+    criteria:{...base.criteria,form_proportions:'fail'},
+    findings:[...base.findings,{criterion:'form_proportions',visible:tigerRelation.visible,
+      next_change:'Replace the head and neck silhouette to read as a tiger instead of a giraffe.'}]};
+  expect(() => validateChatCritic(failure,req,r,s)).toThrow(/visual_relationship_defect_required/);
+  const defect={ id:tigerRelation.id, kind:'relative-size', visible:tigerRelation.visible,
+    part_ids:['head','torso'],relation_ids:[tigerRelation.id],
+    brief_relevance:'The original brief requires recognizable big-cat head-to-torso proportions.',
+    recheck:'On the new AFTER verify the connected neck and head scale and contour.' };
+  const valid=validateChatCritic({...failure,findings:[...base.findings,
+    {...failure.findings[1],correction_kind:'form',structural_defect:defect}]},req,r,s)!;
+  expect(valid).toMatchObject({frame_sha256:r.preview.sha256,
+    visual_relationship_review_version:VISUAL_RELATIONSHIP_REVIEW_VERSION,
+    visual_relationships:[{id:tigerRelation.id,status:'fail'}]});
+  const retained={...s,...persistChatCritic(s,valid)};
+  expect(retained.visual_problems[tigerRelation.id].status).toBe('open');
+  expect(retained.visual_problems[tigerRelation.id].visual_relationship_kind).toBe('anatomy');
+  const changed=record(4),next=chatCriticRequest(changed,retained,records(4))!;
+  const unknown={...reply(next),criteria:{...reply(next).criteria,form_proportions:'unknown'},
+    visual_relationships:[{...tigerRelation,status:'unknown'}]};
+  expect(persistChatCritic(retained,validateChatCritic(unknown,next,changed,retained)!).visual_problems[tigerRelation.id].status)
+    .toBe('open');
+  const premature={...reply(next),visual_relationships:[{...tigerRelation,status:'pass',
+    visible:'The AFTER now shows a shorter neck and a proportionate wide cat torso; head is aligned above the shoulders.'}]};
+  expect(() => validateChatCritic(premature,next,changed,retained)).toThrow(/recheck_required/);
+  const recheckedFinding={
+    criterion:'form_proportions',structural_defect:defect,
+    visible:'The newly rebuilt head and neck visibly connect at the shoulders and match the wider torso proportions.',
+    next_change:'Preserve this checked head-to-torso silhouette and cat-like neck proportion.'};
+  expect(() => validateChatCritic({...reply(next),findings:[...reply(next).findings,recheckedFinding]},
+    next,changed,retained)).toThrow(/visual_relationship_recheck_required/);
+  const verified=validateChatCritic({...premature,findings:[...premature.findings,recheckedFinding]},
+    next,changed,retained)!;
+  expect(persistChatCritic(retained,verified).visual_problems[tigerRelation.id].status).toBe('resolved');
+});
+
+it('checks visible hand-to-object contact and object support without a native geometric pass being enough', () => {
+  const s: any={...state(),painting_profile:'simple_graphic'},r=record(3),req=chatCriticRequest(r,s,records(3))!;
+  const base=reply(req),hand={id:'fingers-to-peel',kind:'interaction',part_ids:['fingers','banana-peel'],
+    expected:'Fingers should wrap around the peel at opposing contact points rather than float above it.',
+    visible:'The curled fingertip contours overlap the peel edge incorrectly and the actual grip appears disconnected.',
+    status:'fail'},support={id:'body-to-floor',kind:'support',part_ids:['body','floor'],
+    expected:'The resting body should meet its supporting floor or justify suspension in the brief.',
+    visible:'The cropped subject and floor are not both visible; no load-bearing contact can be assessed.',
+    status:'unknown'};
+  const bad={...base,criteria:{...base.criteria,contact_and_protection:'pass'},visual_relationships:[hand,support]};
+  expect(() => validateChatCritic(bad,req,r,s)).toThrow(/criteria_conflict/);
+  const defect={id:hand.id,kind:'attachment',visible:hand.visible,
+    part_ids:hand.part_ids,relation_ids:[hand.id],
+    brief_relevance:'The hand must visibly grasp the banana in the original eating scene.',
+    recheck:'Verify finger and peel overlap on the next delivered frame.'};
+  const failed={...bad,criteria:{...base.criteria,contact_and_protection:'fail'},
+    findings:[{criterion:'contact_and_protection',correction_kind:'contact',
+      visible:hand.visible,next_change:'Rebuild the gripping fingers and peel contact.',structural_defect:defect}]};
+  expect(validateChatCritic(failed,req,r,s)?.visual_relationships).toHaveLength(2);
+  const noPixels={...failed,visual_relationships:[{...hand,visible:'tool ok'}]};
+  expect(() => validateChatCritic(noPixels,req,r,s)).toThrow(/visual_relationship_invalid/);
+});
+
+it('does not allow none to bypass anatomy and support checks for a declared compound animal', () => {
+  const s:any={...state(),original_brief:'A deliberately stylized flying animal against the sky',
+    scene_ownership_plan:{objects:[{object_id:'animal',kind:'compound-object',subject_kind:'animal',
+      component_semantic_ids:['head','torso']}]}}, r=record(3);
+  const req=chatCriticRequest(r,s,records(3))!;
+  expect(req.visual_relationship_required_kinds).toEqual(['anatomy','support']);
+  expect(() => validateChatCritic(reply(req),req,r,s)).toThrow(/coverage_required/);
+  const reviewed={...reply(req),criteria:{...reply(req).criteria,form_proportions:'unknown'},
+    visual_relationships:[
+      {id:'animal-head-torso',kind:'anatomy',part_ids:['head','torso'],
+        expected:'The visible head and torso should connect with a plausible stylized animal neck.',
+        visible:'The head has not yet been painted, so the relationship cannot be visually assessed.',
+        status:'unknown'},
+      {id:'animal-support',kind:'support',part_ids:['animal','ground'],
+        expected:'An airborne animal can be suspended without floor contact under this explicit brief.',
+        visible:'The animal is flying in an empty sky, so there is intentionally no ground support.',
+        status:'not-applicable'},
+    ],
+    findings:[{criterion:'contact_and_protection',
+      visible:'The flying animal is intentionally suspended in the sky without a visible supporting surface.',
+      next_change:'Preserve the intended airborne composition and do not invent a floor.'}]};
+  expect(validateChatCritic(reviewed,req,r,s)).toMatchObject({
+    criteria:{form_proportions:'unknown'},visual_relationships:[{status:'unknown'},{status:'not-applicable'}]});
+});
 
 it('advances a compound Critic finding only after frame-bound prerequisite review and invalidates touched components', () => {
   const s: any = state(), first = record(3), request = chatCriticRequest(first, s, records(3))!;

@@ -53,6 +53,50 @@ reading, recapture or separate closure call is needed. Findings survive local ta
 saves. Unknown rereview preserves prior findings; only an explicit pass on that criterion clears them.
 Final painting_completion cannot claim pass for Critic's failed/unknown criteria.
 
+### Exact-frame visual relationship review (2026-10-16)
+
+At each scheduled Critic checkpoint, for **both** painting profiles, the same
+already delivered AFTER image must also be examined for key visible relations.
+The Critic returns `critic_review.visual_relationships` (1–8 items):
+`id`, `kind` (`anatomy`, `interaction`, `support`, `spatial`, `none`),
+`part_ids`, brief/style-grounded `expected`, observed pixels described in
+`visible`, and `status` (`pass`, `fail`, `unknown`, `not-applicable`). Examples:
+head versus torso scale/connection, hand holding an object, object touching its
+support, or relative size/overlap in depth. `none/not-applicable` requires an
+explanation and cannot skip mandatory categories from an existing compound
+`scene_ownership_plan`: people/animals require anatomy and support observations;
+furniture requires support. Intentional flight and cropped compositions can
+justify a category's `not-applicable`; hidden/unfinished required anatomy is
+`unknown`, not a pass. Correctness is judged against the actual brief and
+chosen style, not invented generic proportion tables.
+
+Every `fail` must identify the same named relation in
+`findings[].structural_defect` (matching stable `id`, part IDs and relation
+ID), creating existing durable scene debt. Repeated `unknown` never clears
+this debt. To mark a previous defect `pass`, the Critic must recheck the
+same structure on the **new exact delivered pixels**, using its stable ID.
+Local tool success, an IK solve, projected coordinates, native brush receipts
+and a saved PSD alone do not prove image correctness. `visual_relationship_review_version`
+also invalidates older final approvals until this evidence is collected;
+historical unresolved findings survive a review-format upgrade.
+
+This is **host visual inspection**, not a new vision model or independent
+pixel-scoring algorithm. The Guard validates report consistency, pixel-frame
+binding, scene applicability and carryover; it cannot verify that the host's
+description of the picture is true. Human/held-out image acceptance remains
+necessary for claiming better art. No extra image capture or Photoshop
+mutation is initiated by the review.
+
+Real archived diagnostic examples (read-only, outside the Git-tracked test
+fixtures): `moonlit-siberian-tiger-process/study-02` frame
+`0005_tiger02_rebuild_stale_head_v3.jpg` (SHA-256 begins `f887d786`):
+long upright neck and small angular head relative to the feline torso.
+`banana-eating-process/banana-eating-2026-10-16` frame
+`0026_banana-finger-rounded-planes-rollback-v5-037.jpg` (SHA-256 begins
+`8358bb85`): fingers/peel contact remains hard to read. These are visual
+observations on historical pixels, **not** proof of improvement after this
+code change; a fresh before/after painting trial remains open.
+
 As of 2026-10-16, Guard's whole-brief completion contract additionally requires a
 validated Critic **pass on all five criteria**, bound to the *current accepted* frame,
 original UTF-8 brief hash, applicable review protocol and document incarnation.

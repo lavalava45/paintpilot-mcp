@@ -1,5 +1,21 @@
 # Changelog
 
+- 2026-10-16 — **Ground structural Critic relationships in exact delivered pixels.**
+  Add a structured, mandatory `visual_relationships` checkpoint for
+  head–torso form, hand–object interaction, object–support contact and spatial
+  scale/overlap, applicable to both painting profiles. The report binds to the
+  current delivered frame/brief/document incarnation. Every failed relation
+  requires a named retained `structural_defect` with stable part/relation IDs;
+  unknown cannot be a criterion pass, and an earlier failure is resolved only
+  by explicit same-relation recheck on new pixels. Declared compound living
+  subjects require anatomy and support coverage; furniture requires support,
+  without assuming a canned species template or ground contact for flight.
+  Versioned reviews invalidate old ungrounded completion approval while
+  preserving old structural debt. Historical tiger and banana JPEGs were
+  inspected read-only; pixel-quality improvement has not been established,
+  and a fresh controlled Photoshop drawing A/B remains open. No runtime
+  restart, live painting or UXP mutation was performed during source work.
+
 - 2026-10-16 — **Cross-profile Critic and fail-closed whole-brief corroboration (offline).**
   Schedule whole-scene Critic checkpoints for both `simple_graphic` and
   `nontrivial_painting`; require validated exact-current-frame Critic passes alongside

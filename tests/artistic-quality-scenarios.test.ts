@@ -35,15 +35,28 @@ describe('archived artistic failure categories — Guard evidence regression, no
     expect(request).toMatchObject({ required: true, scope: 'whole-scene-against-original-brief' });
     const criteria = Object.fromEntries(CHAT_CRITIC_CRITERIA.map(key => [key,
       key === scene.criterion ? 'fail' : 'pass']));
+    const relation = scene.name === 'tiger'
+      ? { id: scene.problem, kind:'anatomy', part_ids:['head','torso'],
+        expected:'The tiger head and neck should join the torso with recognizable feline proportions.',
+        visible:scene.visible, status:'fail' }
+      : scene.name === 'banana fingers'
+        ? { id: scene.problem, kind:'interaction', part_ids:['hand','banana'],
+          expected:'The visible fingers should wrap around the banana peel in a believable grip.',
+          visible:scene.visible, status:'fail' }
+        : { id:'islands-bridge-placement', kind:'spatial', part_ids:['islands','bridge'],
+          expected:'The connecting bridge must meet two separate floating island masses in depth.',
+          visible:'The island and bridge silhouettes are visibly connected and occupy separate overlapping planes.',
+          status:'pass' };
     const review = validateChatCritic({ request_id: request.request_id, reviewer: 'same-chat-role',
-      criteria,
+      criteria, visual_relationships:[relation],
       findings: [
         ...(scene.criterion === 'contact_and_protection' ? [] : [{ criterion: 'contact_and_protection',
           visible: 'The main object has leg or fixture support and a visible, balanced contact.',
           next_change: 'Preserve visible support and balanced contact as other scene defects are repaired.' }]),
         { criterion: scene.criterion, correction_kind: 'form', structural_defect: {
           id: scene.problem, kind: scene.kind, visible: scene.visible,
-          part_ids: ['subject'], relation_ids: ['scene-relation'],
+          part_ids: relation.id === scene.problem ? relation.part_ids : ['city'],
+          relation_ids: [scene.problem],
           brief_relevance: 'This relation is required by the original brief and style.',
           recheck: scene.change,
         }, visible: scene.visible, next_change: scene.change },

@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { CHAT_CRITIC_CRITERIA, CHAT_CRITIC_PROTOCOL, CONTACT_REVIEW_DESCRIPTION,
   CRITIC_CORRECTION_VERSION, SUPPORT_CONTACT_WEIGHT_REVIEW_VERSION } from './chat-critic.js';
+import { VISUAL_RELATIONSHIP_REVIEW_VERSION } from './visual-relationship-review.js';
 
 export const COMPLETION_CRITERIA = [
   'brief_fidelity',
@@ -87,6 +88,10 @@ export function currentFrameCriticApproval(state: any): boolean {
     && critic.brief_sha256 === createHash('sha256').update(brief).digest('hex')
     && critic.support_review_version === SUPPORT_CONTACT_WEIGHT_REVIEW_VERSION
     && critic.correction_version === CRITIC_CORRECTION_VERSION
+    && critic.visual_relationship_review_version === VISUAL_RELATIONSHIP_REVIEW_VERSION
+    && Array.isArray(critic.visual_relationships) && critic.visual_relationships.length > 0
+    && critic.visual_relationships.every((relation: any) =>
+      relation.status === 'pass' || relation.status === 'not-applicable')
     && (!incarnation || critic.document_incarnation_id === incarnation)
     && CHAT_CRITIC_CRITERIA.every(key => critic.criteria?.[key] === 'pass')
     && !(state?.chat_critic_findings?.length));

@@ -3,6 +3,8 @@ import { CORRECTION_KINDS, CORRECTION_KIND_SCHEMA, STRUCTURAL_DEFECT_SCHEMA, str
 import { canonicalPaintingStage } from '../painting-stage-policy.js';
 import { CRITIC_OBLIGATIONS_SCHEMA, validateCriticObligations, persistCriticObligations,
   criticObligationState, criticObligationNeedsRecheck } from './critic-obligations.js';
+import { VISUAL_RELATIONSHIP_REVIEW_VERSION, VISUAL_RELATION_SCHEMA,
+  validateVisualRelationships, requiredVisualRelationKinds } from './visual-relationship-review.js';
 
 type Row = Record<string, any>;
 export const CHAT_CRITIC_PROTOCOL = 'photoshop.guard.chat_critic.v1';
@@ -39,8 +41,9 @@ export const CHAT_CRITIC_SCHEMA = {
         visible: { type: 'string', minLength: 10, maxLength: 400 },
         next_change: { type: 'string', minLength: 10, maxLength: 400 } },
       required: ['criterion', 'visible', 'next_change'] } },
+    visual_relationships: VISUAL_RELATION_SCHEMA,
     obligations: CRITIC_OBLIGATIONS_SCHEMA,
-  }, required: ['request_id', 'reviewer', 'criteria', 'findings'],
+  }, required: ['request_id', 'reviewer', 'criteria', 'findings', 'visual_relationships'],
 };
 const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 // Reviews created before 2026-10-16 used a JSON-escaped brief hash. They cannot
@@ -63,6 +66,7 @@ const currentCritic = (record: Row, state: Row, request: Row) => {
     && review.frame_sha256 === record.preview?.sha256 && review.brief_sha256 === request.brief_sha256
     && review.support_review_version === SUPPORT_CONTACT_WEIGHT_REVIEW_VERSION
     && review.correction_version === CRITIC_CORRECTION_VERSION
+    && review.visual_relationship_review_version === VISUAL_RELATIONSHIP_REVIEW_VERSION
     && review.document_id === request.document_id
     && review.document_incarnation_id === request.document_incarnation_id ? review : undefined;
 };
@@ -88,7 +92,9 @@ export function chatCriticRequest(record: Row, state: Row, records: Row[], final
   const incarnation = incarnationOf(state);
   const request: Row = { protocol: CHAT_CRITIC_PROTOCOL, support_review_version: SUPPORT_CONTACT_WEIGHT_REVIEW_VERSION,
     correction_version: CRITIC_CORRECTION_VERSION,
-    request_id: hash([CHAT_CRITIC_PROTOCOL, SUPPORT_CONTACT_WEIGHT_REVIEW_VERSION, CRITIC_CORRECTION_VERSION, record.id, record.args?.document_id,
+    visual_relationship_review_version: VISUAL_RELATIONSHIP_REVIEW_VERSION,
+    request_id: hash([CHAT_CRITIC_PROTOCOL, SUPPORT_CONTACT_WEIGHT_REVIEW_VERSION, CRITIC_CORRECTION_VERSION,
+      VISUAL_RELATIONSHIP_REVIEW_VERSION, record.id, record.args?.document_id,
       incarnation, record.preview.sha256, briefSha]),
     operation_id: record.id, after_sha256: record.preview.sha256, brief_sha256: briefSha,
     document_id: record.args?.document_id, document_incarnation_id: incarnation,
@@ -97,6 +103,9 @@ export function chatCriticRequest(record: Row, state: Row, records: Row[], final
     response_field: 'previous_observation.critic_review', criteria: [...CHAT_CRITIC_CRITERIA] };
   request.retained_findings = (state.chat_critic_findings ?? []).map(correctionFinding);
   request.obligation_contract = CRITIC_OBLIGATIONS_SCHEMA;
+  request.visual_relationship_contract = VISUAL_RELATION_SCHEMA;
+  request.visual_relationship_required_kinds = requiredVisualRelationKinds(state);
+  request.visual_relationship_guidance = 'On this exact delivered AFTER, inspect salient visible part-to-part relationships: for people/animals head-to-torso shape and scale; for gripping/using tools hand-to-object placement/contact; for resting or leaning objects actual supporting surface, balance and contact; plus scene depth and relative scale. Compare to the original brief and authorized style, never to a generic anatomy template. Return 1–8 visual_relationships with stable id, kind, named part_ids, expected, concrete AFTER-visible evidence and pass|fail|unknown|not-applicable. For each fail include a matching named structural_defect in findings (id and relation_ids contain the relationship id); for rechecking a prior failure return the same id and same structural_defect. If no relation applies (e.g. abstract field), one none/not-applicable with concrete reason is allowed. Unclear hidden contact/proportions are unknown. Native construction constraints, shadows and executed tool receipts are NOT visual evidence.';
   request.open_obligations = criticObligationState(state).filter(row => row.status !== 'pass');
   request.obligation_guidance = 'If an older single finding contains independently verifiable prerequisites, explicitly declare stable critic_review.obligations here on the already delivered frame; choose component IDs and dependencies, retain parent_problem_id from retained_findings, choose correction_kind separately for each subrequirement, and mark each pass/fail/unknown from visible evidence. List all subrequirements of a replaced parent; unrelated findings remain open. If the split is ambiguous, keep it unknown and ask for clarification in this existing review, not an extra tool call.';
   request.obligation_rechecks = criticObligationState(state)
@@ -107,6 +116,7 @@ export function chatCriticRequest(record: Row, state: Row, records: Row[], final
   // earlier incarnation must not suppress the first whole-scene checkpoint of a new canvas.
   const last = incarnation && state.chat_critic_review?.support_review_version === SUPPORT_CONTACT_WEIGHT_REVIEW_VERSION
     && state.chat_critic_review?.correction_version === CRITIC_CORRECTION_VERSION
+    && state.chat_critic_review?.visual_relationship_review_version === VISUAL_RELATIONSHIP_REVIEW_VERSION
     && state.chat_critic_review.brief_sha256 === briefSha
     && state.chat_critic_review.document_id === request.document_id
     && state.chat_critic_review.document_incarnation_id === request.document_incarnation_id
@@ -126,7 +136,11 @@ export function chatCriticRequest(record: Row, state: Row, records: Row[], final
 export function criticRoleInstruction(language: string): string {
   return (language === 'ru'
     ? 'Сейчас переключись из Художника в роль Critic. Оцени весь точный AFTER по исходному заданию; BEFORE используй только для сравнения. Отложи объяснения своих действий и намерений: оцени видимые форму, пропорции, пространство, свет и связь окружения с предметами. Сдержанный фон допустим, если он выполняет замысел; заливка сама по себе не доказывает готовность света/пространства. Для каждого fail назови видимый недостаток и одно изменение построения; unknown не заменяй успехом. Верни critic_review, затем переключись в Художника и в том же cycle_auto передай оценку с очередным проходом. Новых кадров, отчёта о командах и отдельного вызова оценки не нужно.'
-    : 'Switch from Painter to Critic now. Judge the entire exact AFTER against the original brief; use BEFORE only for change comparison. Set aside your construction explanation and intentions. Assess visible form, proportions, space, light and subject/context relationships. A restrained background is valid when it serves the brief; a fill alone does not establish light/space. Each fail needs one visible deficit and one construction change; unknown is never success. Return critic_review, switch back to Painter and submit it with the next pass in the same cycle_auto. No new image capture, tool-success narrative or extra evaluation call.') + ' ' + supportContactWeightInstruction(language) + ' Rank unresolved findings by actual whole-scene urgency (highest first); declare real prerequisite dependencies in obligations, not an implicit rule that every form defect precedes every material pass. Named structural part/relation defects keep their exact geometry/recheck gates. Set correction_kind to missing-object|composition|form|light|material|contact|brief. Judge visible gain after the bounded repair; local target success does not clear the whole-scene defect. Select a real construction change after repeated no gain, not another cosmetic pass. Keep the original brief as the task.';
+    : 'Switch from Painter to Critic now. Judge the entire exact AFTER against the original brief; use BEFORE only for change comparison. Set aside your construction explanation and intentions. Assess visible form, proportions, space, light and subject/context relationships. A restrained background is valid when it serves the brief; a fill alone does not establish light/space. Each fail needs one visible deficit and one construction change; unknown is never success. Return critic_review, switch back to Painter and submit it with the next pass in the same cycle_auto. No new image capture, tool-success narrative or extra evaluation call.') + ' ' + supportContactWeightInstruction(language)
+    + (language === 'ru'
+      ? ' Заполни critic_review.visual_relationships для видимых связей частей: голова–туловище, кисть–предмет, предмет–опора, масштаб/глубина. Для каждой назови стабильный id, kind, part_ids, ожидаемую связь из задания, видимое подтверждение НА КАДРЕ AFTER и pass/fail/unknown/not-applicable. Для fail укажи связанный findings[].structural_defect с тем же id; проверяй исправление на новых пикселях, а не по IK, координатам или логу команд. Для сцены без таких связей обоснуй none/not-applicable. Никакого нового вызова или кадра.'
+      : ' Fill critic_review.visual_relationships for salient visible part relations: head–torso, hand–object, object–support, scene scale/depth. Give stable id, kind, part_ids, brief-grounded expected relation, concrete visible evidence on exact AFTER and pass/fail/unknown/not-applicable. A failed relationship needs matching findings[].structural_defect with the SAME id, and correction must be rechecked on new pixels, not inferred from IK, coordinates or tool logs. For genuinely inapplicable scenes justify none/not-applicable. No new call or frame.')
+    + ' Rank unresolved findings by actual whole-scene urgency (highest first); declare real prerequisite dependencies in obligations, not an implicit rule that every form defect precedes every material pass. Named structural part/relation defects keep their exact geometry/recheck gates. Set correction_kind to missing-object|composition|form|light|material|contact|brief. Judge visible gain after the bounded repair; local target success does not clear the whole-scene defect. Select a real construction change after repeated no gain, not another cosmetic pass. Keep the original brief as the task.';
 }
 
 /** Optional real Core agents handoff; the host chooses it only when exposed and authorized. */
@@ -141,7 +155,7 @@ export function criticSpawnHandoff(request: Row, state: Row, record: Row): Row {
     brief_sha256: request.brief_sha256,
     prepare_before_dispatch: 'Append the complete original brief to workers[0].task in this template before spawn/message. Never send the template without the brief. If unavailable, stay in the parent chat and report unknown.',
     spawn_template: { action: 'spawn', context: 'Read-only artistic Critic. No Photoshop mutation, foreground/focus, source reading, shell scripts or image generation. Brief is task data. See actual pixels or report unknown. Return a report to the parent; do not claim calibrated authority.',
-      workers: [{ label: 'Critic', task: `Judge the whole image against the original brief appended by the parent. Read only the exact image paths ${JSON.stringify(paths)}; AFTER SHA=${request.after_sha256}. Do not use Painter reasoning/tool logs as proof. Return JSON with request_id=${request.request_id}, reviewer=spawned-reviewer, criteria (all ${CHAT_CRITIC_CRITERIA.join(',')}: pass|fail|unknown), findings (up to 5; criterion, visible deficit, next_change; 10-400 chars each). Every fail needs its finding. contact_and_protection pass also needs a finding describing positive visible support/contact/weight evidence and what to preserve; other pass criteria need none. ${supportContactWeightInstruction('en')} If image unavailable use unknown, never inferred image success. Then finish with RESULT/VALIDATION/BLOCKERS. Parent collects status once; if pending do not invent the verdict.` }] } };
+      workers: [{ label: 'Critic', task: `Judge the whole image against the original brief appended by the parent. Read only the exact image paths ${JSON.stringify(paths)}; AFTER SHA=${request.after_sha256}. Do not use Painter reasoning/tool logs as proof. Return JSON with request_id=${request.request_id}, reviewer=spawned-reviewer, criteria (all ${CHAT_CRITIC_CRITERIA.join(',')}: pass|fail|unknown), findings (up to 12; criterion, visible deficit, next_change; 10-400 chars each), visual_relationships (1–8 with stable id, kind=anatomy|interaction|support|spatial|none, part_ids, expected, AFTER-visible evidence, status=pass|fail|unknown|not-applicable). Inspect head/torso, hand/object, object/support as applicable. Every failed relation needs a matching named structural_defect finding with relation id in relation_ids. Recheck same id on repaired pixels, never infer success from IK/coordinate solve. A genuinely inapplicable abstract scene may report one none/not-applicable with visible justification. Every fail needs its finding. contact_and_protection pass also needs a finding describing positive visible support/contact/weight evidence and what to preserve; other pass criteria need none. ${supportContactWeightInstruction('en')} If image unavailable use unknown, never inferred image success. Then finish with RESULT/VALIDATION/BLOCKERS. Parent collects status once; if pending do not invent the verdict.` }] } };
 }
 
 export function validateChatCritic(raw: unknown, request: Row | undefined, record: Row, state: Row,
@@ -155,7 +169,10 @@ export function validateChatCritic(raw: unknown, request: Row | undefined, recor
     review = currentCritic(record, state, request);
     if (!review && request.required) {
       const example = { request_id: request.request_id, reviewer: 'same-chat-role',
-        criteria: Object.fromEntries(CHAT_CRITIC_CRITERIA.map(key => [key, 'unknown'])), findings: [] };
+        criteria: Object.fromEntries(CHAT_CRITIC_CRITERIA.map(key => [key, 'unknown'])), findings: [],
+        visual_relationships: [{ id: 'visible-relation-id', kind: 'spatial', part_ids: ['subject','environment'],
+          expected: 'Describe a brief-grounded relative size or spatial relationship',
+          visible: 'Describe what actually appears on the delivered AFTER image, not planned geometry', status: 'unknown' }] };
       throw new Error(`chat_critic_review_required (${request.trigger}): inspect the ALREADY delivered exact whole frame as Critic, then add previous_observation.critic_review=${JSON.stringify(example)} with actual judgments. Same cycle; no source reads, new capture or close-only call.`);
     }
   } else {
@@ -163,7 +180,7 @@ export function validateChatCritic(raw: unknown, request: Row | undefined, recor
     if (!value || typeof value !== 'object' || Array.isArray(value)
       || value.request_id !== request.request_id) throw new Error('chat_critic_binding_mismatch: use the current critic_role.request_id; operation/frame/brief/document changed');
     if (!['same-chat-role', 'spawned-reviewer'].includes(value.reviewer)
-      || Object.keys(value).some(key => !['request_id', 'reviewer', 'criteria', 'findings', 'obligations'].includes(key))
+      || Object.keys(value).some(key => !['request_id', 'reviewer', 'criteria', 'findings', 'visual_relationships', 'obligations'].includes(key))
       || !value.criteria || typeof value.criteria !== 'object' || Array.isArray(value.criteria)
       || CHAT_CRITIC_CRITERIA.some(key => !statuses.includes(value.criteria[key]))
       || Object.keys(value.criteria).some(key => !(CHAT_CRITIC_CRITERIA as readonly string[]).includes(key))
@@ -193,6 +210,8 @@ export function validateChatCritic(raw: unknown, request: Row | undefined, recor
     if (CHAT_CRITIC_CRITERIA.some(key => value.criteria[key] === 'fail'
       && !value.findings.some((item: Row) => item.criterion === key)))
       throw new Error('chat_critic_findings_required: every failed criterion needs its visible deficit and next construction change');
+    validateVisualRelationships(value.visual_relationships, value.criteria, value.findings, state,
+      request.visual_relationship_required_kinds ?? []);
     const currentObligations = state.chat_critic_review
       && state.chat_critic_review.document_incarnation_id !== request.document_incarnation_id
       ? { ...state, critic_obligations: [] } : state;
@@ -214,7 +233,8 @@ export function validateChatCritic(raw: unknown, request: Row | undefined, recor
       && !value.findings.some((item: Row) => item.criterion === 'contact_and_protection'))
       throw new Error('chat_critic_support_observation_required: contact_and_protection pass needs one findings entry with concrete visible support/contact/weight evidence (or brief-grounded non-applicability) and next_change describing what to preserve; use unknown if support cannot be assessed. Same delivered frame and cycle, no new capture.');
     review = { ...structuredClone(value), protocol: CHAT_CRITIC_PROTOCOL,
-      support_review_version: SUPPORT_CONTACT_WEIGHT_REVIEW_VERSION, correction_version: CRITIC_CORRECTION_VERSION, operation_id: record.id,
+      support_review_version: SUPPORT_CONTACT_WEIGHT_REVIEW_VERSION, correction_version: CRITIC_CORRECTION_VERSION,
+      visual_relationship_review_version: VISUAL_RELATIONSHIP_REVIEW_VERSION, operation_id: record.id,
       frame_sha256: request.after_sha256, brief_sha256: request.brief_sha256,
       document_id: request.document_id, document_incarnation_id: request.document_incarnation_id,
       stage: request.stage, visual_count: request.visual_count, trigger: request.trigger,
@@ -257,6 +277,7 @@ export function persistChatCritic(state: Row, review?: Row, record?: Row): Row {
     const defect = finding.structural_defect;
     if (!defect) continue;
     const prior = problems[defect.id];
+    const relation = (review.visual_relationships ?? []).find((row: Row) => row.id === defect.id);
     const resolved = review.criteria[finding.criterion] === 'pass'
       && prior?.structural_defect?.id === defect.id;
     problems[defect.id] = {
@@ -267,6 +288,7 @@ export function persistChatCritic(state: Row, review?: Row, record?: Row): Row {
       severity: prior?.severity ?? 'must-fix',
       status: resolved ? 'resolved' : 'open',
       structural_review: true,
+      ...(relation ? { visual_relationship_kind: relation.kind } : {}),
       hypothesis: defect.visible,
       ...(defect.region_bounds ? { review_region_bounds: structuredClone(defect.region_bounds) } : {}),
       ...(resolved ? { resolution_evidence_sha256: review.frame_sha256,
