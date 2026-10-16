@@ -410,6 +410,61 @@ describe('E.17 artistic frame commentary', () => {
 });
 
 describe('E.8b continuation checkpoint', () => {
+  it('projects a bounded compiler audit without losing full-window rejection counts or duplicate-code semantics', () => {
+    const s = store();
+    const attempts = [
+      { at: 'first', outcome: 'rejected', error_codes: ['geometry', 'geometry', 'owner'], request_key: 'early' },
+      { at: 'second', outcome: 'rejected', error_codes: [], problem_id: 'early' },
+      ...Array.from({ length: 17 }, (_, i) => ({
+        at: `accepted-${i}`, outcome: 'accepted', correction_wall_ms: i === 0 ? 0 : undefined,
+        rejected_attempts_before_correction: i === 0 ? 2 : undefined,
+      })),
+      { at: 'last', outcome: 'rejected', error_codes: ['owner', 'owner'], rejection_fingerprint: 'fingerprint' },
+    ];
+    const projection: any = { records: [], activeJobs: [], capturedAt: Date.now(),
+      paintingState: { documents: { '42': { compiler_attempt_audit: {
+        rejected_attempts: '17', recent_attempts: attempts,
+      } } } } };
+    const readRecords = vi.spyOn(s, 'records');
+    const readState = vi.spyOn(s, 'paintingState');
+    const report = s.continuationTimelineExport(42, [], projection);
+    expect(readRecords).not.toHaveBeenCalled();
+    expect(readState).not.toHaveBeenCalled();
+    expect(report.compiler_attempts).toHaveLength(16);
+    expect(report.compiler_attempts[0].at).toBe('accepted-2');
+    expect(report.compiler_attempts.at(-1)).toMatchObject({
+      at: 'last', outcome: 'rejected', error_codes: ['owner', 'owner'],
+      rejection_fingerprint: 'fingerprint',
+    });
+    expect(report.guard_rejections).toMatchObject({
+      total_rejected_attempts: 17,
+      recent_rejected_attempts: 3,
+      recent_reason_counts: { geometry: 1, owner: 2, unspecified_rejection: 1 },
+      corrections_with_measured_wall_time: 1,
+      correction_wall_ms_total_observed: 0,
+    });
+  });
+
+  it('retains fallback compiler-audit projection for invalid recent-attempt data', () => {
+    const s = store();
+    const projection: any = { records: [], activeJobs: [], capturedAt: Date.now(),
+      paintingState: { documents: { '42': { compiler_attempt_audit: {
+        rejected_attempts: 'invalid', recent_attempts: { unexpected: true },
+      } } } } };
+    const report = s.continuationTimelineExport(42, [], projection);
+    expect(report.compiler_attempts).toEqual([]);
+    expect(report.guard_rejections).toMatchObject({
+      total_rejected_attempts: Number.NaN,
+      recent_rejected_attempts: 0,
+      recent_reason_counts: {},
+      corrections_with_measured_wall_time: 0,
+      correction_wall_ms_total_observed: 0,
+    });
+    expect(s.continuationTimelineExport(42, [], {
+      ...projection, paintingState: { documents: { '42': {} } },
+    }).guard_rejections.total_rejected_attempts).toBe(0);
+  });
+
   it('keeps an invalid document timeline empty without reading journal or state', () => {
     const s = store();
     const journal = vi.spyOn(s, 'records');
