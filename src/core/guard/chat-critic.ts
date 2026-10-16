@@ -43,6 +43,13 @@ export const CHAT_CRITIC_SCHEMA = {
   }, required: ['request_id', 'reviewer', 'criteria', 'findings'],
 };
 const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+// Reviews created before 2026-10-16 used a JSON-escaped brief hash. They cannot
+// approve a NEW completion, but their unresolved findings must not disappear on
+// the first review after deployment solely because the hash format was corrected.
+const compatiblePriorBrief = (state: Row, briefSha: string): boolean =>
+  state.chat_critic_review?.brief_sha256 === briefSha
+  || (typeof state.original_brief === 'string'
+    && state.chat_critic_review?.brief_sha256 === hash(state.original_brief));
 const stageOf = (record: Row) => canonicalPaintingStage(record.stage ?? record.args?.stage ?? 'GLOBAL_BLOCK_IN') ?? 'GLOBAL_BLOCK_IN';
 // A missing identity is not a stable incarnation. In particular, a reused numeric
 // Photoshop id must not inherit a checkpoint merely because its brief is unchanged.
@@ -63,7 +70,7 @@ const currentCritic = (record: Row, state: Row, request: Row) => {
 /** Scheduling and evidence only. The server neither sees the picture nor generates a Critic judgment. */
 export function chatCriticRequest(record: Row, state: Row, records: Row[], final = false): Row | undefined {
   const profile = state.painting_profile ?? (state.process_dir ? 'nontrivial_painting' : undefined);
-  if (profile !== 'nontrivial_painting' || !state.original_brief?.trim()
+  if (!['nontrivial_painting', 'simple_graphic'].includes(profile) || !state.original_brief?.trim()
     || !record?.visual || record.failed || record.rolled_back || record.current_frame_authority === false
     || record.verdict?.disposition === 'rollback' || !record.preview?.sha256 || record.phase !== 'completed') return undefined;
   // The caller supplies only records belonging to the current document incarnation.
@@ -75,7 +82,9 @@ export function chatCriticRequest(record: Row, state: Row, records: Row[], final
     && row.current_frame_authority !== false && row.phase === 'completed'
     && row.args?.document_id === record.args?.document_id
     && !['photoshop_get_preview', 'photoshop_undo', 'photoshop_redo'].includes(row.tool)).length;
-  const briefSha = hash(state.original_brief);
+  // Completion contracts hash the original UTF-8 brief directly. Critic must bind
+  // the same bytes, not JSON.stringify(brief), or exact-frame corroboration fails.
+  const briefSha = createHash('sha256').update(state.original_brief).digest('hex');
   const incarnation = incarnationOf(state);
   const request: Row = { protocol: CHAT_CRITIC_PROTOCOL, support_review_version: SUPPORT_CONTACT_WEIGHT_REVIEW_VERSION,
     correction_version: CRITIC_CORRECTION_VERSION,
@@ -138,7 +147,7 @@ export function criticSpawnHandoff(request: Row, state: Row, record: Row): Row {
 export function validateChatCritic(raw: unknown, request: Row | undefined, record: Row, state: Row,
   completion?: Row): Row | undefined {
   if (!request) {
-    if (raw !== undefined) throw new Error('chat_critic_not_applicable: bind the original brief and exact nontrivial visual frame first');
+    if (raw !== undefined) throw new Error('chat_critic_not_applicable: bind the original brief and exact visual frame in a supported painting profile first');
     return undefined;
   }
   let review: Row | undefined;
@@ -221,7 +230,7 @@ export function validateChatCritic(raw: unknown, request: Row | undefined, recor
 export function persistChatCritic(state: Row, review?: Row, record?: Row): Row {
   if (!review) return criticObligationState(state).length && record
     ? { critic_obligations: persistCriticObligations(state, undefined, record) } : {};
-  const old = review.document_incarnation_id && state.chat_critic_review?.brief_sha256 === review.brief_sha256
+  const old = review.document_incarnation_id && compatiblePriorBrief(state, review.brief_sha256)
     && state.chat_critic_review.document_id === review.document_id
     && state.chat_critic_review.document_incarnation_id === review.document_incarnation_id
     ? state.chat_critic_findings ?? [] : [];
@@ -266,13 +275,36 @@ export function persistChatCritic(state: Row, review?: Row, record?: Row): Row {
   }
   const compatibleObligations = review.document_incarnation_id
     && state.chat_critic_review?.document_incarnation_id === review.document_incarnation_id
-    && state.chat_critic_review?.brief_sha256 === review.brief_sha256
+    && compatiblePriorBrief(state, review.brief_sha256)
     && state.chat_critic_review?.document_id === review.document_id;
   const obligationSource = compatibleObligations ? state : { ...state, critic_obligations: [] };
+  const previousFailures = compatibleObligations ? state.critic_scene_failures ?? {} : {};
+  const sceneFailures: Row = {};
+  for (const finding of findings.values()) {
+    const id = keyOf(finding);
+    const criterion = finding.criterion;
+    if (review.criteria[criterion] === 'pass') continue;
+    const prior = previousFailures[id];
+    if (review.criteria[criterion] === 'unknown') {
+      if (prior) sceneFailures[id] = prior;
+      continue;
+    }
+    const previousFinding = compatibleObligations && (state.chat_critic_findings ?? [])
+      .some((row: Row) => keyOf(row) === id);
+    const distinct = previousFinding && prior?.last_failed_frame_sha256
+      && prior.last_failed_frame_sha256 !== review.frame_sha256;
+    sceneFailures[id] = {
+      consecutive_failed_frames: distinct ? (prior?.consecutive_failed_frames ?? 1) + 1
+        : prior?.consecutive_failed_frames ?? 1,
+      last_failed_frame_sha256: review.frame_sha256,
+      last_review_operation_id: review.operation_id,
+    };
+  }
   return { chat_critic_review: review,
     ...(review.obligations !== undefined || criticObligationState(state).length
       ? { critic_obligations: persistCriticObligations(obligationSource, review, record) } : {}),
     chat_critic_findings: [...findings.values()].sort((a, b) => Number(rank.get(keyOf(a)) ?? 99) - Number(rank.get(keyOf(b)) ?? 99)),
+    critic_scene_failures: sceneFailures,
     ...(Object.keys(problems).length ? { visual_problems: problems } : {}),
   };
 }

@@ -381,6 +381,12 @@ function hasStructuralMutationFootprint(request: Row, execution: string): boolea
     || (step.tool === 'photoshop_paint_strokes' && Array.isArray(step.args?.strokes) && step.args.strokes.length > 0)
     || (step.tool === 'photoshop_paint_dabs' && Array.isArray(step.args?.dabs) && step.args.dabs.length > 0));
 }
+/** Native mutation family, not an artist-supplied strategy label. */
+function correctionMethodFamily(request: Row): string {
+  return [...new Set(steps(request).map(row => row.tool)
+    .filter(tool => ['photoshop_paint_regions', 'photoshop_paint_strokes', 'photoshop_paint_dabs',
+      'photoshop_transform_layer', 'photoshop_apply_gradient', 'photoshop_paint_color_gradient'].includes(tool)))].sort().join('|');
+}
 function obligationsForFinding(state: Row, problemId: string): boolean {
   return criticObligationState(state).some(row => row.id === problemId || (row.parent_problem_id ?? `critic-${row.criterion}`) === problemId);
 }
@@ -492,6 +498,19 @@ export function criticCorrectionIssue(state: Row, request: Row, originalOperatio
       message: `Critic ${finding.problem_id} (${kind}): the proposed operation repeats the rejected geometry. Change component outline, size, placement or support relation; recoloring, re-labeling or repeating the same pixels cannot repair this finding.`,
     };
   const attempt = state.critic_correction_attempts?.[finding.problem_id];
+  const repeated = state.critic_scene_failures?.[finding.problem_id];
+  const nativeReplacement = steps(request).some(step => step.tool === 'photoshop_paint_regions'
+    && step.args?.replace_contents === true);
+  // Local improvement cannot license an endless loop when the SAME named structural
+  // defect has failed the whole-scene Critic on multiple different accepted frames.
+  // A verified replacement or a different native method is needed, not a renamed plan.
+  if (finding.structural_defect && repeated?.consecutive_failed_frames >= 2
+    && attempt?.outcome === 'local-gain-whole-defect-still-open'
+    && attempt?.method_family && attempt.method_family === correctionMethodFamily(request)
+    && !nativeReplacement) return {
+      code: 'critic_scene_strategy_switch_required',
+      message: `Critic repeatedly rejected named structural defect ${finding.problem_id} on distinct frames despite local improvement. Rebuild its owned silhouette with native replace_contents or use a different executable Photoshop method, then recheck the whole scene. A new strategy label or local accent is not evidence of resolution.`,
+    };
   if (attempt?.no_gain_count >= 2 && attempt.strategy_sha256 === correctionStrategy(request, kind))
     return {
       code: 'critic_correction_strategy_exhausted',
@@ -541,6 +560,7 @@ export function advanceCriticCorrections(
         operation_id: record.id,
         frame_sha256: record.preview?.sha256,
         strategy_sha256: signature,
+        method_family: correctionMethodFamily(record),
         no_gain_count: noGain
           ? (prior?.strategy_sha256 === signature ? (prior.no_gain_count ?? 0) : 0) + 1
           : 0,

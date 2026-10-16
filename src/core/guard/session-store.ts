@@ -5909,6 +5909,12 @@ export class SessionStore {
       seconds_to_subject_recognizable: null,
       first_subject_and_style_recognizable_at: null,
       seconds_to_subject_and_style_recognizable: null,
+      recognition_evidence_source: 'painter_verdict',
+      visual_passes_classified: 0,
+      subject_assessment_count: 0,
+      subject_assessment_status: 'not_assessed',
+      style_assessment_count: 0,
+      style_assessment_status: 'not_assessed',
       recognition_feature_destruction_passes: 0,
       recognition_features_lost_count: 0,
       recognition_features_lost: [],
@@ -9735,7 +9741,7 @@ export class SessionStore {
     const documentId = record.args?.document_id;
     const paintingState = projectionContext?.paintingState ?? this.paintingState();
     const state = paintingState.documents?.[String(documentId)] ?? {};
-    if ((state.painting_profile ?? (state.process_dir ? 'nontrivial_painting' : undefined)) !== 'nontrivial_painting'
+    if (!['nontrivial_painting', 'simple_graphic'].includes(state.painting_profile ?? (state.process_dir ? 'nontrivial_painting' : undefined))
       || !state.original_brief || !record.visual || record.failed || !record.preview?.sha256 || record.phase !== 'completed') return undefined;
     const records = this.currentDocumentRecords(documentId, projectionContext?.records ?? this.records(), projectionContext);
     return chatCriticRequest(record, { ...state,

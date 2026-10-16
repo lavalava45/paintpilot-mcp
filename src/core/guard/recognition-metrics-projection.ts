@@ -14,6 +14,17 @@ export function projectRecognitionMetrics(records, significanceHasDetectedChange
   const firstSubjectStyle = classifiedVisual.find(r =>
     r.verdict?.recognition?.subject === 'yes' && r.verdict?.recognition?.style === 'yes'
   );
+  // Absence of a Painter recognition observation is not a negative visual judgment.
+  // These are self-reported milestones, never pixel-based recognition scores.
+  const assessment = key => {
+    const values = classifiedVisual.map(r => r.verdict?.recognition?.[key])
+      .filter(value => ['yes', 'no', 'uncertain'].includes(value));
+    return { count: values.length, status: values.includes('yes') ? 'recognizable'
+      : values.includes('uncertain') ? 'uncertain'
+        : values.includes('no') ? 'not_recognizable' : 'not_assessed' };
+  };
+  const subjectAssessment = assessment('subject');
+  const styleAssessment = assessment('style');
   const firstChangeAt = firstChange ? milestoneAt(firstChange) : null;
   const firstSubjectAt = firstSubject ? milestoneAt(firstSubject) : null;
   const firstSubjectStyleAt = firstSubjectStyle ? milestoneAt(firstSubjectStyle) : null;
@@ -53,6 +64,12 @@ export function projectRecognitionMetrics(records, significanceHasDetectedChange
     seconds_to_subject_recognizable: secondsFromStart(firstSubjectAt),
     first_subject_and_style_recognizable_at: firstSubjectStyleAt,
     seconds_to_subject_and_style_recognizable: secondsFromStart(firstSubjectStyleAt),
+    recognition_evidence_source: 'painter_verdict',
+    visual_passes_classified: classifiedVisual.length,
+    subject_assessment_count: subjectAssessment.count,
+    subject_assessment_status: subjectAssessment.status,
+    style_assessment_count: styleAssessment.count,
+    style_assessment_status: styleAssessment.status,
     recognition_feature_destruction_passes: destruction.length,
     recognition_features_lost_count: lost.length,
     recognition_features_lost: [...new Set(lost)],

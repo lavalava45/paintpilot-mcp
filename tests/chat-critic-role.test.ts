@@ -159,7 +159,15 @@ it('schedules early scene, bounded periodic, stage and final roles without a rev
   expect(chatCriticRequest(record(9),s,records(9))).toMatchObject({ required: true, trigger: 'scene-checkpoint' });
   expect(chatCriticRequest(record(4,'FORM'),s,[...records(3),record(4,'FORM')])).toMatchObject({ trigger: 'stage-boundary' });
   expect(chatCriticRequest(record(4),s,records(4),true)).toMatchObject({ required: true, trigger: 'final-review' });
-  expect(chatCriticRequest(record(1),{...s,painting_profile:'simple_graphic'},records(1))).toBeUndefined();
+  const simple = { ...state(), painting_profile: 'simple_graphic' };
+  expect(chatCriticRequest(record(1),simple,records(1))).toMatchObject({ required: false, trigger: 'optional' });
+  expect(chatCriticRequest(record(3),simple,records(3))).toMatchObject({ required: true, trigger: 'early-scene' });
+  expect(chatCriticRequest(record(4,'FORM'),simple,[...records(3),record(4,'FORM')]))
+    .toMatchObject({ required: true, trigger: 'stage-boundary' });
+  expect(chatCriticRequest(record(4),simple,records(4),true))
+    .toMatchObject({ required: true, trigger: 'final-review' });
+  const simpleRequest = chatCriticRequest(record(3),simple,records(3))!;
+  expect(() => validateChatCritic(undefined, simpleRequest, record(3), simple)).toThrow(/review_required/);
 });
 it('binds actual role responses to exact operation/frame/brief/incarnation and ignores transient witness timestamps', () => {
   const s: any = state(), r = record(3), request = chatCriticRequest(r,s,records(3))!;
@@ -260,6 +268,67 @@ it('preserves background findings through local successes/saves and unknown rere
   expect(persistChatCritic(saved,review).chat_critic_findings).toHaveLength(1);
   expect(persistChatCritic(saved,validateChatCritic(reply(next),next,record(4),saved)).chat_critic_findings).toHaveLength(0);
 });
+it('keeps historic structural and scene debts when upgrading from JSON-escaped to raw brief hash', () => {
+  const s: any = state(), r = record(3), first = chatCriticRequest(r,s,records(3))!;
+  const failed = validateChatCritic(reply(first,true),first,r,s)!;
+  const legacy: any = { ...s, ...persistChatCritic(s,failed) };
+  legacy.chat_critic_review = { ...legacy.chat_critic_review,
+    brief_sha256: createHash('sha256').update(JSON.stringify(s.original_brief)).digest('hex') };
+  const next = record(4), request = chatCriticRequest(next,legacy,records(4))!;
+  expect(request.required).toBe(true);
+  const uncertain = { ...reply(request), criteria: { ...reply(request).criteria, composition_context:'unknown' } };
+  const review = validateChatCritic(uncertain,request,next,legacy)!;
+  expect(persistChatCritic(legacy,review).chat_critic_findings)
+    .toMatchObject([{ criterion:'composition_context' }]);
+});
+it('escalates repeated exact-frame structural Critic failures despite locally successful corrections', () => {
+  const defect = {
+    id: 'hand-banana-contact', kind: 'attachment',
+    visible: 'The index finger does not actually meet the banana peel.',
+    part_ids: ['hand', 'banana'], relation_ids: ['finger-peel-contact'],
+    brief_relevance: 'The hand must plausibly grip the banana.',
+    recheck: 'Verify visible contact and overlap of finger and banana peel.',
+  };
+  const initial: any = state();
+  const firstRecord = record(3);
+  const firstReq = chatCriticRequest(firstRecord, initial, records(3))!;
+  const failure = (request: any) => ({ ...reply(request),
+    criteria: { ...reply(request).criteria, form_proportions: 'fail' },
+    findings: [...reply(request).findings, { criterion: 'form_proportions', correction_kind: 'form',
+      structural_defect: defect, visible: defect.visible, next_change: defect.recheck }],
+  });
+  const firstReview = validateChatCritic(failure(firstReq), firstReq, firstRecord, initial)!;
+  const afterFirst: any = { ...initial, ...persistChatCritic(initial, firstReview) };
+  expect(afterFirst.critic_scene_failures[defect.id].consecutive_failed_frames).toBe(1);
+  const secondRecord = record(4), secondReq = chatCriticRequest(secondRecord, afterFirst, records(4))!;
+  const secondReview = validateChatCritic(failure(secondReq), secondReq, secondRecord, afterFirst)!;
+  const afterSecond: any = { ...afterFirst, ...persistChatCritic(afterFirst, secondReview),
+    critic_correction_attempts: { [defect.id]: {
+      outcome: 'local-gain-whole-defect-still-open', method_family: 'photoshop_paint_regions',
+    } },
+  };
+  expect(afterSecond.critic_scene_failures[defect.id].consecutive_failed_frames).toBe(2);
+  // Re-reviewing the same stored pixels does not manufacture another failure.
+  const sameFrame = persistChatCritic(afterSecond, secondReview);
+  expect(sameFrame.critic_scene_failures[defect.id].consecutive_failed_frames).toBe(2);
+  const req: any = { tool: 'photoshop_execute_visual_microplan', impact_class: 'construct', visual_intent: 'mass',
+    structural_correction: { defect_id: defect.id, part_ids: ['hand'],
+      relation_ids: ['finger-peel-contact'], target: 'Move fingertip onto the peel edge.', execution: 'brush' },
+    args: { steps: [{ tool: 'photoshop_paint_regions', args: { regions: [{
+      contours: [{ points: [{x:1,y:1},{x:4,y:1},{x:3,y:5}] }],
+    }] } }] },
+  };
+  expect(criticCorrectionIssue(afterSecond, req)?.code).toBe('critic_scene_strategy_switch_required');
+  const replaced = structuredClone(req);
+  replaced.args.steps[0].args.replace_contents = true;
+  expect(criticCorrectionIssue(afterSecond, replaced)).toBeUndefined();
+  const passed = { ...reply(secondReq), findings: [...reply(secondReq).findings,
+    { criterion: 'form_proportions', structural_defect: defect,
+      visible: 'The fingertip meets and overlaps the peel without an unexplained gap.',
+      next_change: 'Preserve this anatomically plausible finger contact.' }] };
+  const accepted = validateChatCritic(passed, secondReq, secondRecord, afterSecond)!;
+  expect(persistChatCritic(afterSecond, accepted).critic_scene_failures[defect.id]).toBeUndefined();
+});
 it('builds only an optional exact-image Core agents handoff without Painter explanations or forced model overrides', () => {
   const s=state(),r=record(3),request=chatCriticRequest(r,s,records(3))!;
   const handoff:any=criticSpawnHandoff(request,s,{...r,summary:'Painter says perfect',result:'successful tool logs'});
@@ -273,12 +342,12 @@ it('builds only an optional exact-image Core agents handoff without Painter expl
   expect(handoff.prepare_before_dispatch).toContain('complete original brief');
   expect(JSON.stringify(handoff)).not.toContain(s.original_brief);
 });
-it('ordinary simple-profile review carries the same visual support rule without a Critic or extra images', async () => {
+it('ordinary simple-profile review requests the same whole-scene Critic without extra images', async () => {
   const f=fixture();
   f.runtime.store.updatePaintingState(42,current=>({...current,painting_profile:'simple_graphic'}));
   const result:any=await f.review.handler({operation_id:'pass-3'});
   const body=JSON.parse(result.content[0].text);
-  expect(body.artistic_review.critic_role).toBeUndefined();
+  expect(body.artistic_review.critic_role).toMatchObject({required:true,trigger:'early-scene'});
   expect(body.artistic_review.instruction).toContain(supportContactWeightInstruction('en'));
   expect(result.content.filter((x:any)=>x.type==='image')).toHaveLength(1);
   expect(f.evaluate).not.toHaveBeenCalled();

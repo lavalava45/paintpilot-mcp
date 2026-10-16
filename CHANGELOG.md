@@ -1,5 +1,19 @@
 # Changelog
 
+- 2026-10-16 — **Cross-profile Critic and fail-closed whole-brief corroboration (offline).**
+  Schedule whole-scene Critic checkpoints for both `simple_graphic` and
+  `nontrivial_painting`; require validated exact-current-frame Critic passes alongside
+  Painter's completion before Guard permits a whole-brief finish. Fix incompatible
+  brief SHA-256 derivation between Critic (formerly JSON-escaped string) and Painter
+  (raw UTF-8). Retain source/version/incarnation binding; same-chat review is still
+  not independent authority. Retain consecutive distinct-frame failures for named
+  structural defects and require an actual native-method change or owned content
+  replacement when local improvements fail whole-scene rereview. Recognition metrics
+  now distinguish unassessed, uncertain, negative and positive Painter reports.
+  Add protocol regressions for the historical tiger, marker city and banana grip;
+  real-image A/B and running-host deployment are **not yet qualified**. The live
+  Photoshop application, UXP and Guard were not restarted or mutated for this change.
+
 - 2026-10-15 — **Move whole-painting completion ownership into PaintPilot Guard (E.26 architecture).**
   Reuse the existing `painting_completion` exact-frame/original-brief evidence and
   artistic debt model; derive `paintpilot.whole-brief-completion.v1` with

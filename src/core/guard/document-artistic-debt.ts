@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
-import { CONTACT_REVIEW_DESCRIPTION } from './chat-critic.js';
+import { CHAT_CRITIC_CRITERIA, CHAT_CRITIC_PROTOCOL, CONTACT_REVIEW_DESCRIPTION,
+  CRITIC_CORRECTION_VERSION, SUPPORT_CONTACT_WEIGHT_REVIEW_VERSION } from './chat-critic.js';
 
 export const COMPLETION_CRITERIA = [
   'brief_fidelity',
@@ -69,6 +70,28 @@ export function bindPaintingCompletion(value: any, state: any, frameSha: string)
   };
 }
 
+/** A Painter completion may agree with a Critic only when both judged these exact pixels.
+ * The same-chat Critic role is a second review, not an independent image evaluator. */
+export function currentFrameCriticApproval(state: any): boolean {
+  const critic = state?.chat_critic_review;
+  const frameSha = state?.current_frame?.sha256;
+  const brief = state?.original_brief;
+  const incarnation = state?.document_incarnation_id ?? state?.document_instance?.host_witness?.token;
+  return Boolean(critic && typeof frameSha === 'string' && frameSha
+    && typeof brief === 'string' && brief.trim()
+    && critic.protocol === CHAT_CRITIC_PROTOCOL
+    && ['same-chat-role-review', 'host-reported-delegation'].includes(critic.validation)
+    && critic.independent === false
+    && typeof critic.operation_id === 'string' && critic.operation_id
+    && critic.frame_sha256 === frameSha
+    && critic.brief_sha256 === createHash('sha256').update(brief).digest('hex')
+    && critic.support_review_version === SUPPORT_CONTACT_WEIGHT_REVIEW_VERSION
+    && critic.correction_version === CRITIC_CORRECTION_VERSION
+    && (!incarnation || critic.document_incarnation_id === incarnation)
+    && CHAT_CRITIC_CRITERIA.every(key => critic.criteria?.[key] === 'pass')
+    && !(state?.chat_critic_findings?.length));
+}
+
 /** Saving/exporting closes a technical operation, never the unfinished painting. */
 export function documentArtisticDebt(state: any, lastRecord?: any): string[] {
   const reasons: string[] = [];
@@ -96,6 +119,8 @@ export function documentArtisticDebt(state: any, lastRecord?: any): string[] {
       reasons.push('whole_brief_review_required');
     else if (COMPLETION_CRITERIA.some((key) => completion.criteria?.[key] !== 'pass'))
       reasons.push('whole_brief_criteria_unmet');
+    else if (!currentFrameCriticApproval(state))
+      reasons.push('whole_brief_critic_review_required');
   }
   if (state?.chat_critic_review && (Object.values(state.chat_critic_review.criteria ?? {}).some(value => value !== 'pass')
     || state.chat_critic_findings?.length)) reasons.push('chat_critic_scene_unfinished');
@@ -117,6 +142,8 @@ export function artisticContinuation(state: any, lastRecord?: any): string | und
   if (!reasons.length) return undefined;
   if (reasons.length === 1 && reasons[0] === 'whole_brief_review_required')
     return 'Whole-brief completion is unconfirmed. In the existing exact whole-frame review supply previous_observation.painting_completion={scope:"whole-brief",summary:"concrete observed outcome against original_brief",criteria:{brief_fidelity:"pass|fail|unknown",form_proportions:"pass|fail|unknown",light_material:"pass|fail|unknown",composition_context:"pass|fail|unknown",editable_parts:"pass|fail|unknown",contact_and_protection:"pass|fail|unknown"}}. Correct failed/unknown criteria with one bounded visual pass; no extra reviewer or source reads. An explicit user pause/stop remains allowed.';
+  if (reasons.length === 1 && reasons[0] === 'whole_brief_critic_review_required')
+    return 'The Painter completion is not yet corroborated by the Critic role on this exact accepted frame and original brief. Request the current whole-frame Critic review in the existing Guard review (no new pixel operation); all five criteria must pass. Same-chat Critic is not independent image evaluation. Correct any failed/unknown criteria before declaring completion.';
   const failed = COMPLETION_CRITERIA.filter(
     (key) =>
       state?.painting_completion?.criteria?.[key] &&
@@ -155,6 +182,10 @@ export function wholeBriefCompletionContract(state: any, guardAction: string) {
     reasons.push('whole_brief_review_required');
   else if (review && COMPLETION_CRITERIA.some(key => review.criteria?.[key] !== 'pass'))
     reasons.push('whole_brief_criteria_unmet');
+  if (review && frameSha && briefSha && review.frame_sha256 === frameSha
+    && review.brief_sha256 === briefSha
+    && COMPLETION_CRITERIA.every(key => review.criteria?.[key] === 'pass')
+    && !currentFrameCriticApproval(state)) reasons.push('whole_brief_critic_review_required');
 
   const uniqueReasons = [...new Set(reasons)];
   const guardPending = guardAction !== 'ready'
@@ -181,6 +212,10 @@ export function wholeBriefCompletionContract(state: any, guardAction: string) {
       current_frame_sha256: frameSha,
       review_frame_sha256: typeof review?.frame_sha256 === 'string' ? review.frame_sha256 : null,
       review_kind: 'painter_self_assessment',
+      critic_frame_sha256: typeof state?.chat_critic_review?.frame_sha256 === 'string'
+        ? state.chat_critic_review.frame_sha256 : null,
+      critic_role_approved: currentFrameCriticApproval(state),
+      critic_independent: false,
     },
     reasons: uniqueReasons,
     next_required_action: nextAction,

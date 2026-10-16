@@ -1,6 +1,6 @@
 # Pixel review in the painting chat
 
-Current source, 2026-10-10: ChatGPT stays the painting host and explicitly switches into a
+Current source, 2026-10-16: ChatGPT stays the painting host and explicitly switches into a
 Critic role at bounded checkpoints. Ordinary painting does not create, prepare or call a local artistic
 model. `photoshop_guard_review_image` and inline cycle-auto delivery return the actual registered
 images plus `artistic_review`, a direct request to the host in the SAME chat. It is guidance awaiting
@@ -8,14 +8,14 @@ an observation, never a server-generated judgment or independent approval.
 
 ## ChatGPT Critic checkpoints
 
-`implementation_revision=2026-10-10-chat-critic-role`. The default reviewer is the SAME ChatGPT chat,
+The default reviewer is the SAME ChatGPT chat,
 with an explicit Painter → Critic → Painter role switch. Critic judges the whole exact AFTER against
 the original brief, setting aside the Painter's explanations and tool success. BEFORE supports change
 comparison. A restrained background may serve the requested style; merely filling a wall does not
 establish convincing space or light. This role is implemented in the normal image-delivery/continuation
 path, not as a separate inference service.
 
-For nontrivial paintings, the first checkpoint is after three completed visual passes (or the first
+For both `simple_graphic` and `nontrivial_painting`, the first checkpoint is after three completed visual passes (or the first
 result outside GLOBAL_BLOCK_IN). Further checkpoints occur at a stage change, after six more visual
 passes, and at final review. Ordinary component passes retain their short existing observation.
 `artistic_review.critic_role` supplies the exact request id and five existing visual criteria:
@@ -52,6 +52,30 @@ returns the complete minimal response template, asking for the already-delivered
 reading, recapture or separate closure call is needed. Findings survive local target success and PSD/JPEG
 saves. Unknown rereview preserves prior findings; only an explicit pass on that criterion clears them.
 Final painting_completion cannot claim pass for Critic's failed/unknown criteria.
+
+As of 2026-10-16, Guard's whole-brief completion contract additionally requires a
+validated Critic **pass on all five criteria**, bound to the *current accepted* frame,
+original UTF-8 brief hash, applicable review protocol and document incarnation.
+Painter completion and Critic approval are separate pieces of evidence; a technical
+save or a stale review cannot substitute for either. Both use the same SHA-256 of the
+unmodified UTF-8 original brief (not its JSON-escaped representation). This is a
+same-chat second review, **not** an independent quality verdict or a guarantee that
+the drawing is good. A missing Critic on an already-saved final frame can be supplied
+through the existing non-mutating retained-frame review route.
+
+For repeated failures of the **same named structural defect** across two distinct
+Critic-reviewed frames, a prior locally successful correction does not license
+unbounded repetition of the same native mutation method. Guard requires a real
+owner replacement or a different executable native method, then another visual
+review. Unnamed complaints, unreviewed frames and invented strategy labels cannot
+trigger/clear that gate by themselves.
+
+`recognition_metrics` now distinguishes `not_assessed`, `not_recognizable`,
+`uncertain` and `recognizable`, with counts and `recognition_evidence_source=painter_verdict`.
+These are reported assessment states, not a machine-vision score. Protocol fixtures
+for the tiger, flying pink city and banana grip are in
+`tests/artistic-quality-scenarios.test.ts`; they **do not** replace blind visual A/B
+on actual artwork, which remains a release-qualification requirement.
 
 ### Optional host-spawned Critic
 

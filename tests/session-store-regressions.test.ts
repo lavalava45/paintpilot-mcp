@@ -461,6 +461,22 @@ describe('Artistic throughput observation projection contract', () => {
 });
 
 describe('Recognition metrics projection contract', () => {
+  it('distinguishes an unreviewed frame from an explicitly negative or uncertain Painter judgment', () => {
+    const s = store();
+    const make = (recognition: any) => {
+      const rows: any[] = [{ id: 'frame-1', sequence: 1, args: { document_id: 42 },
+        visual: true, created_at: '2026-10-16T00:00:00.000Z', completed_at: '2026-10-16T00:00:01.000Z',
+        verdict: { ...(recognition === undefined ? {} : { recognition }) } }];
+      return s.recognitionMetrics(42, rows, { records: rows,
+        paintingState: { documents: { '42': {} } }, activeJobs: [], capturedAt: Date.now() } as any);
+    };
+    expect(make(undefined)).toMatchObject({ subject_assessment_status: 'not_assessed',
+      subject_assessment_count: 0, recognition_evidence_source: 'painter_verdict' });
+    expect(make({ subject: 'no', style: 'uncertain' })).toMatchObject({
+      subject_assessment_status: 'not_recognizable', style_assessment_status: 'uncertain',
+      subject_assessment_count: 1, style_assessment_count: 1,
+    });
+  });
   it('preserves empty results for invalid ids and empty documents without reading the journal for invalid ids', () => {
     const s = store();
     const recordsSpy = vi.spyOn(s, 'records');
@@ -470,6 +486,8 @@ describe('Recognition metrics projection contract', () => {
       tracking_started: false, tracking_started_at: null,
       first_detected_visual_change_at: null, first_subject_recognizable_at: null,
       first_subject_and_style_recognizable_at: null,
+      subject_assessment_status: 'not_assessed', style_assessment_status: 'not_assessed',
+      subject_assessment_count: 0, style_assessment_count: 0,
       recognition_feature_destruction_passes: 0, recognition_features_lost: [],
       recorded_operation_ms: 0, between_operation_gap_ms: 0,
       reported_tool_execution_ms: 0, reported_tool_execution_operations: 0,
@@ -527,6 +545,10 @@ describe('Recognition metrics projection contract', () => {
       first_subject_recognizable_at: date(8), seconds_to_subject_recognizable: 8,
       first_subject_and_style_recognizable_at: date(11),
       seconds_to_subject_and_style_recognizable: 11,
+      recognition_evidence_source: 'painter_verdict',
+      visual_passes_classified: 3,
+      subject_assessment_count: 3, subject_assessment_status: 'recognizable',
+      style_assessment_count: 3, style_assessment_status: 'recognizable',
       recognition_feature_destruction_passes: 2,
       recognition_features_lost_count: 3, recognition_features_lost: ['roof', 'door'],
       recorded_operation_ms: 6000, between_operation_gap_ms: 5000,

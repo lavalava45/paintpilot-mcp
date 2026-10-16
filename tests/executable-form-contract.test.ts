@@ -23,6 +23,8 @@ import {
   wholeBriefCompletionContract,
 } from '../src/core/guard/document-artistic-debt.js';
 import { SessionStore } from '../src/core/guard/session-store.js';
+import { CHAT_CRITIC_CRITERIA, CHAT_CRITIC_PROTOCOL, CRITIC_CORRECTION_VERSION,
+  SUPPORT_CONTACT_WEIGHT_REVIEW_VERSION } from '../src/core/guard/chat-critic.js';
 import {
   applyDeterministicPassRepairs,
   classifyViolation,
@@ -510,6 +512,15 @@ it('requires current whole-brief assessment, independent of local success and sa
     criteria: Object.fromEntries(COMPLETION_CRITERIA.map((key) => [key, 'pass'])),
   };
   state.painting_completion = bindPaintingCompletion(review, state, 'frame-1');
+  expect(documentArtisticDebt(state)).toContain('whole_brief_critic_review_required');
+  state.chat_critic_review = {
+    protocol: CHAT_CRITIC_PROTOCOL, validation: 'same-chat-role-review', independent: false, operation_id: 'visual-1',
+    frame_sha256: 'frame-1',
+    brief_sha256: createHash('sha256').update(state.original_brief).digest('hex'),
+    criteria: Object.fromEntries(CHAT_CRITIC_CRITERIA.map(key => [key, 'pass'])),
+    support_review_version: SUPPORT_CONTACT_WEIGHT_REVIEW_VERSION,
+    correction_version: CRITIC_CORRECTION_VERSION,
+  };
   expect(documentArtisticDebt(state, { visual: false, tool: 'photoshop_save_document' })).toEqual(
     []
   );
@@ -553,6 +564,19 @@ it('publishes a fail-closed whole-brief completion decision across saves, false 
     criteria: Object.fromEntries(COMPLETION_CRITERIA.map(key => [key, 'pass'])),
   }, state, 'frame-1');
   expect(wholeBriefCompletionContract(state, 'ready')).toMatchObject({
+    status: 'incomplete', completion_allowed: false,
+    reasons: expect.arrayContaining(['whole_brief_critic_review_required']),
+    evidence: { critic_role_approved: false, critic_independent: false },
+  });
+  state.chat_critic_review = {
+    protocol: CHAT_CRITIC_PROTOCOL, validation: 'same-chat-role-review', independent: false, operation_id: 'visual-1',
+    frame_sha256: 'frame-1',
+    brief_sha256: createHash('sha256').update(state.original_brief).digest('hex'),
+    criteria: Object.fromEntries(CHAT_CRITIC_CRITERIA.map(key => [key, 'pass'])),
+    support_review_version: SUPPORT_CONTACT_WEIGHT_REVIEW_VERSION,
+    correction_version: CRITIC_CORRECTION_VERSION,
+  };
+  expect(wholeBriefCompletionContract(state, 'ready')).toMatchObject({
     status: 'completed', completion_allowed: true, reasons: [],
   });
   // A save/technical closure is not a second artistic acceptance.
@@ -564,6 +588,16 @@ it('publishes a fail-closed whole-brief completion decision across saves, false 
     reasons: expect.arrayContaining(['whole_brief_review_required']),
   });
   state.current_frame.sha256 = 'frame-1';
+  state.chat_critic_review.frame_sha256 = 'stale-frame';
+  expect(wholeBriefCompletionContract(state, 'ready').reasons).toContain('whole_brief_critic_review_required');
+  state.chat_critic_review.frame_sha256 = 'frame-1';
+  state.chat_critic_review.criteria.form_proportions = 'unknown';
+  expect(wholeBriefCompletionContract(state, 'ready').completion_allowed).toBe(false);
+  state.chat_critic_review.criteria.form_proportions = 'pass';
+  state.document_incarnation_id = 'host:new';
+  expect(wholeBriefCompletionContract(state, 'ready').completion_allowed).toBe(false);
+  state.chat_critic_review.document_incarnation_id = 'host:new';
+  expect(wholeBriefCompletionContract(state, 'ready').completion_allowed).toBe(true);
   state.painting_completion.criteria.form_proportions = 'unknown';
   expect(wholeBriefCompletionContract(state, 'ready').reasons).toContain('whole_brief_criteria_unmet');
   state.painting_completion.criteria.form_proportions = 'pass';
@@ -621,6 +655,16 @@ it('adds whole-brief assessment after save without repainting or overwriting the
     store.finalWholeBriefReview(input, save, false);
     expect(state.painting_completion).toBeUndefined();
     store.finalWholeBriefReview(input, save, true);
+    expect(documentArtisticDebt(state)).toContain('whole_brief_critic_review_required');
+    // The technical save and the Painter assessment cannot replace a second exact-frame Critic review.
+    state.chat_critic_review = {
+      protocol: CHAT_CRITIC_PROTOCOL, validation: 'same-chat-role-review', independent: false, operation_id: 'visual-1',
+      frame_sha256: sha,
+      brief_sha256: createHash('sha256').update(state.original_brief).digest('hex'),
+      criteria: Object.fromEntries(CHAT_CRITIC_CRITERIA.map(key => [key, 'pass'])),
+      support_review_version: SUPPORT_CONTACT_WEIGHT_REVIEW_VERSION,
+      correction_version: CRITIC_CORRECTION_VERSION,
+    };
     expect(documentArtisticDebt(state)).toEqual([]);
     expect(source.verdict).toEqual({ disposition: 'accept' });
     writeFileSync(file, 'different pixels');
