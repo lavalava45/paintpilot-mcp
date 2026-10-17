@@ -853,14 +853,14 @@ Agent routing rules:
 
 - **Canonical:** `Chat_On_Steroids_Plugins` → this project's `dist/cos-plugin.js` → embedded Guard → internal `ToolRegistry` → Photoshop.
 - **Removed:** the former external Core/controller/daemon provider chain is not a supported or recoverable route.
-- The current compact-only native catalog is 132 tools / 15 public Guard tools. Do not interpret a stale legacy connector snapshot as a server limitation.
+- The current compact-only native catalog is 134 tools / 16 public Guard tools. Do not interpret a stale legacy connector snapshot as a server limitation.
 - If the native Plugins route is genuinely absent/stale, inspect its discovery/readiness state and repair that route. Do not silently create or switch to a parallel controller path.
 - `Chat_On_Steroids_Desktop` is for read-only desktop/UI inspection when useful, not the Photoshop MCP transport.
 - The Adobe UXP bridge in `uxp-plugin/` is a separate Photoshop-side runtime; it is not the Chat On Steroids Plugins route. Production semantic Photoshop dispatch is UXP-only and fail-closed for every migrated Photoshop primitive. Raw `photoshop_execute_script` and the production ExtendScript/COM fallback are removed; Guard keeps only negative tombstones for stale callers. The current readiness target is bridge revision `compact-v2-20261009-component-rebuild`.
 
 **Prerequisites:** Photoshop running on Windows 10/11, Node.js 18+. This project intentionally supports Windows only. This is unofficial and not affiliated with Adobe.
 
-**Tool surface:** 132 semantic `photoshop_*` MCP tools; 15 are the public embedded `photoshop_guard_*` façade; 5 MCP guide prompt templates (`ps.*`); no `photoshop_recipe_*` tools remain.
+**Tool surface:** 134 semantic `photoshop_*` MCP tools; 16 are the public embedded `photoshop_guard_*` façade; 5 MCP guide prompt templates (`ps.*`); no `photoshop_recipe_*` tools remain.
 
 ### Continuing painting-pipeline development
 

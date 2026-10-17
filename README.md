@@ -69,7 +69,7 @@ Digital Painting Edition combines broad Photoshop automation with a focused pain
 - a Photoshop-side UXP companion on localhost long-poll for Neural Filters, foreground-safe `asCopy` PSD/JPEG/PNG persistence, and low-latency fast-lane development/diagnostics;
 - an agent visual-control workflow with semantic passes, previews, measurement checkpoints, occlusion reasoning, cleanup, sticky Photoshop routing, and a state-based Definition of Done.
 
-The current build exposes **132 tools** (**132 atomic/non-recipe**) and **5 prompts**.
+The current build exposes **134 tools** (**134 atomic/non-recipe**) and **5 prompts**.
 
 The dedicated Chat On Steroids entry point is `dist/cos-plugin.js`. It starts the same MCP server with `PHOTOSHOP_GUARD_MODE=required`, so read-only tools remain directly callable while raw mutating tools fail closed and must be dispatched through `photoshop_guard_cycle_auto`. This native Plugins route has passed dedicated live acceptance and is the canonical Chat On Steroids path. The retired external Core/controller/daemon provider chain has been removed from the repository.
 
@@ -268,6 +268,15 @@ This transport behavior is separate from document targeting. `document_id` is no
 
 For Chat On Steroids, the canonical production path is **Plugins → `dist/cos-plugin.js` → embedded Guard → Photoshop**. It has passed the dedicated live acceptance sequence. The former Core/controller/daemon route has been physically removed; recovery stays on Guard status/resume/reconcile surfaces.
 
+**Stop limitation with unmodified COS:** the COS chat Stop button has not been
+shown to cancel an in-flight Photoshop MCP call. PaintPilot supports an
+independent `photoshop_guard_request_stop` for one known `operation_id`, which
+prevents subsequent guarded mutation dispatch for that operation; it neither
+observes the COS button nor undoes commands already dispatched to Photoshop.
+When an MCP host actually delivers a cancellation signal, PaintPilot blocks
+new UXP commands from that cancelled request. In-flight results still require
+Guard receipt/History reconciliation. No patched COS installation is required.
+
 For local development after `npm run build:server`, restart only the custom MCP child with
 **Chat On Steroids app → Plugins → this Digital Painting Edition entry → … → Restart**.
 ChatGPT-side Plugins **Refresh** updates the schema/connector view but does not guarantee
@@ -305,7 +314,7 @@ npm run test:document-targeting-live
 The current verified tool-count result is:
 
 ```text
-catalog counts consistent: 132 = 132 atomic + 0 recipes; 15 Guard tools; 5 MCP prompt templates
+catalog counts consistent: 134 = 134 atomic + 0 recipes; 16 Guard tools; 5 MCP prompt templates
 ```
 
 The project has been live-tested primarily on **Photoshop 2026 for Windows**. During the current validation, 123 installed brush presets were enumerated and the painting smoke test completed with `PAINTING_TEST_OK`.

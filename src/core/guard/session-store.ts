@@ -6285,6 +6285,9 @@ export class SessionStore {
       'planner_directive_id', 'planner_task_id', 'painter_scope', 'change_domains',
       'affected_relations', 'affected_qualities', 'preservation_facts',
       'independent_region', 'addresses_primary_mismatch', 'addresses_problem_id', 'addresses_problem_ids',
+      // Compiled Guard-only correction contract: retain it for critic validation.
+      // It is not a Photoshop action and never bypasses executable footprint checks.
+      'structural_correction',
       'preview_args', 'visual_review_profile', 'artistic_commentary', 'accepted_anchor_restore',
       // Direct planning metadata; logical_layer is validated against current durable blur ownership below.
       'material_response', 'logical_layer',
@@ -11154,7 +11157,7 @@ export class SessionStore {
         summary: r.summary, report: r.report, preview: r.preview, verdict: r.verdict, latency: r.latency ?? null, file: this.file(r.id) })),
     };
   }
-  statusCompact(suppliedProjectionContext: GuardProjectionContext | undefined = undefined) {
+  statusCompact(suppliedProjectionContext: GuardProjectionContext | undefined = undefined, scopedDocumentId: number | undefined = undefined) {
     const baseProjection = suppliedProjectionContext ?? this.captureProjectionContext();
     const all = baseProjection.records.map(r => this.hasDurableNotExecutedProof(r)
       ? this.finalizeDurableNotExecuted(r, 'status_compact_not_executed_cleanup')
@@ -11164,7 +11167,7 @@ export class SessionStore {
     const documentIds = [...new Set([
       ...all.map(r => r.args?.document_id).filter(id => Number.isSafeInteger(id) && id > 0),
       ...Object.keys(state.documents ?? {}).map(Number).filter(id => Number.isSafeInteger(id) && id > 0),
-    ])];
+    ])].filter(id => scopedDocumentId === undefined || id === scopedDocumentId);
     const pendingReports = all.filter(r => !isAbandonedRecovery(r) && r.execution !== 'not-executed' && !isTerminalBootstrapFailure(r) && !r.report).map(r => r.id);
     const pendingAcks = all.filter(r => !isAbandonedRecovery(r) && r.execution !== 'not-executed' && r.operation_receipt && !r.operation_ack).map(r => r.id);
     const pendingOperationAckDetails = all

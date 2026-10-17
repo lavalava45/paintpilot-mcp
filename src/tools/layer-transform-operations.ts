@@ -14,6 +14,29 @@ interface TransformSpec {
   payload: Record<string, unknown>;
 }
 
+export async function runGuardedTransformLayer(router: PhotoshopBackendRouter, args: LayerArgs): Promise<ToolResult> {
+  try {
+    if (!currentToolExecutionContext()?.guardOperationId) throw new Error('transform_guard_dispatch_required');
+    const id = documentId(args);
+    const layerId = Number(args.layer_id);
+    const translation = args.translation as { x?: number; y?: number } | undefined;
+    if (!id || !Number.isSafeInteger(layerId) || layerId < 1 || !translation
+      || !Number.isFinite(translation.x) || !Number.isFinite(translation.y)
+      || (translation.x === 0 && translation.y === 0)
+      || Math.abs(translation.x!) > 128 || Math.abs(translation.y!) > 128) {
+      throw new Error('transform_parameters_invalid: positive document/layer ids and nonzero translation <=128px required');
+    }
+    const backend = await router.backendFor('layer.move_pixels');
+    if (backend.kind !== 'uxp') throw new Error('transform_native_uxp_required');
+    const outcome = await invokeUxpOperation('transform_layer', {
+      document_id: id, layer_id: layerId, translation,
+    }, 'uxp_transform_layer_failed');
+    if (!outcome.ok || !outcome.data || outcome.data.transformed !== true
+        || outcome.data.layer_id !== layerId) throw new Error(outcome.error ?? 'transform_receipt_invalid');
+    return atomicSuccess('Guarded native layer transform completed', outcome.data);
+  } catch (error) { return atomicFailureFromError(error); }
+}
+
 async function executeTransform(
   router: PhotoshopBackendRouter,
   args: LayerArgs,

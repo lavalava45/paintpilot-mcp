@@ -88,6 +88,8 @@ const ALREADY_UXP = new Set([
   'photoshop_merge_layer_down',
   'photoshop_merge_visible_layers',
   'photoshop_move_layer',
+  // Native UXP layer.translate with pinned id and verified post-bounds.
+  'photoshop_transform_layer',
   'photoshop_release_clipping_mask',
   'photoshop_rotate_layer',
   'photoshop_save_selection',

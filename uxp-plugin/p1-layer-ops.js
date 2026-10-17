@@ -202,6 +202,40 @@ async function moveLayerPixels(params = {}) {
   );
 }
 
+async function transformLayer(params = {}) {
+  const deltaX = requireFiniteNumber(params.translation?.x, 'translation.x');
+  const deltaY = requireFiniteNumber(params.translation?.y, 'translation.y');
+  const layerId = params.layer_id;
+  if (!Number.isSafeInteger(layerId) || layerId < 1 || (deltaX === 0 && deltaY === 0)
+      || Math.abs(deltaX) > 128 || Math.abs(deltaY) > 128) {
+    throw new Error('transform_parameters_invalid');
+  }
+  return core.executeAsModal(async () => {
+    const doc = requirePinnedActiveDocument(params);
+    const target = findLayerEntry(doc, layerId, doc)?.layer;
+    if (!target || target.isBackgroundLayer || target.visible !== true
+        || target.kind !== constants.LayerKind.NORMAL) throw new Error('transform_layer_identity_mismatch');
+    const previouslyActiveId = Array.from(doc.activeLayers ?? [])[0]?.id ?? null;
+    try {
+      if (previouslyActiveId !== layerId) await selectOnlyLayer(layerId);
+      const layer = requireActiveLayer(doc, 'transform_layer');
+      if (layer.id !== layerId || layer.isBackgroundLayer || layer.visible !== true
+        || layer.kind !== constants.LayerKind.NORMAL) throw new Error('transform_layer_identity_mismatch');
+      const before = { ...layer.bounds };
+      await layer.translate(deltaX, deltaY);
+      const actualAfter = findLayerEntry(doc, layerId, doc)?.layer?.bounds ?? layer.bounds;
+      const after = { ...actualAfter };
+      if (Math.abs(after.left - before.left - deltaX) > 1
+          || Math.abs(after.top - before.top - deltaY) > 1) throw new Error('transform_native_bounds_unverified');
+      return { transformed: true, document_id: doc.id, layer_id: layerId,
+        translation: { x: deltaX, y: deltaY }, before, after };
+    } finally {
+      if (previouslyActiveId != null && previouslyActiveId !== layerId
+          && findLayerEntry(doc, previouslyActiveId, doc)) await selectOnlyLayer(previouslyActiveId);
+    }
+  }, { commandName: 'MCP Guarded Transform Layer' });
+}
+
 // One bounded, native, all-or-nothing translation. A semantic relationship
 // never implies that Photoshop automatically moves dependent raster layers.
 // The caller must pin every physical layer and its observed BEFORE bounds.
@@ -435,6 +469,8 @@ async function tryHandleP1LayerOperation(cmdAction, params = {}) {
       return { handled: true, data: await scaleLayer(params) };
     case 'move_layer_pixels':
       return { handled: true, data: await moveLayerPixels(params) };
+    case 'transform_layer':
+      return { handled: true, data: await transformLayer(params) };
     case 'rotate_layer':
       return { handled: true, data: await rotateLayer(params) };
     case 'flatten_image':

@@ -4242,6 +4242,7 @@ const DIRECT_LAYER_TRANSFORM_TOOLS = new Set([
   'photoshop_move_layer',
   'photoshop_rotate_layer',
   'photoshop_scale_layer',
+  'photoshop_transform_layer',
   'photoshop_transform_landmarks',
 ]);
 

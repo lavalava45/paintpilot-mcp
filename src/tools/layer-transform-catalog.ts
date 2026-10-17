@@ -4,6 +4,7 @@ import { PhotoshopBackendRouter } from '../platform/photoshop-backend.js';
 import {
   runFitLayerToDocument,
   runMoveLayerPixels,
+  runGuardedTransformLayer,
   runRotateLayer,
   runScaleLayer,
 } from './layer-transform-operations.js';
@@ -32,6 +33,19 @@ export function createLayerTransformTools(
   router = new PhotoshopBackendRouter(connection)
 ): ToolDefinition[] {
   return [
+    transformTool(
+      'photoshop_transform_layer',
+      'Guard-only native translation of an explicitly pinned Photoshop raster layer; never reorders layers',
+      {
+        document_id: { type: 'integer', minimum: 1 },
+        layer_id: { type: 'integer', minimum: 1 },
+        translation: { type: 'object', properties: {
+          x: { type: 'number' }, y: { type: 'number' },
+        }, required: ['x', 'y'], additionalProperties: false },
+      },
+      ['document_id', 'layer_id', 'translation'],
+      (args) => runGuardedTransformLayer(router, args)
+    ),
     transformTool(
       'photoshop_fit_layer_to_document',
       'Scale the active layer to fit the document canvas while maintaining aspect ratio',

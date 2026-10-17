@@ -9,6 +9,10 @@
  */
 process.env.PHOTOSHOP_GUARD_MODE ??= 'required';
 
+// The ordinary COS Plugins transport does not expose a trustworthy Stop
+// authority. Do not require an experimental, fork-only COS endpoint to paint.
+// Guard, preflight and PaintPilot's own execution cancellation remain separate.
+
 await import('./index.js');
 
 export {};

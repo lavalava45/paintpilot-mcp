@@ -1,6 +1,6 @@
 # Painting Quality Roadmap
 
-Last updated: 2026-10-15
+Last updated: 2026-10-17
 
 **Scope:** ONLY pending work, decisions, acceptance criteria and preservation
 rules. Implemented changes, completed cleanups and dated engineering evidence
@@ -13,6 +13,92 @@ creative freedom preserved. [Release Hardening](RELEASE-HARDENING.md) remains
 the finite qualification gate for real-pixel quality, safety, recovery,
 autonomy and independent assessment on six registered scenes. Do not
 misinterpret successful offline tests as completed artistic acceptance.
+
+## Final shipping track — single branch, one personal image (decision 2026-10-17)
+
+**Scope freeze:** `digital-painting` is the only active development branch.
+Do not create additional release-development branches or resume feature work
+to postpone shipping. Tag a reviewed commit on that branch; distribute the
+matching build as a separate release artifact. Historical archive refs do not
+constitute active development branches.
+
+- [x] **Stock COS integration:** live deployment `current`, guarded disposable
+      Photoshop 2026 / UXP create → layer → pixel fill → PSD save → close →
+      reopen → verify identical image SHA-256 and layers → close. The isolated
+      2026-10-17 acceptance run is not evidence of artistic autonomy.
+- [x] **Reproducible source snapshot:** candidate source Git tree recorded and
+      independent frozen-lockfile dependency installation succeeded. Windows
+      checkout LF/CRLF normalization causes different byte-hash build IDs;
+      compiled entry points compare identically. Do not mistake distinct
+      source-byte fingerprints for distinct executable functionality.
+- [ ] **User's one real image:** user chooses the subject, initiates a fresh
+      painting, assesses visible fidelity, editable PSD, ability to correct
+      errors and whether the experience is usable. Fix only reproducible
+      ship-blocking issues, never weaken Guard or pretend COS Stop cancels MCP.
+- [ ] **Developer Preview release:** publish from a clean, reviewed
+      `digital-painting` commit and tag (no auxiliary branch), with one
+      versioned MCPB, matching source and UXP, concise installation steps,
+      known limitations (including COS Stop), and a fresh-install smoke.
+      Do not call this the qualified Beta; its six-scene artistic acceptance
+      remains open and is **not** a condition for an explicitly experimental
+      Developer Preview.
+- [ ] **Reddit post, then close this project phase:** describe what PaintPilot
+      actually demonstrates, link to the tagged release and docs, disclose
+      experimental limits, and invite people to share their own images.
+
+**No new feature scope:** independent native warp, extra artistic modes,
+refactors, UI expansion, broad multi-scene benchmarking and COS source patches
+are deferred beyond the Developer Preview unless the user's one-image test
+uncovers a concrete release-blocking regression.
+
+## Release boundary — user Stop with stock COS (decision 2026-10-17)
+
+**Decision: do not patch, fork, rebuild, or require users to replace Chat On
+Steroids (COS) for PaintPilot.** Treat COS's Stop button and PaintPilot's
+own execution cancellation as **different contracts**. Do not claim that
+pressing the existing COS Stop button safely interrupts an already-running
+Photoshop operation unless the unmodified host has been proven to transmit a
+usable cancellation signal all the way to the execution boundary.
+
+The independently supplied 2026-10-17 Stop-boundary review reports **12/12
+protocol probes** and identifies three limits of the inspected integration:
+COS's Stop does not cancel the outgoing plugin MCP call (only its timeout
+signal is passed); PaintPilot discards `extra.signal` if cancellation does
+arrive; and cancellation of an already completed request cannot control a
+detached background job. **These are diagnostic findings, not a passing
+end-to-end Stop acceptance or a deployed fix.** Keep the report and probe
+artifacts outside the production source until reviewed and attributed.
+
+- [ ] **P0 — PaintPilot-owned Stop for one execution:** design a separately
+      exposed, user-accessible pause/cancel command bound to the exact run,
+      document incarnation and active operation. Do not represent it as the
+      COS Stop button or allow a different chat/run to clear another run's
+      Stop. Persist the Stop intent through acknowledgement/reconnect.
+- [ ] **P0 — cancellation at real dispatch boundaries:** propagate standard
+      MCP `extra.signal` where supported, but do not rely on COS sending it.
+      Enforce the PaintPilot-owned Stop before every new Guard/UXP mutation,
+      including queued/background jobs and retry/recovery paths. A command
+      already dispatched to UXP is **uncertain** until receipt/state/pixel
+      reconciliation; never assume cancellation undid it, replay it, or
+      silently overwrite Photoshop History.
+- [ ] **P0 — public-host compatibility and release scope:** isolate/remove
+      the experimental COS-specific signed Stop integration from the default
+      stock-COS distribution unless a supported independent host capability
+      is established. Verify that ordinary stock COS invocation does not
+      become permanently fail-closed and that no unsafe fallback declares
+      unknown Stop=false. Document the precise button/operation semantics
+      and supported modes in the installer and release notes.
+- [ ] **Acceptance:** automated pre-dispatch, mid-call, post-response,
+      detached-job, timeout/disconnect, concurrent-chat and exact-run tests,
+      followed by real disposable-PSD/UXP cancellation, History, saved-layer
+      and non-replay verification. Record actual COS version, running MCP/UXP
+      fingerprints and real Stop observations. Recheck the release checklist
+      after choosing the supported Beta boundary; no source-only PASS.
+
+**Release policy:** until these checks pass, COS Stop must be disclosed as
+**not guaranteed to cancel a Photoshop mutation**. Do not resolve the issue
+by editing COS; reconsider native COS integration only in a separate,
+explicitly authorized workstream, not as a PaintPilot release prerequisite.
 
 ## Priority 0 — qualify the original first-city creative environment
 

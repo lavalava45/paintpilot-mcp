@@ -1,0 +1,17 @@
+# Unregistered UXP local warp — disposable Photoshop acceptance gate
+
+The isolated adapter `uxp-plugin/local-warp-native-adapter.js` is deliberately **not registered** in any command router, Guard, or Palette. The only supported entry is an injected experimental harness that supplies `disposableProof`, verified document/layer identity, explicit ROI and protected rectangles, cryptographic `digest`, and verified raster `transform`. The string gate is an offline safeguard, **not** proof that the document is disposable. Do not call this on a user document.
+
+Adobe's Imaging API documents `getPixels` (which can trim empty bounds) and `putPixels` (`replace: true` replaces all existing target-layer pixels); this adapter therefore requires a full, untrimmed 8-bit RGB+alpha layer read and performs a **full-layer replacement**, retaining the exact original bytes outside the approved change footprint. A layer lacking full-canvas pixels fails closed before mutation.
+
+## Required native acceptance before registration
+
+1. In a newly created disposable Photoshop document, make one normal 8-bit RGB raster layer with alpha and explicit ownership. Preserve an independently captured PSD baseline and hashes of the layer and flattened composite. Add a neighboring layer and known protected ROI with contrasting colors; test pixel data at and beyond all boundaries.
+2. Verify real UXP `getPixels` returns `level=0`, exactly the requested full-layer bounds, four 8-bit chunky RGBA components, profile identity, and stable digests across repeated reads. Repeat with transparent margins, nonzero layer bounds, a mask, non-opaque pixels, and empty regions; cases with trimming must remain blocked.
+3. Confirm `imaging.createImageDataFromBuffer` plus `putPixels({replace:true,targetBounds:{left:0,top:0}})` yields exactly the requested full-layer bytes, keeps alpha, color profile, layer identity, neighboring layers, and all untouched ROI/outside pixels. Confirm no silent color-profile or premultiplication conversion; byte-for-byte equality is mandatory for this strict path.
+4. Under `executeAsModal`, pin the active document incarnation, semantic owner, layer ID, construction revision, masks and dependent parts before and immediately before writing; disallow concurrent document changes. Demonstrate that the injected identity verifier cannot be bypassed by a caller-generated claim.
+5. Prove a single suspended History transaction on the disposable document, including failure injection immediately before write, during write, after write, during verification and commit. Verify `resumeHistory(id,false)` restores exact original layer, composite, mask and neighboring layers; verify history length/steps and restoration of active selection/layer. Failure to prove any rollback yields an explicit reconciliation blocker and leaves the feature unavailable.
+6. Prove exact real-pixel BEFORE/AFTER digests, changed-pixel count/bounds, protected-zone identity, topology without fold or tearing, visible artistic improvement, and native Undo/Redo fidelity. Reject every mismatch or timeout. Verify on the target Photoshop/UXP versions after plugin reload.
+7. Only after the above may the main Guard architect consider registering a bounded guarded command with durable owner/ROI/masks/history authority, no fallback to arbitrary batchPlay, and the existing Critic → Painter review contract.
+
+Mock tests validate only JavaScript control flow. They cannot establish Photoshop native support, correct color conversions, exact History rollback or visual quality.

@@ -428,7 +428,7 @@ describe('embedded Photoshop Guard', () => {
     expect(runtime.store.read('create-readiness-rejected')).toBeUndefined();
   });
 
-  it('completes a ready UXP create_document with a confirmed document id and no visual-review debt', async () => {
+  it('waits for a matching UXP long-poll reconnect before creating a document', async () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'embedded-guard-create-ready-'));
     dirs.push(dir);
     const { registry } = fakeRegistry(dir);
@@ -471,23 +471,24 @@ describe('embedded Photoshop Guard', () => {
       const microplan = createVisualMicroPlanTools(registry)[0]!;
       registry.register(microplan.tool.name, microplan);
     }
+    let readinessChecks = 0;
     const runtime = new EmbeddedGuardRuntime(registry, {
       runtimeDirectory: path.join(dir, 'controller'),
       previewBarrierDirectory: path.join(dir, 'barriers'),
       executionLeaseFile: path.join(dir, 'execution.lock'),
       workspaceRoot: dir,
       uxpReadinessProbe: async () => ({
-        ready: true,
+        ready: ++readinessChecks > 1,
         transport: 'uxp',
         bridge_transport: 'long-poll',
         bridge_revision: 'expected-revision',
         expected_bridge_revision: 'expected-revision',
-        revision_match: true,
+        revision_match: readinessChecks > 1,
         photoshop_version: '27.0.0',
         document_count: 0,
         active_document: null,
-        plugin_connected: true,
-        reason: null,
+        plugin_connected: readinessChecks > 1,
+        reason: readinessChecks > 1 ? null : 'uxp_plugin_not_connected',
         checked_at: new Date().toISOString(),
         cache: { hit: false, age_ms: 0, ttl_ms: 2000 },
       }),
@@ -505,6 +506,7 @@ describe('embedded Photoshop Guard', () => {
     }) as any;
 
     expect(dispatches).toBe(1);
+    expect(readinessChecks).toBeGreaterThan(1);
     expect(result.execution).toMatchObject({ phase: 'completed', failed: false, execution: undefined });
     expect(result.confirmed_targets.document_id).toBe(732);
     expect(result.preview).toBeUndefined();
@@ -1243,7 +1245,10 @@ describe('embedded Photoshop Guard', () => {
         'next_pass',
     ]);
     expect(schema('photoshop_guard_cycle')).toBeUndefined();
-    expect(tools).toHaveLength(15);
+    expect(tools).toHaveLength(16);
+    expect(schema('photoshop_guard_request_stop')).toMatchObject({
+      required: ['operation_id'],
+    });
     expect(tools.some(definition => definition.tool.name === 'photoshop_guard_cycle_start')).toBe(false);
     expect(schema('photoshop_guard_cycle_auto').properties.next_pass.properties).toMatchObject({
       scene_camera_imaging_model: expect.any(Object),
@@ -2055,6 +2060,61 @@ describe('embedded Photoshop Guard', () => {
 
     expect(captures).toBe(1);
     expect(projectionSeen).toBe(true);
+  });
+
+  it('scopes read-only status to its document without suppressing unrelated geometry validation globally', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'guard-scoped-status-invalid-unrelated-'));
+    dirs.push(dir);
+    const { registry } = fakeRegistry(dir);
+    const runtime = runtimeFor(registry, dir);
+    for (const document_id of [59, 63]) {
+      runtime.store.write({
+        id: `scoped-status-document-${document_id}`,
+        tool: 'photoshop_get_state', args: { document_id },
+        summary: 'Read-only document fixture', purpose: 'Document-scoped status',
+        phase: 'completed', failed: false, execution: 'completed',
+        sequence: document_id, created_at: new Date(1_700_000_000_000 + document_id).toISOString(),
+        report: { delivered: true },
+      } as any);
+    }
+    const originalGeometry = runtime.store.sceneGeometryModel.bind(runtime.store);
+    runtime.store.sceneGeometryModel = ((id: number, ...args: any[]) => {
+      if (id === 59) throw new Error('model.parts.tree_branches.outline: invalid unrelated geometry');
+      return originalGeometry(id, ...args);
+    }) as any;
+    await expect(runtime.statusWithCapabilitySnapshots()).rejects.toThrow('tree_branches');
+    const scoped = await runtime.statusWithCapabilitySnapshots(63) as any;
+    expect(Object.keys(scoped.documents)).toEqual(['63']);
+    expect(scoped.documents['63'].document_id).toBe(63);
+  });
+
+  it('scoped next_pass lint never traverses unrelated status geometry and keeps same-document validation', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'guard-scoped-lint-unrelated-'));
+    dirs.push(dir);
+    const { registry } = fakeRegistry(dir);
+    const runtime = runtimeFor(registry, dir);
+    runtime.statusWithCapabilitySnapshots = async (documentId?: number) => {
+      if (documentId === undefined) throw new Error('tree_branches unrelated scene geometry');
+      return { documents: { '63': { document_id: 63, document_identity: { status: 'verified' }, visual_barrier: null } },
+        lock: null, active_jobs: [], uncertain: [], pending_reports: [], pending_operation_acks: [],
+        pending_visual_verdicts: [], identity_recovery_blockers: [],
+        next_required_action: 'workflow stall: a distinct candidate is required' };
+    };
+    runtime.lintNextPass = async (candidate: any) => ({
+      ok: candidate.geometry_valid === true, execution: 'not-executed',
+      violations: candidate.geometry_valid === true ? [] : [{ code: 'scene_geometry_invalid', message: 'invalid current document geometry' }],
+    });
+    const handler = createGuardTools(runtime).find(def => def.tool.name === 'photoshop_guard_status')!.handler;
+    const valid = JSON.parse(((await handler({ document_id: 63, next_pass: { document_id: 63, geometry_valid: true } })).content[0] as any).text);
+    expect(valid.next_pass_lint).toMatchObject({ ok: true, execution: 'not-executed' });
+    expect(valid).toMatchObject({ mutation_allowed: true, mutation_gate: 'candidate_guard_ready_cos_stop_requires_independent_check' });
+    const invalid = JSON.parse(((await handler({ document_id: 63, next_pass: { document_id: 63, geometry_valid: false } })).content[0] as any).text);
+    expect(invalid.next_pass_lint).toMatchObject({ ok: false, violations: [expect.objectContaining({ code: 'scene_geometry_invalid' })] });
+    expect(invalid.mutation_allowed).toBe(false);
+    const inferred = JSON.parse(((await handler({ next_pass: { document_id: 63, geometry_valid: true } })).content[0] as any).text);
+    expect(inferred).toMatchObject({ document_id: 63, mutation_allowed: true });
+    const mismatch = JSON.parse(((await handler({ document_id: 63, next_pass: { document_id: 59 } })).content[0] as any).text);
+    expect(mismatch.code).toBe('guard_status_document_scope_mismatch');
   });
 
   it('keeps ordinary status journal scans bounded to one even with a large operation history', async () => {

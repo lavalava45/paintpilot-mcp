@@ -1867,6 +1867,7 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
         inputSchema: {
           type: 'object',
           properties: {
+            document_id: { type: 'integer', minimum: 1, description: 'Optional read-only document scope. Unrelated invalid scene geometry remains validated by its own document operations; global status stays unchanged.' },
             next_pass: compactPassSchema(),
             construction_model: CONSTRUCTION_MODEL_SCHEMA,
             construction_ref: { type: 'object', properties: { document_id: { type: 'integer', minimum: 1 }, model_id: { type: 'string' } }, required: ['document_id', 'model_id'], additionalProperties: false },
@@ -1931,8 +1932,73 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
             }, true);
           }
         }
+        const candidate = args.next_pass && typeof args.next_pass === 'object' && !Array.isArray(args.next_pass)
+          ? args.next_pass as Record<string, unknown> : undefined;
+        // The candidate's pinned document scopes the status snapshot too. Never
+        // validate document 59 while linting an unrelated document 63 action.
+        const scopedDocumentId = args.document_id === undefined
+          ? (candidate && Number.isSafeInteger(candidate.document_id) && Number(candidate.document_id) > 0
+            ? Number(candidate.document_id) : undefined)
+          : Number(args.document_id);
+        if (candidate && scopedDocumentId !== undefined && candidate.document_id !== scopedDocumentId) {
+          return json({ ok: false, execution: 'not-executed', code: 'guard_status_document_scope_mismatch',
+            message: 'next_pass.document_id must match the read-only status document_id' }, true);
+        }
+        // Lint is independently read-only and validates the candidate's own geometry.
+        // Do not serialize global status before this document-scoped operation.
+        if (candidate && scopedDocumentId !== undefined) {
+          const lint = await runtime.lintNextPass(candidate);
+          const snapshot = await runtime.statusWithCapabilitySnapshots(scopedDocumentId);
+          const document = (snapshot.documents as Record<string, any> | undefined)?.[String(scopedDocumentId)];
+          const pending = ['pending_reports', 'pending_operation_acks', 'pending_visual_verdicts', 'uncertain', 'active_jobs', 'identity_recovery_blockers']
+            .some(key => Array.isArray(snapshot[key]) && (snapshot[key] as unknown[]).length > 0);
+          // A workflow stall blocks equivalent retries, NOT a causally distinct candidate
+          // that has passed the exact Guard compiler. Only report candidate-specific
+          // readiness: the unconditional/global readiness remains unchanged.
+          const mutationAllowed = Boolean(lint.ok && document && !pending && snapshot.lock == null
+            && document.document_identity?.status === 'verified' && document.visual_barrier == null);
+          return stateJson({ mode: 'document-scoped-next-pass-lint', document_id: scopedDocumentId,
+            execution: 'not-executed', next_pass_lint: lint,
+            mutation_allowed: mutationAllowed,
+            mutation_gate: mutationAllowed ? 'candidate_guard_ready_cos_stop_requires_independent_check' : 'guard_not_ready',
+            lock: snapshot.lock ?? null,
+            active_jobs: snapshot.active_jobs, uncertain: snapshot.uncertain,
+            identity_recovery_blockers: snapshot.identity_recovery_blockers,
+            next_required_action: snapshot.next_required_action,
+          }, runtime, 'status');
+        }
+        const snapshot = await runtime.statusWithCapabilitySnapshots(scopedDocumentId);
+        if (scopedDocumentId !== undefined) {
+          const docs = snapshot.documents as Record<string, any> | undefined;
+          const document = docs?.[String(scopedDocumentId)] ?? null;
+          const pending = ['pending_reports', 'pending_operation_acks', 'pending_visual_verdicts', 'uncertain', 'active_jobs', 'identity_recovery_blockers']
+            .some(key => Array.isArray(snapshot[key]) && (snapshot[key] as unknown[]).length > 0);
+          const mutationAllowed = Boolean(document && !pending && snapshot.lock == null
+            && snapshot.next_required_action === 'ready' && document.next_required_action === 'ready'
+            && document.document_identity?.status === 'verified');
+          return stateJson({
+            mode: 'document-scoped-readiness', document_id: scopedDocumentId,
+            mutation_allowed: mutationAllowed,
+            mutation_gate: mutationAllowed ? 'guard_ready_cos_stop_requires_independent_check' : 'guard_not_ready',
+            lock: snapshot.lock ?? null,
+            pending_reports: snapshot.pending_reports,
+            pending_operation_acks: snapshot.pending_operation_acks,
+            pending_visual_verdicts: snapshot.pending_visual_verdicts,
+            uncertain: snapshot.uncertain,
+            active_jobs: snapshot.active_jobs,
+            identity_recovery_blockers: snapshot.identity_recovery_blockers,
+            next_required_action: snapshot.next_required_action,
+            document: document && {
+              document_id: scopedDocumentId,
+              document_identity: document.document_identity,
+              visual_barrier: document.visual_barrier,
+              next_required_action: document.next_required_action,
+              checkpoint_due_before_next_visual_mutation: document.checkpoint_due_before_next_visual_mutation,
+            },
+          }, runtime, 'status');
+        }
         return stateJson({
-          ...(await runtime.statusWithCapabilitySnapshots()),
+          ...snapshot,
           ...(args.next_pass && typeof args.next_pass === 'object' && !Array.isArray(args.next_pass)
             ? { next_pass_lint: await runtime.lintNextPass(args.next_pass as Record<string, unknown>) }
             : {}),
@@ -2087,6 +2153,22 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
         typeof args.redelivery_reason === 'string' ? args.redelivery_reason : undefined,
         args.review_scope === 'whole-scene'
       ),
+    },
+    {
+      tool: {
+        name: 'photoshop_guard_request_stop',
+        description: 'Explicit PaintPilot Stop for one known Guard execution operation_id. Blocks subsequent Photoshop mutations in that execution, including queued work. This does not detect or replace the Chat On Steroids chat Stop button, and cannot undo an already dispatched command.',
+        inputSchema: {
+          type: 'object',
+          properties: { operation_id: { type: 'string', minLength: 1 } },
+          required: ['operation_id'],
+          additionalProperties: false,
+        },
+      },
+      handler: async (args) => {
+        try { return json(runtime.requestPaintPilotStop(String(args.operation_id ?? ''))); }
+        catch (error) { return json({ ok: false, code: guardRuntimeErrorCode(error, 'paintpilot_stop_rejected'), message: error instanceof Error ? error.message : String(error) }, true); }
+      },
     },
     {
       tool: {

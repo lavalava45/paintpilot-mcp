@@ -1,5 +1,24 @@
 # Changelog
 
+- 2026-10-17 — **Restore stock Chat On Steroids compatibility without editing COS (source-only).**
+  The canonical `dist/cos-plugin.js` no longer forces the experimental
+  `PHOTOSHOP_COS_HOST_STOP_REQUIRED` setting on every invocation; ordinary COS
+  therefore does not require a custom host-signed Stop service merely to run
+  a Guard-approved Photoshop mutation. Explicitly configured custom host Stop
+  services remain fail-closed when their proof is absent or invalid. Forward
+  standard MCP request `extra.signal` through the nested execution context;
+  cancelled requests refuse subsequent UXP dispatch rather than implying that
+  an already-issued Photoshop command was undone. Add an explicit durable
+  `photoshop_guard_request_stop` for a known PaintPilot operation id; each
+  subsequent Guard mutation admission checks its persisted marker. This is
+  **not** the COS Stop button, and a detached or already-issued operation still
+  requires receipt/History reconciliation. No standalone external Stop UI or
+  real-Photoshop cancellation acceptance is claimed. Synchronize public tool
+  inventory to 134 tools / 16 Guard tools (including the earlier integrated
+  `photoshop_transform_layer` addition); native transform and art quality
+  require their independent live gates. This change did not modify COS sources.
+
+
 - 2026-10-16 — **Ground structural Critic relationships in exact delivered pixels.**
   Add a structured, mandatory `visual_relationships` checkpoint for
   head–torso form, hand–object interaction, object–support contact and spatial

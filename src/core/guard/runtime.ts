@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import { artisticEvaluationFingerprint, type ArtisticEvaluator, type ArtisticEvaluation } from './artistic-evaluator.js';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
+import jpeg from 'jpeg-js';
 import { fileURLToPath } from 'node:url';
 import type { ToolResult, ToolRegistry } from '../tool-registry.js';
 import { createValueCheckTools } from '../../tools/value-check-tools.js';
@@ -44,7 +45,9 @@ import type { GuardProjectionContext } from './projection-context.js';
 import {
   collectOperationContractViolations,
 } from './operation-contract.js';
-import { guardExecutionPolicyError } from './execution-policy.js';
+import { guardExecutionClass, guardExecutionPolicyError } from './execution-policy.js';
+import { assessHostStop, type HostStopObservation } from './host-stop-authority.js';
+import { PaintPilotStopControl } from './paintpilot-stop-control.js';
 import {
   createJob,
   JOB_HEARTBEAT_INTERVAL_MS,
@@ -208,6 +211,10 @@ export function describeToolForGuardMode(
 }
 
 export interface EmbeddedGuardRuntimeOptions {
+  /** Only a trusted COS host transport may provide this observation. */
+  hostStopProbe?: () => Promise<HostStopObservation | undefined>;
+  /** Enforce fail-closed Stop checks on all Photoshop state changes. */
+  requireHostStop?: boolean;
   artisticEvaluator?: ArtisticEvaluator | false;
   runtimeDirectory?: string;
   previewBarrierDirectory?: string;
@@ -376,6 +383,9 @@ export class EmbeddedGuardRuntime {
   private readonly uxpQueuedCommandCancel: typeof cancelUxpStableCommandIfQueued;
   private readonly processVideoTraceEnabled: boolean | undefined;
   private readonly artisticEvaluator: ArtisticEvaluator | false;
+  private readonly hostStopProbe?: () => Promise<HostStopObservation | undefined>;
+  private readonly requireHostStop: boolean;
+  private readonly paintPilotStop: PaintPilotStopControl;
   private readonly capabilitySnapshotCache = new Map<number, {
     dependencyKey: string;
     snapshot: Record<string, unknown>;
@@ -405,6 +415,9 @@ export class EmbeddedGuardRuntime {
     this.uxpQueuedCommandCancel = options.uxpQueuedCommandCancel ?? cancelUxpStableCommandIfQueued;
     this.processVideoTraceEnabled = options.processVideoTraceEnabled;
     this.artisticEvaluator = options.artisticEvaluator ?? false;
+    this.hostStopProbe = options.hostStopProbe;
+    this.requireHostStop = options.requireHostStop ?? false;
+    this.paintPilotStop = new PaintPilotStopControl(this.runtimeDirectory);
     // One existing public tool, now bound to durable Guard frame/evidence state.
     // Standalone catalog fixtures retain their preview-only implementation.
     for (const definition of createValueCheckTools(this.registry, {
@@ -803,7 +816,7 @@ export class EmbeddedGuardRuntime {
     return snapshot;
   }
 
-  async statusWithCapabilitySnapshots(): Promise<Record<string, unknown>> {
+  async statusWithCapabilitySnapshots(documentId?: number): Promise<Record<string, unknown>> {
     let projection = this.store.captureProjectionContext({ capturedAt: Date.now() });
     const abandoned = await this.autoAbandonMissingDocuments('guard_status_fallback', projection);
     // Abandonment mutates durable document/operation state. Re-capture only in
@@ -813,7 +826,7 @@ export class EmbeddedGuardRuntime {
       projection = this.store.captureProjectionContext({ capturedAt: Date.now() });
     }
     const status = {
-      ...this.store.statusCompact(projection),
+      ...this.store.statusCompact(projection, documentId),
       guard_capabilities: this.capabilities(),
       public_mutation_mode: EMBEDDED_GUARD_MODE,
     };
@@ -1102,10 +1115,19 @@ export class EmbeddedGuardRuntime {
       const previewArgs = { ...(capture?.args ?? record?.preview_args ?? {}), document_id: documentId, include_image: true };
       delete previewArgs.focus_region;
       delete previewArgs.materialize_path; // Never overwrite the saved comparison frame.
+      // Older retained frames may lack preview_args; the ordinary preview default
+      // (1024 px) differs from the recorder's 1000 px frame. Match the verified
+      // saved JPEG's actual dimensions before comparing its exact byte hash.
+      if (previewArgs.max_dimension_px === undefined) {
+        const savedJpeg = jpeg.decode(fs.readFileSync(frame.path), { useTArray: true });
+        previewArgs.max_dimension_px = Math.max(savedJpeg.width, savedJpeg.height);
+      }
       const preview = await this.invoke('photoshop_get_preview', previewArgs, 10_000);
       const image = preview.content.find(item => item.type === 'image');
-      if (preview.isError || image?.type !== 'image' || createHash('sha256').update(Buffer.from(image.data, 'base64')).digest('hex') !== frame.sha256) {
-        throw new Error('document_identity_frame_mismatch: fresh pixels do not exactly match the saved frame; work is preserved, recovery is not accepted');
+      const liveSha = image?.type === 'image' ? createHash('sha256').update(Buffer.from(image.data, 'base64')).digest('hex') : null;
+      if (preview.isError || liveSha !== frame.sha256) {
+        const response = preview.content.find(item => item.type === 'text');
+        throw new Error(`document_identity_frame_mismatch: fresh pixels do not exactly match the saved frame; work is preserved, recovery is not accepted; preview_max_dimension=${String(previewArgs.max_dimension_px)}; preview_quality=${String(previewArgs.quality)}; live_sha=${liveSha ?? 'missing'}; preview_error=${preview.isError === true}; response=${response?.type === 'text' ? response.text.slice(0, 500) : 'none'}`);
       }
       const layersResult = await this.invoke('photoshop_get_layers', { document_id: documentId }, 5_000);
       const bodies: Record<string, unknown>[] = parseTexts(layersResult);
@@ -1338,6 +1360,7 @@ export class EmbeddedGuardRuntime {
     try {
       releaseExecution = this.executionLease.acquire('photoshop_guard_brush_pack_profile');
       const commandId = `brush-probe:${createHash('sha256').update(JSON.stringify({
+        probe_contract_revision: 2, // v1 cached errors predated unattributed diagnostic samples.
         brush_pack_id: brushPackId,
         preset_name: presetName,
         occurrence_index: occurrenceIndex,
@@ -1362,6 +1385,20 @@ export class EmbeddedGuardRuntime {
         preview_sha256: sha,
         operation_id: commandId,
       };
+      if (result.data.preset_identity_verified !== true) {
+        // Measured pixels are diagnostic only, never an attributed/approved
+        // brush profile. In particular, do not create a trusted probe receipt.
+        return {
+          ok: true,
+          classification_status: 'unverified',
+          brush_pack_id: brushPackId,
+          requested_preset: presetName,
+          observed_preset: result.data.observed_preset ?? null,
+          evidence,
+          stable_command_id: commandId,
+          preflight_eligible: false,
+        };
+      }
       writeBrushProbeReceipt({
         protocol: 'photoshop.brush_pack.probe_receipt.v1',
         brush_pack_id: brushPackId,
@@ -1803,8 +1840,57 @@ export class EmbeddedGuardRuntime {
     if (name !== 'photoshop_get_state' && toolAcceptsDocumentId(this.registry, name) && !positiveDocumentId(args.document_id)) {
       throw new Error(`Pass a positive pinned document_id for ${name}; obtain it from photoshop_get_state/photoshop_list_documents first`);
     }
+    if (guardExecutionClass(name) !== 'read-only' && (this.requireHostStop || this.hostStopProbe)) {
+      let observation: HostStopObservation | undefined;
+      try {
+        observation = await this.hostStopProbe?.();
+      } catch {
+        // A failed COS host read cannot grant permission to modify Photoshop.
+      }
+      const decision = assessHostStop(observation);
+      if (!decision.may_mutate) {
+        throw new Error(`${decision.reason}: COS host Stop must be authoritatively cleared before ${name}`);
+      }
+    }
+    if (guardExecutionClass(name) !== 'read-only' && context.guardOperationId) {
+      // The filesystem marker survives MCP process exits and is checked again
+      // after any asynchronous host preflight, immediately before dispatch.
+      this.paintPilotStop.assertMutationAllowed(context.guardOperationId);
+    }
     const deadlineAt = Date.now() + timeoutMs;
     return withToolExecutionContext({ deadlineAt, ...context }, () => this.registry.execute(name, args));
+  }
+
+  /** Called by PaintPilot's explicit user-facing Stop transport for an exact run. */
+  requestPaintPilotStop(operationId: string): Record<string, unknown> {
+    const record = this.store.read(operationId);
+    const activeJob = this.store.activeJobs(undefined).some(job => job.operation_id === operationId);
+    if (!record && !activeJob) throw new Error('paintpilot_stop_unknown_operation');
+    return { ok: true, protocol: 'paintpilot.stop.v1', ...this.paintPilotStop.requestStop(operationId),
+      effect: 'subsequent_mutation_admission_blocked',
+      inflight_mutation: 'may_require_receipt_reconciliation' };
+  }
+
+  /**
+   * Long-poll availability is a lease, not a durable UXP identity. A busy
+   * compiler may consume the lease while the companion is still alive.
+   * Yield briefly for the next matching UXP registration before rejecting.
+   * Never accept a stale/mismatched revision or an unconfirmed connection.
+   */
+  private async confirmedUxpReadiness() {
+    let readiness = await this.uxpReadinessProbe({ forceRefresh: true });
+    if (readiness.ready && readiness.revision_match && readiness.plugin_connected) return readiness;
+    if (readiness.bridge_revision !== readiness.expected_bridge_revision
+      || readiness.reason !== 'uxp_plugin_not_connected') return readiness;
+    const deadline = Date.now() + 8_000;
+    while (Date.now() < deadline) {
+      await new Promise(resolve => setTimeout(resolve, 250));
+      readiness = await this.uxpReadinessProbe({ forceRefresh: true });
+      if (readiness.ready && readiness.revision_match && readiness.plugin_connected) return readiness;
+      if (readiness.bridge_revision !== readiness.expected_bridge_revision
+        || readiness.reason !== 'uxp_plugin_not_connected') break;
+    }
+    return readiness;
   }
 
   private async collectDynamicOperationViolations(
@@ -1814,7 +1900,7 @@ export class EmbeddedGuardRuntime {
   ) {
     const tool = String(operation.tool ?? '');
     if (tool === 'photoshop_create_document' || tool === 'photoshop_open_image') {
-      const readiness = await this.uxpReadinessProbe({ forceRefresh: true });
+      const readiness = await this.confirmedUxpReadiness();
       if (readiness.ready && readiness.revision_match && readiness.plugin_connected) return [];
       return [{
         scope: 'next_operation' as const,
@@ -1910,7 +1996,7 @@ export class EmbeddedGuardRuntime {
     // Preserve the existing bounded COM fallback when UXP is not the selected
     // ready route, but never dispatch through a ready UXP route without proving
     // that the pinned numeric id still denotes the same live document object.
-    let readiness = await this.uxpReadinessProbe({ forceRefresh: true });
+    let readiness = await this.confirmedUxpReadiness();
     let warmedStateProbe: Awaited<ReturnType<typeof invokeUxpGetState>> | undefined;
     // The companion uses a long-poll transport, so its health endpoint can briefly
     // report disconnected while the exact read route is still healthy. Do one
@@ -1920,7 +2006,7 @@ export class EmbeddedGuardRuntime {
     if (!(readiness.ready && readiness.revision_match && readiness.plugin_connected)) {
       warmedStateProbe = await this.uxpStateProbe().catch(() => undefined);
       if (warmedStateProbe?.ok === true) {
-        readiness = await this.uxpReadinessProbe({ forceRefresh: true });
+        readiness = await this.confirmedUxpReadiness();
       }
     }
     if (!(readiness.ready && readiness.revision_match && readiness.plugin_connected)) {

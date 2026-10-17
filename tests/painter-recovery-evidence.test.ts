@@ -247,6 +247,7 @@ describe('identity recovery terminal journal regression', () => {
     expect(readFileSync(f.runtime.store.file(record.id), 'utf8')).toBe(before);
     expect(recovered.uncertain).toContain(record.id);
     expect(f.preview).toHaveBeenCalledTimes(1);
+    expect(f.preview).toHaveBeenCalledWith(expect.objectContaining({ document_id: 42, max_dimension_px: 16, include_image: true }));
   });
   it('rejects same-document identity recovery with an unresolved selection timeout when preserved pixels do not match', async () => {
     const f = fixture(); f.restart(); f.runtime.store.observeDocumentInstance(42, witness('restarted'));

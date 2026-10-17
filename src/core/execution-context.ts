@@ -1,6 +1,10 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 
 export interface ToolExecutionContext {
+  /** MCP request cancellation is advisory and scoped to this invocation only. */
+  mcpAbortSignal?: AbortSignal;
+  /** Opaque, host-injected COS per-invocation token (MCP _meta only). */
+  cosStopCallToken?: string;
   /** Host-proven conversation identity; never supplied in model tool arguments. */
   reviewContextId?: string;
   /** Absolute epoch deadline supplied by the controller/daemon. */
@@ -18,7 +22,7 @@ export interface ToolExecutionContext {
 const storage = new AsyncLocalStorage<ToolExecutionContext>();
 
 export function withToolExecutionContext<T>(context: ToolExecutionContext, run: () => Promise<T>): Promise<T> {
-  return storage.run(context, run);
+  return storage.run({ ...storage.getStore(), ...context }, run);
 }
 
 export function currentToolExecutionContext(): ToolExecutionContext | undefined {
@@ -65,6 +69,11 @@ export function withToolExecutionStepContext<T>(stepId: string, run: () => Promi
  * historical per-script timeout.
  */
 export function executionTimeoutMs(requestedMs?: number, fallbackMs = 30_000, reserveMs = 350): number {
+  // Prevent *new* UXP commands after a host cancellation that was actually
+  // delivered. Commands already sent to Photoshop must still be reconciled.
+  if (storage.getStore()?.mcpAbortSignal?.aborted) {
+    throw new Error('mcp_request_cancelled_before_uxp_dispatch: command not sent; reconcile any earlier commands separately');
+  }
   const requested = requestedMs === undefined ? undefined : Number(requestedMs);
   if (requested !== undefined && (!Number.isFinite(requested) || requested <= 0)) {
     throw new Error('Invalid script timeout');

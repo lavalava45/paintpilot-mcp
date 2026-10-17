@@ -8,6 +8,18 @@ import {
 } from './execution-context.js';
 
 describe('logical Photoshop execution deadline', () => {
+  it('rejects a new Photoshop-side dispatch after an actual MCP cancellation, including nested calls', async () => {
+    const controller = new AbortController();
+    await withToolExecutionContext({ mcpAbortSignal: controller.signal }, async () => {
+      expect(executionTimeoutMs()).toBe(30_000);
+      controller.abort();
+      await withToolExecutionContext({ guardOperationId: 'nested-guard-1' }, async () => {
+        expect(() => executionTimeoutMs()).toThrow(/mcp_request_cancelled_before_uxp_dispatch/);
+      });
+    });
+    // A fresh independent request is not stopped by an earlier request's signal.
+    expect(executionTimeoutMs()).toBe(30_000);
+  });
   it('preserves the historical fallback without a logical deadline', () => {
     expect(executionTimeoutMs()).toBe(30_000);
     expect(executionTimeoutMs(1_234)).toBe(1_234);

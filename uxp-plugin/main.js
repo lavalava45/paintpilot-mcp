@@ -1553,6 +1553,7 @@ async function selectBrushPreset(params = {}) {
   let listenerInstalled = false;
   let observing = true;
   let snapshot;
+  let independentPreset = null;
   const diagnostics = { select_response_types: [], notification_events: [],
     current_tool_option_keys: [], brush_option_keys: [], independent_readback: null };
   const optionKeys = descriptor => {
@@ -1629,6 +1630,7 @@ async function selectBrushPreset(params = {}) {
         const [raw] = await action.batchPlay([currentToolOptionsDescriptor()], READ_BATCHPLAY_OPTIONS);
         optionKeys(raw);
         const readback = normalizeBrushSettingsDescriptor(raw);
+        independentPreset = readback.preset ?? null;
         diagnostics.independent_readback = { preset: readback.preset ?? null,
           observed_fields: Array.isArray(readback.observed_fields) ? readback.observed_fields.slice(0, 20) : [] };
       } catch (error) {
@@ -1636,16 +1638,16 @@ async function selectBrushPreset(params = {}) {
           error: String(error?.message ?? error).slice(0, 160) };
       }
     }
-    const conflictingEvidence = conflictingSelectNotifications || Boolean(
-      current.preset && observedSelection && current.preset !== observedSelection
-    );
+    const identities = [current.preset, observedSelection, independentPreset].filter(Boolean);
+    const conflictingEvidence = conflictingSelectNotifications || new Set(identities).size > 1;
     // Two native identity sources disagreeing is not confirmation of either.
     // Guard must refuse the pass rather than painting with a guessed preset.
-    const preset = conflictingEvidence ? null : current.preset ?? observedSelection;
+    const preset = conflictingEvidence ? null : current.preset ?? observedSelection ?? independentPreset;
     return { ok: true, preset: preset ?? null, settings: current.settings,
       preset_verification: { source: conflictingEvidence ? 'conflicting_evidence'
         : current.preset ? 'current_tool_options'
-        : observedSelection ? 'photoshop_select_notification' : 'unavailable',
+        : observedSelection ? 'photoshop_select_notification'
+        : independentPreset ? 'independent_current_tool_options' : 'unavailable',
         observed_preset: preset ?? null,
         ...(!preset ? { native_diagnostics: diagnostics } : {}),
         ...(conflictingEvidence ? {
@@ -4521,10 +4523,11 @@ async function probeMediaBrush(params = {}) {
     if (!Number.isInteger(layerId) || layerId <= 0) throw new Error('brush_probe_layer_id_unavailable');
     const selected = await selectBrushPreset({ name: presetName });
     const effectivePreset = typeof selected?.preset === 'string' ? selected.preset.trim() : '';
-    // A successful selector command does not prove which native preset is active.
-    // Do not render and label a sample as the requested brush on an unknown or
-    // conflicting Photoshop readback (the probe is intentionally disposable).
-    if (!selected?.ok || effectivePreset !== presetName) {
+    // A nameless native readback does not prove the requested identity. However,
+    // it must not prevent measuring an *unattributed* mark on this disposable
+    // sheet. The caller must quarantine it until separately compared with an
+    // independently trusted reference. A conflicting named preset is rejected.
+    if (!selected?.ok || (effectivePreset && effectivePreset !== presetName)) {
       throw new Error(`brush_probe_preset_unverified: requested=${presetName}, effective=${effectivePreset || 'unknown'}`);
     }
     const baseSize = Math.max(24, Math.min(120, Number(selected?.settings?.size) || 64));
@@ -4565,6 +4568,8 @@ async function probeMediaBrush(params = {}) {
     return {
       operation: 'probe_media_brush',
       preset_name: presetName,
+      preset_identity_verified: effectivePreset === presetName,
+      observed_preset: effectivePreset || null,
       effective_settings: selected?.settings ?? {},
       probe_document: { width: 960, height: 820 },
       layout: mediaBrushProbeLayout(),

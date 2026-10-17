@@ -122,7 +122,7 @@ export function installProtocolHandlers(runtime: ProtocolRuntime): void {
     return prompts.get(request.params.name, args);
   });
 
-  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
     const name = request.params.name;
     if (EMBEDDED_GUARD_REQUIRED && shouldBlockRawTool(name)) {
       return guard.rawMutationBlocked(name);
@@ -145,7 +145,14 @@ export function installProtocolHandlers(runtime: ProtocolRuntime): void {
       );
       const deadlineAt = requestDeadline(request.params);
       const contextId = request.params._meta?.['paintpilot/review-context'];
+      const cosToken = request.params._meta?.['cos/stop-call-token'];
       const executionContext = {
+        // Stock MCP hosts may send notifications/cancelled. Propagate this
+        // standard signal to nested Guard/UXP operations without requiring COS
+        // internals. Some COS versions do not send it on the Stop button.
+        ...(extra?.signal ? { mcpAbortSignal: extra.signal } : {}),
+        ...(typeof cosToken === 'string' && /^[a-f0-9]{64}$/.test(cosToken)
+          ? { cosStopCallToken: cosToken } : {}),
         ...(deadlineAt === undefined ? {} : { deadlineAt }),
         ...(typeof contextId === 'string' && contextId.trim() && contextId.length <= 256
           ? { reviewContextId: contextId } : {}),

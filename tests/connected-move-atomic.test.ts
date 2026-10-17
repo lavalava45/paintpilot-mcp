@@ -200,6 +200,30 @@ function uxpFixture(opts: { stale?: boolean; failSecond?: boolean; wrongDocument
 }
 
 describe('E.25 actual UXP source atomic translation and native History', () => {
+  it('guarded layer transform moves only the pinned active raster layer and rejects invalid identities/offsets', async () => {
+    const f = uxpFixture();
+    const { data } = await f.handle('transform_layer', {
+      document_id: 42, layer_id: 2, translation: { x: -6, y: 4 },
+    });
+    expect(data).toMatchObject({ transformed: true, document_id: 42, layer_id: 2,
+      translation: { x: -6, y: 4 } });
+    expect(f.parent.bounds).toEqual(bounds(44, 74, 139, 164));
+    expect(f.child.bounds).toEqual(bounds(140, 100, 186, 135));
+    const transformedOther = await f.handle('transform_layer', { document_id: 42, layer_id: 3,
+      translation: { x: 5, y: 1 } });
+    expect(transformedOther.data.layer_id).toBe(3);
+    expect(f.parent.bounds).toEqual(bounds(44, 74, 139, 164));
+    expect(f.child.bounds).toEqual(bounds(145, 101, 191, 136));
+    expect(f.calls.slice(-3)).toEqual(['select:3', 'translate:3', 'select:2']);
+    await expect(f.handle('transform_layer', { document_id: 42, layer_id: 999,
+      translation: { x: 1, y: 0 } })).rejects.toThrow('transform_layer_identity_mismatch');
+    await expect(f.handle('transform_layer', { document_id: 42, layer_id: 2,
+      translation: { x: 0, y: 0 } })).rejects.toThrow('transform_parameters_invalid');
+    await expect(f.handle('transform_layer', { document_id: 42, layer_id: 2,
+      translation: { x: 129, y: 0 } })).rejects.toThrow('transform_parameters_invalid');
+    await expect(f.handle('transform_layer', { document_id: 999, layer_id: 2,
+      translation: { x: 1, y: 0 } })).rejects.toThrow('document_not_found');
+  });
   it('physically moves both original raster layers and commits precisely one Undo unit', async () => {
     const f = uxpFixture();
     const { data } = await f.handle('move_layer_pixels', f.payload);

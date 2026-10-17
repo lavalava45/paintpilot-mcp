@@ -129,7 +129,7 @@ flowchart TB
 | --- | --- | --- |
 | MCP core | protocol, tool/prompt registry, session lifecycle | `src/core/` |
 | Embedded Guard | durable journal, barriers, jobs, recovery, artistic workflow state | `src/core/guard/`, `src/tools/guard-tools.ts` |
-| Semantic tools | 132 public non-recipe `photoshop_*` tools | `src/tools/`, core connection/Guard tools |
+| Semantic tools | 134 public non-recipe `photoshop_*` tools | `src/tools/`, core connection/Guard tools |
 | Backend router | production UXP-only semantic dispatch | `src/platform/photoshop-backend.ts` |
 | UXP bridge | Photoshop-side execution and exact outcomes | `src/platform/uxp-bridge-client.ts`, `uxp-plugin/` |
 | Prompt layer | server instructions and 5 MCP guide prompts | `src/prompts/` |
@@ -140,7 +140,7 @@ flowchart TB
 `PhotoshopMCPServer` is implemented in `src/core/photoshop-mcp-server.ts`; `src/core/server.ts` is the
 stable compatibility facade. The server wires the official MCP SDK to:
 
-- **132 semantic tools**, including 15 public Guard tools;
+- **134 semantic tools**, including 16 public Guard tools;
 - **5 MCP guide prompts**;
 - server-level instructions published during MCP initialization;
 - structured error wrapping with machine-readable error codes and suggested next actions;

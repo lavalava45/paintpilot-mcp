@@ -503,6 +503,21 @@ it('compact compiler carries the separate Critic judgment into the ordinary clos
   expect(compiled.input.previous_visual_verdict).toMatchObject({critic_review:critic});
   expect(f.runtime.store.read('pass-3').verdict).toBeUndefined();
 });
+it('accepts compiler-authored structural_correction metadata in Guard preflight', () => {
+  const f = fixture();
+  const errors = f.runtime.store.collectPreflightErrors({
+    tool: 'photoshop_execute_visual_microplan',
+    args: { document_id: 42, steps: [] },
+    structural_correction: {
+      defect_id: 'cup_support_table',
+      part_ids: ['cup_body', 'table_top'],
+      relation_ids: ['cup_support_table'],
+      target: 'Cup base lies on the drawn tabletop within ten pixels.',
+      execution: 'brush',
+    },
+  });
+  expect(errors.join('\n')).not.toContain('Unsupported request field: structural_correction');
+});
 function retainedFixture() {
   const f = fixture(), store = f.runtime.store;
   const r = store.read('pass-3');

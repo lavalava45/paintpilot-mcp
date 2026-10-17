@@ -45,20 +45,24 @@ function brushProbeHarness(observedPreset: string | null) {
 }
 
 describe('UXP native media-brush probe identity', () => {
-  it.each([null, 'Different Brush'])(
-    'rejects missing or mismatched native preset identity (%s) before painting',
-    async (observedPreset) => {
-      const { probe, counts } = brushProbeHarness(observedPreset);
-      await expect(probe.probeMediaBrush({ preset_name: 'Square Charcoal' }))
-        .rejects.toThrow('brush_probe_preset_unverified');
-      expect(counts).toEqual({ dabs: 0, strokes: 0, previews: 0, closes: 1 });
-    }
-  );
+  it('measures nameless selection on a disposable sheet but explicitly rejects identity attribution', async () => {
+    const { probe, counts } = brushProbeHarness(null);
+    await expect(probe.probeMediaBrush({ preset_name: 'Square Charcoal' }))
+      .resolves.toMatchObject({ preset_identity_verified: false, observed_preset: null });
+    expect(counts).toEqual({ dabs: 1, strokes: 1, previews: 1, closes: 1 });
+  });
+
+  it('rejects a different named preset before painting', async () => {
+    const { probe, counts } = brushProbeHarness('Different Brush');
+    await expect(probe.probeMediaBrush({ preset_name: 'Square Charcoal' }))
+      .rejects.toThrow('brush_probe_preset_unverified');
+    expect(counts).toEqual({ dabs: 0, strokes: 0, previews: 0, closes: 1 });
+  });
 
   it('paints only after confirming the actual selected native preset', async () => {
     const { probe, counts } = brushProbeHarness('Square Charcoal');
     await expect(probe.probeMediaBrush({ preset_name: 'Square Charcoal' }))
-      .resolves.toMatchObject({ operation: 'probe_media_brush', preset_name: 'Square Charcoal' });
+      .resolves.toMatchObject({ operation: 'probe_media_brush', preset_name: 'Square Charcoal', preset_identity_verified: true });
     expect(counts).toEqual({ dabs: 1, strokes: 1, previews: 1, closes: 1 });
   });
 });

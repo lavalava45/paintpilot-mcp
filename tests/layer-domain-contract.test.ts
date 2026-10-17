@@ -133,6 +133,7 @@ describe('full layer-domain public contract', () => {
       'photoshop_flatten_image',
     ]);
     expect(createLayerTransformTools(connection, router).map((item) => item.tool.name)).toEqual([
+      'photoshop_transform_layer',
       'photoshop_fit_layer_to_document',
       'photoshop_scale_layer',
       'photoshop_move_layer',

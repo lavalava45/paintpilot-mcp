@@ -273,6 +273,20 @@ describe('UXP bootstrap mutations', () => {
       independent_readback: { preset: null },
     });
   });
+  it('uses a fresh independent native readback when the first snapshot has no preset identity', async () => {
+    let reads = 0;
+    const harness = bootstrapHarness({ batchPlay: async descriptors => descriptors.map(descriptor => {
+      if (descriptor._obj !== 'get') return {};
+      reads++;
+      return { currentToolOptions: { brush: {
+        diameter: 24, ...(reads >= 2 ? { name: 'Installed Dry Brush' } : {}),
+      } } };
+    }) });
+    const result = await harness.selectBrushPreset({ name: 'Installed Dry Brush' });
+    expect(reads).toBe(2);
+    expect(result).toMatchObject({ preset: 'Installed Dry Brush',
+      preset_verification: { source: 'independent_current_tool_options' } });
+  });
   it('never invokes unsupported active brush Get that raises Photoshop modal errors', async () => {
     const queries: any[] = [];
     const h = bootstrapHarness({ batchPlay: async descriptors => descriptors.map(d => {

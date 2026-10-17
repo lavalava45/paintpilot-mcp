@@ -10,6 +10,7 @@ import { Logger } from '../utils/logger.js';
 import { withOptionalDocumentId, wrapDocumentIdHandler } from './document-target.js';
 import { ExecutionLease } from './execution-lease.js';
 import { EmbeddedGuardRuntime } from './guard/runtime.js';
+import { createCosHostStopProbe } from './guard/cos-host-stop-client.js';
 import { PromptRegistry } from './prompt-registry.js';
 import {
   createConnectionToolCatalog,
@@ -82,9 +83,19 @@ export class PhotoshopMCPServer {
       || runtimePath('preview-barriers/');
     this.install(createRegistryToolCatalog(this.tools, previewBarrierDirectory));
 
+    const cosHostStopEndpoint = process.env.COS_HOST_STOP_ENDPOINT?.trim();
+    const cosHostStopKey = process.env.COS_HOST_STOP_KEY?.trim();
+    // Explicit integrations can opt in to a host Stop authority. Stock COS
+    // supplies no such proof; never make a patched COS a production prerequisite.
+    // A half-configured explicit integration still fails closed.
+    const cosHostStopRequired = process.env.PHOTOSHOP_COS_HOST_STOP_REQUIRED !== undefined
+      || cosHostStopEndpoint !== undefined || cosHostStopKey !== undefined;
     const guard = new EmbeddedGuardRuntime(this.tools, {
       previewBarrierDirectory,
       executionLeaseFile: runtimePath('execution.lock'),
+      requireHostStop: cosHostStopRequired,
+      ...(cosHostStopEndpoint && cosHostStopKey
+        ? { hostStopProbe: createCosHostStopProbe(cosHostStopEndpoint, cosHostStopKey) } : {}),
     });
     // Reapply the standard public handler wrappers to the Guard-bound analyzer.
     this.install([this.tools.get('photoshop_analyze_value_structure')!]);

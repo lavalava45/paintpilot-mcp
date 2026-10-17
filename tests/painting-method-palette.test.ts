@@ -233,7 +233,7 @@ describe('painting method capability map', () => {
     });
     expect(available('transform-layer')).toMatchObject({
       primaryTool: 'photoshop_move_layer',
-      executionTools: ['photoshop_move_layer', 'photoshop_scale_layer', 'photoshop_rotate_layer'],
+      executionTools: ['photoshop_move_layer', 'photoshop_scale_layer', 'photoshop_rotate_layer', 'photoshop_transform_layer'],
       availability: 'available',
     });
     expect(available('soft-brush-build')?.visualIntents).toContain('light-sculpt');

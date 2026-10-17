@@ -1004,10 +1004,37 @@ export async function preflightVisualMicroPlanForExecution(
       ],
     }).rejection;
   }
+  // A document-list read is non-mutating. A single fresh retry is safe if the
+  // UXP long-poll dropped during preflight; do not weaken document pinning or
+  // accept arbitrary non-document data as authoritative canvas bounds.
+  let body = normalizeToolResultForPlaceholders(listResult);
+  let payload = body && typeof body === 'object' && !Array.isArray(body)
+    ? body as Record<string, unknown> : undefined;
+  if (listResult.isError === true
+    && typeof payload?.code === 'string'
+    && /uxp_bridge|uxp_plugin_not_connected|timeout/.test(payload.code)) {
+    try {
+      await new Promise(resolve => setTimeout(resolve, 250));
+      listResult = await registry.execute('photoshop_list_documents', {});
+      body = normalizeToolResultForPlaceholders(listResult);
+      payload = body && typeof body === 'object' && !Array.isArray(body)
+        ? body as Record<string, unknown> : undefined;
+    } catch (error) {
+      return validateCompiledVisualMicroPlan(args, registry, {
+        extraErrors: [
+          `document bounds preflight retry failed: ${error instanceof Error ? error.message : String(error)}`,
+        ],
+      }).rejection;
+    }
+  }
   const documents = documentsFromListResult(listResult);
   if (listResult.isError === true || !documents) {
     return validateCompiledVisualMicroPlan(args, registry, {
-      extraErrors: ['document bounds preflight failed: photoshop_list_documents did not return a usable documents array'],
+      extraErrors: [
+        listResult.isError === true
+          ? `document bounds preflight read failed: ${String(payload?.code ?? 'unknown')}: ${String(payload?.message ?? 'no detailed reason')}`
+          : 'document bounds preflight failed: photoshop_list_documents did not return a usable documents array',
+      ],
     }).rejection;
   }
   const document = documents.find(item => Number(item.id ?? item.document_id) === documentId);

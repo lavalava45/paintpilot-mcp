@@ -399,7 +399,7 @@ const SEEDS: CapabilitySeed[] = [
     impactClasses: ['transform'],
     visualIntents: ['move-scale-rotate'],
     primaryTool: 'photoshop_move_layer',
-    executionTools: ['photoshop_move_layer', 'photoshop_scale_layer', 'photoshop_rotate_layer'],
+    executionTools: ['photoshop_move_layer', 'photoshop_scale_layer', 'photoshop_rotate_layer', 'photoshop_transform_layer'],
     requiredTools: ['photoshop_move_layer', 'photoshop_scale_layer', 'photoshop_rotate_layer'],
   },
   {

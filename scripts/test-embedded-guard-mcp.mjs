@@ -100,6 +100,20 @@ try {
   assert.equal(blockedResult.isError, true);
   assert.equal(blocked.code, 'guard_required');
 
+  // Stock CoS can expose PaintPilot's own explicit stop tool without a
+  // private COS Stop API. An unknown operation MUST be refused, not create
+  // a global Stop marker or affect any Photoshop document.
+  const ownStopSchema = published('photoshop_guard_request_stop');
+  assert.deepEqual(ownStopSchema.required, ['operation_id']);
+  const refusedStop = await client.callTool({
+    name: 'photoshop_guard_request_stop',
+    arguments: { operation_id: 'nonexistent-operation-for-read-only-smoke' },
+  });
+  assert.equal(refusedStop.isError, true);
+  const refusal = textBody(refusedStop);
+  assert.equal(refusal.code, 'paintpilot_stop_rejected');
+  assert.match(refusal.message, /paintpilot_stop_unknown_operation/);
+
   console.log(JSON.stringify({
     ok: true,
     tools: tools.length,

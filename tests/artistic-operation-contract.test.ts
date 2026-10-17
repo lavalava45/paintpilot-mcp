@@ -160,6 +160,7 @@ describe('unified artistic-operation execution contract', () => {
       'photoshop_move_layer',
       'photoshop_scale_layer',
       'photoshop_rotate_layer',
+      'photoshop_transform_layer',
     ]);
     for (const executedTool of plan.allowedExecutionTools) {
       expect(() => validateArtisticOperationExecution({

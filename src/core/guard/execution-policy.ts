@@ -97,6 +97,7 @@ const SEMANTIC_MUTATION_TOOLS = new Set([
   'photoshop_merge_layer_down',
   'photoshop_merge_visible_layers',
   'photoshop_move_layer',
+  'photoshop_transform_layer',
   'photoshop_move_layer_down',
   'photoshop_move_layer_to_bottom',
   'photoshop_move_layer_to_position',

@@ -297,6 +297,40 @@ describe('microplan request compilation and pre-dispatch diagnostics', () => {
     expect(listCalls).toBe(0);
   });
 
+  it('retries one transient UXP document-list failure without losing pinned bounds', async () => {
+    const { registry: tools } = registry();
+    const list = tools.get('photoshop_list_documents')!;
+    let reads = 0;
+    tools.register('photoshop_list_documents', {
+      ...list,
+      handler: async (args) => {
+        if (++reads === 1) {
+          return { isError: true, content: [{ type: 'text',
+            text: JSON.stringify({ ok: false, code: 'uxp_bridge_unavailable', message: 'poll expired' }) }] };
+        }
+        return list.handler(args);
+      },
+    });
+    expect(await preflightVisualMicroPlanForExecution(template(), tools)).toBeUndefined();
+    expect(reads).toBe(2);
+  });
+
+  it('retains the actual UXP read failure after a bounded retry', async () => {
+    const { registry: tools } = registry();
+    let reads = 0;
+    tools.register('photoshop_list_documents', {
+      tool: { name: 'photoshop_list_documents', inputSchema: { type: 'object', properties: {} } },
+      handler: async () => {
+        reads++;
+        return { isError: true, content: [{ type: 'text',
+          text: JSON.stringify({ ok: false, code: 'uxp_bridge_unavailable', message: 'companion disconnected' }) }] };
+      },
+    });
+    const rejected = await preflightVisualMicroPlanForExecution(template(), tools);
+    expect(resultBody(rejected!).errors.join('\n')).toMatch(/uxp_bridge_unavailable: companion disconnected/);
+    expect(reads).toBe(2);
+  });
+
   it('returns independent stage, method, schema, and bounds errors in one rejection while ignoring step prose', async () => {
     const input = template();
     input.stage = 'BLOCKIIN';
