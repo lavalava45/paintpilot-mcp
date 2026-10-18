@@ -1,4 +1,6 @@
-﻿export const USER_CONFIG_VERSION = 1 as const;
+﻿import { CONFIG_LANGUAGES, normalizeReportLanguage } from './report-locales.js';
+
+export const USER_CONFIG_VERSION = 1 as const;
 
 export const USER_CONFIG_DEFAULTS = {
   language: 'auto',
@@ -7,7 +9,7 @@ export const USER_CONFIG_DEFAULTS = {
   painting_profile: 'auto',
 } as const;
 
-export type UserConfigLanguage = 'auto' | 'ru' | 'en';
+export type UserConfigLanguage = typeof CONFIG_LANGUAGES[number];
 export type UserConfigCommentaryMode = 'technical' | 'artistic' | 'mixed';
 export type UserConfigCommentaryDetail = 'short' | 'normal' | 'detailed';
 export type UserConfigPaintingProfile = 'auto' | 'simple_graphic' | 'nontrivial_painting';
@@ -34,7 +36,7 @@ export type NormalizedUserConfig = {
 };
 
 const ALLOWED = {
-  language: new Set<UserConfigLanguage>(['auto', 'ru', 'en']),
+  language: new Set<UserConfigLanguage>(CONFIG_LANGUAGES),
   commentary_mode: new Set<UserConfigCommentaryMode>(['technical', 'artistic', 'mixed']),
   commentary_detail: new Set<UserConfigCommentaryDetail>(['short', 'normal', 'detailed']),
   painting_profile: new Set<UserConfigPaintingProfile>(['auto', 'simple_graphic', 'nontrivial_painting']),
@@ -69,11 +71,12 @@ export function normalizeUserConfig(value: unknown): NormalizedUserConfig {
     warnings.push(`unsupported config_version ${String(raw.config_version)}; using v${USER_CONFIG_VERSION} semantics`);
   }
 
-  const languageCandidate = normalizedString(raw?.language);
+  const languageRaw = normalizedString(raw?.language);
+  const languageCandidate = languageRaw === 'auto' ? 'auto' : normalizeReportLanguage(languageRaw);
   const language = languageCandidate && ALLOWED.language.has(languageCandidate as UserConfigLanguage)
     ? languageCandidate as UserConfigLanguage
     : USER_CONFIG_DEFAULTS.language;
-  if (languageCandidate && languageCandidate !== language) warnings.push(`invalid language ${languageCandidate}; using auto`);
+  if (languageRaw && !languageCandidate) warnings.push(`invalid language ${languageRaw}; using auto`);
   else if (languageCandidate) sources.language = 'stored';
 
   const modeCandidate = normalizedString(raw?.commentary_mode);
@@ -134,9 +137,10 @@ export function parseUserConfigPatch(value: unknown): Partial<UserConfigValues> 
   }
 
   if (raw.language !== undefined) {
-    const candidate = normalizedString(raw.language);
+    const rawLanguage = normalizedString(raw.language);
+    const candidate = rawLanguage === 'auto' ? 'auto' : normalizeReportLanguage(rawLanguage);
     if (!candidate || !ALLOWED.language.has(candidate as UserConfigLanguage)) {
-      throw new UserConfigValidationError('language must be auto|ru|en');
+      throw new UserConfigValidationError(`language must be ${CONFIG_LANGUAGES.join('|')}`);
     }
     patch.language = candidate as UserConfigLanguage;
   }

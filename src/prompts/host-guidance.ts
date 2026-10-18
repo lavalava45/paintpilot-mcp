@@ -289,7 +289,7 @@ Multi-step etiquette
 - Use the language selected by \`presentation_context.language\` in every mode
   (\`auto\` follows the current user's conversation language). Mandatory report semantics still apply,
   localized to that language.
-- Treat an explicit \`ru\` or \`en\` as binding for every model-authored user-facing string in the
+- Treat an explicit \`ru\`, \`en\`, \`es\`, \`pt-BR\`, \`de\` or \`fr\` as binding for every model-authored user-facing string in the
   painting hot loop, especially \`next_pass.goal\` / artistic commentary, progress/review prose and
   Did / Why / Result reporting. Internal ids, exact Photoshop layer names and API enum values may remain
   unchanged; do not let them determine the surrounding natural language.

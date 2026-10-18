@@ -23,6 +23,7 @@ import { atomicJson, readDurableOperation, writeDurableOperation, scanDurableOpe
 import { captureClosureFiles, restoreClosureFiles } from './closure-snapshot-files.js';
 import { ART_RUN_COMMENTARY_MODES, ART_RUN_COMMENTARY_DETAILS, ART_RUN_PAINTING_PROFILES, resolveSessionUserConfig } from './session-user-config-projection.js';
 import { sidecarLanguage, commentaryText, prePassCommentary, lowerInitial, sentenceWithoutTerminalPunctuation, artisticObservedResult, completedArtisticSentence, artisticToolDescription, renderCommentarySidecar } from './painting-commentary-presentation.js';
+import { reportText } from '../report-locales.js';
 import { criticObligationState } from './critic-obligations.js';
 import { editableScopeRequest, validateEditableScopeReview, persistEditableScopeReview, editableOwnerScopeIssue } from './editable-scope.js';
 import { normalizeBrushAllowedScales } from './brush-scale-fit.js';
@@ -7855,28 +7856,16 @@ export class SessionStore {
     const mode = presentation.commentary_mode;
     const region = textOrUndefined(record.region);
     const executionConfirmed = deriveExecutionOutcome(record) === 'completed';
-    const artisticFallback = language === 'ru'
-      ? `${executionConfirmed ? 'Выполнен запланированный художественный проход' : 'Выполнение художественного прохода не подтверждено'}${region ? ` в области «${region}»` : ''}.`
-      : executionConfirmed
-        ? `Completed the planned artistic pass${region ? ` in “${region}”` : ''}.`
-        : `Execution of the artistic pass${region ? ` in “${region}”` : ''} is unconfirmed.`;
+    const artisticFallback = reportText(language, executionConfirmed ? 'passCompleted' : 'passUnconfirmed', {
+      region: region ? reportText(language, 'inRegion', { region }) : '',
+    });
     const resultFallback = observedResult
-      ? language === 'ru'
-        ? 'Визуальное наблюдение записано; оно относится только к этому проходу.'
-        : 'A visual observation was recorded for this pass only.'
-      : language === 'ru'
-        ? `${executionConfirmed ? 'Выполнение подтверждено' : 'Выполнение не подтверждено'}; визуальный результат ещё не оценён.`
-        : `${executionConfirmed ? 'Execution confirmed' : 'Execution unconfirmed'}; the visual result is not yet assessed.`;
-    const technicalDid = language === 'ru'
-      ? `Guard зафиксировал ${executionConfirmed ? 'завершение' : 'неподтверждённое выполнение'} операции ${record.tool}.`
-      : `Guard recorded ${executionConfirmed ? 'completion' : 'unconfirmed execution'} of ${record.tool}.`;
-    const technicalWhy = language === 'ru'
-      ? 'Закрыть технический цикл операции и сохранить подтверждённое состояние.'
-      : 'Close the technical operation cycle and persist the confirmed state.';
+      ? reportText(language, 'observedSaved')
+      : reportText(language, executionConfirmed ? 'executionConfirmed' : 'executionUnconfirmed');
+    const technicalDid = reportText(language, executionConfirmed ? 'guardCompleted' : 'guardUnconfirmed', { tool: record.tool });
+    const technicalWhy = reportText(language, 'guardWhy');
     const artisticWhy = prePassCommentary(record, previousVerdict ?? record.verdict)
-      ?? (language === 'ru'
-        ? 'Художественный замысел прохода не записан.'
-        : 'The artistic intent of this pass was not recorded.');
+      ?? reportText(language, 'intentMissing');
     const result = commentaryText(rawResult, resultFallback);
     const previousReport = mode === 'technical'
       ? { did: technicalDid, why: technicalWhy, result }
@@ -10174,18 +10163,12 @@ export class SessionStore {
       ? [
           completedArtisticSentence(input.did, language),
           artisticToolDescription(record, language, presentation.commentary_detail),
-          language === 'ru'
-            ? `Для того чтобы ${lowerInitial(sentenceWithoutTerminalPunctuation(input.why))}.`
-            : `This is to ${lowerInitial(sentenceWithoutTerminalPunctuation(input.why))}.`,
-          language === 'ru'
-            ? `В результате ${lowerInitial(sentenceWithoutTerminalPunctuation(input.result))}.`
-            : `As a result, ${lowerInitial(sentenceWithoutTerminalPunctuation(input.result))}.`,
+          reportText(language, 'purpose', { text: lowerInitial(sentenceWithoutTerminalPunctuation(input.why)) }),
+          reportText(language, 'outcome', { text: lowerInitial(sentenceWithoutTerminalPunctuation(input.result)) }),
         ].filter(Boolean).join('\n')
       : undefined;
     return {
-      report: artisticReport ?? (language === 'ru'
-        ? `Что сделал: ${input.did}\nЗачем: ${input.why}\nРезультат: ${input.result}`
-        : `Did: ${input.did}\nWhy: ${input.why}\nResult: ${input.result}`),
+      report: artisticReport ?? `${reportText(language, 'did')}: ${input.did}\n${reportText(language, 'why')}: ${input.why}\n${reportText(language, 'result')}: ${input.result}`,
       delivery: record.report.delivery,
       ...(commentaryPath ? { commentary_path: commentaryPath } : {}),
     };
@@ -10469,9 +10452,7 @@ export class SessionStore {
         || input.planner_task_assessment?.status === 'completed');
     if (unsupportedGain) {
       const language = this.presentationContext(record.args?.document_id)?.language;
-      const reason = language === 'ru'
-        ? 'Декодированные кадры до и после совпадают. Этот проход не дал видимого изменения; заявленное улучшение не подтверждено.'
-        : 'Decoded BEFORE/AFTER frames are identical. This pass produced no visible change; the claimed improvement is unconfirmed.';
+      const reason = reportText(language, 'unchangedFrame');
       input = {
         ...input,
         verdict: 'neutral',
@@ -11534,14 +11515,13 @@ export class SessionStore {
       ? document?.next_required_action ?? compact.next_required_action ?? 'ready'
       : compact.next_required_action !== 'ready' ? compact.next_required_action : document?.next_required_action ?? 'ready';
     const presentation = this.presentationContext(selectedId, projectionContext.paintingState);
-    const ru = presentation.language !== 'en';
     const baseResumeSummary = activeJob?.narrative ?? (latest ? operationNarrative(latest, latestNarrativeState, presentation) : {
         progress_id: 'photoshop-resume:idle',
         operation_id: null,
         state: 'idle',
-        now: ru ? 'рабочая сессия восстановлена' : 'working session restored',
-        why: ru ? 'продолжить с последнего подтверждённого состояния без повторного выполнения действий' : 'continue from the last confirmed state without replaying actions',
-        photoshop: ru ? 'активной операции нет' : 'no active operation',
+        now: reportText(presentation.language, 'idleNow'),
+        why: reportText(presentation.language, 'idleWhy'),
+        photoshop: reportText(presentation.language, 'idlePhotoshop'),
         next: nextRequiredAction,
       });
     const resumeSummary = {

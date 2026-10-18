@@ -160,7 +160,13 @@ adding gloss cannot establish the missing rounded volume. An intentionally flat 
 against its own brief, not forced into realism. Distinguish useful pass gain, task completion,
 stage readiness and whole-image finish. Retaining unfinished pixels can be appropriate.
 
-Review uses the selected commentary language (Russian/English), independently of panel localization.
+Review and report sidecars use the selected commentary language (Russian `ru`, English `en`,
+Spanish `es`, Brazilian Portuguese `pt-BR`, German `de`, or French `fr`), independently of
+the Photoshop panel UI locale. `auto` retains the conversation-language preference for
+model-authored narration; for server-side historical/free-form text it recognizes Cyrillic
+as Russian and otherwise falls back to English. Machine IDs, stored evidence, and user-authored
+comments are preserved verbatim rather than automatically translated. Translated fixed
+report/progress copy lives in `src/core/report-locales.ts`.
 Exact image hashes/delivery, incomplete-role recovery and mutation no-replay rules are unchanged.
 Stored legacy local-model results no longer override ordinary observations or appear as current
 review/continuation authority. Guard validates protocol/provenance; field presence cannot establish

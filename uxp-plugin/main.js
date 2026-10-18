@@ -51,6 +51,10 @@ const UI_COPY = {
     languageAuto: 'auto',
     languageRu: 'Russian',
     languageEn: 'English',
+    languageEs: 'Spanish',
+    languagePtBR: 'Portuguese (Brazil)',
+    languageDe: 'German',
+    languageFr: 'French',
     commentaryLabel: 'Commentary',
     commentaryTechnical: 'technical',
     commentaryArtistic: 'artistic',
@@ -108,6 +112,10 @@ const UI_COPY = {
     languageAuto: 'авто',
     languageRu: 'русский',
     languageEn: 'английский',
+    languageEs: 'испанский',
+    languagePtBR: 'португальский (Бразилия)',
+    languageDe: 'немецкий',
+    languageFr: 'французский',
     commentaryLabel: 'Комментарий',
     commentaryTechnical: 'технический',
     commentaryArtistic: 'художественный',
@@ -179,6 +187,10 @@ function applyPanelLocale() {
     userConfigLanguageAuto: 'languageAuto',
     userConfigLanguageRu: 'languageRu',
     userConfigLanguageEn: 'languageEn',
+    userConfigLanguageEs: 'languageEs',
+    userConfigLanguagePtBR: 'languagePtBR',
+    userConfigLanguageDe: 'languageDe',
+    userConfigLanguageFr: 'languageFr',
     userConfigCommentaryModeLabel: 'commentaryLabel',
     userConfigCommentaryTechnical: 'commentaryTechnical',
     userConfigCommentaryArtistic: 'commentaryArtistic',
@@ -382,7 +394,7 @@ function applyUserConfigState(state, saved = false, changedField = null) {
     userConfigStatus,
   } = bridgeUiElements();
   const effective = state?.effective ?? {};
-  if (userConfigLanguage && ['auto', 'ru', 'en'].includes(effective.language)) {
+  if (userConfigLanguage && ['auto', 'ru', 'en', 'es', 'pt-BR', 'de', 'fr'].includes(effective.language)) {
     userConfigLanguage.value = effective.language;
   }
   if (userConfigPaintingProfile && ['auto', 'simple_graphic', 'nontrivial_painting'].includes(state?.configured?.painting_profile)) {

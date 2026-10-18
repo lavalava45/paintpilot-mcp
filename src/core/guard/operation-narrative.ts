@@ -1,5 +1,6 @@
 // @ts-nocheck
 import { deriveExecutionOutcome } from './artistic-contract.js';
+import { effectiveReportLanguage, reportText } from '../report-locales.js';
 const LONG_RUNNING_TOOLS = [
   /^photoshop_execute_visual_microplan$/,
   /^photoshop_paint_(?:strokes|dabs|regions)$/,
@@ -19,61 +20,55 @@ function hasLocalFocus(operation = {}) {
 }
 
 function nextStep(operation = {}, state = 'running', language = 'ru') {
-  const copy = (ru, en) => language === 'ru' ? ru : en;
-  if (state === 'not-executed') return copy('исправить отклонённый запрос; операция в Photoshop не выполнялась', 'correct the rejected request; Photoshop did not execute the operation');
-  if (state === 'failed' || state === 'uncertain') return copy('восстановить подтверждённое состояние без повторного запуска действия', 'reconcile confirmed state without replaying the mutation');
-  if (state === 'before_preview') return copy('после фиксации исходной области выполнить запланированное действие', 'execute the planned mutation after recording the starting frame');
+  const copy = key => reportText(language, key);
+  if (state === 'not-executed') return copy('nextNotExecuted');
+  if (state === 'failed' || state === 'uncertain') return copy('nextFailed');
+  if (state === 'before_preview') return copy('nextBefore');
   if (state === 'after_preview') return hasLocalFocus(operation)
-    ? copy('сравнить исходный и итоговый кадры области и оценить результат', 'compare the local before/after frames and assess the result')
-    : copy('проверить итоговый кадр и оценить результат', 'inspect the final frame and assess the result');
+    ? copy('nextAfterLocal') : copy('nextAfter');
   if (state === 'completed') {
-    if (operation.verdict?.disposition === 'rollback' && operation.rolled_back !== true) return copy('завершить ограниченный откат отвергнутого прохода', 'complete bounded rollback of the rejected pass');
-    if (operation.verdict) return copy('продолжить по записанному наблюдению и оставшимся недостаткам', 'continue from the recorded observation and remaining defects');
+    if (operation.verdict?.disposition === 'rollback' && operation.rolled_back !== true) return copy('nextRollback');
+    if (operation.verdict) return copy('nextVerdict');
     return isVisualOperation(operation)
-      ? copy('оценить изображение и решить: принять, скорректировать или откатить', 'assess the image and decide whether to accept, correct or roll back')
-      : copy('использовать результат для следующего решения по задаче', 'use the result for the next task decision');
+      ? copy('nextVisual') : copy('nextNonvisual');
   }
-  if (hasLocalFocus(operation)) return copy('сравнить исходный и итоговый кадры именно этой области', 'compare the local before/after frames');
-  if (isVisualOperation(operation)) return copy('получить итоговый кадр и оценить его перед следующим действием', 'obtain and assess the final frame before the next mutation');
-  if (operation.tool === 'photoshop_get_preview') return copy('визуально проверить полученный кадр', 'inspect the delivered frame');
-  if (operation.tool === 'photoshop_save_document') return copy('подтвердить сохранение и продолжить с сохранённого состояния', 'confirm the checkpoint and continue from saved state');
-  return copy('оценить результат и выбрать следующий осмысленный шаг', 'assess the result and select the next useful step');
+  if (hasLocalFocus(operation)) return copy('nextFocus');
+  if (isVisualOperation(operation)) return copy('nextPreview');
+  if (operation.tool === 'photoshop_get_preview') return copy('nextInspect');
+  if (operation.tool === 'photoshop_save_document') return copy('nextSave');
+  return copy('nextGeneric');
 }
 
 function photoshopState(operation = {}, state = 'running', language = 'ru') {
-  const copy = (ru, en) => language === 'ru' ? ru : en;
-  if (state === 'not-executed') return copy('операция не выполнялась', 'operation was not executed');
-  if (state === 'queued') return copy('операция поставлена в очередь', 'operation is queued');
-  if (state === 'starting') return copy('операция запускается', 'operation is starting');
-  if (state === 'before_preview') return copy('снимается исходный кадр', 'capturing the starting frame');
-  if (state === 'after_preview') return copy('снимается итоговый кадр', 'capturing the final frame');
-  if (state === 'awaiting_preview') return copy('выполнение завершено; итоговый кадр ещё нужен', 'execution completed; the final frame is still required');
+  const copy = key => reportText(language, key);
+  if (state === 'not-executed') return copy('statusNotExecuted');
+  if (state === 'queued') return copy('statusQueued');
+  if (state === 'starting') return copy('statusStarting');
+  if (state === 'before_preview') return copy('statusBefore');
+  if (state === 'after_preview') return copy('statusAfter');
+  if (state === 'awaiting_preview') return copy('statusAwaiting');
   if (state === 'completed') return isVisualOperation(operation)
-    ? operation.preview
-      ? copy('выполнение завершено; итоговый кадр записан', 'execution completed; final frame recorded')
-      : copy('выполнение завершено; итоговый кадр не подтверждён', 'execution completed; final frame is unconfirmed')
-    : copy('операция завершена', 'operation completed');
-  if (state === 'failed') return copy('операция завершилась ошибкой', 'operation failed');
-  if (state === 'uncertain') return copy('результат выполнения не подтверждён', 'execution outcome is unconfirmed');
-  return copy('операция выполняется', 'operation is running');
+    ? operation.preview ? copy('statusVisualConfirmed') : copy('statusVisualUnconfirmed')
+    : copy('statusCompleted');
+  if (state === 'failed') return copy('statusFailed');
+  if (state === 'uncertain') return copy('statusUncertain');
+  return copy('statusRunning');
 }
 
 export function formatOperationNarrative(narrative, language = narrative.language ?? 'ru') {
-  const ru = language === 'ru';
   return [
-    `${ru ? 'Сейчас' : 'Now'}: ${narrative.now}`,
-    ...(narrative.why && narrative.why !== narrative.now ? [`${ru ? 'Зачем' : 'Why'}: ${narrative.why}`] : []),
+    `${reportText(language, 'now')}: ${narrative.now}`,
+    ...(narrative.why && narrative.why !== narrative.now ? [`${reportText(language, 'why')}: ${narrative.why}`] : []),
     `Photoshop: ${narrative.photoshop}`,
-    ...(narrative.observed ? [`${ru ? 'Наблюдение' : 'Observed'}: ${narrative.observed}`] : []),
-    ...(narrative.unresolved_basis ? [`${ru ? 'Нерешённое визуальное основание' : 'Unresolved visual basis'}: ${narrative.unresolved_basis}`] : []),
-    `${ru ? 'Следом' : 'Next'}: ${narrative.next}`,
+    ...(narrative.observed ? [`${reportText(language, 'observed')}: ${narrative.observed}`] : []),
+    ...(narrative.unresolved_basis ? [`${reportText(language, 'unresolved')}: ${narrative.unresolved_basis}`] : []),
+    `${reportText(language, 'next')}: ${narrative.next}`,
   ].join('\n');
 }
 
 export function operationNarrative(operation, state = 'running', presentation = {}) {
   const summary = String(operation?.verdict?.artistic_commentary ?? operation?.artistic_commentary ?? operation?.summary ?? '').trim();
-  const language = ['ru', 'en'].includes(presentation.language) ? presentation.language
-    : presentation.language === 'auto' ? /[А-Яа-яЁё]/.test(summary) ? 'ru' : 'en' : 'ru';
+  const language = effectiveReportLanguage(presentation.language, summary);
   const purpose = String(operation?.purpose ?? '').trim();
   const genericPurpose = /^Execute (?:one bounded compact Photoshop operation|the requested bounded Photoshop pass)\.$/.test(purpose);
   const execution = deriveExecutionOutcome(operation ?? {});
@@ -85,7 +80,7 @@ export function operationNarrative(operation, state = 'running', presentation = 
     operation_id: operationId,
     language,
     state,
-    now: summary || (language === 'ru' ? 'выполняю следующий шаг в Photoshop' : 'performing the next Photoshop step'),
+    now: summary || reportText(language, 'defaultNow'),
     why: genericPurpose ? summary : purpose,
     photoshop: photoshopState(operation, state, language),
     next: nextStep(operation, state, language),

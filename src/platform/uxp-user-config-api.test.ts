@@ -61,22 +61,32 @@ describe('UXP user-config settings API', () => {
       },
     });
 
+    const localizedResponse = await fetch(`${base}/settings/user-config`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ language: 'pt-BR' }),
+    });
+    expect(localizedResponse.status).toBe(200);
+    await expect(localizedResponse.json()).resolves.toMatchObject({
+      configured: { language: 'pt-BR' }, effective: { language: 'pt-BR' },
+    });
+
     const invalidResponse = await fetch(`${base}/settings/user-config`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ language: 'de' }),
+      body: JSON.stringify({ language: 'xx' }),
     });
     expect(invalidResponse.status).toBe(400);
     await expect(invalidResponse.json()).resolves.toMatchObject({
       ok: false,
-      error: 'language must be auto|ru|en',
+      error: 'language must be auto|ru|en|es|pt-BR|de|fr',
     });
 
     const persistedResponse = await fetch(`${base}/settings/user-config`);
     expect(persistedResponse.status).toBe(200);
     await expect(persistedResponse.json()).resolves.toMatchObject({
       effective: {
-        language: 'ru',
+        language: 'pt-BR',
         commentary_mode: 'artistic',
         commentary_detail: 'detailed',
       },

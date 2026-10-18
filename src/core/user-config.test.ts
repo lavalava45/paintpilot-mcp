@@ -28,7 +28,7 @@ describe('user config normalization', () => {
   it('falls back field-by-field when persisted presentation values are invalid', () => {
     const normalized = normalizeUserConfig({
       config_version: 99,
-      language: 'de',
+      language: 'xx',
       commentary_mode: 'mixed',
       commentary_detail: 'verbose',
       painting_profile: 'unknown',
@@ -58,7 +58,7 @@ describe('user config normalization', () => {
   it('rejects invalid write patches without accepting a second vocabulary', () => {
     expect(() => parseUserConfigPatch({ commentary_mode: 'hybrid' }))
       .toThrow(UserConfigValidationError);
-    expect(() => parseUserConfigPatch({ language: 'de' }))
+    expect(() => parseUserConfigPatch({ language: 'xx' }))
       .toThrow('language must be auto|ru|en');
     expect(() => parseUserConfigPatch({ unknown: true }))
       .toThrow('unsupported user config field');
@@ -66,6 +66,16 @@ describe('user config normalization', () => {
       .toThrow('painting_profile must be auto|simple_graphic|nontrivial_painting');
     expect(parseUserConfigPatch({ painting_profile: 'simple_graphic' }))
       .toEqual({ painting_profile: 'simple_graphic' });
+  });
+
+  it('accepts and canonically persists four additional report languages', () => {
+    for (const language of ['es', 'pt-BR', 'de', 'fr']) {
+      expect(parseUserConfigPatch({ language })).toEqual({ language });
+      expect(normalizeUserConfig({ language }).config.language).toBe(language);
+    }
+    expect(parseUserConfigPatch({ language: 'PT-br' })).toEqual({ language: 'pt-BR' });
+    expect(normalizeUserConfig({ language: 'pt-br' }).config.language).toBe('pt-BR');
+    expect(normalizeUserConfig({ language: 'xx' }).config.language).toBe('auto');
   });
 });
 
