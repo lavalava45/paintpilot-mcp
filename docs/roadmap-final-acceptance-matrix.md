@@ -1,5 +1,25 @@
 # Roadmap final acceptance matrix
 
+## 2026-10-18 Guard Contract Preservation Audit — repository gate
+
+**Repository implementation and machine validation, real Photoshop acceptance pending.**
+The published `photoshop_guard_cycle_auto` now has a machine-checked disposition inventory
+covering 6 cycle fields, 62 next-pass fields, 40 PaintingIntent fields and 33 previous-observation
+fields (141 named top-level contract fields), plus recursively discovered named nested schema
+paths. A field introduced without a reviewed disposition breaks
+`npm run verify:contract-preservation`. Final executable operations are independently checked
+for lost `foundation_goal`, `change_domains`, pinned `document_id` and VisualMicroPlan
+`action_class` after bounded repair. A loss is a systemic pre-dispatch refusal, not an
+artistic request to guess new fields. Offline route tests and negative controls:
+`tests/contract-preservation-audit.test.ts`,
+`tests/direct-foundation-domain-regressions.test.ts` and
+`tests/scene-foundation.test.ts`. Existing `nonvisual-closure`,
+`paintpilot-stop-control` and `accepted-anchor-restore` suites retain independent
+rollback/Stop authority. Required in `test:acceptance`, `verify:canonical`,
+`prepublishOnly`. This is NOT a claim of a live deletion test or proof of semantic
+equivalence for every nested artistic field; see
+[contract-preservation-audit.md](en/contract-preservation-audit.md).
+
 ## 2026-10-10 E.8a per-event completeness (Agent 2)
 
 **Repo-pass for missing-versus-zero event integrity; live-pending.**

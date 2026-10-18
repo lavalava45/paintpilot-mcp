@@ -7,6 +7,7 @@ import { compileSemanticContracts } from './semantic-entity-registry.js';
 import { compileSemanticOwnership, compileSemanticMethod, compileSemanticExecutablePlan } from './semantic-execution-compiler.js';
 import { compileMinimalOwnerBootstrap } from './ownership-bootstrap-compiler.js';
 import { ContractErrorProvenanceObserver } from './contract-error-provenance.js';
+import { criticalPreservationFailures } from './contract-preservation.js';
 import { brushRoleMatchesScale } from './brush-scale-fit.js';
 import { constructionExecutionIssue, unexpandedConstructionPrerequisites } from './construction-execution.js';
 import { ConstructionError, expandConstructionPass, type ConstructionModel } from '../object-construction.js';
@@ -3702,6 +3703,7 @@ export async function compileGuardCycle(
   let autoRepairCount = 0;
   let autoSplitCount = 0;
   let originalIntentFingerprint: string | undefined;
+  let preservationSource: Record<string, unknown> | undefined;
   let compilerDeferredFromOperationId: string | undefined;
   let compiledAt: string | undefined;
   let validatedAt: string | undefined;
@@ -3876,6 +3878,10 @@ export async function compileGuardCycle(
       originalIntentFingerprint = paintingIntentFingerprint(intent);
       compilerDeferredFromOperationId = intent.deferred_from_operation_id;
       const intentCompilation = compilePaintingIntentToNextPass(intent, store, options.projectionContext);
+      // The original intent has already been semantically translated into a
+      // next_pass. Preserve the pre-technical contract for the final audit,
+      // including across bounded compiler convergence and post-repair checks.
+      preservationSource = structuredClone(intentCompilation.next_pass);
       durableStateInjectionMs = intentCompilation.durable_state_injection_ms;
       compiledInput.next_pass = intentCompilation.next_pass;
       contractProvenance.capture('operation_compiled', 'next_pass', intentCompilation.next_pass);
@@ -3921,6 +3927,7 @@ export async function compileGuardCycle(
       ));
     } else {
       sourceNextPass = structuredClone(rawNextPass as Record<string, unknown>);
+      preservationSource ??= structuredClone(sourceNextPass);
       const documentId = Number(sourceNextPass.document_id);
       const context = Number.isSafeInteger(documentId) && documentId > 0
         ? store.compactPassContext?.(documentId, options.projectionContext) ?? {} : {};
@@ -4237,6 +4244,13 @@ export async function compileGuardCycle(
         && previous.error_codes.includes('geometry_contract_invalid')) {
       violations.push(violation('next_operation', 'geometry_contract_retry_exhausted',
         'A corrected geometry contract is still invalid. Stop automatic resubmission and report this complete diagnostic as a pipeline blocker; do not read source or schemas during painting.'));
+    }
+  }
+  if (preservationSource && nextOperation) {
+    for (const lost of criticalPreservationFailures(preservationSource, nextOperation)) {
+      violations.push(violation('next_operation', lost.code, lost.message, {
+        path: lost.path, source: 'contract-preservation-audit', stage: 'final-compiled-operation',
+      }));
     }
   }
   violations.push(...contractInvariantViolations(violations, registry));

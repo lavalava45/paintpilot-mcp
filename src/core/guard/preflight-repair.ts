@@ -130,6 +130,9 @@ const MODEL_DECISION_CODES = new Set([
 ]);
 
 const SYSTEMIC_CODES = new Set([
+  // A field explicitly accepted at the public boundary vanished inside our
+  // compiler. This is NEVER an additional artistic decision to ask for.
+  'contract_field_lost_during_compilation',
   'scene_ownership_plan_state_invalid',
   'scene_geometry_model_state_invalid',
   'scene_lighting_color_model_state_invalid',
