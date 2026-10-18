@@ -32,6 +32,7 @@ import { brushUseKey, boundedBrushTrial } from './brush-role-extension.js';
 import { artisticContinuation, documentArtisticDebt, bindPaintingCompletion, wholeBriefCompletionContract } from './document-artistic-debt.js';
 import fs from 'node:fs';
 import { undoProofForPendingVerdict } from './undo-proof-projection.js';
+import { simpleGraphicFoundationAdvisory } from './simple-graphic-leniency.js';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { appendThroughputArchiveEvent, readThroughputArchivePage } from './throughput-event-archive.js';
@@ -4188,7 +4189,16 @@ export class SessionStore {
         && (state.current_frame?.operation_id === proof.operation_id && state.current_frame.sha256 === proof.frame_sha256
           || this.currentFrameAncestry(state, projectionContext?.records ?? this.records())?.has(source.id) === true);
     }
-    return foundationAdmission(state, request, retained);
+    const admission = foundationAdmission(state, request, retained);
+    // Only aesthetic foundation ordering can be advisory in simple_graphic,
+    // and only for a proven clipped existing-owner native sky operation.
+    // Stop, document identity, owned targets and other Guard gates still apply.
+    if (admission.status === 'blocked' && simpleGraphicFoundationAdvisory(
+      state, request, this.semanticLayerOwners(documentId, projectionContext?.records, projectionContext),
+    )) return { ...admission, status: 'advisory',
+      warning_code: 'simple_graphic_foundation_deferred',
+      warning: 'Foundation remains incomplete. One exact-owner clipped sky gradient may proceed away from reviewed structural debt; missing composition/technique is not certified.' };
+    return admission;
   }
   plannerGate(documentId, request, projectionContext, deferPhysicalStackReview = false) {
     if (!isVisual(request.tool)) return null;

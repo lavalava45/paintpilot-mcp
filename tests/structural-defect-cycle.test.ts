@@ -70,6 +70,86 @@ it('keeps unresolved structural Critic work ahead of material unless actual clip
   expect(criticCorrectionIssue(state, request)?.code).toBe('structural_correction_target_missing');
 });
 
+it('honors sky-first priority ONLY for genuinely disjoint bounded roof-independent painting', () => {
+  const roof = correctionFinding({
+    criterion: 'composition_context', correction_kind: 'composition',
+    structural_defect: {
+      id: 'roofline-center-distance', kind: 'composition-relation',
+      visible: 'Distant roof chevrons are brighter than the warm lantern and dominate the view.',
+      part_ids: ['distant-roofline-field', 'distant-alley-fog-veil', 'lamp-glowing-glass'],
+      relation_ids: ['roofline-center-distance'],
+      brief_relevance: 'The far roofline should dissolve in fog around the lantern.',
+      recheck: 'After reconstruction inspect the exact image for subdued roofs.',
+      region_bounds: { left: 310, top: 260, right: 655, bottom: 390 },
+    },
+    visible: 'Bright zigzags need reconstruction later.',
+    next_change: 'Repair the distant roof component later.',
+  });
+  const state: any = { chat_critic_findings: [roof], active_problem: {
+    problem_id: 'upper-center-sky-too-flat', priority_order: 0, status: 'open',
+  }, visual_problems: {
+    'roofline-center-distance': { status: 'open', structural_defect: roof.structural_defect },
+    'upper-center-sky-too-flat': { status: 'open', scale: 'global', severity: 'must-fix' },
+  } };
+  const sky: any = { tool: 'photoshop_execute_visual_microplan',
+    problem_id: 'upper-center-sky-too-flat',
+    addresses_problem_ids: ['upper-center-sky-too-flat'],
+    impact_class: 'construct', visual_intent: 'atmospheric-mass',
+    independent_region: true,
+    preservation_facts: ['Paint only the upper-sky rectangle, preserving the distant roofs below y=260.'],
+    args: { steps: [{ tool: 'photoshop_paint_regions', args: {
+      layer_id: 22,
+      clip_bounds: { left: 40, top: 15, right: 900, bottom: 240 },
+      regions: [{ contours: [{ points: [
+        { x: 40, y: 15 }, { x: 900, y: 15 }, { x: 900, y: 240 }, { x: 40, y: 240 },
+      ] }] }],
+    } }] } };
+  expect(selectedCriticCorrection(state, sky)).toBeUndefined();
+  expect(criticCorrectionIssue(state, sky)).toBeUndefined();
+  expect(state.visual_problems['roofline-center-distance'].status).toBe('open');
+  const overlapping = structuredClone(sky);
+  overlapping.args.steps[0].args.clip_bounds.bottom = 310;
+  expect(selectedCriticCorrection(state, overlapping)?.problem_id).toBe('roofline-center-distance');
+  expect(criticCorrectionIssue(state, overlapping)?.code).toBe('structural_correction_target_missing');
+  const unproven = structuredClone(sky);
+  delete unproven.independent_region;
+  expect(criticCorrectionIssue(state, unproven)?.code).toBe('structural_correction_target_missing');
+  const missingClip = structuredClone(sky);
+  delete missingClip.args.steps[0].args.clip_bounds;
+  expect(criticCorrectionIssue(state, missingClip)?.code).toBe('structural_correction_target_missing');
+  const mixed = structuredClone(sky);
+  mixed.args.steps.push({ tool: 'photoshop_paint_strokes', args: { layer_id: 22,
+    strokes: [{ points: [{ x: 10, y: 10 }, { x: 50, y: 50 }] }] } });
+  expect(criticCorrectionIssue(state, mixed)?.code).toBe('structural_correction_target_missing');
+  const roofRequest = structuredClone(sky);
+  roofRequest.addresses_problem_ids = ['roofline-center-distance'];
+  expect(criticCorrectionIssue(state, roofRequest)?.code).toBe('structural_correction_target_missing');
+  const gradient: any = structuredClone(sky);
+  gradient.args.steps = [{ tool: 'photoshop_paint_color_gradient', args: {
+    layer_id: 22, preserve_transparency: true,
+    clip_contour: [
+      { x: 40, y: 15 }, { x: 900, y: 15 },
+      { x: 900, y: 240 }, { x: 40, y: 240 },
+    ],
+    from: { x: 40, y: 0 }, to: { x: 900, y: 240 },
+    stops: [{ position: 0, red: 26, green: 42, blue: 53 },
+      { position: 1, red: 56, green: 68, blue: 79 }],
+  } }];
+  expect(criticCorrectionIssue(state, gradient)).toBeUndefined();
+  const unprotectedGradient = structuredClone(gradient);
+  unprotectedGradient.args.steps[0].args.preserve_transparency = false;
+  expect(criticCorrectionIssue(state, unprotectedGradient)?.code)
+    .toBe('structural_correction_target_missing');
+  const overlappingGradient = structuredClone(gradient);
+  overlappingGradient.args.steps[0].args.clip_contour[2].y = 320;
+  expect(criticCorrectionIssue(state, overlappingGradient)?.code)
+    .toBe('structural_correction_target_missing');
+  const uncontrolledGradient = structuredClone(gradient);
+  delete uncontrolledGradient.args.steps[0].args.clip_contour;
+  expect(criticCorrectionIssue(state, uncontrolledGradient)?.code)
+    .toBe('structural_correction_target_missing');
+});
+
 it('rejects cosmetic fixes, admits relevant geometric work and retains three generic defects until visual recheck', () => {
   for (const [kind, relation, tool] of [
     ['relative-size', 'length-ratio', 'photoshop_paint_regions'],

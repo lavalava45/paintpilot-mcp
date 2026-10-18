@@ -124,11 +124,40 @@ function independentlyClippedFromStructuralDebt(state: Row, request: Row, struct
   if (!debts.length || debts.some(bounds => !bounds)) return false;
   const paintSteps = steps(request).filter(step => step.tool !== 'photoshop_create_layer'
     && step.tool !== 'photoshop_get_preview');
-  if (!paintSteps.length || paintSteps.some(step => step.tool !== 'photoshop_paint_regions')) return false;
+  if (!paintSteps.length) return false;
+  const disjoint = (clip: Bounds): boolean => debts.every(debt =>
+    clip.right <= debt!.left || clip.left >= debt!.right
+    || clip.bottom <= debt!.top || clip.top >= debt!.bottom);
   return paintSteps.every(step => {
-    const clip = boundedRectangle(step.args?.clip_bounds);
-    return clip && debts.every(debt => clip.right <= debt!.left || clip.left >= debt!.right
-      || clip.bottom <= debt!.top || clip.top >= debt!.bottom);
+    if (step.tool === 'photoshop_paint_regions') {
+      const clip = boundedRectangle(step.args?.clip_bounds);
+      return !!clip && disjoint(clip);
+    }
+    // Unlike unconstrained soft strokes, the native color gradient has a
+    // verified unfeathered polygon selection AND transparency lock. Both are
+    // required, and the entire polygon's axis-aligned envelope must be
+    // disjoint from every retained structural defect.
+    if (step.tool !== 'photoshop_paint_color_gradient'
+      || step.args?.preserve_transparency !== true
+      || !Number.isSafeInteger(step.args?.layer_id)
+      || step.args.layer_id <= 0) return false;
+    const polygon: Row[] = step.args.clip_contour;
+    if (!Array.isArray(polygon) || polygon.length < 3 || polygon.length > 256
+      || polygon.some(point => !point || !Number.isFinite(point.x)
+        || !Number.isFinite(point.y)
+        || Object.keys(point).some(key => !['x', 'y'].includes(key)))) return false;
+    const xs = polygon.map(point => point.x);
+    const ys = polygon.map(point => point.y);
+    const area2 = polygon.reduce((sum, point, index) => {
+      const next = polygon[(index + 1) % polygon.length]!;
+      return sum + point.x * next.y - next.x * point.y;
+    }, 0);
+    if (!Number.isFinite(area2) || Math.abs(area2) < 1e-7) return false;
+    const clip = boundedRectangle({
+      left: Math.min(...xs), top: Math.min(...ys),
+      right: Math.max(...xs), bottom: Math.max(...ys),
+    });
+    return !!clip && disjoint(clip);
   });
 }
 export function selectedCriticCorrection(state: Row, request?: Row): Row | undefined {
@@ -160,8 +189,16 @@ export function selectedCriticCorrection(state: Row, request?: Row): Row | undef
     const index = findings.findIndex(finding => finding.problem_id === (row.parent_problem_id ?? `critic-${row.criterion}`));
     return index < 0 ? findings.length : index;
   };
+  // A verified *physically disjoint* sky/material edit must not be converted
+  // back into a roof structural repair merely because that roof finding is
+  // retained at the head of the historical Critic list. Do not erase the
+  // structural debt or invent a completion verdict: it remains mandatory for
+  // any later operation touching its reviewed rectangle.
   const rankedObligations = [...obligations].sort((a, b) => parentRank(a) - parentRank(b));
-  const selected = openCriticObligation({ ...state, critic_obligations: rankedObligations }, links);
+  const requestedObligation = rankedObligations.some(row =>
+    links.includes(row.id) || links.includes(row.parent_problem_id ?? `critic-${row.criterion}`));
+  const selected = independent && !requestedObligation ? undefined
+    : openCriticObligation({ ...state, critic_obligations: rankedObligations }, links);
   if (selected) {
     const parentId = selected.parent_problem_id ?? `critic-${selected.criterion}`;
     const parentRank = findings.findIndex(row => row.problem_id === parentId);
@@ -178,7 +215,8 @@ export function selectedCriticCorrection(state: Row, request?: Row): Row | undef
       next_change: `Correct and visually recheck obligation ${selected.id} on its owned components; preserve earlier verified prerequisites.`,
     });
   }
-  const remaining = findings.filter(row => !obligations.some(obligation =>
+  const remaining = (independent ? findings.filter(row => !hardStructural.includes(row)) : findings)
+    .filter(row => !obligations.some(obligation =>
     (obligation.parent_problem_id ?? `critic-${obligation.criterion}`) === row.problem_id && !row.structural_defect));
   const requested = remaining.find(row => links.includes(row.problem_id));
   const first = remaining[0];

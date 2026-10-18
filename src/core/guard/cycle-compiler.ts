@@ -8,6 +8,7 @@ import { compileSemanticOwnership, compileSemanticMethod, compileSemanticExecuta
 import { compileMinimalOwnerBootstrap } from './ownership-bootstrap-compiler.js';
 import { ContractErrorProvenanceObserver } from './contract-error-provenance.js';
 import { criticalPreservationFailures } from './contract-preservation.js';
+import { normalizeSimpleGraphicPass } from './simple-graphic-leniency.js';
 import { directMethodApplicability } from './direct-method-applicability.js';
 import { brushRoleMatchesScale } from './brush-scale-fit.js';
 import { constructionExecutionIssue, unexpandedConstructionPrerequisites } from './construction-execution.js';
@@ -1121,6 +1122,8 @@ function compileCompactPass(
       ...(text(raw.addresses_problem_id) ? { addresses_problem_id: text(raw.addresses_problem_id) } : {}),
       ...(raw.addresses_problem_ids !== undefined ? { addresses_problem_ids: normalizedProblemIds } : {}),
       ...(raw.structural_correction ? { structural_correction: structuredClone(raw.structural_correction) } : {}),
+      ...(Array.isArray(raw.preservation_facts) ? { preservation_facts: structuredClone(raw.preservation_facts) } : {}),
+      ...(raw.independent_region === true ? { independent_region: true } : {}),
       ...(stage ? { stage } : {}),
       ...(stageReset ? { stage_reset: stageReset } : {}),
       ...(scale ? { scale } : {}),
@@ -2840,6 +2843,8 @@ function compileCompactPass(
   // already makes the semantic construction unambiguous. Do not require the
   // model to restate what a dedicated continuous-field primitive proves.
   const constructionRoleDerivedFromExecution = !constructionRole
+      && (!text(raw.visual_intent)
+        || ['continuous-field', 'soft-transition'].includes(text(raw.visual_intent)!))
       && methodClass === 'gradient'
       && mutationSteps.length > 0
       && mutationSteps.every(step => text(step.tool) === 'photoshop_paint_color_gradient');
@@ -2848,6 +2853,20 @@ function compileCompactPass(
     normalizations.push({
       code: 'construction_role_normalized',
       message: 'Derived construction_role=continuous-field from the dedicated color-gradient execution primitive.',
+    });
+  }
+  // atmospheric-mass is a positive artistic statement about optical haze,
+  // not an unspecified generic soft brush. Its sole matching environmental
+  // construction role is optical-veil (as opposed to form-bearing
+  // volumetric-soft-mass). This classifies the pass; it does NOT grant
+  // permission to use a fallback dab-chain or to paint outside owned bounds.
+  if (!constructionRole && text(raw.visual_intent) === 'atmospheric-mass'
+    && !raw.construction && !raw.construction_model
+    && !['opaque-mass', 'support-surface'].includes(physicalRole ?? '')) {
+    constructionRole = 'optical-veil';
+    normalizations.push({
+      code: 'construction_role_normalized',
+      message: 'Derived construction_role=optical-veil from explicitly authored atmospheric-mass visual intent; all native method/fallback, ownership and Clip guards still apply.',
     });
   }
   // A 2D graphic can legitimately draw structured shapes without claiming
@@ -3342,10 +3361,11 @@ function compileCompactPass(
     };
   }
 
-  if (constructionRole && !paintStrategy && visualIntent && requestedMaterialRole) {
+  if (constructionRole && !paintStrategy && visualIntent
+    && (requestedMaterialRole || (constructionRole === 'optical-veil' && visualIntent === 'atmospheric-mass'))) {
     paintStrategy = {
       construction_role: constructionRole,
-      material_role: requestedMaterialRole,
+      ...(requestedMaterialRole ? { material_role: requestedMaterialRole } : {}),
       visual_intent: visualIntent,
       pressure_policy: 'none',
     };
@@ -3457,6 +3477,8 @@ function compileCompactPass(
     ...(text(raw.addresses_problem_id) ? { addresses_problem_id: text(raw.addresses_problem_id) } : {}),
     ...(raw.addresses_problem_ids !== undefined ? { addresses_problem_ids: normalizedProblemIds } : {}),
     ...(raw.structural_correction ? { structural_correction: structuredClone(raw.structural_correction) } : {}),
+    ...(Array.isArray(raw.preservation_facts) ? { preservation_facts: structuredClone(raw.preservation_facts) } : {}),
+    ...(raw.independent_region === true ? { independent_region: true } : {}),
     ...(plannerDirectiveId && plannerTaskId ? {
       planner_directive_id: plannerDirectiveId,
       planner_task_id: plannerTaskId,
@@ -3959,6 +3981,9 @@ export async function compileGuardCycle(
       const documentId = Number(sourceNextPass.document_id);
       const context = Number.isSafeInteger(documentId) && documentId > 0
         ? store.compactPassContext?.(documentId, options.projectionContext) ?? {} : {};
+      const simple = normalizeSimpleGraphicPass(sourceNextPass, context);
+      sourceNextPass = simple.pass;
+      normalizations.push(...simple.notices);
       const semantic = compileSemanticContracts(sourceNextPass, context);
       contractProvenance.capture('semantic_identity', 'next_pass', semantic.pass);
       const ownership = compileSemanticOwnership(semantic.pass, context);

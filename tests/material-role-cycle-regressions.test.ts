@@ -88,4 +88,63 @@ describe('material role at the actual Guard cycle / executor boundary', () => {
     expect(schema.properties.paint_strategy.properties.material_role.type).toBe('string');
     expect(schema.properties.paint_strategy.description).toContain('required for preset-brush');
   });
+  it('preserves independent native-gradient clip and preservation proof even without Art Director', async () => {
+    const f = fixture();
+    const request: any = { ...gradient(),
+      request_key: 'sky-first-contained-native-gradient',
+      independent_region: true,
+      preservation_facts: ['Native selection confines the sky tone to the rectangle above the reviewed rooftops.'],
+      actions: [{ ...gradient().actions[0], args: {
+        ...gradient().actions[0].args,
+        preserve_transparency: true,
+        clip_contour: [{ x: 20, y: 10 }, { x: 380, y: 10 },
+          { x: 380, y: 235 }, { x: 20, y: 235 }],
+      } }],
+    };
+    const compiled = await compileGuardCycle({ next_pass: request }, f.store, f.registry);
+    const args = compiled.nextOperation?.args as any;
+    expect(args?.independent_region).toBe(true);
+    expect(args?.preservation_facts).toEqual(request.preservation_facts);
+    expect(args?.steps?.find((step: any) => step.tool === 'photoshop_paint_color_gradient')
+      ?.args?.clip_contour).toEqual(request.actions[0].args.clip_contour);
+    expect(compiled.violations.map(item => item.code)).not.toContain('invalid_visual_microplan');
+    expect(f.dispatches()).toBe(0);
+  });
+  it('classifies an explicitly atmospheric broad pass as optical-veil without manufacturing a brush material', async () => {
+    const f = fixture();
+    for (const name of ['photoshop_paint_strokes', 'photoshop_select_brush_preset',
+      'photoshop_list_brush_presets']) {
+      f.registry.register(name, {
+        tool: { name, inputSchema: { type: 'object' } },
+        handler: async () => { throw new Error('Never paint in this test'); },
+      });
+    }
+    const request: any = { ...gradient(), request_key: 'sky-atmospheric-classification',
+      problem_id: 'upper-center-sky-too-flat', action_class: 'REFINE',
+      visual_intent: 'atmospheric-mass', impact_class: 'transition',
+      preferred_method_id: 'installed-brush-preset',
+      independent_region: true,
+      preservation_facts: ['The top sky is disjoint from the preserved distant rooftop defect.'],
+      actions: [{ id: 'sky-veil', tool: 'photoshop_paint_strokes', args: {
+        layer_id: 7,
+        strokes: [{ tool: 'BRUSH', points: [
+          { x: 30, y: 30 }, { x: 180, y: 110 }, { x: 340, y: 160 },
+        ] }],
+      } }],
+    };
+    const compiled = await compileGuardCycle({ next_pass: request }, f.store, f.registry);
+    expect(compiled.normalizations).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'construction_role_normalized',
+        message: expect.stringContaining('optical-veil') }),
+    ]));
+    expect(compiled.violations.map(item => item.message).join('\n')).not.toContain(
+      'broad/global soft or environmental VisualMicroPlan requires paint_strategy.construction_role');
+    expect(compiled.violations.map(item => item.code)).not.toContain('construction_role_method_unavailable');
+    expect((compiled.nextOperation?.args as any)?.paint_strategy?.construction_role)
+      .toBe('optical-veil');
+    expect((compiled.nextOperation?.args as any)?.independent_region).toBe(true);
+    expect((compiled.nextOperation?.args as any)?.preservation_facts)
+      .toEqual(request.preservation_facts);
+    expect(f.dispatches()).toBe(0);
+  });
 });

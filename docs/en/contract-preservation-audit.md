@@ -57,6 +57,22 @@ The gate deliberately removes `foundation_goal`, `change_domains` and replaces `
 
 ## Reviewed structural relation vs. separately owned causal overlay
 
+### Simple graphic: finish-first WARN / AUTO-FIX
+
+`simple_graphic` can auto-derive only unambiguous metadata for a **single** native continuous canvas field: a stable owner ID from the request key and created layer name, `construction_role=continuous-field`, and `layer_separation_check` from one exact `create_layer` plus one native fill/gradient linked by `$steps.<create>.details.layerId`. An omitted `material_role` on this native field generates `simple_graphic_warn`, never an invented brush material. An existing role can be inherited only from one uniquely bound durable native owner. An explicitly flat canvas field needs no synthetic perspective geometry.
+
+An uncompleted `scene_foundation` may become `simple_graphic_foundation_deferred` only for a native clipped gradient on one exact existing owner, with transparency preservation and a full polygon envelope disjoint from all reviewed structural defect rectangles. The foundation is **not** marked passed. The strict profile and all identity/Stop/History/ownership, real Photoshop schema, destructive mutation, bounded-clip and method compatibility gates remain unchanged.
+
+For a first composition containing sky, houses, trees, quay and water, these are **multiple** independently editable components, not a provably single canvas field. First configure the art run with `photoshop_guard_set_art_run`, a valid `process_dir`, and the Photoshop panel's selected profile. Then use explicit component scopes/owners or a single initial native sky field and continue after its ordinary review. `terminal_not_executed` never authorizes replaying the rejected attempt unchanged. Coverage: `tests/simple-graphic-finish-first.test.ts`, mandatory `verify:contract-preservation`.
+
+### Independent sky-first work while the roof defect remains unresolved
+
+Changing `visual_problems.priority_order` or `active_problem` does **not** erase an outstanding Critic structural obligation. A truly independent sky pass may nevertheless proceed without inventing a roof `structural_correction`: `independent_region=true`, nonempty `preservation_facts` and **native-bounded** pixels must be disjoint from every open structural defect rectangle. Supported cases: `photoshop_paint_regions` with real `clip_bounds`, or an existing-layer `photoshop_paint_color_gradient` with an explicit layer ID, `preserve_transparency=true` and a straight-point `clip_contour` whose entire bounding box is disjoint. UXP uses an actual unfeathered selection with post-mutation restoration readback. Unclipped strokes, blur, unclipped gradients and overlapping work are not exempt.
+
+The compiler now retains `independent_region` and `preservation_facts` through the compact path **with or without Art Director**. An explicitly authored `visual_intent=atmospheric-mass` can yield the unique `optical-veil` construction role in the executor without inventing a brush `material_role`; method/fallback compatibility remains mandatory. An explicitly atmospheric intent cannot be silently replaced with `continuous-field` merely because a gradient was supplied.
+
+No roof defect is closed by this independent operation. `tests/structural-defect-cycle.test.ts` and `tests/material-role-cycle-regressions.test.ts` are included in the mandatory preservation gate.
+
 A Critic may accurately identify a relation defect involving architecture, fog and a lamp while the flawed brush marks reside on a **distinct owned layer**. Never rewrite the durable `structural_defect.part_ids` to make such a correction pass. Optional `structural_correction.causal_source` pins `semantic_id`, `owner_id`, `layer_id`, `source_operation_id`, and `frame_sha256`; the original `part_ids` and `relation_ids` must still match the reviewed relation.
 
 The source is admitted only if the exact retained editable-scope review, unique durable native/scene owner, exact completed source-operation `continuation_layers` receipt and every explicitly targeted Photoshop mutation agree. No unbound active-layer edits, foreign physical targets, unreviewed history or retroactive Critic identity changes are authorized. This does not waive protected-layer, Stop, Director, method, structural footprint or visual recheck gates.
