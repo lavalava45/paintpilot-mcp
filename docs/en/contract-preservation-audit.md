@@ -54,3 +54,13 @@ The gate deliberately removes `foundation_goal`, `change_domains` and replaces `
 `npm run verify:contract-preservation` checks the freshly built/public schema and targeted tests. It is required by `test:acceptance`, `verify:canonical` and `prepublishOnly`. All source tests remain part of `test:acceptance` through automatic Vitest discovery; this is not a separate optional QA note.
 
 **Limitations:** This audit does not prove the model received instructions, that a document mutation succeeded, or that an artwork is visually correct. A richer automated semantic equivalence check for every field/subschema still requires domain-specific proof obligations; the current runtime guard intentionally enforces the highest-risk cross-boundary fields without guessing meanings.
+
+## Native Photoshop History ownership and safe rollback refusal
+
+A `VisualMicroPlan` can have completed painting but still lack an **exact independently owned Photoshop History span**. `history_ownership.status=unproven` must continue to block `previous_observation.disposition=rollback`; guessing a count and issuing Undo could erase unrelated work.
+
+For **future** operations, UXP `create_layer` and ordinary `color_gradient` (without `preserve_transparency`) expose `history_steps` only when two native `itemIndex/count` reads **inside the same exclusive executeAsModal transaction** demonstrate an actual increasing History cursor. If History is unavailable or ambiguous, the receipt remains absent and Undo remains blocked. `fill_layer` already uses independently authenticated `suspendHistory/resumeHistory` for one unit. Historical incomplete receipts must never be backfilled from assumptions.
+
+`photoshop_guard_resume(document_id, projection="recovery")` reports `pending_visual_verdict.undo_proof`: `candidate-exact` or `unproven`, with missing step IDs where available. A candidate exact span is **not** automatic authorization: document/frame identity and intervening writers remain independent gates. For unproven passes, the agent should review the exact frame and use a truthful `correct` disposition if it requires improvement, followed by a fresh guarded correction on a pinned owner, or independently verified accepted-anchor restoration. A correction verdict is not an undo and never claims pixels were restored.
+
+Mandatory regression coverage: `tests/native-history-ownership-uxp.test.ts`, `tests/undo-proof-projection.test.ts` and `tests/bounded-undo-semantics.test.ts`. They use a simulated native modal and isolated Guard, not the user's Photoshop document. Updated UXP requires a separate disposable-document live acceptance.

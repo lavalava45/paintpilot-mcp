@@ -2138,6 +2138,35 @@ function requireActiveLayerTarget(prepared, operationName) {
   return layer;
 }
 
+/**
+ * Read-only, native History cursor taken while executeAsModal owns Photoshop.
+ * Omit a receipt on any read failure; NEVER estimate a history span from how
+ * many DOM/batchPlay mutations our JavaScript attempted.
+ */
+async function readNativeHistoryCursor() {
+  try {
+    const [current] = await action.batchPlay(
+      [historyStateDescriptor('target')],
+      { synchronousExecution: true }
+    );
+    if (!current || current._obj === 'error') return null;
+    const count = numericValue(current.count);
+    const index = numericValue(current.itemIndex);
+    if (!Number.isSafeInteger(count) || !Number.isSafeInteger(index)
+      || count < 1 || index < 1 || index > count) return null;
+    return { count, index };
+  } catch {
+    return null;
+  }
+}
+
+function provenNativeHistorySteps(before, after) {
+  if (!before || !after || !Number.isSafeInteger(before.index)
+    || !Number.isSafeInteger(after.index) || !Number.isSafeInteger(after.count)
+    || after.index > after.count || after.index <= before.index) return undefined;
+  return after.index - before.index;
+}
+
 async function createLayerMutation(params = {}) {
   const aboveLayerId = Number.isInteger(params.above_layer_id) && params.above_layer_id > 0
     ? params.above_layer_id
@@ -2168,9 +2197,13 @@ async function createLayerMutation(params = {}) {
       const relativeToId = targetLayer?.id ?? null;
       const relativeToPath = targetLayer ? layerPathDom(targetLayer) : null;
       const options = typeof params.name === 'string' ? { name: params.name } : {};
+      // Count the actual Photoshop History span inside this exclusive modal
+      // transaction. Creating, repositioning and selecting a layer may add
+      // more than one state; an assumed 1 would authorize an unsafe Undo.
+      const beforeHistory = await readNativeHistoryCursor();
       const layer = await doc.createLayer(constants.LayerKind.NORMAL, options);
       if (targetLayer && targetLayer.id !== layer.id) {
-        layer.move(
+        await layer.move(
           targetLayer,
           requestedPlacement === 'BELOW'
             ? constants.ElementPlacement.PLACEAFTER
@@ -2201,6 +2234,11 @@ async function createLayerMutation(params = {}) {
         context,
         layerId: layer.id,
       };
+      const nativeHistorySteps = provenNativeHistorySteps(beforeHistory, await readNativeHistoryCursor());
+      if (nativeHistorySteps !== undefined) {
+        result.history_steps = nativeHistorySteps;
+        result.history_evidence = 'uxp_modal_native_history_cursor';
+      }
       if (layer.parent) result.parentPath = layerPathDom(layer.parent);
       else result.parentPath = '';
       if (targetLayer) {
@@ -4206,6 +4244,7 @@ async function paintColorGradient(params = {}) {
       }
     }
     const originalLayerId = prepared.originalActiveLayerId;
+    const beforePlainGradientHistory = preserveTransparency ? null : await readNativeHistoryCursor();
     let clipPathName = null;
     let suspensionId = null;
     if (preserveTransparency) {
@@ -4279,8 +4318,11 @@ async function paintColorGradient(params = {}) {
       await executionContext.hostControl.resumeHistory(suspensionId, true);
       suspensionId = null;
     }
+    const plainGradientHistorySteps = preserveTransparency ? undefined
+      : provenNativeHistorySteps(beforePlainGradientHistory, await readNativeHistoryCursor());
     return { applied: true, layer_id: targetLayerId, from: { x: from.x, y: from.y }, to: { x: to.x, y: to.y }, stops: normalizedStops, opacity, gradient_kind: 'raster-color-linear',
       ...(clipContour ? { clip_contour: clipContour, clip_contour_applied: true, selection_restored: true } : {}),
+      ...(plainGradientHistorySteps !== undefined ? { history_steps: plainGradientHistorySteps, history_evidence: 'uxp_modal_native_history_cursor' } : {}),
       ...(preserveTransparency ? { surface_alpha_preserved: true, history_steps: 1, history_name: 'MCP Continuous Surface Tone' } : {}) };
     } catch (error) {
       if (suspensionId !== null) {

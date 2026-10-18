@@ -5236,6 +5236,11 @@ describe('embedded Photoshop Guard', () => {
     expect(resumed.pending_visual_verdict).toEqual({
       operation_id: 'job-visual-lost-result',
       preview_id: 'job-visual-lost-result',
+      undo_proof: {
+        status: 'unproven',
+        source: 'missing-or-inexact-history-receipt',
+        guidance: expect.stringContaining('Do NOT use disposition=rollback'),
+      },
       sha256: after.sha256,
       materialized_path: after.materialized_path,
       document_id: 42,

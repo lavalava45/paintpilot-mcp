@@ -31,6 +31,7 @@ import { normalizeBrushAllowedScales } from './brush-scale-fit.js';
 import { brushUseKey, boundedBrushTrial } from './brush-role-extension.js';
 import { artisticContinuation, documentArtisticDebt, bindPaintingCompletion, wholeBriefCompletionContract } from './document-artistic-debt.js';
 import fs from 'node:fs';
+import { undoProofForPendingVerdict } from './undo-proof-projection.js';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { appendThroughputArchiveEvent, readThroughputArchivePage } from './throughput-event-archive.js';
@@ -10308,7 +10309,7 @@ export class SessionStore {
         .find(ownership => ownership?.protocol === 'photoshop.guard.semantic_pass_history_ownership.v1');
       if (semanticOwnership && semanticOwnership.status !== 'exact') {
         throw new Error(
-          `semantic_pass_rollback_unproven: pass history ownership is ${semanticOwnership.status ?? 'unknown'}; reconcile the partial/uncertain execution or restore an exact accepted anchor instead of issuing an unbounded Photoshop undo`
+          `semantic_pass_rollback_unproven: pass history ownership is ${semanticOwnership.status ?? 'unknown'}; do not issue Photoshop Undo. For a completed reviewed pass, use a truthful correct disposition and a new Guard-checked correction of its exact owned pixels, or independently verified accepted-anchor restoration. Reconcile only actually partial/uncertain execution; never guess missing history steps`
         );
       }
     }
@@ -11296,6 +11297,7 @@ export class SessionStore {
       .map(r => ({
         operation_id: r.id,
         preview_id: r.id,
+        undo_proof: undoProofForPendingVerdict(r.tool, parseTexts(r.result)),
         sha256: r.preview.sha256,
         materialized_path: r.preview.materialized_path,
         document_id: r.args?.document_id ?? null,
@@ -11579,6 +11581,9 @@ export class SessionStore {
       pending_visual_verdict: pendingVisualVerdict ? {
         operation_id: pendingVisualVerdict.id,
         preview_id: pendingVisualVerdict.id,
+        undo_proof: undoProofForPendingVerdict(
+          pendingVisualVerdict.tool, parseTexts(pendingVisualVerdict.result)
+        ),
         sha256: pendingVisualVerdict.preview.sha256,
         materialized_path: pendingVisualVerdict.preview.materialized_path,
         document_id: pendingVisualVerdict.args?.document_id ?? null,
