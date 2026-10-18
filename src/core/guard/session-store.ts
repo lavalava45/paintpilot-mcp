@@ -12,6 +12,7 @@ import { summarizePaintingMethodUsage } from './painting-method-usage.js';
 import { summarizeCycleLatency } from './cycle-latency-summary.js';
 import { projectContinuationTimelineOperations } from './continuation-timeline-operations.js';
 import { projectCompilerAttemptAudit } from './compiler-attempt-audit-projection.js';
+import { sanitizeContractErrorProvenance } from './contract-error-provenance.js';
 import { projectRecognitionMetrics } from './recognition-metrics-projection.js';
 import { projectArtisticThroughputObservations } from './artistic-throughput-observations.js';
 import { projectCompactFrameReferences } from './compact-frame-reference-projection.js';
@@ -5525,6 +5526,8 @@ export class SessionStore {
       const outcome = event.outcome === 'rejected'
         ? 'rejected'
         : event.outcome === 'accepted' ? 'accepted' : 'dispatched';
+      const originEvidence = outcome === 'rejected'
+        ? sanitizeContractErrorProvenance(event.contract_error_provenance) : undefined;
       const at = new Date().toISOString();
       const attempt = {
         at,
@@ -5541,6 +5544,9 @@ export class SessionStore {
         ...(event.compiler_repair_audit && typeof event.compiler_repair_audit === 'object' && !Array.isArray(event.compiler_repair_audit)
           ? { compiler_repair_audit: structuredClone(event.compiler_repair_audit) }
           : {}),
+        // The compiler emits only hashed, bounded evidence; do not persist
+        // raw artistic payloads, previews or model instructions in this audit.
+        ...(originEvidence ? { contract_error_provenance: originEvidence } : {}),
         ...(outcome !== 'rejected' && previousRejected
           ? {
             ...(previousRejected.rejection_fingerprint

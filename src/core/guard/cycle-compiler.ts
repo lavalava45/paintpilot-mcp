@@ -5,6 +5,7 @@ import { contradictoryTransitionRequirements, transitionRequirementSchemaErrors,
 import { convergeTechnicalContracts, MAX_TECHNICAL_CONVERGENCE_PASSES, type ContractConvergenceStop } from './contract-convergence.js';
 import { compileSemanticContracts } from './semantic-entity-registry.js';
 import { compileSemanticOwnership, compileSemanticMethod, compileSemanticExecutablePlan } from './semantic-execution-compiler.js';
+import { ContractErrorProvenanceObserver } from './contract-error-provenance.js';
 import { brushRoleMatchesScale } from './brush-scale-fit.js';
 import { constructionExecutionIssue, unexpandedConstructionPrerequisites } from './construction-execution.js';
 import { ConstructionError, expandConstructionPass, type ConstructionModel } from '../object-construction.js';
@@ -3675,6 +3676,9 @@ export async function compileGuardCycle(
 ): Promise<GuardCycleCompileResult> {
   const intentReceivedAt = new Date().toISOString();
   const compiledInput = structuredClone(input);
+  // Local evidence observer: do not publish the original artistic prompt or
+  // pixel payload. Rejection reports contain only typed, bounded witnesses.
+  const contractProvenance = new ContractErrorProvenanceObserver(input);
   const violations: GuardCycleCompileViolation[] = [];
   const normalizations: Array<{ code: string; message: string }> = [];
   let paintingIntentCompileMs = 0;
@@ -3732,6 +3736,7 @@ export async function compileGuardCycle(
           rejection_fingerprint: rejectionFingerprint,
           error_codes: ['legacy_contract_removed'],
           violations: unique,
+          contract_error_provenance: contractProvenance.report(unique),
           errors,
           normalizations,
           cycle_errors: errors,
@@ -3845,6 +3850,7 @@ export async function compileGuardCycle(
       const durable = Number.isSafeInteger(id) && id > 0
         ? store.compactPassContext?.(id, options.projectionContext) ?? {} : {};
       const semantic = intentData ? compileSemanticContracts(intentData, durable) : undefined;
+      if (semantic) contractProvenance.capture('semantic_identity', 'painting_intent', semantic.pass);
       if (semantic) {
         for (const issue of semantic.issues) violations.push(violation('next_operation',
           issue.code, issue.message, { path: `painting_intent.${issue.path}`, candidates: issue.candidates }));
@@ -3858,6 +3864,7 @@ export async function compileGuardCycle(
       const intentCompilation = compilePaintingIntentToNextPass(intent, store, options.projectionContext);
       durableStateInjectionMs = intentCompilation.durable_state_injection_ms;
       compiledInput.next_pass = intentCompilation.next_pass;
+      contractProvenance.capture('operation_compiled', 'next_pass', intentCompilation.next_pass);
       normalizations.push(...intentCompilation.diagnostics.map(item => ({
         code: item.code,
         message: item.message,
@@ -3904,7 +3911,9 @@ export async function compileGuardCycle(
       const context = Number.isSafeInteger(documentId) && documentId > 0
         ? store.compactPassContext?.(documentId, options.projectionContext) ?? {} : {};
       const semantic = compileSemanticContracts(sourceNextPass, context);
+      contractProvenance.capture('semantic_identity', 'next_pass', semantic.pass);
       const ownership = compileSemanticOwnership(semantic.pass, context);
+      contractProvenance.capture('semantic_ownership', 'next_pass', ownership.pass);
       sourceNextPass = ownership.pass;
       for (const issue of semantic.issues) violations.push(violation('next_operation',
         issue.code, issue.message, { path: `next_pass.${issue.path}`, candidates: issue.candidates }));
@@ -3940,6 +3949,7 @@ export async function compileGuardCycle(
       }
       const technical = prepareTechnicalPassBindings(sourceNextPass, context);
       sourceNextPass = technical.pass;
+      contractProvenance.capture('technical_binding', 'next_pass', technical.pass);
       for (const repair of technical.repairs) normalizations.push({
         code: 'technical_owner_binding_derived', message: `${repair.path}: ${repair.reason}`,
       });
@@ -3948,6 +3958,7 @@ export async function compileGuardCycle(
       ));
       const geometry = prepareGeometryContract(sourceNextPass, context);
       sourceNextPass = geometry.pass;
+      contractProvenance.capture('geometry_binding', 'next_pass', geometry.pass);
       geometryRepairs = [
         ...semantic.repairs.map(item => ({ kind: 'inject_from_context' as const,
           path: `next_pass.${item.path}`, source: item.source, reason: item.reason })),
@@ -3966,6 +3977,7 @@ export async function compileGuardCycle(
       if (compact.normalizations?.length) normalizations.push(...compact.normalizations);
       if (compact.operation) {
         compiledInput.next_operation = compact.operation;
+        contractProvenance.capture('operation_compiled', 'next_operation', compact.operation);
         compiledAt ??= new Date().toISOString();
       }
     }
@@ -4027,6 +4039,7 @@ export async function compileGuardCycle(
       }
     );
     localValidationMs += Date.now() - validationStartedAt;
+    contractProvenance.capture('operation_validated', 'next_operation', result.operation);
     validatedAt = new Date().toISOString();
     return result;
   };
@@ -4166,6 +4179,8 @@ export async function compileGuardCycle(
       if (converged.operation) compiledInput.next_operation = converged.operation;
       else delete compiledInput.next_operation;
       sourceNextPass = converged.pass;
+      contractProvenance.capture('convergence', 'next_pass', converged.pass);
+      if (converged.operation) contractProvenance.capture('convergence', 'next_operation', converged.operation);
       normalizations.push(...converged.normalizations);
       repairedAt = new Date().toISOString();
       autoRepairCount = converged.repairs.length;
@@ -4282,6 +4297,7 @@ export async function compileGuardCycle(
       ? Number(sourceNextPass?.document_id)
       : undefined;
   const passContext = nextDocumentId ? store.compactPassContext?.(nextDocumentId, options.projectionContext) : undefined;
+  const provenanceReport = contractProvenance.report(unique, passContext ?? {});
   const artDirector = passContext?.art_director && typeof passContext.art_director === 'object'
     ? passContext.art_director as Record<string, unknown>
     : undefined;
@@ -4343,6 +4359,7 @@ export async function compileGuardCycle(
       rejection_fingerprint: rejectionFingerprint,
       error_codes: errorCodes,
       violations: unique,
+      contract_error_provenance: provenanceReport,
       validation_coverage: validationCoverage,
       errors,
       normalizations,

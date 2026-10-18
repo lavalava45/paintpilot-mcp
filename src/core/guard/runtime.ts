@@ -3028,6 +3028,7 @@ export class EmbeddedGuardRuntime {
             error_codes: rejection?.error_codes,
             repair_recipe: rejection?.compact_correction_recipe,
             compiler_repair_audit: result.compiler_repair_audit,
+            contract_error_provenance: rejection?.contract_error_provenance,
           });
         } catch {
           telemetryFailures.push('compiler_attempt_audit_write_failed');

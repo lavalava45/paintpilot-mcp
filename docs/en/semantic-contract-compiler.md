@@ -22,6 +22,22 @@ The shared specification is `src/core/guard/semantic-contract-spec.ts` (`SEMANTI
 
 This fixes **some** missing-owner and method-schema cases at the cause, rather than filtering error codes. `semantic_mutation_target_owner_mismatch` for a genuinely foreign layer and `invalid_visual_microplan` for genuinely invalid executable steps remain valid safety rejections.
 
+## Evidence-based origin of Guard contract errors
+
+`contract-error-provenance.ts` attaches a bounded `contract_error_provenance` report to **every compiled-cycle preflight rejection**. The report is generated in the same compiler attempt, before Photoshop mutation, and joins the existing error codes instead of replacing the Guard's decision.
+
+The observer captures technical fields at the submitted, identity, ownership, durable-binding, geometry, compiled-operation, validation and bounded-convergence stages. Each finding includes its exact field path (when available), stage/presence/type, and a per-attempt HMAC-SHA-256 fingerprint of the value. Full prompts, pixel buffers and argument bodies are not included in the report. The durable compiler-attempt journal saves only a sanitized, bounded projection; the recent rejection summary provides the latest classification without flooding the hot-loop status.
+
+- **`authored_conflict_with_durable_binding`**: the submitted numeric mutation target is provably outside exactly one durable owner's current physical binding. This proves **payload provenance**, not that the model disregarded instructions.
+- **`durable_owner_binding_absent`**: the submitted continuation requires a semantic owner but the authoritative inventory contains no registered owner.
+- **`compiler_output_invalid`**: a rejected technical field appeared during compilation, or an invalid executor field came from the server-generated `next_operation`.
+- **`contract_spec_conflict`** / **`compiler_pipeline_failure`**: a detected incompatible/unexpressible Guard requirement or an absent compiled operation is a server-side failure, not an invitation to invent artistic input.
+- **`input_field_present`**, **`input_field_missing`** and **`unattributed`**: only the stated field lineage is proven; ambiguous runtime errors remain unattributed.
+
+`instruction_delivery: "not-observed"` and `model_instruction_noncompliance_proven: false` are deliberate. MCP cannot attest which host instructions were actually delivered/read by the model or its internal reasons. Evidence of an invalid payload must **never** be presented as proof that the artist saw and ignored a rule. Genuine Photoshop execution faults, uncertain mutation/recovery, and external host instruction delivery are outside this *current-preflight-only* trace.
+
+The report does not grant auto-repair, cross-layer authority, Undo, replay or artistic acceptance. The pre-existing validator retains the final verdict.
+
 ## Example
 
 An agent may submit a complete scene-light declaration with one emitter but **without** technical `id`, `model_id`, `revision` and `source_frame`. If the current document witness is known, the compiler deterministically allocates the new IDs, binds the exact witness and derives the initial revision. An authored prose `local_value_anchor` can bind to the single compatible declared emitter; multiple possible emitters produce a **semantic-reference ambiguity** rather than a guessed choice. Existing explicit unknown IDs are not remapped.
@@ -45,6 +61,6 @@ The specification currently covers the main scene-light/color, geometry, camera 
 
 ## Verification
 
-`tests/semantic-contract-registry.test.ts` checks deterministic IDs, schema derivation, typed ambiguity, stale pins, model continuation, and reference safety. `tests/semantic-execution-compiler.test.ts` covers owner binding, foreign and ambiguous targets, method derivation and executable preview compilation. `tests/semantic-contract-end-to-end.test.ts` exercises both acceptance and rejection through the actual `compileGuardCycle` without dispatch. Live artistic acceptance of `nontrivial_painting` remains separate from compilation correctness.
+`tests/semantic-contract-registry.test.ts` checks deterministic IDs, schema derivation, typed ambiguity, stale pins, model continuation, and reference safety. `tests/semantic-execution-compiler.test.ts` covers owner binding, foreign and ambiguous targets, method derivation and executable preview compilation. `tests/contract-error-provenance.test.ts` covers trustworthy classifications, privacy/redaction, durable audit and real compiler rejection. `tests/semantic-contract-end-to-end.test.ts` exercises both acceptance and rejection through the actual `compileGuardCycle` without dispatch. Live artistic acceptance of `nontrivial_painting` remains separate from compilation correctness.
 
 [Русская версия](../ru/semantic-contract-compiler.md)

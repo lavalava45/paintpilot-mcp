@@ -2,6 +2,9 @@
 // Read-only compiler attempt diagnostics over an existing audit snapshot.
 export function projectCompilerAttemptAudit(compilerAudit) {
   const attempts = Array.isArray(compilerAudit.recent_attempts) ? compilerAudit.recent_attempts : [];
+  const lastWithProvenance = attempts.findLast(attempt =>
+    attempt?.outcome === 'rejected'
+    && attempt?.contract_error_provenance?.protocol === 'paintpilot.contract_error_provenance.v1');
   const reasonCounts = {};
   for (const attempt of attempts) {
     if (attempt?.outcome !== 'rejected') continue;
@@ -23,6 +26,23 @@ export function projectCompilerAttemptAudit(compilerAudit) {
         ? { rejected_attempts_before_correction: attempt.rejected_attempts_before_correction } : {}),
       ...(attempt.correction_wall_ms !== undefined ? { correction_wall_ms: attempt.correction_wall_ms } : {}),
     })),
+    // Compact, read-only access to last *proven* attribution. The full
+    // bounded hash witnesses remain on the rejection and in the audit journal;
+    // they do not get repeated in every hot-loop status projection.
+    ...(lastWithProvenance ? {
+      last_rejection_origin: {
+        protocol: 'paintpilot.contract_error_provenance.v1',
+        request_key: lastWithProvenance.request_key ?? null,
+        rejection_fingerprint: lastWithProvenance.rejection_fingerprint ?? null,
+        instruction_delivery: 'not-observed',
+        findings: lastWithProvenance.contract_error_provenance.findings.slice(0, 6).map(item => ({
+          code: item.code, path: item.path, finding: item.finding, certainty: item.certainty,
+          ...(item.state_binding ? { state_binding: item.state_binding } : {}),
+        })),
+        remaining_count: Math.max(0, lastWithProvenance.contract_error_provenance.findings.length - 6)
+          + (lastWithProvenance.contract_error_provenance.remaining_count ?? 0),
+      },
+    } : {}),
     guard_rejections: {
       total_rejected_attempts: Number(compilerAudit.rejected_attempts ?? 0),
       recent_rejected_attempts: attempts.filter(attempt => attempt.outcome === 'rejected').length,
