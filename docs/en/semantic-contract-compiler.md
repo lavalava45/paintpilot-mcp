@@ -22,6 +22,14 @@ The shared specification is `src/core/guard/semantic-contract-spec.ts` (`SEMANTI
 
 This fixes **some** missing-owner and method-schema cases at the cause, rather than filtering error codes. `semantic_mutation_target_owner_mismatch` for a genuinely foreign layer and `invalid_visual_microplan` for genuinely invalid executable steps remain valid safety rejections.
 
+### Material role is conditional on actual brush-material fitness
+
+Previously, `paint_strategy.material_role` was required even for a pure `photoshop_paint_color_gradient` or `photoshop_fill_layer`, despite those tools executing from color/gradient parameters rather than a selected brush's material fitness. Its absence could therefore create both `tool_schema_invalid` and `invalid_visual_microplan`.
+
+`SEMANTIC_EXECUTION_SPEC.method` now drives the public contract, compiler and VisualMicroPlan parser consistently. For a gradient/fill or another method without a bound brush, `material_role` is optional and compiler-produced `undefined` is omitted rather than replaced with a fabricated material. For `preset-brush` or any strategy bound to `brush_role`, `brush_pack_id` or `stamp_profile_id`, the material is **mandatory**, explicitly authored or uniquely proven by brush preflight. A contradictory, blank or incorrectly typed supplied material is still rejected. Actual gradient artistic parameters are unchanged.
+
+`tests/material-role-cycle-regressions.test.ts` exercises the real `compileGuardCycle` using a `simple_graphic` gradient without `material_role`, schema/parser agreement, and preserved independent layer-ownership rejections. No Photoshop mutation is dispatched.
+
 ## Evidence-based origin of Guard contract errors
 
 `contract-error-provenance.ts` attaches a bounded `contract_error_provenance` report to **every compiled-cycle preflight rejection**. The report is generated in the same compiler attempt, before Photoshop mutation, and joins the existing error codes instead of replacing the Guard's decision.

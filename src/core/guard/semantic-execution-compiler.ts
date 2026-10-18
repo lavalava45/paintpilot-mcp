@@ -119,6 +119,7 @@ export function compileSemanticMethod(
     authoredMaterial?: string;
     authoredVisualIntent?: string;
     brushMaterialRoles?: unknown;
+    methodClass?: string;
   },
 ): { strategy?: RecordValue; issues: SemanticExecutionIssue[]; repairs: StructuredRepairOperation[] } {
   if (!provided) return { issues: [], repairs: [] };
@@ -126,6 +127,9 @@ export function compileSemanticMethod(
   const issues: SemanticExecutionIssue[] = [];
   const repairs: StructuredRepairOperation[] = [];
   const spec = SEMANTIC_EXECUTION_SPEC.method;
+  const materialRequired = spec.materialRequiredMethodClasses.includes(input.methodClass as 'preset-brush')
+    || (spec.materialRequiredWhenBrushBound
+      && !!(nonempty(strategy.brush_role) || nonempty(strategy.brush_pack_id) || nonempty(strategy.stamp_profile_id)));
   const material = nonempty(strategy.material_role);
   const explicit = nonempty(input.authoredMaterial);
   const choices = [...new Set((Array.isArray(input.brushMaterialRoles) ? input.brushMaterialRoles : [])
@@ -139,7 +143,14 @@ export function compileSemanticMethod(
       strategy.material_role = uniquelyProven;
       repairs.push({ kind: 'inject_from_context', path: 'next_operation.args.paint_strategy.material_role',
         source: explicit ? 'next_pass.material_role' : 'preflighted_brush_role.material_roles',
-        reason: 'Executor requires the uniquely authored or preflight-proven material role.' });
+        reason: 'Preserved the uniquely authored or preflight-proven material role without guessing.' });
+    } else if (!materialRequired && Object.hasOwn(strategy, 'material_role') && strategy.material_role === undefined) {
+      // A pure gradient/fill never needed a material-fitness claim. Omit the
+      // compiler-generated undefined property; do not synthesize "generic".
+      delete strategy.material_role;
+      repairs.push({ kind: 'normalize', path: 'next_operation.args.paint_strategy.material_role',
+        normalizer: 'omit_non_brush_material_role',
+        reason: 'This execution method needs no brush material. Removed an absent compiler-only field instead of inventing an artistic material.' });
     }
   }
   if (nonempty(input.authoredVisualIntent) && nonempty(strategy.visual_intent)
@@ -147,7 +158,7 @@ export function compileSemanticMethod(
     issues.push({ code: 'semantic_method_contract_conflict', path: 'paint_strategy.visual_intent',
       message: 'Executor visual intent differs from the supplied artistic intent.' });
   }
-  for (const field of spec.requiredFields) {
+  for (const field of [...spec.requiredFields, ...(materialRequired ? ['material_role'] : [])]) {
     if (!nonempty(strategy[field])) issues.push({
       code: 'semantic_method_contract_required',
       path: `paint_strategy.${field}`,

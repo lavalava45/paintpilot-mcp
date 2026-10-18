@@ -14,6 +14,7 @@ import { normalizeGeometryBinding, type GeometryBinding } from './geometry-bindi
 import { normalizeCameraBinding, type CameraBinding } from './scene-camera-imaging-model.js';
 import { normalizeAttentionBinding, type AttentionBinding } from './perceptual-hierarchy.js';
 import { normalizeProblemLinks } from './guard/problem-links.js';
+import { SEMANTIC_EXECUTION_SPEC } from './guard/semantic-contract-spec.js';
 
 export const VISUAL_MICROPLAN_ACTION_CLASSES = [
   'ADD',
@@ -420,7 +421,7 @@ export interface VisualMicroPlan {
   addressesProblemIds: string[];
   paintStrategy?: {
     constructionRole?: PaintingConstructionRole;
-    materialRole: string;
+    materialRole?: string;
     visualIntent: PaintingVisualIntent;
     fallbackFromMethodId?: string;
     fallbackReason?: string;
@@ -891,9 +892,18 @@ export function parseVisualMicroPlan(args: Record<string, unknown>): VisualMicro
       : requireString(raw.fallback_reason, 'paint_strategy.fallback_reason');
     // E.7c: fallback_from_method_id is executable routing authority; fallback_reason is
     // optional artistic/audit guidance and must not be a mutation-admission certificate.
+    const materialRole = raw.material_role === undefined
+      ? undefined : requireString(raw.material_role, 'paint_strategy.material_role');
+    const methodSpec = SEMANTIC_EXECUTION_SPEC.method;
+    const materialBound = methodSpec.materialRequiredMethodClasses.includes(args.method_class as 'preset-brush')
+      || (methodSpec.materialRequiredWhenBrushBound
+        && (raw.brush_role !== undefined || raw.brush_pack_id !== undefined || raw.stamp_profile_id !== undefined));
+    if (materialBound && !materialRole) {
+      throw new Error('brush-bound paint_strategy requires a verified paint_strategy.material_role');
+    }
     paintStrategy = {
       ...(constructionRole ? { constructionRole } : {}),
-      materialRole: requireString(raw.material_role, 'paint_strategy.material_role'),
+      ...(materialRole ? { materialRole } : {}),
       visualIntent,
       ...(fallbackFromMethodId ? { fallbackFromMethodId } : {}),
       ...(fallbackReason ? { fallbackReason } : {}),

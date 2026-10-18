@@ -3315,6 +3315,7 @@ function compileCompactPass(
     authoredMaterial: requestedMaterialRole,
     authoredVisualIntent: visualIntent,
     brushMaterialRoles: brushRole?.material_roles,
+    methodClass,
   });
   paintStrategy = compiledMethod.strategy;
   violations.push(...compiledMethod.issues.map(item => violation('next_operation', item.code, item.message,

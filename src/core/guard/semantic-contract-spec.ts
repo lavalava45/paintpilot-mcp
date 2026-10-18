@@ -40,8 +40,8 @@ export interface SemanticContractSpec {
 }
 
 /** Execution binding policy belongs to the same source of truth as IDs/refs.
- * Required strategy fields mirror the VisualMicroPlan tool contract; neither
- * owner identity nor an artistic material choice is inferred from free text. */
+ * Required strategy fields mirror the VisualMicroPlan tool contract. A generic
+ * gradient/fill has no brush-material fitness claim and must not invent one. */
 export const SEMANTIC_EXECUTION_SPEC = {
   owner: {
     selector: 'target_owner_id',
@@ -53,7 +53,9 @@ export const SEMANTIC_EXECUTION_SPEC = {
     creationDecisions: ['create-new', 'temporary-hypothesis'],
   },
   method: {
-    requiredFields: ['material_role', 'visual_intent', 'pressure_policy'],
+    requiredFields: ['visual_intent', 'pressure_policy'],
+    materialRequiredMethodClasses: ['preset-brush'],
+    materialRequiredWhenBrushBound: true,
     materialSource: 'material_role',
     brushMaterialsSource: 'material_roles',
     artisticFields: ['construction_role', 'material_role', 'visual_intent'],

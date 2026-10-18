@@ -1519,7 +1519,7 @@ function visualMicroPlanToolSchema(): Tool {
         paint_strategy: {
           type: 'object',
           description:
-            'Construction-first execution contract. construction_role is mandatory for broad/global softness-dominant or environmental work. continuous-field defaults to continuous-color-field. optical-veil may use a generic soft dab-chain only as an explicit justified fallback.',
+            'Construction-first execution contract. material_role is optional for non-brush gradient/fill methods, but required for preset-brush and when brush_role/brush_pack_id/stamp_profile_id is supplied. Never invent a material for a pure color field. construction_role is mandatory for broad/global softness-dominant or environmental work. continuous-field defaults to continuous-color-field. optical-veil may use a generic soft dab-chain only as an explicit justified fallback.',
           properties: {
             construction_role: { type: 'string', enum: [...PAINTING_CONSTRUCTION_ROLES] },
             material_role: { type: 'string' },

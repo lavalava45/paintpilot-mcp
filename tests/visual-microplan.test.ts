@@ -85,6 +85,60 @@ function materialResponsePlan(): Record<string, unknown> {
 }
 
 describe('parseVisualMicroPlan', () => {
+  it('accepts a real non-brush gradient method without an invented artistic material', () => {
+    const gradientPlan = basePlan({
+      method_class: 'gradient',
+      scale: 'global',
+      paint_strategy: {
+        construction_role: 'continuous-field',
+        visual_intent: 'continuous-field',
+        pressure_policy: 'none',
+      },
+      steps: [
+        { id: 'gradient', tool: 'photoshop_paint_color_gradient',
+          method_id: 'continuous-color-field', args: {} },
+        { id: 'preview', tool: 'photoshop_get_preview', args: {} },
+      ],
+    });
+    const parsed = parseVisualMicroPlan(gradientPlan);
+    expect(parsed.paintStrategy?.constructionRole).toBe('continuous-field');
+    expect(parsed.paintStrategy?.materialRole).toBeUndefined();
+    expect(parsed.paintStrategy).not.toHaveProperty('materialRole');
+    for (const methodClass of ['gradient', 'fill', 'region']) {
+      const tools = methodClass === 'gradient'
+        ? [{ id: 'color', tool: 'photoshop_paint_color_gradient', args: {} }]
+        : methodClass === 'fill'
+          ? [{ id: 'fill', tool: 'photoshop_fill_layer', args: {} }]
+          : [{ id: 'region', tool: 'photoshop_paint_regions', args: {} }];
+      const p = basePlan({ method_class: methodClass, paint_strategy: {
+        visual_intent: 'continuous-field', pressure_policy: 'none', construction_role: 'continuous-field',
+      }, steps: [...tools, { id: 'preview', tool: 'photoshop_get_preview', args: {} }] });
+      if (methodClass === 'region') {
+        // A region-fill cannot masquerade as a continuous color field.
+        expect(() => parseVisualMicroPlan(p)).toThrow(/continuous-field/);
+      } else expect(parseVisualMicroPlan(p).paintStrategy?.materialRole).toBeUndefined();
+    }
+  });
+
+  it('still rejects absent, empty and non-string material when the paint strategy binds an actual brush', () => {
+    const strategy = {
+      visual_intent: 'directional-mass', pressure_policy: 'none',
+      brush_role: 'verified-brush',
+    };
+    for (const material_role of [undefined, '', 9, null]) {
+      const paint_strategy = { ...strategy, ...(material_role === undefined ? {} : { material_role }) };
+      expect(() => parseVisualMicroPlan(basePlan({ paint_strategy }))).toThrow(/material_role/i);
+    }
+    expect(() => parseVisualMicroPlan(basePlan({ method_class: 'preset-brush',
+      paint_strategy: { visual_intent: 'directional-mass', pressure_policy: 'none' },
+    }))).toThrow(/material_role/i);
+  });
+
+  it('keeps supplied invalid material types invalid even for a non-brush field', () => {
+    expect(() => parseVisualMicroPlan(basePlan({
+      paint_strategy: { visual_intent: 'directional-mass', pressure_policy: 'none', material_role: 7 },
+    }))).toThrow(/paint_strategy.material_role/i);
+  });
   it('parses JSON tool payloads that carry a native connector identity footer', () => {
     const payload = {
       ok: true,

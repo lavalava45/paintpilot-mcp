@@ -87,17 +87,37 @@ describe('intent → owner → method → executable plan', () => {
     expect(result.repairs[0].source).toBe('preflighted_brush_role.material_roles');
   });
 
-  it('reports a missing artistic material instead of emitting an undefined value or choosing the first', () => {
+  it('does not invent a material or reject non-brush continuous fields because an optional material is missing', () => {
     for (const choices of [[], ['fur', 'fabric']]) {
       const result = compileSemanticMethod({
         construction_role: 'continuous-field', visual_intent: 'continuous-field',
         material_role: undefined, pressure_policy: 'none',
-      }, { brushMaterialRoles: choices, authoredVisualIntent: 'continuous-field' });
+      }, { brushMaterialRoles: choices, authoredVisualIntent: 'continuous-field', methodClass: 'gradient' });
+      expect(result.issues).toEqual([]);
+      expect(result.strategy?.material_role).toBeUndefined();
+      expect(result.strategy).not.toHaveProperty('material_role');
+      expect(result.repairs.some(item => item.kind === 'normalize')).toBe(true);
+    }
+  });
+
+  it('keeps material fitness mandatory for a preflighted brush, including ambiguous roles', () => {
+    for (const context of [
+      { methodClass: 'preset-brush', brushMaterialRoles: ['fur', 'fabric'] },
+      { methodClass: 'paint', brushMaterialRoles: ['fur', 'fabric'] },
+    ]) {
+      const result = compileSemanticMethod({
+        construction_role: 'structured-mass', visual_intent: 'directional-mass',
+        pressure_policy: 'none', brush_role: 'verified-fur-preset',
+      }, { ...context, authoredVisualIntent: 'directional-mass' });
       expect(result.issues).toEqual([expect.objectContaining({
         code: 'semantic_method_contract_required', path: 'paint_strategy.material_role',
+        candidates: ['fur', 'fabric'],
       })]);
-      expect(result.strategy?.material_role).toBeUndefined();
     }
+    const unboundPreset = compileSemanticMethod({
+      visual_intent: 'directional-mass', pressure_policy: 'none',
+    }, { methodClass: 'preset-brush', brushMaterialRoles: [] });
+    expect(unboundPreset.issues.some(item => item.path === 'paint_strategy.material_role')).toBe(true);
   });
 
   it('keeps authored method values and blocks conflicting strategy metadata', () => {
@@ -122,7 +142,8 @@ describe('intent → owner → method → executable plan', () => {
   it('publishes the actual VisualMicroPlan method schema from the same contract specification', () => {
     // The runtime tool schema and source data contract must not drift again.
     expect(SEMANTIC_EXECUTION_SPEC.method.requiredFields).toEqual([
-      'material_role', 'visual_intent', 'pressure_policy',
+      'visual_intent', 'pressure_policy',
     ]);
+    expect(SEMANTIC_EXECUTION_SPEC.method.materialRequiredMethodClasses).toContain('preset-brush');
   });
 });
