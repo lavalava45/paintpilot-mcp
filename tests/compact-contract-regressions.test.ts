@@ -788,6 +788,28 @@ function physicalStackObservation() {
 }
 
 describe('public compact Guard contract regressions', () => {
+  it('executes an explicit canvas field after reconciling stale spatial/method labels without geometric bindings', async () => {
+    const f = fixture({ sceneGeometry: false });
+    await f.setArtRun.handler({ document_id: 42, process_dir: 'processes/canvas-field-process/run', painting_profile: 'nontrivial_painting' });
+    const pass: any = { request_key: 'canvas-field-normalized', document_id: 42,
+      goal: 'Establish a separately editable flat paper color field.', stage: 'GLOBAL_BLOCK_IN', scale: 'global', region: 'whole-canvas',
+      construction_role: 'structured-mass', material_role: 'paper', visual_intent: 'mass', impact_class: 'construct', preferred_method_id: 'region-block-in',
+      scene_ownership_plan: semanticSceneOwnershipPlan('paper-plan', [{ semanticId: 'paper', subjectKind: 'continuous-field', editability: 'continuous-field', editAxes: ['visibility', 'color', 'rollback'] }]),
+      layer_separation_check: semanticLayerSeparation('new-object'),
+      logical_layer: { ...semanticLogicalLayer('paper', 'create-new', { layerName: 'Paper field', constructionTier: 'primary', constructionChange: true }), component_space: 'canvas' },
+      actions: [{ id: 'paper-layer', tool: 'photoshop_create_layer', args: { name: 'Paper field' } },
+        { id: 'paper-fill', tool: 'photoshop_fill_layer', method_id: 'region-block-in', args: { layer_id: '$steps.paper-layer.details.layerId', red: 90, green: 100, blue: 110 } }],
+    };
+    let result: any = await body(await f.cycle.handler({ next_pass: pass }));
+    if (result.job_id) { await vi.waitFor(() => expect(f.runtime.pollJob(result.job_id).state).toBe('completed')); result = f.runtime.pollJob(result.job_id).result; }
+    expect(result.preflight_rejection, JSON.stringify(result)).toBeUndefined();
+    expect(result.execution).toMatchObject({ phase: 'completed', failed: false });
+    const record: any = f.runtime.store.read(pass.request_key);
+    expect(record.args.logical_layer).toMatchObject({ hypothesis_id: 'paper', component_space: 'canvas' });
+    expect(record.args.logical_layer.geometry_binding).toBeUndefined();
+    expect(record.args.steps.find((s: any) => s.id === 'paper-fill')).toMatchObject({ tool: 'photoshop_fill_layer', method_id: 'continuous-color-field', args: { red: 90, green: 100, blue: 110 } });
+    expect(record.verdict).toBeUndefined();
+  });
   it.each(['composition', 'technique'])('executes a missing %s foundation through ordinary closure plus continuation without requiring a false pass', async foundationGoal => {
     const f = fixture({ stickyAfter: true });
     await f.setArtRun.handler({ document_id: 42, process_dir: 'processes/foundation-process/run',
@@ -3754,7 +3776,7 @@ describe('public compact Guard contract regressions', () => {
     expect(f.counts().strokeCalls).toBe(0);
   });
 
-  it.each(['supported', 'conflict', 'missing'] as const)(
+  it.each(['supported', 'conflict', 'missing', 'missing-both'] as const)(
     'keeps %s atmospheric color preflight in Guard while validating real microplan schemas',
     async outcome => {
       const f = fixture();
@@ -3835,16 +3857,16 @@ describe('public compact Guard contract regressions', () => {
         artistic_choices: [],
       };
       const requestKey = 'color-preflight-' + outcome;
-      const result = await execute({ next_pass: {
+      const request = { next_pass: {
         request_key: requestKey, problem_id: 'atmospheric-depth', document_id: 42,
         goal: 'Add a separately editable atmospheric field preserving the established light and color.',
         stage: 'GLOBAL_BLOCK_IN', scale: 'global', region: 'whole frame', action_class: 'ADD',
         construction_role: 'continuous-field', material_role: 'fog',
         visual_intent: 'continuous-field', impact_class: 'construct',
         preferred_method_id: 'continuous-color-field',
-        scene_geometry_model: sceneGeometryModel(), scene_lighting_color_model: sceneModel,
+        scene_geometry_model: sceneGeometryModel(), ...(outcome === 'missing-both' ? {} : { scene_lighting_color_model: sceneModel }),
         scene_ownership_plan: semanticSceneOwnershipPlan('color-preflight-owners', ['fog-overlay']),
-        ...(outcome === 'missing' ? {} : { color_gradient_preflight: preflight }),
+        ...(outcome.startsWith('missing') ? {} : { color_gradient_preflight: preflight }),
         layer_separation_check: semanticLayerSeparation('new-light'),
         logical_layer: semanticLogicalLayer('fog-overlay', 'create-new', {
           layerName: 'Cold Fog Veil', physicalRole: 'atmosphere', opacityRole: 'transparent-overlay',
@@ -3854,7 +3876,8 @@ describe('public compact Guard contract regressions', () => {
           { id: 'fog-layer', tool: 'photoshop_create_layer', args: { name: 'Cold Fog Veil' } },
           gradient('fog-gradient', '$steps.fog-layer.details.layerId'),
         ],
-      } });
+      } };
+      const result = await execute(request);
 
       if (outcome === 'supported') {
         expect(result.preflight_rejection).toBeUndefined();
@@ -3879,6 +3902,16 @@ describe('public compact Guard contract regressions', () => {
         });
         expect(f.counts().gradientCalls).toBe(1);
         expect(f.runtime.store.read(requestKey)).toBeUndefined();
+        if (outcome === 'missing-both') {
+          expect(result.preflight_rejection.error_codes).toContain('color_gradient_preflight_scene_model_missing');
+          expect(result.preflight_rejection.canonical_next_operation.action).toBe('correct-and-resubmit-cycle');
+          const paths = result.preflight_rejection.compact_correction_recipe.field_correction_packet.corrections.map((c: any) => c.path);
+          expect(paths).toEqual(expect.arrayContaining(['next_pass.color_gradient_preflight', 'next_pass.scene_lighting_color_model']));
+          const corrected = await execute({ next_pass: { ...request.next_pass, scene_lighting_color_model: sceneModel, color_gradient_preflight: preflight } });
+          expect(corrected.preflight_rejection, JSON.stringify(corrected)).toBeUndefined();
+          expect(corrected.execution).toMatchObject({ phase: 'completed', failed: false });
+          expect(f.counts().gradientCalls).toBe(2);
+        }
       }
     },
   );

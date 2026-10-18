@@ -191,6 +191,15 @@ export function fieldCorrectionPacket(violations: RepairableViolation[]) {
     construction_role_material_role_required: 'next_pass.material_role',
     artistic_method_execution_mismatch: 'next_pass.actions',
     invalid_visual_microplan: 'next_pass.actions',
+    component_space_invalid: 'next_pass.logical_layer.component_space',
+    component_space_conflict: 'next_pass.logical_layer.component_space',
+    component_space_owner_conflict: 'next_pass.logical_layer',
+    geometry_binding_required: 'next_pass.logical_layer.geometry_binding',
+    construction_role_intent_mismatch: 'next_pass.visual_intent',
+    color_gradient_preflight_required: 'next_pass.color_gradient_preflight',
+    color_gradient_preflight_invalid: 'next_pass.color_gradient_preflight',
+    color_gradient_preflight_conflict: 'next_pass.color_gradient_preflight',
+    color_gradient_preflight_scene_model_missing: 'next_pass.scene_lighting_color_model',
   };
   const rows = violations.map(item => {
     const path = nonEmptyText(item.details?.path)
@@ -320,7 +329,8 @@ function patchKnownOwner(
   pass.logical_layer = logicalLayer;
 }
 
-/** Preflight-only completion of unique technical pins. Never choose an artistic owner or rewrite conflicts. */
+/** Complete unique technical pins and reconcile proven canvas execution labels.
+ * Never choose an artistic owner, relabel a world owner, or change native actions. */
 export function prepareTechnicalPassBindings(
   rawPass: Record<string, unknown>,
   context: Record<string, unknown>,
@@ -335,6 +345,37 @@ export function prepareTechnicalPassBindings(
   const actions = Array.isArray(pass.actions) ? pass.actions as Array<Record<string, unknown>> : [];
   const ownerId = nonEmptyText(logical?.hypothesis_id);
   const owner = ownerId ? ownerMap(context).get(ownerId) : undefined;
+  // A declared canvas field rendered only by fill/gradient has an unambiguous
+  // mechanism. Repair obsolete construction labels, never commands, targets,
+  // colors or real spatial bindings. A durable world owner is never relabelled.
+  const canvasField = (logical?.component_space ?? owner?.component_space) === 'canvas'
+    && (!owner || owner.component_space === 'canvas')
+    && !pass.construction && !pass.painterly && !pass.restore_anchor_operation_id
+    && !(Array.isArray(context.construction_bindings) && context.construction_bindings.some((b: any) => b.owner_id === ownerId))
+    && !['geometry_binding', 'parent_hypothesis_id', 'surface_frame', 'camera_binding'].some(key => logical?.[key] || owner?.[key])
+    && !['support-surface', 'transmissive-surface'].includes(String(logical?.physical_role ?? owner?.physical_role))
+    && !['ROLLBACK', 'ERASE', 'REPLACE'].includes(String(pass.action_class).toUpperCase())
+    && [undefined, 'mass', 'continuous-field'].includes(pass.visual_intent as any)
+    && actions.length > 0 && actions.every(a => ['photoshop_create_layer', 'photoshop_fill_layer',
+      'photoshop_paint_color_gradient', 'photoshop_get_preview'].includes(String(a?.tool)))
+    && actions.some(a => ['photoshop_fill_layer', 'photoshop_paint_color_gradient'].includes(String(a?.tool)));
+  if (canvasField && logical) {
+    const update = (target: Record<string, unknown>, key: string, value: unknown, path: string) => {
+      if (target[key] === value) return;
+      if (value === undefined) delete target[key]; else target[key] = value;
+      repairs.push({ kind: 'normalize', path, normalizer: 'canvas_field_execution',
+        reason: 'Explicit canvas field with fill/gradient execution; remove spatial construction labels without changing pixels or ownership.' });
+    };
+    update(pass, 'construction_role', 'continuous-field', 'next_pass.construction_role');
+    update(pass, 'visual_intent', 'continuous-field', 'next_pass.visual_intent');
+    update(pass, 'preferred_method_id', 'continuous-color-field', 'next_pass.preferred_method_id');
+    update(logical, 'construction_tier', undefined, 'next_pass.logical_layer.construction_tier');
+    update(logical, 'construction_change', undefined, 'next_pass.logical_layer.construction_change');
+    actions.forEach((a, i) => {
+      if (['photoshop_fill_layer', 'photoshop_paint_color_gradient'].includes(String(a.tool)) && a.method_id !== undefined)
+        update(a, 'method_id', 'continuous-color-field', `next_pass.actions[${i}].method_id`);
+    });
+  }
   const continuing = ['continue-logical-layer', 'adjust'].includes(nonEmptyText(logical?.decision) ?? '');
   const targetId = Number(owner?.layer_id);
   if (continuing && Number.isSafeInteger(targetId) && targetId > 0) {
@@ -623,6 +664,7 @@ export function machineRepairRecipe(
   repairs: StructuredRepairOperation[] = []
 ): Record<string, unknown> {
   const classified = classifyViolations(violations);
+  const diagnosticContractIncomplete = fieldCorrectionPacket(violations).unaddressable_count > 0;
   return {
     repairs,
     violation_classes: classified.map(item => ({
@@ -630,6 +672,8 @@ export function machineRepairRecipe(
       repair_class: item.repair_class,
     })),
     model_semantic_decision_required: classified.some(item => item.repair_class === 'MODEL_SEMANTIC_DECISION'),
-    systemic_failure: classified.some(item => item.repair_class === 'SYSTEMIC_FAILURE'),
+    systemic_failure: classified.some(item => item.repair_class === 'SYSTEMIC_FAILURE')
+      || diagnosticContractIncomplete,
+    diagnostic_contract_incomplete: diagnosticContractIncomplete,
   };
 }

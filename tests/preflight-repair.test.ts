@@ -16,6 +16,33 @@ function violation(code: string, message = code, details?: Record<string, unknow
 }
 
 describe('preflight repair', () => {
+  it('normalizes obsolete canvas field labels without changing native commands, color or layer targets', () => {
+    const source: any = { construction_role: 'structured-mass', visual_intent: 'mass',
+      preferred_method_id: 'region-block-in', material_role: 'paper',
+      logical_layer: { hypothesis_id: 'paper', component_space: 'canvas', decision: 'create-new', construction_tier: 'primary', construction_change: true },
+      actions: [{ tool: 'photoshop_fill_layer', method_id: 'region-block-in', args: { layer_id: 7, color: { red: 20, green: 30, blue: 40 } } }] };
+    const fixed: any = prepareTechnicalPassBindings(source, {}).pass;
+    expect(fixed).toMatchObject({ construction_role: 'continuous-field', visual_intent: 'continuous-field', preferred_method_id: 'continuous-color-field' });
+    expect(fixed.logical_layer).not.toHaveProperty('construction_tier');
+    expect(fixed.logical_layer).not.toHaveProperty('construction_change');
+    expect(fixed.actions[0]).toMatchObject({ tool: source.actions[0].tool, args: source.actions[0].args, method_id: 'continuous-color-field' });
+    expect(source.logical_layer.construction_tier).toBe('primary');
+    for (const altered of [
+      { ...source, logical_layer: { ...source.logical_layer, geometry_binding: { support_plane_id: 'floor' } } },
+      { ...source, construction: { model_id: 'tower' } },
+      { ...source, actions: [{ tool: 'photoshop_paint_regions', args: {} }] },
+    ]) expect(prepareTechnicalPassBindings(altered, {}).pass.construction_role).toBe('structured-mass');
+    expect(prepareTechnicalPassBindings(source, { logical_layer_owners: [{ hypothesis_id: 'paper', layer_id: 7, component_space: 'world' }] }).pass.construction_role).toBe('structured-mass');
+  });
+
+  it('addresses all canvas-field failure families and makes a genuinely missing correction contract explicit', () => {
+    const codes = ['component_space_conflict', 'geometry_binding_required', 'color_gradient_preflight_required',
+      'construction_role_intent_mismatch', 'artistic_method_execution_mismatch', 'invalid_visual_microplan'];
+    const packet = fieldCorrectionPacket(codes.map(code => violation(code)));
+    expect(packet.unaddressable_count).toBe(0);
+    expect(machineRepairRecipe(codes.map(code => violation(code)))).toMatchObject({ systemic_failure: false, diagnostic_contract_incomplete: false });
+    expect(machineRepairRecipe([violation('unmapped_internal_error')])).toMatchObject({ systemic_failure: true, diagnostic_contract_incomplete: true });
+  });
   it('addresses the entire background-owner/method rejection without mislabelling semantic choices as a pipeline blocker', () => {
     const codes = ['semantic_layer_owner_missing', 'semantic_layer_isolation_required',
       'construction_role_material_role_required', 'artistic_method_execution_mismatch', 'invalid_visual_microplan'];

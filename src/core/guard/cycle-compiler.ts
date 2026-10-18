@@ -1619,7 +1619,12 @@ function compileCompactPass(
   let colorGradientPreflight: ColorGradientPreflight | undefined;
   if (colorPreflightRequired && raw.color_gradient_preflight === undefined) {
     violations.push(violation('next_operation', 'color_gradient_preflight_required',
-      'Large color-field/gradient, broad relighting, atmosphere, and major optical-effect passes require next_pass.color_gradient_preflight before dispatch'));
+      'Large color-field/gradient, broad relighting, atmosphere, and major optical-effect passes require next_pass.color_gradient_preflight before dispatch',
+      { path: 'next_pass.color_gradient_preflight' }));
+    if (!applicableSceneLightingColorModel && !lightingModelInvalid) violations.push(violation('next_operation',
+      'color_gradient_preflight_scene_model_missing',
+      'The required color_gradient_preflight also needs next_pass.scene_lighting_color_model or its durable current-document model. Supply both together; do not invent sampled evidence.',
+      { path: 'next_pass.scene_lighting_color_model' }));
   } else if (raw.color_gradient_preflight !== undefined) {
     if (!applicableSceneLightingColorModel) {
       // The invalid supplied/durable model is the root error. A secondary
@@ -2520,7 +2525,7 @@ function compileCompactPass(
     && typeof logicalLayer.surface_frame === 'object'
     && !Array.isArray(logicalLayer.surface_frame)
     && text((logicalLayer.surface_frame as Record<string, unknown>).distribution)?.toLowerCase() === 'perspective-regular';
-  if (logicalHypothesisId && mutationSteps.length > 0 && perspectiveRegularSurface
+  if (!canvasComponent(raw, context) && logicalHypothesisId && mutationSteps.length > 0 && perspectiveRegularSurface
       && applicableSceneGeometryModel?.applicability === 'coherent_3d') {
     if (!logicalLayer?.geometry_binding) {
       violations.push(violation(
@@ -2978,7 +2983,8 @@ function compileCompactPass(
           violations.push(violation(
             'next_operation',
             'construction_role_intent_mismatch',
-            `construction_role=${constructionRole} resolves to visual_intent=${roleSelection.visualIntent}, not ${visualIntent}`
+            `construction_role=${constructionRole} resolves to visual_intent=${roleSelection.visualIntent}, not ${visualIntent}`,
+            { path: 'next_pass.visual_intent', expected: roleSelection.visualIntent, actual: visualIntent }
           ));
         }
       }
@@ -4161,11 +4167,14 @@ export async function compileGuardCycle(
   const currentTaskId = text(artDirector?.current_task_id);
   const tasks = Array.isArray(artDirector?.tasks) ? artDirector.tasks as Array<Record<string, unknown>> : [];
   const currentTask = currentTaskId ? tasks.find(task => text(task.task_id) === currentTaskId) : undefined;
-  const systemicFailure = classifiedFinal.some(item => item.repair_class === 'SYSTEMIC_FAILURE');
+  const classifiedSystemicFailure = classifiedFinal.some(item => item.repair_class === 'SYSTEMIC_FAILURE');
   const semanticDecisionRequired = classifiedFinal.some(item => item.repair_class === 'MODEL_SEMANTIC_DECISION');
   const geometryRecipe = sourceNextPass ? geometryContractRecipe(sourceNextPass, passContext ?? {}, unique) : {};
   const geometryIssues = (geometryRecipe.geometry_contract as { issues?: Array<{ path?: string; message?: string }> } | undefined)?.issues ?? [];
   const fieldPacket = fieldCorrectionPacket(unique);
+  // Missing correction targets are a server diagnostic-contract defect. Never
+  // report systemic_failure=false while ordering a pipeline-blocker stop.
+  const systemicFailure = classifiedSystemicFailure || fieldPacket.unaddressable_count > 0;
   const stopAutomaticRetry = systemicFailure || fieldPacket.unaddressable_count > 0
     || errorCodes.includes('geometry_contract_retry_exhausted');
   const validationCoverage = {
@@ -4216,7 +4225,9 @@ export async function compileGuardCycle(
       cycle_errors: cycleErrors,
       finalization_errors: finalizationErrors,
       next_operation_errors: nextOperationErrors,
-      message: errors.join('\n'),
+      message: errors.join('\n').length > 1000
+        ? `${errorCodes.join(', ')}. All diagnostics are retained in errors/violations and compact_correction_recipe; correct the listed fields together.`
+        : errors.join('\n'),
       next_operation_guard_debt: {
         visual_barrier: false,
         preview: false,

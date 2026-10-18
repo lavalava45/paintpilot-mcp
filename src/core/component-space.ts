@@ -2,7 +2,7 @@
 // A canvas field is still subject to semantic ownership and exact-image Critic review.
 export const COMPONENT_SPACE_SCHEMA = {
   type: 'string', enum: ['canvas', 'world'],
-  description: 'world (default): depicted spatial component. canvas: paper/backdrop/flat graphic field in canvas coordinates, with no physical support, construction model or spatial parent. This never waives separate semantic parts or visual review.',
+  description: 'world (default): depicted spatial component. canvas: paper/backdrop/flat graphic field in canvas coordinates, with no physical support, construction model or spatial parent. For a flat fill/gradient use construction_role=continuous-field, visual_intent=continuous-field and method continuous-color-field; omit spatial construction_tier/change/bindings. Geometry is not required for that field; applicable color preflight and visual review remain required.',
 };
 
 export function canvasComponent(raw: any, context: any = {}): boolean {
@@ -32,6 +32,7 @@ export function componentSpaceIssue(raw: any, context: any = {}) {
       || prior?.geometry_binding || prior?.construction_tier
       || (Array.isArray(context.construction_bindings)
         && context.construction_bindings.some((binding: any) => binding?.owner_id === logical?.hypothesis_id))))
-    return { code: 'component_space_conflict', message: 'Canvas components cannot claim spatial construction/support/parent bindings. Use world for depicted objects or a separate canvas owner for paper/flat fields; preserve semantic units.' };
+    return { code: 'component_space_conflict', path: 'next_pass.logical_layer.component_space',
+      message: 'Canvas components cannot claim spatial construction/support/parent bindings. For a flat field keep canvas, use fill/gradient with construction_role=continuous-field, and omit construction, construction_change, construction_tier, spatial parent/bindings and support-surface/transmissive-surface roles. For a depicted spatial component choose world and supply actual geometry. A durable world owner requires a distinct canvas owner; preserve semantic units.' };
   return undefined;
 }
