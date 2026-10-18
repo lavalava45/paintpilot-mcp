@@ -469,6 +469,25 @@ export function prepareTechnicalPassBindings(
   const record = (value: unknown): Record<string, unknown> | undefined =>
     value && typeof value === 'object' && !Array.isArray(value)
       ? value as Record<string, unknown> : undefined;
+  const light = record(pass.scene_lighting_color_model);
+  const colorReport = record(pass.color_gradient_preflight);
+  const selectedStops = Array.isArray(colorReport?.stops) ? colorReport.stops.map(record).filter(Boolean) : [];
+  const selectedAnchors = [record(light?.ambient_environment),
+    ...(Array.isArray(light?.emitters) ? light.emitters.map(record) : [])];
+  for (const [i, anchor] of selectedAnchors.entries()) {
+    const sample = record(anchor?.sample);
+    if (anchor?.provenance !== 'artist-selected' || !Array.isArray(sample?.rgb)) continue;
+    const selected = selectedStops.find(stop => stop?.provenance === 'artist-selected'
+      && nonEmptyText(stop.artistic_choice)
+      && (stop.source_anchor_id === anchor.id || stop.id === anchor.id)
+      && JSON.stringify(stop.rgb) === JSON.stringify(sample.rgb));
+    if (!selected) continue;
+    delete anchor.sample;
+    repairs.push({ kind: 'normalize', normalizer: 'artist_color_not_sample',
+      path: `next_pass.scene_lighting_color_model.${i === 0 ? 'ambient_environment' : `emitters[${i - 1}]`}.sample`,
+      source: 'next_pass.color_gradient_preflight.stops',
+      reason: 'The same named artist-selected RGB and explicit artistic choice are already preserved in the color preflight. Remove only the contradictory duplicate measurement claim.' });
+  }
   const inject = (object: Record<string, unknown> | undefined, key: string, value: unknown,
     path: string, source: string) => {
     if (!object || object[key] !== undefined || value === undefined || value === null) return;

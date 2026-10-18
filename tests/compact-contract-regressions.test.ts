@@ -3776,7 +3776,7 @@ describe('public compact Guard contract regressions', () => {
     expect(f.counts().strokeCalls).toBe(0);
   });
 
-  it.each(['supported', 'conflict', 'missing', 'missing-both'] as const)(
+  it.each(['supported', 'conflict', 'missing', 'missing-both', 'chosen-duplicate', 'invalid-provenance'] as const)(
     'keeps %s atmospheric color preflight in Guard while validating real microplan schemas',
     async outcome => {
       const f = fixture();
@@ -3857,6 +3857,13 @@ describe('public compact Guard contract regressions', () => {
         artistic_choices: [],
       };
       const requestKey = 'color-preflight-' + outcome;
+      if (outcome === 'chosen-duplicate' || outcome === 'invalid-provenance') {
+        sceneModel.ambient_environment.provenance = 'artist-selected';
+        (sceneModel.ambient_environment as any).sample = { rgb: [105, 119, 116], source: 'Artist chose a cool teal.' };
+        if (outcome === 'chosen-duplicate') Object.assign(preflight.stops[0], {
+          source_anchor_id: 'overcast', provenance: 'artist-selected', artistic_choice: 'Artist chose a cool teal.',
+        });
+      }
       const request = { next_pass: {
         request_key: requestKey, problem_id: 'atmospheric-depth', document_id: 42,
         goal: 'Add a separately editable atmospheric field preserving the established light and color.',
@@ -3879,7 +3886,7 @@ describe('public compact Guard contract regressions', () => {
       } };
       const result = await execute(request);
 
-      if (outcome === 'supported') {
+      if (outcome === 'supported' || outcome === 'chosen-duplicate') {
         expect(result.preflight_rejection).toBeUndefined();
         expect(result.execution).toMatchObject({ phase: 'completed', failed: false });
         expect(f.counts().gradientCalls).toBe(2);
@@ -3893,15 +3900,32 @@ describe('public compact Guard contract regressions', () => {
         expect(record.preview?.sha256).toBeTruthy();
         expect(record.verdict).toBeUndefined();
         expect(result.next_state).toBe('awaiting_visual_review');
+        if (outcome === 'chosen-duplicate') {
+          expect(record.scene_lighting_color_model.ambient_environment).toMatchObject({ provenance: 'artist-selected', family: 'cool_teal_grey' });
+          expect(record.scene_lighting_color_model.ambient_environment).not.toHaveProperty('sample');
+          expect(record.color_gradient_preflight.stops[0].rgb).toEqual([105, 119, 116]);
+          expect((sceneModel.ambient_environment as any).sample).toBeDefined();
+        }
       } else {
         expect(result.preflight_rejection?.error_codes).toContain(
-          outcome === 'conflict' ? 'color_gradient_preflight_conflict' : 'color_gradient_preflight_required',
+          outcome === 'conflict' ? 'color_gradient_preflight_conflict'
+            : outcome === 'invalid-provenance' ? 'scene_lighting_color_model_invalid' : 'color_gradient_preflight_required',
         );
         expect(result.preflight_rejection).toMatchObject({
           next_operation_dispatched: false, visual_mutation_started: false,
         });
         expect(f.counts().gradientCalls).toBe(1);
         expect(f.runtime.store.read(requestKey)).toBeUndefined();
+        if (outcome === 'invalid-provenance') {
+          expect(result.preflight_rejection.canonical_next_operation.action).toBe('correct-and-resubmit-cycle');
+          expect(result.preflight_rejection.compact_correction_recipe.systemic_failure).toBe(false);
+          expect(result.preflight_rejection.compact_correction_recipe.field_correction_packet.corrections).toContainEqual(expect.objectContaining({ path: 'next_pass.scene_lighting_color_model.ambient_environment.sample' }));
+          const correctedModel: any = structuredClone(sceneModel); delete correctedModel.ambient_environment.sample;
+          const corrected = await execute({ next_pass: { ...request.next_pass, scene_lighting_color_model: correctedModel } });
+          expect(corrected.preflight_rejection, JSON.stringify(corrected)).toBeUndefined();
+          expect(corrected.execution).toMatchObject({ phase: 'completed', failed: false });
+          expect(f.counts().gradientCalls).toBe(2);
+        }
         if (outcome === 'missing-both') {
           expect(result.preflight_rejection.error_codes).toContain('color_gradient_preflight_scene_model_missing');
           expect(result.preflight_rejection.canonical_next_operation.action).toBe('correct-and-resubmit-cycle');

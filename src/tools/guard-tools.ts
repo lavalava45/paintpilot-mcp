@@ -1,4 +1,5 @@
 import { COMPONENT_SPACE_SCHEMA } from '../core/component-space.js';
+import { COLOR_SAMPLE_GUIDANCE } from '../core/scene-lighting-color-model.js';
 import { SCENE_FOUNDATION_SCHEMA, FOUNDATION_GOAL_SCHEMA, sceneFoundationRequest } from '../core/guard/scene-foundation.js';
 import { PHOTOSHOP_DRAWING_ROUTE } from '../prompts/host-guidance.js';
 import { CHAT_CRITIC_SCHEMA, criticRoleInstruction, criticSpawnHandoff, supportContactWeightInstruction } from '../core/guard/chat-critic.js';
@@ -709,6 +710,7 @@ function compactPassSchema(): Record<string, unknown> {
               provenance: { type: 'string', enum: ['user-or-prompt', 'reference-sample', 'accepted-frame', 'deterministic-derivation', 'artist-selected'] },
               sample: {
                 type: 'object',
+                description: COLOR_SAMPLE_GUIDANCE,
                 properties: {
                   rgb: { type: 'array', minItems: 3, maxItems: 3, items: { type: 'integer', minimum: 0, maximum: 255 } },
                   source: { type: 'string' },
@@ -734,6 +736,7 @@ function compactPassSchema(): Record<string, unknown> {
                 provenance: { type: 'string', enum: ['user-or-prompt', 'reference-sample', 'accepted-frame', 'deterministic-derivation', 'artist-selected'] },
                 sample: {
                   type: 'object',
+                  description: COLOR_SAMPLE_GUIDANCE,
                   properties: {
                     rgb: { type: 'array', minItems: 3, maxItems: 3, items: { type: 'integer', minimum: 0, maximum: 255 } },
                     source: { type: 'string' },
@@ -772,6 +775,7 @@ function compactPassSchema(): Record<string, unknown> {
                 provenance: { type: 'string', enum: ['reference-sample', 'accepted-frame'] },
                 sample: {
                   type: 'object',
+                  description: COLOR_SAMPLE_GUIDANCE,
                   properties: {
                     rgb: { type: 'array', minItems: 3, maxItems: 3, items: { type: 'integer', minimum: 0, maximum: 255 } },
                     source: { type: 'string' },

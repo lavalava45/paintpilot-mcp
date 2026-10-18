@@ -4,6 +4,14 @@ export const COLOR_PROVENANCE = [
   'user-or-prompt', 'reference-sample', 'accepted-frame', 'deterministic-derivation', 'artist-selected',
 ] as const;
 export type ColorProvenance = (typeof COLOR_PROVENANCE)[number];
+export const COLOR_SAMPLE_GUIDANCE = 'sample is measured reference/accepted-frame evidence only. Put artist-selected RGB in color_gradient_preflight.stops with provenance=artist-selected and artistic_choice, and in paint-command colors; omit sample. Never relabel a chosen RGB as measured.';
+
+export class LightingColorProvenanceError extends Error {
+  constructor(readonly issues: Array<{ path: string; message: string }>) {
+    super(issues.map(issue => issue.message).join('; '));
+    this.name = 'LightingColorProvenanceError';
+  }
+}
 
 export interface ColorAnchor {
   id: string;
@@ -209,6 +217,23 @@ function anchor(value: unknown, path: string): ColorAnchor {
 
 export function normalizeSceneLightingColorModel(value: unknown): SceneLightingColorModel {
   const raw = record(value, 'scene_lighting_color_model');
+  const provenanceIssues: Array<{ path: string; message: string }> = [];
+  const anchors = [
+    ...(raw.ambient_environment ? [{ value: raw.ambient_environment, path: 'scene_lighting_color_model.ambient_environment', sampled: false }] : []),
+    ...(Array.isArray(raw.emitters) ? raw.emitters.map((value, i) => ({ value, path: `scene_lighting_color_model.emitters[${i}]`, sampled: false })) : []),
+    ...(Array.isArray(raw.sampled_anchors) ? raw.sampled_anchors.map((value, i) => ({ value, path: `scene_lighting_color_model.sampled_anchors[${i}]`, sampled: true })) : []),
+  ];
+  for (const { value, path, sampled } of anchors) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
+    const a = value as Record<string, unknown>;
+    if (a.sample !== undefined && !['reference-sample', 'accepted-frame'].includes(String(a.provenance)))
+      provenanceIssues.push({ path: `next_pass.${path}.sample`, message: `${path}.sample is evidence and cannot be attached to ${String(a.provenance)} provenance. ${COLOR_SAMPLE_GUIDANCE}` });
+    if (a.provenance === 'reference-sample' && a.sample === undefined)
+      provenanceIssues.push({ path: `next_pass.${path}.sample`, message: `${path} reference-sample provenance requires exact sample evidence. Supply a real source/sample; never invent a measurement.` });
+    if (sampled && !['reference-sample', 'accepted-frame'].includes(String(a.provenance)))
+      provenanceIssues.push({ path: `next_pass.${path}`, message: `${path}: sampled_anchors must contain measured references/accepted-frame anchors. Place an artist-selected ambient/emitter in its actual role instead; do not change provenance just to pass validation.` });
+  }
+  if (provenanceIssues.length) throw new LightingColorProvenanceError(provenanceIssues);
   const source = record(raw.source_frame, 'scene_lighting_color_model.source_frame');
   const global = record(raw.global_value_structure, 'scene_lighting_color_model.global_value_structure');
   const key = text(global.key, 'scene_lighting_color_model.global_value_structure.key') as SceneLightingColorModel['global_value_structure']['key'];

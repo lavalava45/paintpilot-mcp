@@ -4,6 +4,7 @@ import {
   changedSceneLightingColorDependencyIds,
   lightingColorBindingStaleness,
   normalizeSceneLightingColorModel,
+  LightingColorProvenanceError,
 } from './scene-lighting-color-model.js';
 import { normalizeMaterialResponsePlan } from './material-response.js';
 
@@ -21,6 +22,22 @@ const railway = {
 };
 
 describe('Scene Lighting & Color Model', () => {
+  it('returns every independent provenance correction without promoting artist choices to measurements', () => {
+    const input = { ...railway,
+      ambient_environment: { ...railway.ambient_environment, provenance: 'artist-selected', sample: { rgb: [20, 40, 45], source: 'chosen' } },
+      emitters: [{ ...railway.emitters[0], provenance: 'artist-selected', sample: { rgb: [220, 180, 100], source: 'chosen' } }],
+      sampled_anchors: [{ id: 'ref', role: 'base', family: 'teal', provenance: 'reference-sample' }],
+    };
+    let rejected: LightingColorProvenanceError | undefined;
+    try { normalizeSceneLightingColorModel(input); } catch (e) { if (e instanceof LightingColorProvenanceError) rejected = e; else throw e; }
+    expect(rejected?.issues.map(issue => issue.path)).toEqual([
+      'next_pass.scene_lighting_color_model.ambient_environment.sample',
+      'next_pass.scene_lighting_color_model.emitters[0].sample',
+      'next_pass.scene_lighting_color_model.sampled_anchors[0].sample',
+    ]);
+    expect(input.ambient_environment.provenance).toBe('artist-selected');
+    expect(normalizeSceneLightingColorModel(railway).sampled_anchors).toEqual([]);
+  });
   it('preserves relational prompt constraints without inventing exact RGB values', () => {
     const model = normalizeSceneLightingColorModel(railway);
     expect(model.ambient_environment).toMatchObject({ family: 'cool_blue_teal', provenance: 'user-or-prompt' });

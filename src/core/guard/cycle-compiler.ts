@@ -86,6 +86,7 @@ import { geometryOptOutAuthorityIssue, normalizeSceneGeometryModel, type SceneGe
 import {
   assertLightingColorBindingMatchesScene,
   lightingColorBindingStaleness,
+  LightingColorProvenanceError,
   normalizeSceneLightingColorModel,
   type SceneLightingColorModel,
 } from '../scene-lighting-color-model.js';
@@ -1559,7 +1560,9 @@ function compileCompactPass(
       suppliedSceneLightingColorModel = normalizeSceneLightingColorModel(raw.scene_lighting_color_model);
     } catch (error) {
       lightingModelInvalid = true;
-      violations.push(violation('next_operation', 'scene_lighting_color_model_invalid', error instanceof Error ? error.message : String(error)));
+      if (error instanceof LightingColorProvenanceError) {
+        for (const issue of error.issues) violations.push(violation('next_operation', 'scene_lighting_color_model_invalid', issue.message, { path: issue.path }));
+      } else violations.push(violation('next_operation', 'scene_lighting_color_model_invalid', error instanceof Error ? error.message : String(error)));
     }
   }
   let sceneLightingColorModelToPersist: SceneLightingColorModel | undefined;

@@ -16,6 +16,26 @@ function violation(code: string, message = code, details?: Record<string, unknow
 }
 
 describe('preflight repair', () => {
+  it('drops a false duplicate sample only when the same named artistic choice and RGB are already retained', () => {
+    const input: any = { scene_lighting_color_model: {
+      ambient_environment: { id: 'sky', family: 'teal', provenance: 'artist-selected', sample: { rgb: [20, 40, 45], source: 'chosen by artist' } },
+    }, color_gradient_preflight: { stops: [{ id: 'top', source_anchor_id: 'sky', provenance: 'artist-selected',
+      rgb: [20, 40, 45], artistic_choice: 'Deliberately selected cool teal.' }] },
+      actions: [{ tool: 'photoshop_fill_layer', args: { red: 20, green: 40, blue: 45 } }],
+    };
+    const prepared: any = prepareTechnicalPassBindings(input, {});
+    expect(prepared.pass.scene_lighting_color_model.ambient_environment).not.toHaveProperty('sample');
+    expect(prepared.pass.color_gradient_preflight).toEqual(input.color_gradient_preflight);
+    expect(prepared.pass.actions).toEqual(input.actions);
+    expect(prepared.repairs).toContainEqual(expect.objectContaining({ normalizer: 'artist_color_not_sample' }));
+    expect(input.scene_lighting_color_model.ambient_environment.sample.rgb).toEqual([20, 40, 45]);
+    for (const change of [{ rgb: [21, 40, 45] }, { source_anchor_id: 'other' }, { provenance: 'reference-sample' }, { artistic_choice: '' }]) {
+      const conflict = structuredClone(input); Object.assign(conflict.color_gradient_preflight.stops[0], change);
+      expect((prepareTechnicalPassBindings(conflict, {}).pass as any).scene_lighting_color_model.ambient_environment.sample).toBeDefined();
+    }
+    const measured = structuredClone(input); measured.scene_lighting_color_model.ambient_environment.provenance = 'reference-sample';
+    expect((prepareTechnicalPassBindings(measured, {}).pass as any).scene_lighting_color_model.ambient_environment.sample).toBeDefined();
+  });
   it('normalizes obsolete canvas field labels without changing native commands, color or layer targets', () => {
     const source: any = { construction_role: 'structured-mass', visual_intent: 'mass',
       preferred_method_id: 'region-block-in', material_role: 'paper',
