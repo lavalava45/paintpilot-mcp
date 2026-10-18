@@ -80,15 +80,34 @@ export function compileMinimalOwnerBootstrap(passInput: Row, context: Row = {}):
     && pass.construction_role === 'continuous-field'
     && pass.visual_intent === 'continuous-field'
     && ['photoshop_paint_color_gradient', 'photoshop_fill_layer'].includes(String(mutations[0].tool));
+  // One native bounded paint_regions on a NEW, explicitly canvas-space
+  // owner represents one independently editable 2D shape, not an inferred
+  // world-space water surface, building or multi-part subject. The artist has
+  // already declared the flat component, its owner and its contours.
+  const singleCanvasShape = !scope
+    && logical?.component_space === 'canvas'
+    && logical.construction_tier === undefined
+    && logical.construction_change !== true
+    && logical.geometry_binding === undefined
+    && !pass.construction
+    && pass.visual_intent === 'mass'
+    && pass.construction_role === 'structured-mass'
+    && mutations[0].tool === 'photoshop_paint_regions'
+    && Array.isArray(mutationArgs.regions) && mutationArgs.regions.length === 1
+    && Array.isArray(row(mutationArgs.regions[0])?.contours)
+    && (row(mutationArgs.regions[0])?.contours as unknown[]).length > 0
+    && !!text(logical.hypothesis);
   const kind: 'single-component' | 'continuous-field' | undefined =
     explicitKind === 'single-component' || explicitKind === 'continuous-field'
-      ? explicitKind : provenCanvasField ? 'continuous-field' : undefined;
+      ? explicitKind : provenCanvasField ? 'continuous-field'
+        : singleCanvasShape ? 'single-component' : undefined;
   if (!kind) return { pass, derived: false };
   if (kind === 'continuous-field' && (logical?.component_space !== 'canvas'
     || pass.construction_role !== 'continuous-field'
     || !['photoshop_paint_color_gradient', 'photoshop_fill_layer'].includes(String(mutations[0].tool))))
     return { pass, derived: false };
-  const role = text(scope?.role) ?? (kind === 'continuous-field' ? 'Continuous canvas color field' : undefined);
+  const role = text(scope?.role) ?? (kind === 'continuous-field' ? 'Continuous canvas color field'
+    : singleCanvasShape ? text(logical?.hypothesis) : undefined);
   if (!role || role.length < 4) return { pass, derived: false };
   const authoredAxes = scope?.edit_axes;
   if (authoredAxes !== undefined && (!Array.isArray(authoredAxes) || !authoredAxes.length

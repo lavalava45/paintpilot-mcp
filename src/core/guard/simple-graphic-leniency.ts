@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto';
+import type { ToolRegistry } from '../tool-registry.js';
+import { paintingMethodCapabilities } from '../painting-method-palette.js';
 
 type Row = Record<string, any>;
 export interface SimpleGraphicNotice { code: 'simple_graphic_auto_fix' | 'simple_graphic_warn'; message: string }
@@ -15,7 +17,7 @@ const exactId = (value: unknown): value is number => Number.isSafeInteger(value)
  * supported by an unambiguous canvas field or authoritative owner receipt.
  */
 export function normalizeSimpleGraphicPass(
-  authored: Row, context: Row,
+  authored: Row, context: Row, registry?: ToolRegistry,
 ): { pass: Row; notices: SimpleGraphicNotice[] } {
   const pass = structuredClone(authored);
   const notices: SimpleGraphicNotice[] = [];
@@ -31,6 +33,35 @@ export function normalizeSimpleGraphicPass(
   const painted = actions.filter(action => action?.tool !== 'photoshop_create_layer'
     && action?.tool !== 'photoshop_get_preview');
   const logical = row(pass.logical_layer);
+  // preferred_method_id describes a technique, while actions name an actual
+  // executor. For exactly one real native mutation, prefer its unique
+  // compatible method ONLY if the authored visual_intent + impact_class
+  // already agree. Never change action tools, visual intent, excluded methods
+  // or an explicit step method_id. This cannot convert a watercolor wash
+  // (continuous field) into a closed polygon by guessing.
+  const preferred = text(pass.preferred_method_id);
+  if (registry && preferred && painted.length === 1
+    && painted[0]?.tool === 'photoshop_paint_regions'
+    && !text(painted[0]?.method_id)
+    && text(pass.visual_intent) && text(pass.impact_class)
+    && ['ADD', 'REFINE'].includes(String(pass.action_class ?? 'ADD'))) {
+    const choices = paintingMethodCapabilities(registry).filter(method => {
+      const tools = method.executionTools?.length ? method.executionTools
+        : method.primaryTool ? [method.primaryTool] : [];
+      return method.availability !== 'unavailable'
+        && tools.includes(String(painted[0]?.tool))
+        && method.visualIntents.includes(pass.visual_intent)
+        && method.impactClasses.includes(pass.impact_class)
+        && !(Array.isArray(pass.avoid_method_ids) && pass.avoid_method_ids.includes(method.id));
+    });
+    const authoredMethod = paintingMethodCapabilities(registry).find(method => method.id === preferred);
+    if (authoredMethod && choices.length === 1 && choices[0]!.id !== preferred
+      && !choices.includes(authoredMethod)) {
+      pass.preferred_method_id = choices[0]!.id;
+      notices.push({ code: 'simple_graphic_auto_fix',
+        message: `Technical method ${preferred} executes a different command. Selected uniquely compatible ${choices[0]!.id} for the unchanged authored visual_intent and native ${String(painted[0]?.tool)}; pixels, geometry, and action tools are unchanged.` });
+    }
+  }
   const createName = create.length === 1 ? text(row(create[0]?.args)?.name) : undefined;
   const canvasField = createName && create[0]?.id
     && painted.length === 1

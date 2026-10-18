@@ -3981,7 +3981,7 @@ export async function compileGuardCycle(
       const documentId = Number(sourceNextPass.document_id);
       const context = Number.isSafeInteger(documentId) && documentId > 0
         ? store.compactPassContext?.(documentId, options.projectionContext) ?? {} : {};
-      const simple = normalizeSimpleGraphicPass(sourceNextPass, context);
+      const simple = normalizeSimpleGraphicPass(sourceNextPass, context, registry);
       sourceNextPass = simple.pass;
       normalizations.push(...simple.notices);
       const semantic = compileSemanticContracts(sourceNextPass, context);
