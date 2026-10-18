@@ -4779,7 +4779,19 @@ export class SessionStore {
         return `Structural defect "${blocker.problem_id}" requires structural_correction with matching defect_id, part_ids and relation_ids; the address alone is insufficient.`;
       if (isCosmeticCorrectiveAttempt(request))
         return `Structural defect "${blocker.problem_id}" requires construction/geometry, not cosmetic masking.`;
-      const criticIssue = criticCorrectionIssue(documentState ?? {}, request);
+      // Medium-priority checks run before the final visual preflight. Give
+      // causal-overlay reconstruction the SAME authoritative read-only
+      // evidence used by the final gate, rather than rejecting a valid source
+      // only because this earlier check omitted its source operation.
+      const causal = plan?.causal_source;
+      const selected = causal ? selectedCriticCorrection(documentState ?? {}, request) : undefined;
+      const source = causal && selected?.source_operation_id
+        ? this.read(selected.source_operation_id) : undefined;
+      const criticIssue = criticCorrectionIssue(causal ? {
+        ...documentState,
+        logical_layer_owners: this.semanticLayerOwners(documentState.document_id),
+        scene_ownership_plan: this.sceneOwnershipPlan(documentState.document_id),
+      } : (documentState ?? {}), request, source);
       if (criticIssue) return `${criticIssue.code}: ${criticIssue.message}`;
       return undefined;
     }
@@ -6487,6 +6499,7 @@ export class SessionStore {
       const evidenceState = correctionAttemptState(documentState ?? {}, projectionContext?.records ?? this.records());
       const issue = criticCorrectionIssue({ ...evidenceState,
         logical_layer_owners: this.semanticLayerOwners(documentId, projectionContext?.records, projectionContext),
+        scene_ownership_plan: this.sceneOwnershipPlan(documentId, projectionContext?.records, projectionContext),
       }, request, sourceRecord);
       if (issue) add(`${issue.code}: ${issue.message}`);
     }

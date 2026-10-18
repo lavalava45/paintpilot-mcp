@@ -55,6 +55,14 @@ The gate deliberately removes `foundation_goal`, `change_domains` and replaces `
 
 **Limitations:** This audit does not prove the model received instructions, that a document mutation succeeded, or that an artwork is visually correct. A richer automated semantic equivalence check for every field/subschema still requires domain-specific proof obligations; the current runtime guard intentionally enforces the highest-risk cross-boundary fields without guessing meanings.
 
+## Reviewed structural relation vs. separately owned causal overlay
+
+A Critic may accurately identify a relation defect involving architecture, fog and a lamp while the flawed brush marks reside on a **distinct owned layer**. Never rewrite the durable `structural_defect.part_ids` to make such a correction pass. Optional `structural_correction.causal_source` pins `semantic_id`, `owner_id`, `layer_id`, `source_operation_id`, and `frame_sha256`; the original `part_ids` and `relation_ids` must still match the reviewed relation.
+
+The source is admitted only if the exact retained editable-scope review, unique durable native/scene owner, exact completed source-operation `continuation_layers` receipt and every explicitly targeted Photoshop mutation agree. No unbound active-layer edits, foreign physical targets, unreviewed history or retroactive Critic identity changes are authorized. This does not waive protected-layer, Stop, Director, method, structural footprint or visual recheck gates.
+
+The October 18 example has a reviewed relation `roofline-center-distance`, but its over-bright marks reside on layer 20, `far-roof-planar-weathering` (owner `far-roof-material-owner-v1`). Layer 18, fog 19 and lamp 7 remain independently owned. `tests/structural-causal-overlay.test.ts` proves both a pinned simulated positive route and negative mismatched/stale/foreign-target routes. Live Photoshop acceptance remains separate.
+
 ## Native Photoshop History ownership and safe rollback refusal
 
 A `VisualMicroPlan` can have completed painting but still lack an **exact independently owned Photoshop History span**. `history_ownership.status=unproven` must continue to block `previous_observation.disposition=rollback`; guessing a count and issuing Undo could erase unrelated work.

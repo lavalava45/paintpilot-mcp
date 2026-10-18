@@ -67,6 +67,16 @@ export const STRUCTURAL_CORRECTION_SCHEMA = {
     target: { type: 'string', minLength: 10, description: 'Artist-authored desired relation and tolerance; never inferred from an object noun.' },
     execution: { type: 'string', enum: ['construction', 'brush', 'transform'] },
     sequence: { type: 'string', enum: ['single-pass', 'partial-rebuild', 'final-rebuild'] },
+    causal_source: { type: 'object', additionalProperties: false,
+      description: 'Only when the visual defect names contextual components but the separately owned source layer is a different component: pin the exact original reviewed operation/frame and a native owner receipt. Does NOT amend defect.part_ids or grant arbitrary layer access.',
+      properties: {
+        semantic_id: { type: 'string', minLength: 1 },
+        owner_id: { type: 'string', minLength: 1 },
+        layer_id: { type: 'integer', minimum: 1 },
+        source_operation_id: { type: 'string', minLength: 1 },
+        frame_sha256: { type: 'string', pattern: '^[a-fA-F0-9]{64}$' },
+      },
+      required: ['semantic_id', 'owner_id', 'layer_id', 'source_operation_id', 'frame_sha256'] },
   },
   required: ['defect_id', 'part_ids', 'relation_ids', 'target', 'execution'],
 } as const;
@@ -197,6 +207,7 @@ export function criticCorrectionContext(state: Row): Row | null {
               sequence: 'single-pass|partial-rebuild|final-rebuild',
             },
           },
+          causal_source_guidance: 'If a separately owned physical overlay caused this reviewed relationship defect but is not listed in structural_defect.part_ids, do NOT rewrite the defect or fabricate a new owner. Keep structural_correction.part_ids naming one original reviewed relationship part, and add structural_correction.causal_source={semantic_id,owner_id,layer_id,source_operation_id,frame_sha256} from the exact same retained editable_scope_review. Guard requires the completed source-operation native owner receipt and a single physically pinned mutation target. A visually plausible layer name or artist guess alone cannot authorize an exception.',
         } : {}),
         next_required_action:
           'Execute one bounded correction of this visible deficit. Preserve owners/protected pixels and uncertainty rules; inspect exact AFTER/BEFORE. Local improvement does not clear whole-scene Critic debt. After repeated no gain change actual construction or report a concrete blocker.',
@@ -367,6 +378,80 @@ function touchedStructuralParts(state: Row, request: Row): string[] {
   }
   return [...touched];
 }
+
+/**
+ * A structural relationship may describe the affected architecture, fog and
+ * light, while a *different* separately editable overlay caused the fault.
+ * The explicit causal source is usable only when all THREE independent pieces
+ * agree: a current exact-frame editable-scope review, durable native semantic
+ * owner/scene identity and the completed source operation's native owner
+ * receipt. The stored defect itself is never silently rewritten.
+ */
+function verifiedReviewedCausalSource(
+  state: Row, request: Row, finding: Row, plan: Row, sourceRecord?: Row,
+): boolean {
+  const proof = plan.causal_source;
+  const defect = finding.structural_defect;
+  if (!proof || !defect || !sourceRecord || typeof proof !== 'object'
+    || !Number.isSafeInteger(proof.layer_id) || proof.layer_id <= 0
+    || typeof proof.semantic_id !== 'string' || !proof.semantic_id
+    || typeof proof.owner_id !== 'string' || !proof.owner_id
+    || typeof proof.source_operation_id !== 'string'
+    || typeof proof.frame_sha256 !== 'string') return false;
+  if (proof.source_operation_id !== finding.source_operation_id
+    || sourceRecord.id !== proof.source_operation_id
+    || sourceRecord.preview?.sha256 !== proof.frame_sha256
+    || finding.evidence_sha256 !== proof.frame_sha256
+    || sourceRecord.phase !== 'completed' || sourceRecord.failed === true
+    || sourceRecord.rolled_back === true || sourceRecord.visual !== true
+    || sourceRecord.args?.document_id !== state.document_id) return false;
+  const review = state.editable_scope_review;
+  if (review?.scope !== 'whole-scene'
+    || review.operation_id !== proof.source_operation_id
+    || review.frame_sha256 !== proof.frame_sha256) return false;
+  const reviewed = (review.parts ?? []).filter((part: Row) =>
+    part.semantic_id === proof.semantic_id && part.owner_id === proof.owner_id
+    && part.layer_id === proof.layer_id && part.status !== 'missing');
+  if (reviewed.length !== 1) return false;
+  const nativeOwners = (state.logical_layer_owners ?? []).filter((owner: Row) =>
+    owner.layer_id === proof.layer_id && owner.hypothesis_id === proof.owner_id);
+  if (nativeOwners.length !== 1
+    || (state.logical_layer_owners ?? []).some((owner: Row) =>
+      (owner.layer_id === proof.layer_id && owner.hypothesis_id !== proof.owner_id)
+      || (owner.hypothesis_id === proof.owner_id && owner.layer_id !== proof.layer_id))) return false;
+  const units = (state.scene_ownership_plan?.units ?? []).filter((unit: Row) =>
+    unit.semantic_id === proof.semantic_id && unit.owner_id === proof.owner_id);
+  if (units.length !== 1) return false;
+  const resultBodies = (sourceRecord.result?.content ?? [])
+    .filter((item: Row) => item.type === 'text')
+    .flatMap((item: Row) => { try { return [JSON.parse(item.text)]; } catch { return []; } });
+  const receipts = resultBodies.flatMap((body: Row) =>
+    Array.isArray(body.continuation_layers) ? body.continuation_layers : []);
+  if (receipts.filter((item: Row) => item.hypothesis_id === proof.owner_id).length !== 1
+    || !receipts.some((item: Row) => item.layer_id === proof.layer_id
+      && item.hypothesis_id === proof.owner_id)) return false;
+  const atoms = steps(request).filter(step => step.tool !== 'photoshop_get_preview');
+  if (!atoms.length || atoms.some(step => ![
+    'photoshop_paint_regions', 'photoshop_paint_strokes', 'photoshop_paint_dabs',
+    'photoshop_transform_layer',
+  ].includes(step.tool))) return false;
+  if (atoms.some(step => {
+    if (Number.isSafeInteger(step.args?.layer_id)) {
+      if (step.args.layer_id !== proof.layer_id) return true;
+      return Array.isArray(step.args.regions) && step.args.regions.some((region: Row) =>
+        region.layer_id !== undefined && region.layer_id !== proof.layer_id);
+    }
+    // No implicit active-layer target, even if another step names the owner.
+    return !Array.isArray(step.args?.regions) || !step.args.regions.length
+      || step.args.regions.some((region: Row) => region.layer_id !== proof.layer_id);
+  })) return false;
+  // The authored correction must still name the exact reviewed relationship,
+  // not pretend the source overlay was originally one of defect.part_ids.
+  return plan.part_ids.length === 1
+    && defect.part_ids.includes(plan.part_ids[0])
+    && !defect.part_ids.includes(proof.semantic_id)
+    && !(state.visual_problems?.[defect.id]?.status === 'resolved');
+}
 function hasStructuralMutationFootprint(request: Row, execution: string): boolean {
   const atoms = steps(request);
   if (execution === 'construction') return Boolean(
@@ -396,7 +481,10 @@ function obligationsForFinding(state: Row, problemId: string): boolean {
 }
 export function criticCorrectionIssue(state: Row, request: Row, originalOperation?: Row) {
   const finding = selectedCriticCorrection(state, request);
-  if (!finding) return undefined;
+  if (!finding) return (request.structural_correction ?? request.args?.structural_correction)?.causal_source
+    ? { code: 'structural_correction_owner_mismatch',
+        message: 'A causal_source cannot authorize reconstruction without an unresolved, exact Critic-reviewed structural defect.' }
+    : undefined;
   const linked = requestProblemLinks(request);
   const otherTarget = activeCriticFindings(state).map(correctionFinding)
     .find((item: Row) => linked.includes(item.problem_id) && !STRUCTURAL_PRIORITY_KINDS.has(item.correction_kind));
@@ -452,12 +540,19 @@ export function criticCorrectionIssue(state: Row, request: Row, originalOperatio
     if (!hasStructuralMutationFootprint(request, plan.execution))
       return { code: 'structural_correction_no_geometric_execution',
         message: `Defect ${defect.id}: compiled actions need actual nonempty contours, brush paths or nontrivial transforms; a tool name alone is insufficient.` };
-    if (plan.execution === 'construction' && !plan.part_ids.includes(provenance?.part_id))
+    const reviewedSource = verifiedReviewedCausalSource(
+      state, request, finding, plan, originalOperation);
+    if (plan.causal_source && !reviewedSource)
+      return { code: 'structural_correction_owner_mismatch',
+        message: `Defect ${defect.id}: causal_source did not match the reviewed frame, native owner receipt, active scene owner and exact single target. Do not retarget an unrelated layer.` };
+    if (plan.execution === 'construction' && !plan.part_ids.includes(provenance?.part_id)
+      && !(reviewedSource && provenance?.part_id === plan.causal_source?.semantic_id))
       return { code: 'structural_correction_part_mismatch', message: `Construction must rebuild one of the declared affected parts of ${defect.id}.` };
     const touched = touchedStructuralParts(state, request);
-    if (touched.length && plan.part_ids.some((id: string) => !touched.includes(id)))
+    if (touched.length && plan.part_ids.some((id: string) => !touched.includes(id))
+      && !reviewedSource)
       return { code: 'structural_correction_owner_mismatch',
-        message: `Defect ${defect.id}: authored part_ids do not match the components actually addressed by the compiled layer/owner actions.` };
+        message: `Defect ${defect.id}: authored part_ids do not match the components actually addressed by the compiled layer/owner actions. For a separate culprit overlay, structural_correction.causal_source must exactly match the retained reviewed frame, durable semantic owner and native source-operation layer receipt; never relabel unrelated owners.` };
     const completed = state.structural_repair_progress?.[defect.id]?.part_ids ?? [];
     if (plan.sequence === 'final-rebuild'
       && defect.part_ids.some((id: string) => !new Set([...completed, ...plan.part_ids]).has(id)))
