@@ -1,4 +1,5 @@
 import { normalizeSceneOwnershipPlan, completeSceneOwnershipContinuation, extendSceneOwnershipPlan } from '../scene-ownership-plan.js';
+import { compileMinimalOwnerBootstrap } from './ownership-bootstrap-compiler.js';
 import { normalizeProblemLinks } from './problem-links.js';
 import { brushRoleMatchesScale } from './brush-scale-fit.js';
 import { omitRedundantConstructionLayerAction } from './preflight-repair.js';
@@ -673,6 +674,25 @@ export function compilePaintingIntentToNextPass(
   if (effectiveIntent.logical_layer && effectiveIntent.logical_layer.hypothesis_id !== effectiveIntent.target_owner_id)
     throw new NextPassCompilerError('painting_intent_owner_conflict',
       'logical_layer.hypothesis_id must match target_owner_id; do not retarget ownership when forwarding the declared logical layer.');
+  // Before requiring predeclared ownership, compile a genuinely single new
+  // component from typed artistic scope and a single create-layer transaction.
+  // This never turns a continuation into a creation or guesses subject scope.
+  const bootstrap = compileMinimalOwnerBootstrap({
+    ...effectiveIntent,
+    ...(effectiveIntent.logical_layer
+      ? { logical_layer: effectiveIntent.logical_layer }
+      : effectiveIntent.target_owner_id ? { logical_layer: {
+        decision: 'create-new', hypothesis_id: effectiveIntent.target_owner_id,
+      } } : {}),
+  }, durableContext);
+  if (bootstrap.derived) {
+    effectiveIntent = { ...effectiveIntent,
+      scene_ownership_plan: bootstrap.pass.scene_ownership_plan as Record<string, unknown> };
+    context = { ...context, scene_ownership_plan: bootstrap.pass.scene_ownership_plan };
+    diagnostics.push({ code: 'intent_single_component_plan_compiled',
+      message: bootstrap.reason ?? 'Compiled the minimal one-owner plan from the exact new-layer transaction.',
+      source: 'semantic_owner_bootstrap', });
+  }
   const owner = resolveTargetOwner(effectiveIntent, context);
   const plannedOwner = scenePlanOwner(effectiveIntent, context);
   if (effectiveIntent.target_owner_id && !owner && !plannedOwner) {

@@ -9295,6 +9295,25 @@ export class SessionStore {
     for (const record of records) {
       if (!record?.scene_ownership_plan) continue;
       if (record.rolled_back === true || record.current_frame_authority === false) continue;
+      // A submitted scene plan is not a durable owner certificate. In
+      // particular, a rejected/queued/stopped create-layer pass must NOT
+      // register its unexecuted owner just because the proposal was journaled.
+      if (record.phase !== 'completed'
+        || record.execution === 'not-executed' || record.execution === 'uncertain') continue;
+      if (record.failed === true && record.execution !== 'partial') continue;
+      const logical = record.args?.logical_layer;
+      const newOwner = ['create-new', 'temporary-hypothesis'].includes(logical?.decision);
+      // For a first-owner bootstrap, "completed" alone is not physical
+      // evidence. The same VisualMicroPlan must return the created layer's
+      // numeric receipt associated with exactly this declared owner.
+      if (record.execution === 'partial' || newOwner) {
+        const ownerId = textOrUndefined(logical?.hypothesis_id);
+        if (!ownerId || !parseTexts(record.result).some(body =>
+          Array.isArray(body?.continuation_layers)
+          && body.continuation_layers.some(layer => layer?.hypothesis_id === ownerId
+            && Number.isSafeInteger(layer?.layer_id) && layer.layer_id > 0)))
+          continue;
+      }
       try {
         return {
           ...normalizeSceneOwnershipPlan(record.scene_ownership_plan),

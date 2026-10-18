@@ -24,6 +24,7 @@ than a guarantee of autonomous completion.
 
 **Reliability:** [Guard and recovery](guard-and-recovery.md) →
 [Semantic Contract Compiler](semantic-contract-compiler.md) →
+[Owner bootstrap and recovery](ownership-bootstrap.md) →
 [Visual verification](visual-verification.md) →
 [Runtime adaptation](runtime-adaptation.md).
 
@@ -40,6 +41,7 @@ than a guarantee of autonomous completion.
 | [Painting method](painting-method.md) | How recognition, construction, light, materials and selective detail develop |
 | [Guard and recovery](guard-and-recovery.md) | How uncertain execution, ownership and rollback avoid blind replay |
 | [Semantic Contract Compiler](semantic-contract-compiler.md) | How technical identities and references are derived without inventing artistic choices |
+| [Owner bootstrap and recovery](ownership-bootstrap.md) | How a single verified component gets a layer, durable identity and fail-closed recovery in both profiles |
 | [Visual verification](visual-verification.md) | How whole-frame and local crops remain tied to the same operation |
 | [Runtime adaptation](runtime-adaptation.md) | What a painter can retain without training model weights |
 | [Engineering findings](findings.md) | Recurrent design lessons, boundaries and falsifiable hypotheses |

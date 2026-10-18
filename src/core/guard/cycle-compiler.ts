@@ -5,6 +5,7 @@ import { contradictoryTransitionRequirements, transitionRequirementSchemaErrors,
 import { convergeTechnicalContracts, MAX_TECHNICAL_CONVERGENCE_PASSES, type ContractConvergenceStop } from './contract-convergence.js';
 import { compileSemanticContracts } from './semantic-entity-registry.js';
 import { compileSemanticOwnership, compileSemanticMethod, compileSemanticExecutablePlan } from './semantic-execution-compiler.js';
+import { compileMinimalOwnerBootstrap } from './ownership-bootstrap-compiler.js';
 import { ContractErrorProvenanceObserver } from './contract-error-provenance.js';
 import { brushRoleMatchesScale } from './brush-scale-fit.js';
 import { constructionExecutionIssue, unexpandedConstructionPrerequisites } from './construction-execution.js';
@@ -1362,6 +1363,12 @@ function compileCompactPass(
   violations.push(...actionClassViolations);
 
   const context = store.compactPassContext?.(Number(documentId), projectionContext) ?? {};
+  const ownerBootstrap = compileMinimalOwnerBootstrap({ ...raw, actions }, context);
+  if (ownerBootstrap.derived) {
+    raw = { ...raw, scene_ownership_plan: ownerBootstrap.pass.scene_ownership_plan };
+    normalizations.push({ code: 'scene_single_component_plan_compiled',
+      message: ownerBootstrap.reason ?? 'Compiled one exact semantic component from current authored and method contracts.' });
+  }
   const { stage, stageReset } = resolveCompactStageTransition(
     raw,
     context,

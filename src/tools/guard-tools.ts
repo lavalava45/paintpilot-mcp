@@ -656,6 +656,18 @@ function compactPassSchema(): Record<string, unknown> {
       scene_ownership_plan: sceneOwnershipContinuationSchema(
         'First declaration must be complete: plan_id, objects, units, each new unit with owner_id, role, editability and edit_axes. Once saved, omit unchanged entries entirely; for extensions supply only new explicit units/objects or existing object component lists that preserve all old components. Saved owner/subject/classification edits remain rejected. Existing ownership/geometry bindings are inherited by Guard, not guessed by the artist.'
       ),
+      component_scope: {
+        type: 'object',
+        description: 'Artistic declaration of an actual ONE independently editable part. Optional: if absent, compiler derives continuous-field only for proven canvas field with one new layer and one gradient/fill. It never assumes a person/animal/window is single-component.',
+        properties: {
+          subject_kind: { type: 'string', enum: ['single-component', 'continuous-field'] },
+          role: { type: 'string', minLength: 4 },
+          edit_axes: { type: 'array', minItems: 1, uniqueItems: true,
+            items: { type: 'string', enum: ['visibility', 'color', 'material', 'lighting', 'position', 'mask', 'rollback'] } },
+        },
+        required: ['subject_kind'],
+        additionalProperties: false,
+      },
       scene_geometry_model: structuredClone(SCENE_GEOMETRY_SCHEMA),
       construction: { ...CONSTRUCTION_PASS_SCHEMA, description: 'General object proportions/connections and articulated reach/contact/pose edits: model.ik_chains preserves authored bone lengths and joint limits; curve=smooth builds continuous contours. Supply model once, then durable model_id, part_id and explicit color. Generates one component on its own layer. Do not also supply actions. No source reads or extra preparation call.' },
       painterly: PAINTERLY_PASS_SCHEMA,

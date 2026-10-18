@@ -37,6 +37,7 @@ export const PAINTING_INTENT_SCALES = [
 
 export const PAINTING_INTENT_VISUAL_INTENTS = [
   'mass',
+  'continuous-field',
   'painted-mass',
   'planar-mass',
   'broken-mass',
@@ -65,7 +66,7 @@ export interface PaintingIntentBounds {
 }
 
 export const PAINTING_INTENT_CONTRACT_FIELDS = [
-  'scene_ownership_plan', 'scene_geometry_model', 'scene_camera_imaging_model',
+  'component_scope', 'scene_ownership_plan', 'scene_geometry_model', 'scene_camera_imaging_model',
   'scene_lighting_color_model', 'construction', 'painterly', 'logical_layer',
   'layer_separation_check', 'imaging_preflight',
   'color_gradient_preflight', 'cross_layer_correction', 'structural_correction',
