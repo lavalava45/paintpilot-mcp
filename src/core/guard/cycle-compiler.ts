@@ -14,6 +14,7 @@ import { constructionExecutionIssue, unexpandedConstructionPrerequisites } from 
 import { ConstructionError, expandConstructionPass, type ConstructionModel } from '../object-construction.js';
 import { PainterlyError, expandPainterlyPass, type PainterlyFrame } from '../painterly-strokes.js';
 import { prepareGeometryContract, geometryContractRecipe } from '../geometry-contract.js';
+import { perspectiveEvidenceIssues } from '../scene-perspective-validation.js';
 import type { ToolRegistry, ToolResult } from '../tool-registry.js';
 import { DOCUMENT_ID_SCHEMA_EXCLUDES } from '../document-target.js';
 import {
@@ -2849,6 +2850,10 @@ function compileCompactPass(
       message: 'Derived construction_role=continuous-field from the dedicated color-gradient execution primitive.',
     });
   }
+  // A 2D graphic can legitimately draw structured shapes without claiming
+  // shared spatial perspective. In simple_graphic the spatial tier/change/
+  // surface/geometry binding below opts into the SAME scene checks; in the
+  // nontrivial profile coherent construction is spatial by default.
   const committedStructuredConstruction = context.painting_profile === 'nontrivial_painting'
     && ['structured-mass', 'structured-contour'].includes(constructionRole ?? '')
     && mutationSteps.length > 0
@@ -2873,8 +2878,7 @@ function compileCompactPass(
       message: 'A uniform initial fill on its new layer needs no scene geometry; no spatial construction or artistic completion is certified.',
     });
   }
-  const committedSpatialOwnerConstruction = context.painting_profile === 'nontrivial_painting'
-    && !initialLayerTone
+  const committedSpatialOwnerConstruction = !initialLayerTone
     && mutationSteps.length > 0
     && actionClass !== 'ROLLBACK'
     && !!plannedLogicalDecision
@@ -2883,7 +2887,8 @@ function compileCompactPass(
     && (
       plannedLogicalDecision === 'create-new'
         ? (
-            physicalSignatureRoles.has(physicalRole ?? '')
+            ((context.painting_profile === 'nontrivial_painting' || logicalLayer?.component_space === 'world')
+              && physicalSignatureRoles.has(physicalRole ?? ''))
             || !!constructionTier
             || logicalLayer?.construction_change === true
             || perspectiveRegularSurface
@@ -2920,6 +2925,11 @@ function compileCompactPass(
     }
   }
   if (sceneGeometryRequired && applicableSceneGeometryModel?.applicability === 'coherent_3d') {
+    for (const issue of perspectiveEvidenceIssues(applicableSceneGeometryModel, { committed: true })) {
+      violations.push(violation('next_operation', issue.code, issue.message, {
+        path: `next_pass.${issue.path}`,
+      }));
+    }
     const projectionKind = applicableSceneGeometryModel.projection.kind;
     const requiredVanishingPoints = projectionKind === 'one_point' ? 1
       : projectionKind === 'two_point' ? 2
@@ -2928,6 +2938,10 @@ function compileCompactPass(
       const finiteVanishingPoints = applicableSceneGeometryModel.projection.vanishing_points.length;
       const coveredVanishingPoints = new Set(
         applicableSceneGeometryModel.line_families
+          .filter(family => family.members.some(member => (
+            Math.hypot(member.points[1].x - member.points[0].x,
+              member.points[1].y - member.points[0].y) >= 1e-9
+          )))
           .map(family => family.vanishing_point_id)
           .filter((value): value is string => !!value)
       );

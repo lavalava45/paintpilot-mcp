@@ -60,6 +60,22 @@ all dependent transforms, perspective invalidation, source/pixel
 correspondence and artistic quality. See [object construction](../object-construction.md)
 and [the live acceptance requirements](../PAINTING-WORK-DETAILS.md#e18).
 
+### Perspective contract correction — 18 October 2026
+
+Previously, two `derived_from` IDs were accepted as a derived vanishing
+point even when no such source lines existed, or their intersection was
+elsewhere. `scene-perspective-validation` now checks source-line membership,
+finite well-conditioned intersection, every declared family member against
+its VP, and horizontal vanishing points against an explicitly declared
+horizon. The third, vertical VP of a three-point scene may be off horizon.
+
+Empty proposed line families remain legitimate **planning placeholders**, but
+do not certify an **executable** perspective basis. Explicit spatial work in
+`simple_graphic` (for example a world-space physical mass or a construction
+tier) uses the same geometry basis as `nontrivial_painting`. Flat canvas
+components remain exempt. This is source-level and offline-test validation,
+not retroactive correction of existing PSD pixels or full live acceptance.
+
 ## The same pattern appeared in color
 
 The scene's intention was legible: cool low-chroma dusk, warm

@@ -39,7 +39,7 @@ describe('early geometry contract diagnostics', () => {
       'geometry_binding_required', 'perspective_basis_required',
     ]));
     expect(result.issues.find(issue => issue.code === 'perspective_basis_required')?.message)
-      .toContain('covered_vanishing_points=1');
+      .toContain('covered_vanishing_points=0');
   });
 
   it('preserves exact missing-reference and insufficient-control diagnostics', () => {
@@ -58,10 +58,19 @@ describe('early geometry contract diagnostics', () => {
       .toContain('dependencies[0]');
   });
 
-  it('does not invent a perspective-basis defect for two distinct declared families', () => {
+  it('does not certify two EMPTY proposed families as an executable perspective basis', () => {
     const pass = constructionPass();
     const result = prepareGeometryContract(pass, { painting_profile: 'nontrivial_painting' });
-    expect(result.issues.map(issue => issue.code)).not.toContain('perspective_basis_required');
+    expect(result.issues.map(issue => issue.code)).toContain('perspective_basis_required');
     expect(result.issues.map(issue => issue.code)).toContain('geometry_binding_required');
   });
+  it.each(['simple_graphic', 'nontrivial_painting'])(
+    'requires equivalent coherent-3D geometry on authored structured construction in %s',
+    painting_profile => {
+      const pass = constructionPass();
+      const result = prepareGeometryContract(pass, { painting_profile });
+      expect(result.issues.map(issue => issue.code)).toContain('perspective_basis_required');
+      expect(result.issues.map(issue => issue.code)).toContain('geometry_binding_required');
+    },
+  );
 });

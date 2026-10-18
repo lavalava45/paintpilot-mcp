@@ -1,5 +1,7 @@
 import { canvasComponent, componentSpaceIssue } from './component-space.js';
 import type { StructuredRepairOperation } from './guard/preflight-repair.js';
+import { normalizeSceneGeometryModel } from './scene-geometry-model.js';
+import { perspectiveEvidenceIssues } from './scene-perspective-validation.js';
 
 type RecordValue = Record<string, unknown>;
 type Schema = {
@@ -147,11 +149,33 @@ export function prepareGeometryContract(input: RecordValue, context: RecordValue
       path: `next_pass.scene_geometry_model.source_frame.${key}`, message: `scene_geometry_model.source_frame.${key} is required; pinned context is unavailable`, expected: sourceFrame.properties?.[key],
     });
   }
-  const constructing = !canvasComponent(pass, context) && context.painting_profile === 'nontrivial_painting'
+  const explicitSpatialSimple = logical?.construction_change === true
+    || !!logical?.construction_tier || !!logical?.geometry_binding
+    || (logical?.component_space === 'world'
+      && ['opaque-mass', 'support-surface', 'transmissive-surface'].includes(String(logical?.physical_role)))
+    || !!pass.scene_geometry_model || !!context.scene_geometry_model;
+  const constructing = !canvasComponent(pass, context)
+    && (context.painting_profile === 'nontrivial_painting' || explicitSpatialSimple)
     && pass.action_class !== 'ROLLBACK' && logical?.decision !== 'temporary-hypothesis'
     && rows(pass.actions).some(v => typeof v.tool === 'string' && /photoshop_(paint_|fill_layer|apply_)/.test(v.tool))
     && (['structured-mass', 'structured-contour'].includes(String(pass.construction_role)) || logical?.construction_change === true
       || (logical?.decision === 'create-new' && !!logical?.construction_tier));
+  // The scene evidence is a shared contract, not a feature toggle on the
+  // painting profile. Validate even exploratory supplied coherent-3D models;
+  // demand an executable line basis only when the operation commits 3D form.
+  if (scene && (supplied || constructing)) {
+    try {
+      const normalized = normalizeSceneGeometryModel(scene);
+      for (const issue of perspectiveEvidenceIssues(normalized, { committed: constructing })) {
+        issues.push({
+          code: issue.code, path: `next_pass.${issue.path}`,
+          message: issue.message, decision: true,
+        });
+      }
+    } catch {
+      // Existing shape/field validation reports malformed models independently.
+    }
+  }
   if (constructing && scene?.applicability === 'coherent_3d' && logical?.hypothesis_id && logical.geometry_binding === undefined) issues.push({
     path: 'next_pass.logical_layer.geometry_binding', decision: true, code: 'geometry_binding_required',
     message: 'geometry_binding is required for this coherent-3D owner; its technical identity is supplied in the correction template, but choose a real support/family/dependency/anchor/control section',
@@ -167,6 +191,8 @@ export function prepareGeometryContract(input: RecordValue, context: RecordValue
       const points = rows(projection?.vanishing_points);
       const known = new Set(points.map(point => point.id).filter((value): value is string => typeof value === 'string'));
       const covered = new Set(rows(scene.line_families)
+        .filter(family => rows(family.members).some(member => Array.isArray(member.points)
+          && member.points.length === 2))
         .map(family => family.vanishing_point_id)
         .filter((value): value is string => typeof value === 'string' && known.has(value)));
       if (points.length < required || covered.size < required) issues.push({
