@@ -4562,7 +4562,7 @@ describe('embedded Photoshop Guard', () => {
     expect(runtime.store.read('async-preflight-reject')).toBeUndefined();
   });
 
-  it('aggregates operation, Guard and underlying Photoshop tool schema errors in one compiler response', async () => {
+  it('aggregates Guard and Photoshop schema errors without inventing an artistic method for native opacity edits', async () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'embedded-guard-schema-aggregate-'));
     dirs.push(dir);
     const { registry } = fakeRegistry(dir);
@@ -4590,8 +4590,9 @@ describe('embedded Photoshop Guard', () => {
     }) as any;
 
     const errors = rejected.preflight_rejection.errors.join('\n');
-    expect(errors).toMatch(/Supplied method hints or exclusions conflict with executable tools/);
+    expect(errors).toMatch(/next_pass\.actions\[0\]\.args\.opacity is required/);
     expect(errors).toMatch(/args\.opacity is required/);
+    expect(rejected.preflight_rejection.error_codes).not.toContain('artistic_method_unavailable');
     expect(rejected.execution.execution).toBe('not-executed');
     expect(runtime.store.read('schema-aggregate-reject')).toBeUndefined();
     expect(runtime.store.visualBarrier(42)).toBeUndefined();

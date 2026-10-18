@@ -45,6 +45,32 @@ function fixture(planner = false, paintingProfile: 'simple_graphic' | 'nontrivia
 
 describe('October 18 direct foundation rollback domain provenance', () => {
   it.each([
+    { profile: 'simple_graphic' as const, planner: false },
+    { profile: 'simple_graphic' as const, planner: true },
+    { profile: 'nontrivial_painting' as const, planner: false },
+    { profile: 'nontrivial_painting' as const, planner: true },
+  ])('does not demand an artistic paint method to delete one named layer (%o)', async ({ profile, planner }) => {
+    const f = fixture(planner, profile);
+    const pass = {
+      ...proposedDelete(),
+      visual_intent: 'soft-transition',
+      impact_class: 'transition',
+      preferred_method_id: 'gaussian-blur',
+      avoid_method_ids: ['smudge-shape'],
+    };
+    const result = await compileGuardCycle({ next_pass: pass }, f.store, f.registry);
+    const methodErrors = result.violations.filter(item =>
+      ['artistic_method_unavailable', 'artistic_method_execution_mismatch'].includes(item.code));
+    expect(methodErrors, JSON.stringify(result.violations)).toEqual([]);
+    expect(result.nextOperation).toMatchObject({
+      tool: 'photoshop_delete_layer',
+      foundation_goal: 'composition',
+      change_domains: ['composition', 'background-scope'],
+      args: { document_id: 625, layer_id: 16 },
+    });
+    expect(f.mutationCalls()).toBe(0);
+  });
+  it.each([
     { planner: false, profile: 'simple_graphic' as const },
     { planner: true, profile: 'simple_graphic' as const },
     { planner: false, profile: 'nontrivial_painting' as const },

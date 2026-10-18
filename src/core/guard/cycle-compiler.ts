@@ -8,6 +8,7 @@ import { compileSemanticOwnership, compileSemanticMethod, compileSemanticExecuta
 import { compileMinimalOwnerBootstrap } from './ownership-bootstrap-compiler.js';
 import { ContractErrorProvenanceObserver } from './contract-error-provenance.js';
 import { criticalPreservationFailures } from './contract-preservation.js';
+import { directMethodApplicability } from './direct-method-applicability.js';
 import { brushRoleMatchesScale } from './brush-scale-fit.js';
 import { constructionExecutionIssue, unexpandedConstructionPrerequisites } from './construction-execution.js';
 import { ConstructionError, expandConstructionPass, type ConstructionModel } from '../object-construction.js';
@@ -1187,12 +1188,22 @@ function compileCompactPass(
         } : {}),
       };
     }
-    // Document bootstrap is infrastructure, not an artistic painting method.
-    // Callers may accidentally carry stage/intent metadata from the painting
-    // request into create/open. Never route bootstrap through method selection:
-    // doing so can misclassify GLOBAL_BLOCK_IN + mass/construct as
-    // region-block-in and reject the real create/open tool before dispatch.
-    if (!bootstrap && onlyTool !== 'photoshop_undo' && (visualIntent || impactClass || text(raw.preferred_method_id) || (Array.isArray(raw.avoid_method_ids) && raw.avoid_method_ids.length))) {
+    // Selection from the *painting* method palette is meaningful only for
+    // executor tools represented by that palette. A native semantic mutation
+    // like photoshop_delete_layer is still guarded, but cannot match a brush,
+    // region, gradient or blur paint method. Do not turn inherited artistic
+    // hints into an impossible constraint on a registered layer-management
+    // command. Unknown/forbidden tools still fail through their normal gates.
+    const methodApplicability = directMethodApplicability(registry, onlyTool);
+    const authoredMethodHints = !!(visualIntent || impactClass || text(raw.preferred_method_id)
+      || (Array.isArray(raw.avoid_method_ids) && raw.avoid_method_ids.length));
+    if (!bootstrap && methodApplicability === 'native-nonpainting' && authoredMethodHints) {
+      normalizations.push({
+        code: 'artistic_method_not_applicable_to_native_operation',
+        message: `Native operation ${onlyTool} is registered but not an executor in the painting-method palette; descriptive painting hints do not select its primitive. Native Guard safety and document checks remain required.`,
+      });
+    }
+    if (!bootstrap && onlyTool !== 'photoshop_undo' && methodApplicability !== 'native-nonpainting' && authoredMethodHints) {
       const inferred = text(raw.construction_role) ? null : inferUniqueClassification({
         registry, actionClass: directActionClass, executionTools: [onlyTool], visualIntent, impactClass,
         preferredMethodId: text(raw.preferred_method_id),

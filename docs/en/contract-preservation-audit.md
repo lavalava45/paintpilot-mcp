@@ -37,6 +37,12 @@ The catalog is a complete **declared disposition inventory**, not a claim that e
 
 The typed rejection is `contract_field_lost_during_compilation`, with the exact originating `next_pass.*` path. It is a pre-dispatch system defect: no Photoshop action is authorized. For direct `photoshop_delete_layer`, `action_class=ROLLBACK` does **not** magically become a VisualMicroPlan/Undo rollback or confer permission to delete; independent layer, Stop, instance, history and protected-target checks remain authoritative.
 
+### Native operations are not necessarily artistic painting methods
+
+`directMethodApplicability()` checks registered tools against the **single painting method palette**. Tools represented by an artistic method (strokes, gradient, filters and other cataloged techniques) retain strict `visual_intent`, `impact_class`, preference and exclusion checks. A known Guard-authorized native operation **not** represented by a painting method (such as `photoshop_delete_layer`) must not require a fabricated paint method. Stale artistic hints produce an `artistic_method_not_applicable_to_native_operation` normalization without changing the Photoshop command.
+
+Unknown, unregistered and forbidden tools are not exempt. All independent delete, owner, document, Stop and protection checks still apply. `tests/direct-method-applicability.test.ts` and `tests/direct-foundation-domain-regressions.test.ts` cover both profiles, with/without Art Director, stale method metadata, and an actual paint-method mismatch as a negative control.
+
 ## Regression matrix and negative controls
 
 `tests/contract-preservation-audit.test.ts` and `tests/direct-foundation-domain-regressions.test.ts` exercise both `simple_graphic` and `nontrivial_painting`, with/without Art Director, direct and VisualMicroPlan routes, PaintingIntent conversion, multiple action classes, exact-frame closure, Stop refusal, stale restore and missing/invalid declarations. The October 18 deletion of a failed halo is represented by an **offline** attempt against mocked layer 16; no actual Photoshop command is dispatched.
