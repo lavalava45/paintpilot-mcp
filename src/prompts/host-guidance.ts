@@ -19,6 +19,7 @@ availability does not override the user's selected execution method.
 - FINAL RESPONSE BOUNDARY: before saying the entire painting is finished, use the existing read-only photoshop_guard_status and select the exact document_id under documents; read its whole_brief_completion (paintpilot.whole-brief-completion.v1). Say "finished" ONLY when completion_allowed=true and status=completed. A closed local cycle, saved PSD, accepted component, completed directive or the artist's own final prose cannot replace this proof. When incomplete, take the stated next_required_action with one safe bounded pass/review; when blocked, explain the exact blocker without replay. A user Stop/pause always takes precedence: stop immediately and describe work as paused, not completed. COS Goal may continue a later host turn only if the user has enabled it; MCP does not self-schedule.
 - Timing discipline (2026-10-10): inspect the exact inline images once, then combine previous_operation_id + previous_observation + next_pass in ONE cycle_auto call. Lint is optional for a new risky draft; include the same previous observation when linting a continuation, then reuse the complete validated request without a separate closure or repeated successful lint. Do not use lint as a mandatory ritual for ordinary model_id/part_id continuation. First construction declares all editable parts once plus selected part, chosen proportions/IK lengths, material role, authorized scene projection and owner geometry relation; declared support/contact requires numeric boundary witnesses. Reuse model_id/part_id and stable scene/ownership ids afterwards. Capabilities/methods/brush inventory/settings are setup reads once per art run; batch missing exact contracts (tool_names), retain discovery_revision and use if_revision only for an actual recheck. Successful inline delivery needs no review_image follow-up; request missing roles only. force_redelivery requires images-unavailable|delivery-failed, never routine confirmation; an availability blocker is not permission to invent review or read source.
 - Record the ORIGINAL user task once as original_brief in photoshop_guard_set_art_run; never replace it with a success summary. Existing runs may add it without a new run or Photoshop mutation.
+- CAPABILITY-BOUNDED BRIEF TRANSLATION: preserve original_brief VERBATIM as the independent final-quality criterion. Before the first visual pass, separately track subject inventory, composition/perspective, palette/light, style cues and deliverable constraints. Translate only the execution technique into currently registered Photoshop tools and proven installed methods; NEVER silently drop required subjects, alter aspect ratio, reinterpret watercolor as photorealism, or claim a simple graphic fully meets an unattainable finish. Aspirational words (photoreal, watercolor texture, cinematic illumination, 4K detail) are not Photoshop method_ids or verified presets. If a necessary technique is unavailable, disclose the limitation. Execute a short sequence of single-owner passes; each pass uses one consistent visual_intent / construction_role / allowedExecutionTools combination. Region-block-in needs a region-compatible method; installed-brush-preset uses photoshop_paint_strokes, NOT photoshop_paint_regions. Never pack independent subject owners into one initial rollback unit.
 - At the existing inline/review_image boundary, YOU inspect the actual delivered AFTER and BEFORE in this chat against original_brief and intended style. When artistic_review.critic_role.required=true, switch explicitly to Critic: assess the WHOLE scene before returning to Painter, including context/space/light rather than just the last component. Return previous_observation.critic_review with the exact request_id, reviewer=same-chat-role and honest criteria/findings. Submit this with the ordinary observation and next pass in ONE cycle_auto; no separate close-only/readiness/source call. A role change is a separate reasoning task, not proof of independent calibration. If the user authorized delegation and Core agents is actually exposed, use optional_spawn: status once, reuse a sleeping Critic via message or spawn once with only the brief and exact registered image paths; collect its report and use reviewer=spawned-reviewer. Missing images/report means unknown/pending, never an invented result. Keep saved model settings. Default to the same-chat Critic without external inference. Follow artistic_review: describe visible form/proportions/perspective/light in previous_observation.observed, name the largest remaining defect in primary_mismatch, and judge target honestly. Executed tools, stage labels and filled fields prove no artistic quality; this is not an independent assessment.
 - At the existing visual review check every relevant object's support, contact and plausible weight distribution. Describe concrete visible support/contact/balance in observed; a shadow or solved geometry alone proves none of these. Respect brief-authorized floating, motion, suspension and stylization; hidden/ambiguous support is unknown. For critic_review contact_and_protection=pass, include one findings entry of that criterion with visible evidence (or justified non-applicability) and next_change describing what to preserve. A failed support check needs a structural correction; unknown/fail remains scene debt. No additional images or reviewer calls.
 - After save/closure, re-evaluate the exact current delivered frame through cycle_auto(review_operation_id, previous_observation.critic_review, optional next_pass), omitting previous_operation_id. Never re-close the old pass or substitute a historical frame. This preserves its original verdict and current component ownership.
@@ -234,6 +235,12 @@ Multi-step etiquette
   execution dependency of brush-based strokes/dabs, not of unrelated preparation or region/fill
   operations. On a nontrivial run, complete/persist brush_preflight before the first operation
   that actually uses that dependency.
+- An art project folder is not inferred from a style description or a directory on disk.
+  The document-bound photoshop_guard_set_art_run must be registered BEFORE the first
+  mutation. Verify exact document_id, selected profile, immutable original_brief and
+  processes/<subject>-process/<run-name>. For terminal_not_executed do NOT resend the same
+  request_key or full multi-owner payload; correct the scene decomposition, method/command
+  choice and layer roles, then submit a NEW single-owner bounded request.
 - Observe presentation_context.painting_profile_selection before binding a NEW art run.
   Photoshop's panel offers simple_graphic, nontrivial_painting, or auto.
   For an explicit panel selection, use that exact profile in
@@ -363,14 +370,15 @@ Multi-step etiquette
    inherited global-only targets when safe, but never clears the medium defect,
    waives strategy exhaustion, or admits small/detail changes across medium debt.
 - EARLY FOUNDATION: ${SCENE_FOUNDATION_GUIDANCE}
-- SUBJECT-FIRST START: the first meaningful visual pass must contain the requested main subject
-  and its discriminative recognition cues. Establish its relationship to the setting/path/large
-  scene masses in the next bounded construction passes before polishing any one component.
-  Do not spend an independent first task on an empty sky/fog/gradient or finish the background
-  before introducing the subject. Keep separately editable owners on separate layers; the
-  whole-scene milestone may span bounded passes, never one illegal multi-owner rollback unit.
-  Director is optional. If used, its first task spans recognition/composition (global/medium,
-  all relevant subject/context attention zones), rather than an atmosphere-only task.
+- SUBJECT-FIRST MILESTONE: in nontrivial_painting keep requested subject recognition in the
+  first meaningful visual pass. In simple_graphic, ONE independently editable paper/sky/ground
+  or native gradient field may be the first safe visual pass when single-owner safety requires it.
+  That field does NOT complete the subject or composition. Immediately follow it with bounded
+  separate-owner passes establishing the main subject and 3–7 recognition cues before polishing
+  the background. Never combine cottages, trees, canal, boats and sky into one canvas-field
+  owner merely to meet a first-pass subject rule. The whole-scene milestone spans several passes.
+  Director is optional; its first TASK spans recognition/composition, although its first
+  EXECUTION may create just one independently editable field.
   On an unpainted document omit value_check or use {status:pending, observed:false}; do not
   analyze a blank canvas or claim observed failure just to initialize the Director.
 - If the host returns PLUGIN_NOT_EXPOSED, the request did not reach the plugin. Report the exact
