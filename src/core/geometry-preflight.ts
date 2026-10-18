@@ -121,11 +121,25 @@ export function runGeometryPreflight(
   const projectedFamilies = binding.vanishing_family_ids
     .map(id => familyById.get(id))
     .filter((family): family is NonNullable<typeof family> => !!family);
-  const perspectiveSensitive = projectedFamilies.length > 0;
   const centerline = binding.anchors.centerline?.line
     ?? (binding.anchors.near_contact && binding.anchors.far_extent
       ? [binding.anchors.near_contact, binding.anchors.far_extent] as [GeometryPoint, GeometryPoint]
       : undefined);
+  // Family dependencies can describe the support plane. They do not imply
+  // that every object's axis recedes towards the plane's vanishing point.
+  // Explicit directional constraints bind the owner axis OR a named scene
+  // member. Keep the original inference for legacy untyped/depth bindings.
+  const directional = binding.constraints.filter(c => ['converges_to', 'parallel_family'].includes(c.type));
+  const projectionClaims = directional.length ? directional.flatMap(constraint => {
+    const subject = constraint.subject_ref ?? binding.owner_id;
+    const line = subject === binding.owner_id ? centerline : memberById.get(subject)?.points;
+    const families = constraint.target_ref ? [familyById.get(constraint.target_ref)].filter(Boolean) : projectedFamilies;
+    if (!line || !families.length) issues.push({ code: 'geometry_preflight_insufficient',
+      message: `geometry_preflight_insufficient: owner=${binding.owner_id}; ${constraint.type} must bind the owner centerline or a named line member to a declared line family` });
+    return families.map(family => ({ family: family!, line, subject }));
+  }) : (!binding.constraints.length || binding.constraints.some(c => c.type === 'scales_with_depth'))
+    ? projectedFamilies.map(family => ({ family, line: centerline, subject: binding.owner_id })) : [];
+  const perspectiveSensitive = projectionClaims.some(claim => claim.subject === binding.owner_id);
 
   if (perspectiveSensitive) {
     if (!binding.anchors.far_extent) {
@@ -158,8 +172,8 @@ export function runGeometryPreflight(
     }
   }
 
-  if (centerline) {
-    for (const family of projectedFamilies) {
+  for (const { family, line, subject } of projectionClaims) {
+      if (!line) continue;
       if (!family.vanishing_point_id) {
         const note = `family=${family.id} has no finite vanishing point; convergence residual is not numerically testable`;
         uncertainty.push(note);
@@ -168,22 +182,24 @@ export function runGeometryPreflight(
       }
       const vp = vpById.get(family.vanishing_point_id);
       if (!vp) continue;
-      const residual = pointToLineDistance(vp, centerline);
+      const residual = pointToLineDistance(vp, line);
       if (residual > tolerance) {
         issues.push({
           code: 'projection_family_conflict',
-          message: `projection_family_conflict: owner=${binding.owner_id}; centerline misses vanishing family ${family.id}/${vp.id} by ${round(residual)}px (tolerance=${tolerancePx}px); rebuild the structural line against the accepted family`,
+          message: `projection_family_conflict: owner=${binding.owner_id}; subject=${subject} misses vanishing family ${family.id}/${vp.id} by ${round(residual)}px (tolerance=${tolerancePx}px); correct this declared directional constraint. A support-plane dependency alone does not constrain the object's vertical axis; use supported_by for contact and converges_to/parallel_family only for the actual aligned line`,
         });
       } else {
         checks.push({
           id: `family:${family.id}`,
           kind: 'projection-family',
           status: 'pass',
-          detail: `centerline is consistent with vanishing point ${vp.id}`,
+          detail: `subject=${subject} is consistent with vanishing point ${vp.id}`,
           residual_px: round(residual),
           tolerance_px: tolerancePx,
         });
       }
+  }
+  if (centerline) {
       for (const section of binding.control_sections) {
         const residualToCenter = pointToLineDistance(section.at, centerline);
         if (residualToCenter > tolerance) {
@@ -193,7 +209,6 @@ export function runGeometryPreflight(
           });
         }
       }
-    }
   }
 
   if (binding.support_plane_id) {

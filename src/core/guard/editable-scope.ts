@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { normalizeSceneOwnershipPlan } from '../scene-ownership-plan.js';
+import { DEPICTION_DETAIL_GUIDANCE, wholeObjectDepiction } from '../depiction-detail.js';
 
 const STATUSES = ['independent', 'combined', 'missing', 'unknown', 'reference'] as const;
 const idSchema = { type: 'string', pattern: '^[a-zA-Z0-9][a-zA-Z0-9_-]{0,79}$' };
@@ -41,8 +42,11 @@ export function editableScopeRequest(record: any, state: any, rawPlan: any, owne
   const request_id = hash({ version: 'editable-scope-v1', operation_id: record.id, frame: record.preview.sha256,
     brief: state.original_brief, incarnation: state.document_incarnation_id, signature, wholeScene, currentOwner });
   return { required: wholeScene, request_id, operation_id: record.id, scope: wholeScene ? 'whole-scene' : 'touched-owner', parts,
+    whole_object_components: (plan.objects ?? []).filter(object => wholeObjectDepiction(object.depiction))
+      .map(object => ({ object_id: object.object_id, component_semantic_ids: object.component_semantic_ids, depiction: object.depiction })),
+    detail_policy: DEPICTION_DETAIL_GUIDANCE,
     topology_signature: signature, frame_sha256: record.preview.sha256,
-    instruction: 'Review the brief, exact pixels and these layer bindings together. List any visible independently hideable/recolorable/movable/material/light/mask/rollback part absent from this map in unmapped_parts, pinned to its current owner. Single-component and continuous-field labels do not certify completeness. For each required part return its exact layer_id, status and concrete visible evidence. An unpainted planned part is missing with layer_id=null; it does not block its creation. Confirm separation with layer-isolated evidence or exact owner-bound BEFORE/AFTER pixel changes and topology; command success alone does not prove it. Otherwise use unknown. Combined owners are frozen; repair on distinct new layers and visually confirm replacements. Retain old pixels as reference; no automatic split or erase.' };
+    instruction: 'Review the brief, exact pixels and these layer bindings together. Use detail_policy and whole_object_components to choose inventory at delivered scale and for requested edits. Do not invent anatomical subparts of a permitted contextual whole figure. List any part requiring independent editing at that scale absent from this map in unmapped_parts, pinned to its current owner. Single-component and continuous-field labels do not certify completeness. For each required part return its exact layer_id, status and concrete visible evidence. An unpainted planned part is missing with layer_id=null; it does not block its creation. Confirm separation with layer-isolated evidence or exact owner-bound BEFORE/AFTER pixel changes and topology; command success alone does not prove it. Otherwise use unknown. Combined owners are frozen; repair on distinct new layers and visually confirm replacements. Retain old pixels as reference; no automatic split or erase.' };
 }
 
 export function validateEditableScopeReview(value: any, request: any, state: any, completion?: any) {

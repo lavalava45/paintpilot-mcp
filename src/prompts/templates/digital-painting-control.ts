@@ -1,4 +1,5 @@
 import { PHOTOSHOP_DRAWING_ROUTE } from '../host-guidance.js';
+import { DEPICTION_DETAIL_GUIDANCE } from '../../core/depiction-detail.js';
 import {
   readChoiceArg as argEnum,
   readIntegerArg as argInt,
@@ -107,7 +108,7 @@ export const digitalPaintingControlTemplate: PhotoshopPromptTemplate = {
       `- ART RUN: bind one immutable processes/<subject>-process/<run>/ before paint; keep painting-state.json, frames/, checkpoints/, final/ there. accepted_frame != current_frame.`,
       `- PASS LIMITS: one VisualMicroPlan = one rollback unit, <=1 new layer, 1–4 contiguous compatible mutations; preparation first. Limits come from actions; a pass is not an artistic stage.`,
       `- SUBJECT FIRST: first pixels include requested subject/recognition cues; next bounded owner passes establish setting/path/masses before refinement. No independent sky/fog/gradient first task. Director optional; initial value_check omitted or pending/observed=false on empty canvas.`,
-      `- EDITABLE COMPONENTS: predeclare scene_ownership_plan objects/units. Compound containers have independent semantic owners/layers for adjustable parts (bed/blanket/pillow; window/glass/curtain; body/head/eyes). Build/review one component per pass; tiny inseparable accents stay. Plans extend additively; never flatten to evade ownership.`,
+      `- EDITABLE COMPONENTS: predeclare scene_ownership_plan objects/units. ${DEPICTION_DETAIL_GUIDANCE}`,
       `- NO SOURCE DURING ART: use method selection.execution_contract.allowed_commands, input_schema and next_pass skeleton. If absent, retrieve exact public schema once via Guard capabilities(tool_names); never invent aliases or inspect src/tests/dist. Apply all field_correction_packet items together; Guard derives known technical pins but never invents art decisions. If still blocked, report cause. Confirmed closed target: reconcile(id,outcome=abandoned,document_closed_confirmed=true,reason).`,
       `- LAYER SEPARATION CHECK: substantial independent object/material/light/plane uses create-new/temporary-hypothesis, never layer per stroke. protected_layer_ids protects accepted ids; protected_regions is descriptive only. Replacement needs replace_protected_layer_ids.`,
       `- COMMENTARY: technical=developer/debug telemetry only; artistic=artist-facing visual reasoning plus practical Photoshop craft/settings; mixed=artistic first + compact separated debug note. Sticky режим техника|художник|вместе + detail. Use presentation_context.language (ru=natural Russian). Emit root goal in first person (“Я планирую…”, “Я уточню…”); vary by context, no fixed prefix. State intent/change, not completion. Guard reuses artistic_commentary; no duplicate or hidden chain-of-thought.`,

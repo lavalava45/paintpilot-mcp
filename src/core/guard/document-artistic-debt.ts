@@ -1,4 +1,7 @@
 import { createHash } from 'node:crypto';
+import { activeCriticFindings } from './critic-finding-status.js';
+import { criticObligationState } from './critic-obligations.js';
+import { sceneFoundationState, SCENE_FOUNDATION_GUIDANCE } from './scene-foundation.js';
 import { CHAT_CRITIC_CRITERIA, CHAT_CRITIC_PROTOCOL, CONTACT_REVIEW_DESCRIPTION,
   CRITIC_CORRECTION_VERSION, SUPPORT_CONTACT_WEIGHT_REVIEW_VERSION } from './chat-critic.js';
 import { VISUAL_RELATIONSHIP_REVIEW_VERSION } from './visual-relationship-review.js';
@@ -94,12 +97,16 @@ export function currentFrameCriticApproval(state: any): boolean {
       relation.status === 'pass' || relation.status === 'not-applicable')
     && (!incarnation || critic.document_incarnation_id === incarnation)
     && CHAT_CRITIC_CRITERIA.every(key => critic.criteria?.[key] === 'pass')
-    && !(state?.chat_critic_findings?.length));
+    && criticObligationState(state).every(row => row.status === 'pass')
+    && !activeCriticFindings(state ?? {}).length);
 }
 
 /** Saving/exporting closes a technical operation, never the unfinished painting. */
 export function documentArtisticDebt(state: any, lastRecord?: any): string[] {
   const reasons: string[] = [];
+  if (!sceneFoundationState(state ?? {}).ready) reasons.push('scene_foundation_incomplete');
+  if (criticObligationState(state).some(row => row.status !== 'pass'))
+    reasons.push('critic_obligations_unresolved');
   if (Object.values(state?.editable_scope_debt ?? {}).some((row: any) => row.status !== 'replaced'))
     reasons.push('editable_scope_unresolved');
   if (Object.values(state?.visual_problems ?? {}).some((p: any) => p?.status !== 'resolved'))
@@ -128,7 +135,7 @@ export function documentArtisticDebt(state: any, lastRecord?: any): string[] {
       reasons.push('whole_brief_critic_review_required');
   }
   if (state?.chat_critic_review && (Object.values(state.chat_critic_review.criteria ?? {}).some(value => value !== 'pass')
-    || state.chat_critic_findings?.length)) reasons.push('chat_critic_scene_unfinished');
+    || activeCriticFindings(state).length)) reasons.push('chat_critic_scene_unfinished');
   const art = state?.art_director;
   if (
     art &&
@@ -145,6 +152,7 @@ export function documentArtisticDebt(state: any, lastRecord?: any): string[] {
 export function artisticContinuation(state: any, lastRecord?: any): string | undefined {
   const reasons = documentArtisticDebt(state, lastRecord);
   if (!reasons.length) return undefined;
+  if (reasons.includes('scene_foundation_incomplete')) return SCENE_FOUNDATION_GUIDANCE;
   if (reasons.length === 1 && reasons[0] === 'whole_brief_review_required')
     return 'Whole-brief completion is unconfirmed. In the existing exact whole-frame review supply previous_observation.painting_completion={scope:"whole-brief",summary:"concrete observed outcome against original_brief",criteria:{brief_fidelity:"pass|fail|unknown",form_proportions:"pass|fail|unknown",light_material:"pass|fail|unknown",composition_context:"pass|fail|unknown",editable_parts:"pass|fail|unknown",contact_and_protection:"pass|fail|unknown"}}. Correct failed/unknown criteria with one bounded visual pass; no extra reviewer or source reads. An explicit user pause/stop remains allowed.';
   if (reasons.length === 1 && reasons[0] === 'whole_brief_critic_review_required')
@@ -156,7 +164,7 @@ export function artisticContinuation(state: any, lastRecord?: any): string | und
   );
   const defect = failed.length
     ? `whole-brief criteria: ${failed.join(', ')}`
-    : (state?.active_problem?.summary ?? state?.chat_critic_findings?.[0]?.next_change
+    : (state?.active_problem?.summary ?? activeCriticFindings(state ?? {})[0]?.next_change
       ?? state?.last_critique?.primary_mismatch);
   return `Painting remains unfinished after technical closure/save. Continue with one bounded visual pass addressing ${
     typeof defect === 'string' && defect.trim()

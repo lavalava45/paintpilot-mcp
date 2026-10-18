@@ -153,6 +153,7 @@ const PATCH_CODES = new Set([
 ]);
 
 export function classifyViolation(violation: RepairableViolation): ViolationRepairClass {
+  if (violation.code === 'guard_requirement_unexpressible') return 'SYSTEMIC_FAILURE';
   if (violation.code === 'current_frame_review_stale'
     || (violation.code === 'previous_operation_finalization_invalid'
       && /current_frame_review_stale:/.test(violation.message))) return 'SYSTEMIC_FAILURE';
@@ -181,19 +182,33 @@ export function classifyViolations(violations: RepairableViolation[]): Classifie
 
 /** A single bounded field-level reply for all independent errors in the same attempted pass. */
 export function fieldCorrectionPacket(violations: RepairableViolation[]) {
+  // These rules have stable public input locations even when an older dynamic
+  // validator returns prose only. A missing path in that prose is not evidence
+  // that the artist's choice is impossible to express in the command schema.
+  const rulePaths: Record<string, string> = {
+    semantic_layer_owner_missing: 'next_pass.logical_layer',
+    semantic_layer_isolation_required: 'next_pass.logical_layer.decision',
+    construction_role_material_role_required: 'next_pass.material_role',
+    artistic_method_execution_mismatch: 'next_pass.actions',
+    invalid_visual_microplan: 'next_pass.actions',
+  };
   const rows = violations.map(item => {
     const path = nonEmptyText(item.details?.path)
+      ?? rulePaths[item.code]
       ?? item.message.match(/(?:next_pass|painting_intent)\.[A-Za-z0-9_.[\]-]+/)?.[0]
       ?? item.message.match(/args(?:\.[A-Za-z0-9_[\]]+)+/)?.[0]
-      ?? 'next_pass';
+      ?? null;
     const allowed = item.details?.allowed_commands ?? item.details?.allowed_ids;
     const expected = item.details?.expected;
     return {
       path,
+      path_source: item.details?.path || rulePaths[item.code] ? 'rule' : path ? 'legacy-message' : 'unavailable',
       code: item.code,
       reason: item.message,
+      ...(item.details?.cause_code ? { cause_code: item.details.cause_code } : {}),
       ...(allowed ? { allowed } : {}),
-      ...(expected ? { expected } : {}),
+      ...(expected !== undefined ? { expected } : {}),
+      ...(item.details?.operator ? { operator: item.details.operator, actual: item.details.actual } : {}),
       ...(item.details?.method_id ? { selected_method_id: item.details.method_id } : {}),
       ...(classifyViolation(item) === 'MODEL_SEMANTIC_DECISION'
         ? { artistic_decision_required: true } : {}),
@@ -202,8 +217,11 @@ export function fieldCorrectionPacket(violations: RepairableViolation[]) {
   return {
     corrections: rows.slice(0, 24),
     remaining_count: Math.max(0, rows.length - 24),
+    unaddressable_count: rows.filter(row => !row.path).length,
     preserved_input: 'Keep valid ownership, model, component, proportion and light declarations; edit only rejected fields. Nothing was registered or painted.',
-    next: 'Resubmit corrected next_pass in the SAME cycle_auto call; no repeated unchanged status, preview or separate schema round.',
+    next: rows.some(row => !row.path)
+      ? 'Report the unaddressable Guard contract diagnostic. Do not guess a field or automatically retry the same cycle.'
+      : 'Resubmit the corrected cycle in the SAME cycle_auto call, preserving valid previous_observation and next_pass fields; no repeated unchanged status, preview or separate schema round.',
   };
 }
 

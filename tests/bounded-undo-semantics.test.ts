@@ -82,6 +82,24 @@ function fixture(options: { steps?: number; executedSteps?: number; failed?: boo
 }
 
 describe('E.11 ordinary bounded undo semantic recovery', () => {
+  it.each([false, true])('does not classify native Undo as artistic cleanup, with_preview=%s', async withPreview => {
+    const f = fixture({ skipUndo: true });
+    const registry = new ToolRegistry();
+    for (const name of ['photoshop_undo', 'photoshop_get_preview']) registry.register(name, {
+      tool: { name, description: 'Recovery fixture', inputSchema: { type: 'object', properties: {
+        document_id: { type: 'number' }, steps: { type: 'number' },
+      } } }, handler: async () => ({ content: [{ type: 'text', text: '{"ok":true}' }] }),
+    });
+    const compiled = await compileGuardCycle({ next_pass: {
+      request_key: 'undo-regressed-roofs', document_id: 42, action_class: 'ROLLBACK',
+      goal: 'Restore the previous roof pixels.', region: 'whole-canvas',
+      visual_intent: 'remove', impact_class: 'cleanup', preferred_method_id: 'content-aware-cleanup',
+      actions: [{ tool: 'photoshop_undo', args: { document_id: 42, steps: 2 } },
+        ...(withPreview ? [{ tool: 'photoshop_get_preview', args: { document_id: 42 } }] : [])],
+    } }, f.s, registry);
+    expect(compiled.violations.filter(row => /artistic_method|artistic_classification/.test(row.code))).toEqual([]);
+    expect(compiled.nextOperation).toBeDefined();
+  });
   it('permits provisional same-cycle accept+Undo only for an exact pending source, while preserving final dispatch gate', () => {
     const f = fixture({ skipUndo: true });
     const source = f.s.read('rejected') as any;
@@ -120,7 +138,7 @@ describe('E.11 ordinary bounded undo semantic recovery', () => {
       .toContain('bounded_undo_source_unproven');
   });
 
-  it('restores accepted connected_move owner revisions after an exactly evidenced one-step Guard microplan Undo', () => {
+  it.each([true, false])('restores connected_move owner revisions after an exact Undo, accepted=%s', (accepted) => {
     const f = fixture({ skipUndo: true });
     const retainedRecord = f.s.read('retained') as any;
     retainedRecord.result = { content: [{ type: 'text', text: JSON.stringify({ continuation_layers: [
@@ -136,7 +154,7 @@ describe('E.11 ordinary bounded undo semantic recovery', () => {
         children: [{ owner_id: 'tab', layer_id: 3, expected_bounds: { left: 35, top: 15, right: 48, bottom: 30 } }],
       } },
     }] };
-    source.verdict = { verdict: 'improvement', disposition: 'accept', target_resolved: 'yes' };
+    source.verdict = { verdict: accepted ? 'improvement' : 'regression', disposition: accepted ? 'accept' : 'correct', target_resolved: accepted ? 'yes' : 'no' };
     source.operation_ack = { protocol: 'photoshop.guard.operation_ack.v1', receipt_token: 'accepted' };
     source.report = { did: 'Moved both native layers.', why: 'Maintain connected construction.',
       result: 'Both linked pixels moved and the exact frame was accepted.' };
@@ -156,16 +174,17 @@ describe('E.11 ordinary bounded undo semantic recovery', () => {
     f.s.write(source);
     f.s.updatePaintingState(42, current => ({ ...current, pending_rollback: undefined,
       current_frame: { operation_id: 'rejected', sha256: f.rejected.sha256, path: f.rejected.materialized_path,
-        accepted: true }, accepted_frame: { operation_id: 'rejected', sha256: f.rejected.sha256,
+        accepted }, accepted_frame: { operation_id: 'rejected', sha256: f.rejected.sha256,
         path: f.rejected.materialized_path, accepted: true } }));
     expect(f.s.semanticLayerOwners(42).find((owner: any) => owner.hypothesis_id === 'tab'))
-      .toMatchObject({ construction_revision: 'rejected', parent_construction_revision: 'rejected' });
+      .toMatchObject({ construction_revision: accepted ? 'rejected' : 'retained', parent_construction_revision: accepted ? 'rejected' : 'retained' });
     const undoRequest = { id: 'undo-connected', tool: 'photoshop_execute_visual_microplan',
       args: { document_id: 42, action_class: 'ROLLBACK', steps: [
         { id: 'one-undo', tool: 'photoshop_undo', args: { document_id: 42, steps: 1 } },
         { id: 'after', tool: 'photoshop_get_preview', args: {} },
       ] } };
     const wronglyDeep = structuredClone(undoRequest);
+    expect(f.s.collectPreflightErrors(undoRequest).filter(error => error.includes('bounded_undo_source_unproven'))).toEqual([]);
     wronglyDeep.args.steps[0].args.steps = 2;
     expect(f.s.collectPreflightErrors(wronglyDeep).some(error => error.includes('bounded_undo_source_unproven'))).toBe(true);
     const missingDepth = structuredClone(undoRequest) as any;

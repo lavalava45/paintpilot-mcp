@@ -77,7 +77,9 @@ No local LM Studio model is automatically called or prepared by PaintPilot.
 
 ## Editable semantic scope (E.7g, 2026-10-11)
 
-Declare every independently hideable/recolorable/movable/material/light/mask/rollback part
+Choose independent parts at the visible scale and for the requested edits (see depiction policy below).
+A tiny contextual whole-object component does not need anatomical subparts merely because they can be named.
+Declare each part requiring independent hide/recolor/move/material/light/mask/rollback
 as a semantic unit with edit_axes and its own owner/layer. This applies to arbitrary objects;
 subject_kind=single-component/continuous-field is a provisional classification, never proof
 of completeness. Inseparable accents and any number of marks can stay on their component.
@@ -126,19 +128,38 @@ document_closed_confirmed=true and reason; omit documents_id so Guard collects a
 evidence internally. Do not review historical pixels to dispose of that closed document.
 
 The first meaningful painting pass contains the requested main subject and recognition cues.
+Before local component development, establish the WHOLE requested composition and demonstrate
+the requested medium on one representative visible area. Required surroundings/background,
+ground/space and major value/color relationships must be present at block-in fidelity; they need
+not be finished. Pencil/ink line character and paper belong at the start, not after architecture.
+On the EXISTING delivered whole-frame review return previous_observation.scene_foundation with
+the exact request_id from artistic_review.scene_foundation, composition and technique assessments
+(status=pass|fail|unknown, visible, next_change for fail/unknown; technique pass needs sample_region).
+This is an early foundation, not whole-image completion; a tool name, palette or intention is not proof.
+While either assessment is missing/fail/unknown, use next_pass.foundation_goal=composition|technique
+for actual missing scene establishment (change_domains composition/background-scope) or a bounded
+representative medium sample (region_bounds). These tasks preempt local-detail/Director ordering;
+they never waive document identity, ownership, geometry, uncertainty, exact review or user Stop.
+Do not hide local detail under GLOBAL_BLOCK_IN or call filled polygons a pencil sample.
+The same rule applies when resuming an unfinished run. No extra preview or separate evaluator call.
 Establish the setting/path/large masses in the following bounded passes before refinement;
 do not begin with an independent atmosphere-only/gradient task. Preserve editable owner layers
 and the bounded pass contract. Director is optional; its first task should cover whole-scene
 recognition/composition with global/medium scope and the relevant subject/context zones.
 
 Component ownership applies to every rendering profile, including simple_graphic and initial
-block-in. Do not put an entire person/animal/furniture/window on one persistent layer and promise
-to separate it later. Declare scene_ownership_plan.objects with subject_kind and compound-object
-before semantic layer construction; enumerate the visible independently editable parts on
-distinct semantic units, owners and physical layers. For a clothed person this normally includes
-face/body, hair and garment; add separately editable hands/accessories when needed. Construct
-and review one component per pass. single-component means one actual part, not a whole complex
-subject renamed as a silhouette; continuous-field means a continuous background field. Substantial
+block-in. Choose decomposition from visible scale AND task, not subject taxonomy alone.
+A contextual figure/object at most 8% of canvas width and height and 0.5% of canvas area may be
+one whole-object component. Retain its true subject_kind (e.g. person), kind=single-part and
+declare depiction={purpose:"context",projected_size:{width,height},canvas_size:{width,height}}
+in the scene object and construction object. Construct and inspect the whole recognizable figure
+in one pass; do not spend separate cycles on its tiny head, torso or legs. Judge placement,
+silhouette and support on the delivered image; do not demand invisible anatomy.
+Focal subjects and requested independent part edits (purpose=focal|part-edit) retain distinct
+semantic units, owners and physical layers for independently editable visible parts.
+Existing separate owners must remain separate; this policy never merges or relabels old pixels.
+single-component means one actual part; contextual whole figures retain their actual subject kind.
+continuous-field means a continuous background field. Substantial
 temporary objects also require decomposition, and keep cannot bypass component validation.
 A scene unit with editability=temporary is a composition scaffold: after its initial pass it is
 frozen, including at GLOBAL_BLOCK_IN. No continue-logical-layer, adjust or keep/reclassification

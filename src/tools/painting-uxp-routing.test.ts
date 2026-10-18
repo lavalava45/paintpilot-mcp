@@ -120,6 +120,18 @@ describe('canonical painting tools UXP routing', () => {
     expect(executeScript).not.toHaveBeenCalled();
   });
 
+  it('forwards bounded replacement through the actual region handler and returns its scope', async () => {
+    const { connection, router } = fixture();
+    const tool = createPaintingTools(connection, router).find(t => t.tool.name === 'photoshop_paint_regions')!;
+    const replacement_bounds = { left: 1, top: 1, right: 12, bottom: 12 };
+    const result = await tool.handler({ document_id: 42, replace_contents: true, replacement_bounds,
+      regions: [{ layer_id: 9, color: { red: 10, green: 20, blue: 30 },
+        contours: [{ points: [{ x: 1, y: 1 }, { x: 10, y: 1 }, { x: 10, y: 10 }] }] }] });
+    expect(bridge.paintRegions.mock.calls[0][0]).toMatchObject({ replace_contents: true, replacement_bounds });
+    expect(JSON.parse((result.content[0] as any).text).details.replacement_bounds).toEqual(replacement_bounds);
+    expect(tool.tool.inputSchema.properties).toHaveProperty('replacement_bounds');
+  });
+
   it('passes nested Guard step identities through setters and paint batches without sibling collisions', async () => {
     const { connection, router } = fixture();
     const tools = createPaintingTools(connection, router);

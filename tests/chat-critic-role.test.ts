@@ -4,8 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import jpeg from 'jpeg-js';
-import { chatCriticRequest, validateChatCritic, persistChatCritic, CHAT_CRITIC_CRITERIA, criticSpawnHandoff, supportContactWeightInstruction, SUPPORT_CONTACT_WEIGHT_REVIEW_VERSION } from '../src/core/guard/chat-critic.js';
-import { documentArtisticDebt, artisticContinuation } from '../src/core/guard/document-artistic-debt.js';
+import { chatCriticRequest, validateChatCritic, persistChatCritic, reconcileCriticReviewState, CHAT_CRITIC_CRITERIA, criticSpawnHandoff, supportContactWeightInstruction, SUPPORT_CONTACT_WEIGHT_REVIEW_VERSION } from '../src/core/guard/chat-critic.js';
+import { documentArtisticDebt, artisticContinuation, currentFrameCriticApproval } from '../src/core/guard/document-artistic-debt.js';
 import { EmbeddedGuardRuntime } from '../src/core/guard/runtime.js';
 import { ToolRegistry } from '../src/core/tool-registry.js';
 import { createGuardTools } from '../src/tools/guard-tools.js';
@@ -13,6 +13,8 @@ import { compileGuardCycle } from '../src/core/guard/cycle-compiler.js';
 import { projectGuardDiagnostics } from '../src/core/guard/response-budget.js';
 import { selectedCriticCorrection, criticCorrectionIssue } from '../src/core/guard/critic-correction.js';
 import { VISUAL_RELATIONSHIP_REVIEW_VERSION } from '../src/core/guard/visual-relationship-review.js';
+import { validateVisualRelationships, VISUAL_RELATION_RULES } from '../src/core/guard/visual-relationship-review.js';
+import { collectSchemaErrors } from '../src/core/guard/cycle-compiler.js';
 import { openCriticObligation } from '../src/core/guard/critic-obligations.js';
 const dirs: string[] = [];
 it('regression: admits substantive brush construction on an existing semantic component for missing-object and form findings', () => {
@@ -48,6 +50,70 @@ const reply = (request: any, fail = false): any => ({ request_id: request.reques
   findings: [
     { criterion: 'contact_and_protection', visible: 'The subject rests on the floor; its feet meet it and its weight reads over that support.', next_change: 'Preserve the grounded contact and balanced pose while correcting other scene defects.' },
     ...(fail ? [{ criterion: 'composition_context', visible: 'The wall remains one flat field without spatial light.', next_change: 'Build large lit and shadow planes joining the room to the subject.' }] : [])] });
+
+it.each(Object.entries(VISUAL_RELATION_RULES))('resolves a named %s defect independently of a still-failed scene criterion', (kind, rule) => {
+  const s: any = state(), r = record(3);
+  const req = chatCriticRequest(r, s, records(3))!;
+  const defect = { id: 'rechecked-component', kind: rule.structural_kinds[0], part_ids: ['a', 'b'],
+    relation_ids: ['rechecked-component'], visible: 'The named component is absent on the original delivered frame.',
+    brief_relevance: 'The brief requires this independently identifiable component.',
+    recheck: 'Inspect the same named component on the exact current frame.' };
+  const failure = { ...reply(req), criteria: Object.fromEntries(CHAT_CRITIC_CRITERIA.map(key => [key, key === rule.criterion ? 'fail' : 'unknown'])),
+    findings: [{ criterion: rule.criterion, correction_kind: 'form', structural_defect: defect,
+      visible: defect.visible, next_change: defect.recheck }],
+    visual_relationships: [{ id: defect.id, kind, part_ids: defect.part_ids, status: 'fail',
+      expected: 'The named parts should form the intended visible relationship.', visible: defect.visible }] };
+  const old = { ...s, ...persistChatCritic(s, validateChatCritic(failure, req, r, s), r) };
+  expect(selectedCriticCorrection({ ...old, chat_critic_findings: [] })?.criterion).toBe(rule.criterion);
+  const nextReq = chatCriticRequest(r, old, records(3))!;
+  const positive = { ...failure.findings[0], visible: 'The exact current frame clearly shows the corrected named relationship.',
+    next_change: 'Preserve this verified component while correcting the separate remaining deficit.' };
+  const second = { ...failure, request_id: nextReq.request_id,
+    findings: [{ criterion: rule.criterion, correction_kind: 'composition',
+      visible: 'A separate scene component is still absent and requires construction.',
+      next_change: 'Build the separate remaining scene component on its own owner.' }, positive],
+    visual_relationships: [{ ...failure.visual_relationships[0], status: 'pass', visible: positive.visible }] };
+  const reviewed = validateChatCritic(second, nextReq, r, old)!;
+  const result = { ...old, ...persistChatCritic(old, reviewed, r) };
+  expect(result.visual_problems[defect.id]).toMatchObject({ status: 'resolved', resolution_evidence_sha256: r.preview.sha256 });
+  expect(result.chat_critic_review.criteria[rule.criterion]).toBe('fail');
+  expect(result.chat_critic_findings).toEqual([expect.objectContaining({ problem_id: `critic-${rule.criterion}` })]);
+  expect(selectedCriticCorrection(result)?.problem_id).not.toBe(defect.id);
+  expect(result.critic_scene_failures[defect.id]).toBeUndefined();
+  const staleCache = { ...old, document_id: 42,
+    current_frame: { operation_id: r.id, sha256: r.preview.sha256, accepted: true },
+    chat_critic_review: reviewed, chat_critic_findings: second.findings,
+    active_problem: old.visual_problems[defect.id] };
+  const reconciled = reconcileCriticReviewState(staleCache);
+  expect(reconciled.visual_problems[defect.id].status).toBe('resolved');
+  expect(reconciled.active_problem).toBeUndefined();
+  expect(reconcileCriticReviewState(reconciled)).toBe(reconciled);
+  for (const unsafe of [
+    { current_frame: { ...staleCache.current_frame, sha256: 'other-frame' } },
+    { original_brief: 'A different brief must not reuse the old recheck.' },
+    { document_incarnation_id: 'other-document' },
+    { document_id: 43 },
+    { current_frame: { ...staleCache.current_frame, accepted: false } },
+  ]) {
+    const changed = { ...staleCache, ...unsafe };
+    expect(reconcileCriticReviewState(changed)).toBe(changed);
+  }
+  const unknown = structuredClone(second); unknown.visual_relationships[0].status = 'unknown';
+  expect(persistChatCritic(old, validateChatCritic(unknown, nextReq, r, old), r).visual_problems[defect.id].status).toBe('open');
+  const unsupported = structuredClone(second); unsupported.findings.pop();
+  expect(() => validateChatCritic(unsupported, nextReq, r, old)).toThrow(/recheck_required/);
+  const wrongParts = structuredClone(second); wrongParts.visual_relationships[0].part_ids = ['unrelated-a', 'unrelated-b'];
+  expect(() => validateChatCritic(wrongParts, nextReq, r, old)).toThrow(/recheck_required/);
+  const onlyPositive = structuredClone(second); onlyPositive.findings.shift();
+  expect(() => validateChatCritic(onlyPositive, nextReq, r, old)).toThrow(/findings_required/);
+  const reopenedReq = chatCriticRequest(r, result, records(3))!;
+  const reopened = { ...failure, request_id: reopenedReq.request_id };
+  expect(persistChatCritic(result, validateChatCritic(reopened, reopenedReq, r, result), r)
+    .visual_problems[defect.id].status).toBe('open');
+  const retargeted = structuredClone(reopened);
+  retargeted.findings[0].structural_defect.recheck = 'An unrelated target must get its own stable defect identity.';
+  expect(() => validateChatCritic(retargeted, reopenedReq, r, result)).toThrow(/identity_conflict/);
+});
 
 it('requires actual AFTER-visible relationship evidence and rejects an unlinked anatomical failure', () => {
   const s: any=state(), r=record(3), req=chatCriticRequest(r,s,records(3))!;
@@ -93,6 +159,70 @@ it('requires actual AFTER-visible relationship evidence and rejects an unlinked 
   const verified=validateChatCritic({...premature,findings:[...premature.findings,recheckedFinding]},
     next,changed,retained)!;
   expect(persistChatCritic(retained,verified).visual_problems[tigerRelation.id].status).toBe('resolved');
+});
+
+it('DP-02: publicly expressible shoulder anatomy failures can be retained and targeted for correction', () => {
+  const s: any = state(), r = record(3), req = chatCriticRequest(r, s, records(3))!;
+  const relation = { id: 'right-shoulder-glove', kind: 'anatomy', part_ids: ['right_arm', 'torso'],
+    expected: 'The right arm should visibly connect to the torso with a coherent shoulder joint.',
+    visible: 'The glove-bearing right arm floats away from the shoulder contour instead of joining the torso.',
+    status: 'fail' };
+  const basic = reply(req);
+  for (const kind of ['shape-topology', 'attachment', 'placement-orientation', 'relative-size']) {
+    const defect = { id: relation.id, kind, part_ids: relation.part_ids, relation_ids: [relation.id],
+      visible: relation.visible, brief_relevance: 'The original person must have a connected, plausible right shoulder.',
+      recheck: 'Verify that the new exact AFTER shows the right arm connected to the torso.' };
+    const review = { ...basic, criteria: { ...basic.criteria, form_proportions: 'fail' },
+      visual_relationships: [relation], findings: [...basic.findings, { criterion: 'form_proportions',
+        correction_kind: 'form', structural_defect: defect, visible: relation.visible,
+        next_change: 'Rebuild the right arm and shoulder contour on its own semantic owner.' }] };
+    const cycle = createGuardTools(fixture().runtime).find(x => x.tool.name === 'photoshop_guard_cycle_auto')!;
+    expect(collectSchemaErrors({ previous_observation: { critic_review: review } }, cycle.tool.inputSchema,
+      'args')).toEqual([]);
+    const unknownField = structuredClone(review);
+    (unknownField.visual_relationships[0] as any).unpublished_override = true;
+    expect(collectSchemaErrors({ previous_observation: { critic_review: unknownField } }, cycle.tool.inputSchema,
+      'args').some(issue => issue.includes('unpublished_override is not allowed'))).toBe(true);
+    const accepted = validateChatCritic(review, req, r, s)!;
+    const retained: any = { ...s, ...persistChatCritic(s, accepted, r) };
+    expect(retained.visual_problems[defect.id]).toMatchObject({ status: 'open', structural_defect: { kind } });
+    expect(documentArtisticDebt(retained)).toContain('chat_critic_scene_unfinished');
+    const next: any = { tool: 'photoshop_execute_visual_microplan', impact_class: 'construct',
+      visual_intent: 'mass', addresses_problem_ids: [defect.id],
+      structural_correction: { defect_id: defect.id, part_ids: ['right_arm'], relation_ids: [relation.id],
+        target: 'Rebuild the arm contour to connect exactly at the visible shoulder edge.', execution: 'brush' },
+      args: { steps: [{ tool: 'photoshop_paint_regions', args: { regions: [
+        { contours: [{ points: [{ x: 2, y: 2 }, { x: 11, y: 3 }, { x: 7, y: 12 }] }] },
+      ] } }] } };
+    expect(selectedCriticCorrection(retained, next)).toMatchObject({ problem_id: defect.id });
+    expect(criticCorrectionIssue(retained, next)).toBeUndefined();
+    expect(criticCorrectionIssue(retained, { ...next, impact_class: 'texture' })?.code)
+      .toBe('critic_correction_method_mismatch');
+  }
+});
+
+it('DP-02: failed relation diagnostics distinguish id, criterion, kind, parts, and relation links', () => {
+  const relation = { id: 'right-shoulder-glove', kind: 'anatomy', part_ids: ['right_arm', 'torso'],
+    expected: 'The right arm must join the torso at a visibly anatomically plausible shoulder.',
+    visible: 'The right arm appears disconnected from the main torso at the shoulder seam.', status: 'fail' };
+  const criteria = Object.fromEntries(CHAT_CRITIC_CRITERIA.map(key => [key,
+    key === 'form_proportions' ? 'fail' : 'unknown']));
+  const defect = { id: relation.id, kind: 'attachment', part_ids: relation.part_ids, relation_ids: [relation.id],
+    visible: relation.visible, brief_relevance: 'The figure must have an attached right arm and shoulder.',
+    recheck: 'Check visible shoulder attachment on the corrected AFTER frame.' };
+  const finding = { criterion: 'form_proportions', structural_defect: defect };
+  const check = (findings: any[]) => validateVisualRelationships([relation], criteria, findings, {});
+  expect(check([finding])).toHaveLength(1);
+  for (const [label, changed, expected] of [
+    ['id', { ...defect, id: 'other-shoulder' }, /structural_defect\.id/],
+    ['criterion', { ...finding, criterion: 'contact_and_protection' }, /findings\[\]\.criterion/],
+    ['kind', { ...defect, kind: 'support-contact' }, /structural_defect\.kind/],
+    ['parts', { ...defect, part_ids: ['right_arm', 'other'] }, /structural_defect\.part_ids/],
+    ['relations', { ...defect, relation_ids: ['different-id'] }, /structural_defect\.relation_ids/],
+  ] as const) {
+    const broken = label === 'criterion' ? changed : { ...finding, structural_defect: changed };
+    expect(() => check([broken]), label).toThrow(expected);
+  }
 });
 
 it('checks visible hand-to-object contact and object support without a native geometric pass being enough', () => {
@@ -499,7 +629,7 @@ it('compact compiler carries the separate Critic judgment into the ordinary clos
   const closure=vi.spyOn(f.runtime.store,'collectClosePreviousErrors').mockReturnValue([]);
   const compiled=await compileGuardCycle({previous_operation_id:'pass-3',previous_observation:{
     observed:'The latest component improved but the room remains flat.',target:'resolved',critic_review:critic}},f.runtime.store,f.runtime.registry);
-  expect(closure).toHaveBeenCalledWith(expect.objectContaining({previous_visual_verdict:expect.objectContaining({critic_review:critic})}));
+  expect(closure).toHaveBeenCalledWith(expect.objectContaining({previous_visual_verdict:expect.objectContaining({critic_review:critic})}), []);
   expect(compiled.input.previous_visual_verdict).toMatchObject({critic_review:critic});
   expect(f.runtime.store.read('pass-3').verdict).toBeUndefined();
 });
@@ -527,6 +657,184 @@ function retainedFixture() {
     current_frame: { operation_id: r.id, sha256: r.preview.sha256, accepted: false } }));
   return f;
 }
+it('repairs accepted contradictory caches through store reads, projection and current-frame review without drawing', async () => {
+  const f = retainedFixture(), store = f.runtime.store, r = store.read('pass-3');
+  const req = store.chatCriticRequest(r.id, undefined, true)!;
+  const defect = { id: 'entrance', kind: 'composition-relation', part_ids: ['shell', 'door'], relation_ids: ['entrance'],
+    visible: 'The entrance was absent before its independently owned construction.',
+    brief_relevance: 'The entrance must communicate the architectural scale.',
+    recheck: 'Check the same central opening on the exact current whole frame.' };
+  const raw = { ...reply(req, true), findings: [...reply(req, true).findings, {
+    criterion: 'composition_context', structural_defect: defect,
+    visible: 'The current whole frame clearly shows the central entrance already present.',
+    next_change: 'Preserve this entrance while correcting the other scene deficits.' }],
+    visual_relationships: [{ id: defect.id, kind: 'spatial', part_ids: defect.part_ids,
+      expected: 'A distinct central entrance belongs below the lowest roof of the main shell.',
+      visible: 'The current whole frame clearly shows the central entrance already present.', status: 'pass' }] };
+  const prior = store.artRunState(42);
+  const accepted = validateChatCritic(raw, req, r, { ...prior, visual_problems: {
+    entrance: { structural_defect: defect, status: 'open', visual_relationship_kind: 'spatial' } } })!;
+  const disk = store.paintingState();
+  disk.documents['42'] = { ...prior, chat_critic_review: accepted,
+    current_frame: { ...prior.current_frame, accepted: true },
+    chat_critic_findings: raw.findings, visual_problems: { entrance: {
+      problem_id: 'entrance', structural_defect: defect, status: 'open', scale: 'medium', severity: 'must-fix', visual_relationship_kind: 'spatial' } },
+    active_problem: { problem_id: 'entrance', status: 'open' } };
+  // A legacy file can contain an accepted positive report and contradictory
+  // derived caches. Reproducing that file must not itself invoke a migration.
+  fs.writeFileSync(store.paintingStateFile(), JSON.stringify(disk));
+  const beforeRecord = store.read(r.id), beforeCount = store.records().length;
+  const read = store.artRunState(42);
+  expect(read.visual_problems.entrance.status).toBe('resolved');
+  expect(read.active_problem).toBeUndefined();
+  expect(selectedCriticCorrection(read)?.problem_id).not.toBe('entrance');
+  expect(documentArtisticDebt(read)).toContain('chat_critic_scene_unfinished');
+  expect(store.captureProjectionContext().paintingState.documents['42'].visual_problems.entrance.status).toBe('resolved');
+  const nextReq = store.chatCriticRequest(r.id, undefined, true)!;
+  const result: any = await f.runtime.cycleAuto({ review_operation_id: r.id,
+    previous_observation: { observed: raw.findings.at(-1)!.visible, target: 'unresolved',
+      critic_review: { ...raw, request_id: nextReq.request_id } } });
+  expect(result.preflight_rejection, JSON.stringify(result.preflight_rejection)).toBeUndefined();
+  expect(store.read(r.id)).toEqual(beforeRecord);
+  expect(store.records()).toHaveLength(beforeCount);
+  expect(JSON.parse(fs.readFileSync(store.paintingStateFile(), 'utf8')).documents['42'].visual_problems.entrance.status).toBe('resolved');
+});
+
+it('keeps failed named obligations actionable even when the broad criteria all pass', () => {
+  const s: any = state(), r = record(3), req = chatCriticRequest(r, s, records(3))!;
+  const raw = { ...reply(req), obligations: [{ id: 'unfinished-component', criterion: 'brief_fidelity',
+    component_ids: ['assembly'], depends_on_ids: [], status: 'fail',
+    visible: 'The independently identified assembly still requires visual construction.' }] };
+  const accepted = validateChatCritic(raw, req, r, s)!;
+  const stored = { ...s, ...persistChatCritic(s, accepted, r), current_frame: { sha256: r.preview.sha256 } };
+  expect(selectedCriticCorrection(stored)?.problem_id).toBe('unfinished-component');
+  expect(documentArtisticDebt(stored)).toContain('critic_obligations_unresolved');
+  expect(currentFrameCriticApproval(stored)).toBe(false);
+  expect(() => validateChatCritic(raw, req, r, s, { criteria: raw.criteria })).toThrow(/completion_conflict/);
+});
+it.each(['closure', 'current-frame'])('reports independent review failures together with public paths during %s', async mode => {
+  const f = mode === 'closure' ? fixture() : retainedFixture(), store = f.runtime.store;
+  const r = store.read('pass-3');
+  store.write({ ...r, scene_ownership_plan: { plan_id: 'review-scene',
+    units: [{ semantic_id: 'whole', owner_id: 'whole', role: 'Contract fixture whole',
+      editability: 'independent', edit_axes: ['visibility', 'color', 'rollback'] }],
+    objects: [{ object_id: 'whole', subject_kind: 'single-component', kind: 'single-part', component_semantic_ids: ['whole'] }],
+  } });
+  await f.review.handler({ operation_id: r.id, review_scope: 'whole-scene' });
+  const req = store.chatCriticRequest(r.id, undefined, mode === 'current-frame')!;
+  const editable = store.editableScopeRequest(r.id, undefined, true)!;
+  const input = { ...(mode === 'closure' ? { previous_operation_id: r.id } : { review_operation_id: r.id }),
+    previous_observation: { observed: 'The fixture still has unresolved scene construction.', target: 'unresolved',
+      critic_review: { ...reply(req, true), findings: [], visual_relationships: undefined }, editable_scope_review: { request_id: editable.request_id } } };
+  const before = store.read(r.id);
+  const result: any = await f.runtime.cycleAuto(input);
+  const corrections = result.preflight_rejection?.compact_correction_recipe?.field_correction_packet?.corrections;
+  expect(corrections).toEqual(expect.arrayContaining([
+    expect.objectContaining({ path: 'previous_observation.critic_review.findings', cause_code: 'chat_critic_findings_required' }),
+    expect.objectContaining({ path: 'previous_observation.critic_review.visual_relationships', cause_code: 'chat_critic_visual_relationships_required' }),
+    expect.objectContaining({ path: 'previous_observation.editable_scope_review', cause_code: 'editable_scope_review_required' }),
+  ]));
+  expect(store.read(r.id)).toMatchObject({ preview: before.preview, scene_ownership_plan: before.scene_ownership_plan });
+  expect(store.read(r.id).verdict).toEqual(before.verdict);
+  expect(store.read(r.id).report).toEqual(before.report);
+  expect(store.records()).toHaveLength(3);
+  const corrected: any = await f.runtime.cycleAuto({ ...input, previous_observation: {
+    ...input.previous_observation, critic_review: reply(req, true),
+    editable_scope_review: { request_id: editable.request_id, parts: editable.parts.map((part: any) => ({
+      semantic_id: part.semantic_id, layer_id: part.layer_id, status: 'unknown',
+      visible: 'This contract-only fixture does not establish independent pixel ownership.' })), unmapped_parts: [] },
+  } });
+  expect(corrected.preflight_rejection, JSON.stringify(corrected.preflight_rejection)).toBeUndefined();
+  expect(store.artRunState(42).chat_critic_findings).toEqual(expect.arrayContaining([
+    expect.objectContaining({ criterion: 'composition_context' }),
+  ]));
+  expect(store.records()).toHaveLength(3);
+});
+
+it('retains structural identity independently of JSON object key order while rejecting changed values', () => {
+  const s: any = state(), r = record(3), req = chatCriticRequest(r, s, records(3))!;
+  const defect: any = { id: 'stable-joint', kind: 'attachment', part_ids: ['left', 'right'], relation_ids: ['stable-joint'],
+    visible: 'Two disconnected masses remain visible at the named structural joint.',
+    brief_relevance: 'The original scene needs a connected structural joint.',
+    recheck: 'Inspect the same named joint on the new exact AFTER frame.' };
+  const stored: any = { ...s, visual_problems: { [defect.id]: { status: 'open', structural_defect: defect } } };
+  const review: any = { ...reply(req), criteria: { ...reply(req).criteria, form_proportions: 'fail' },
+    visual_relationships: [{ id: defect.id, kind: 'anatomy', part_ids: defect.part_ids,
+      expected: 'The two named parts should meet at their intended structural joint.', visible: defect.visible, status: 'fail' }],
+    findings: [...reply(req).findings, { criterion: 'form_proportions', correction_kind: 'form',
+      structural_defect: Object.fromEntries(Object.entries(defect).reverse()), visible: defect.visible, next_change: defect.recheck }] };
+  expect(() => validateChatCritic(review, req, r, stored)).not.toThrow();
+  for (const changed of [{ kind: 'shape-topology' }, { part_ids: ['left', 'right', 'other'] },
+    { relation_ids: ['stable-joint', 'other'] }, { recheck: 'A different recheck target must not silently change the original defect.' }]) {
+    const mutated = structuredClone(review); Object.assign(mutated.findings[1].structural_defect, changed);
+    expect(() => validateChatCritic(mutated, req, r, stored)).toThrow(/structural_identity_conflict/);
+  }
+});
+it('DP-02: a rejected exact-frame relationship report can be corrected and retained without painting or claiming pass', async () => {
+  const f = retainedFixture();
+  await f.review.handler({ operation_id: 'pass-3', review_scope: 'whole-scene' });
+  const r = f.runtime.store.read('pass-3'), req = f.runtime.store.chatCriticRequest(r.id, undefined, true)!;
+  const original = reply(req);
+  const relation = { id: 'right-shoulder-glove', kind: 'anatomy', part_ids: ['right_arm', 'torso'],
+    expected: 'Right shoulder contour should join the upper arm to the torso without a visible gap.',
+    visible: 'The arm and shoulder are two disconnected painted masses on the retained exact frame.', status: 'fail' };
+  const defect = { id: relation.id, kind: 'attachment', part_ids: relation.part_ids,
+    relation_ids: [relation.id], visible: relation.visible,
+    brief_relevance: 'The original figure needs a connected right shoulder.',
+    recheck: 'Inspect the corrected shoulder connection on a newly delivered exact frame.' };
+  const correctReview = { ...original, criteria: { ...original.criteria, form_proportions: 'fail' },
+    visual_relationships: [relation], findings: [...original.findings,
+      { criterion: 'form_proportions', correction_kind: 'form', structural_defect: defect,
+        visible: relation.visible, next_change: 'Reconstruct the right shoulder joint on its separate layer.' }] };
+  const badReview = structuredClone(correctReview);
+  badReview.findings[1].structural_defect.kind = 'support-contact';
+  const rejected: any = await f.runtime.cycleAuto({ review_operation_id: r.id,
+    previous_observation: { observed: relation.visible, target: 'unresolved', critic_review: badReview } });
+  expect(JSON.stringify(rejected)).toMatch(/structural_defect\.kind/);
+  expect(f.runtime.store.artRunState(42).visual_problems?.[relation.id]).toBeUndefined();
+  const wrongCriterion = structuredClone(correctReview);
+  wrongCriterion.criteria.contact_and_protection = 'fail';
+  wrongCriterion.findings[1].criterion = 'contact_and_protection';
+  wrongCriterion.findings.push({ criterion: 'form_proportions', correction_kind: 'form',
+    visible: relation.visible, next_change: 'Reconstruct the right shoulder joint on its separate layer.' });
+  const criterionRejected: any = await f.runtime.cycleAuto({ review_operation_id: r.id,
+    previous_observation: { observed: relation.visible, target: 'unresolved', critic_review: wrongCriterion } });
+  expect(JSON.stringify(criterionRejected)).toContain('findings[].criterion must be form_proportions');
+  expect(f.runtime.store.artRunState(42).visual_problems?.[relation.id]).toBeUndefined();
+  const before = f.runtime.store.read(r.id);
+  const accepted: any = await f.runtime.cycleAuto({ review_operation_id: r.id,
+    previous_observation: { observed: relation.visible, target: 'unresolved', critic_review: correctReview } });
+  expect(accepted.preflight_rejection, JSON.stringify(accepted.preflight_rejection)).toBeUndefined();
+  expect(f.runtime.store.read(r.id)).toEqual(before);
+  const persisted: any = f.runtime.store.artRunState(42);
+  expect(persisted.visual_problems[relation.id]).toMatchObject({ status: 'open',
+    visual_relationship_kind: 'anatomy', structural_defect: { kind: 'attachment' } });
+  expect(selectedCriticCorrection(persisted)).toMatchObject({ problem_id: relation.id });
+  const correction: any = { tool: 'photoshop_execute_visual_microplan',
+    impact_class: 'construct', visual_intent: 'mass', stage: 'SHAPE', scale: 'medium',
+    addresses_problem_ids: [relation.id], structural_correction: {
+      defect_id: relation.id, part_ids: ['right_arm'], relation_ids: [relation.id],
+      target: 'Join the new upper-arm edge to the visible torso shoulder contour.', execution: 'brush',
+      sequence: 'partial-rebuild',
+    }, args: { document_id: 42, stage: 'SHAPE', scale: 'medium', impact_class: 'construct',
+      visual_intent: 'mass', addresses_problem_ids: [relation.id], steps: [{
+        tool: 'photoshop_paint_regions', args: { layer_id: 7, regions: [{ contours: [{
+          points: [{ x: 4, y: 3 }, { x: 12, y: 4 }, { x: 7, y: 13 }],
+        }] }] },
+      }] } };
+  expect(criticCorrectionIssue(persisted, correction)).toBeUndefined();
+  // The relationship correction is expressible, but a fresh run must first
+  // establish its scene/medium foundation before ordinary local development.
+  expect(() => f.runtime.store.priorityGate(42, correction)).toThrow(/scene_foundation_required/);
+  const nextPass = { request_key: 'shoulder-correction-next', problem_id: relation.id, document_id: 42,
+    goal: 'Rebuild the independently owned right shoulder attachment with one bounded region pass.',
+    stage: 'SHAPE', scale: 'medium', visual_intent: 'mass', impact_class: 'construct',
+    addresses_problem_ids: [relation.id], structural_correction: correction.structural_correction,
+    actions: [{ tool: 'photoshop_paint_regions', args: correction.args.steps[0].args }] };
+  const publicCycle = createGuardTools(f.runtime).find(x => x.tool.name === 'photoshop_guard_cycle_auto')!;
+  expect(collectSchemaErrors({ next_pass: nextPass }, publicCycle.tool.inputSchema, 'args')).toEqual([]);
+  expect(f.runtime.store.records()).toHaveLength(3);
+});
 it('re-evaluates a closed current frame after save through the real compiler/runtime without closing or painting again', async () => {
   const f = retainedFixture();
   await f.review.handler({ operation_id: 'pass-3', review_scope: 'whole-scene' });

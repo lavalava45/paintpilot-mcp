@@ -934,6 +934,7 @@ export async function invokeUxpColorGradient(params: {
 export async function invokeUxpPaintRegions(params: {
   document_id?: number;
   replace_contents?: boolean;
+  replacement_bounds?: { left: number; top: number; right: number; bottom: number };
   regions: unknown[];
   clip_bounds?: { left: number; top: number; right: number; bottom: number };
 }, commandId?: string): Promise<{

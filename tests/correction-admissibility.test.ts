@@ -12,11 +12,21 @@ const defect = {
 };
 const roi = { left: 245, top: 756, right: 706, bottom: 1125 };
 
+it('accepts same-scale medium correction without granting an unreviewed medium-to-small exception', () => {
+  const medium = { ...defect, scale: 'medium' };
+  const facts = correctionTargetFacts({ problem: medium, proposedBounds: roi, allowedScales: ['medium'] });
+  expect(facts.sameScaleMediumTarget).toBe(true);
+  expect(facts.boundedMediumTarget).toBe(false);
+  expect(correctionTargetFacts({ problem: medium, proposedBounds: roi, allowedScales: ['medium', 'small'] }).sameScaleMediumTarget).toBe(false);
+  expect(correctionTargetFacts({ problem: medium, proposedBounds: roi, allowedScales: ['small'] }).sameScaleMediumTarget).toBe(false);
+});
+
 describe('shared Director/Guard correction admissibility', () => {
   it('classifies a durable cumulative global must-fix without fabricating a Critic-reviewed union', () => {
     expect(correctionTargetFacts({ problem: defect, proposedBounds: roi })).toEqual({
       globalTarget: true, mediumTarget: false, boundedMediumTarget: false,
       reclassifiedMediumTarget: false,
+      sameScaleMediumTarget: false,
     });
     expect(correctionTargetFacts({ problem: undefined, proposedBounds: roi }).globalTarget).toBe(false);
     expect(correctionTargetFacts({ problem: { ...defect, status: 'resolved' }, proposedBounds: roi }).globalTarget).toBe(false);

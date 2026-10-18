@@ -19,6 +19,8 @@ import { createGuardTools } from '../src/tools/guard-tools.js';
 import { EmbeddedGuardRuntime } from '../src/core/guard/runtime.js';
 import { UXP_BRIDGE_REVISION } from '../src/core/guard/protocol-version.js';
 import { normalizeGeometryBinding } from '../src/core/geometry-binding.js';
+import { CHAT_CRITIC_CRITERIA } from '../src/core/guard/chat-critic.js';
+import { sceneFoundationRequest } from '../src/core/guard/scene-foundation.js';
 
 const dirs: string[] = [];
 
@@ -786,6 +788,124 @@ function physicalStackObservation() {
 }
 
 describe('public compact Guard contract regressions', () => {
+  it.each(['composition', 'technique'])('executes a missing %s foundation through ordinary closure plus continuation without requiring a false pass', async foundationGoal => {
+    const f = fixture({ stickyAfter: true });
+    await f.setArtRun.handler({ document_id: 42, process_dir: 'processes/foundation-process/run',
+      original_brief: 'A complete flat graphic scene with an independently editable subject, surrounding field and distinctive graphic marks.' });
+    await createHotLoopOwner(f, 'foundation-base');
+    const r = f.runtime.store.read('foundation-base')!;
+    const foundation = { request_id: sceneFoundationRequest(r, f.runtime.store.paintingState().documents['42']).request_id,
+      composition: { status: 'fail', visible: 'The broad surrounding field is not yet established around the subject.', next_change: 'Establish the requested surrounding field.' },
+      technique: { status: 'fail', visible: 'The distinctive graphic mark character is not yet demonstrated.', next_change: 'Demonstrate the chosen graphic character on this component.' } };
+    const critic = { request_id: f.runtime.store.chatCriticRequest(r.id)!.request_id, reviewer: 'same-chat-role',
+      criteria: Object.fromEntries(CHAT_CRITIC_CRITERIA.map(key => [key, 'unknown'])), findings: [],
+      visual_relationships: [{ id: 'subject-space', kind: 'spatial', part_ids: ['hot-loop-owner', 'background'],
+        expected: 'The graphic subject should sit in the requested complete surrounding field.',
+        visible: 'Only the initial subject mass is present; the surrounding spatial relationship is unfinished.', status: 'unknown' }] };
+    const action = regionAction('foundation-marks'); action.args.regions[0].layer_id = 9;
+    const next = { request_key: 'foundation-next', problem_id: 'foundation-base-problem', document_id: 42,
+      foundation_goal: foundationGoal, goal: foundationGoal === 'composition' ? 'Establish the missing broad scene mass.' : 'Demonstrate the chosen graphic mark character.',
+      stage: 'SHAPE', scale: 'medium', ...structuredMassContract('graphic foundation mass'),
+      region_bounds: { left: 0, top: 0, right: 200, bottom: 200 },
+      change_domains: foundationGoal === 'composition' ? ['composition', 'background-scope'] : ['local-shape'],
+      addresses_problem_ids: ['foundation-base-problem'],
+      layer_separation_check: semanticLayerSeparation('continuation', 'low', false),
+      logical_layer: semanticLogicalLayer('hot-loop-owner', 'continue-logical-layer', { layerId: 9 }), actions: [action] };
+    const before = f.counts();
+    const result = await body(await f.cycle.handler({ previous_operation_id: r.id,
+      previous_observation: ownedPreviousObservation(f, r.id, 'The foundation remains visibly incomplete.',
+        { target: 'unresolved', scene_foundation: foundation, critic_review: critic }), next_pass: next }));
+    expect(result.preflight_rejection, JSON.stringify(result.preflight_rejection)).toBeUndefined();
+    expect(result.execution).toMatchObject({ phase: 'completed', failed: false });
+    expect(f.counts().regionCalls - before.regionCalls).toBe(1);
+    expect(f.runtime.store.read('foundation-next')!.foundation_goal).toBe(foundationGoal);
+    expect(f.runtime.store.paintingState().documents['42'].scene_foundation.technique.status).toBe('fail');
+  });
+
+  it.each(['actions', 'construction'])('continues corrected frame and pass contracts through %s to one execution and a new AFTER', async route => {
+    const f = fixture({ stickyAfter: true });
+    await createHotLoopOwner(f, 'review-recovery-base');
+    await closeHotLoopOwner(f, 'review-recovery-base');
+    f.runtime.store.updatePaintingState(42, current => ({ ...current,
+      original_brief: 'Synthetic integration scene with a separately editable connected subject.' }));
+    const req = f.runtime.store.chatCriticRequest('review-recovery-base', undefined, true)!;
+    const relation = { id: 'subject-joint', kind: 'anatomy', part_ids: ['hot-loop-owner', 'neighbour'],
+      expected: 'The independently editable subject should meet its intended neighbouring mass.',
+      visible: 'This contract fixture describes a disconnected structural joint needing a bounded rebuild.', status: 'fail' };
+    const defect = { id: relation.id, kind: 'attachment', part_ids: relation.part_ids, relation_ids: [relation.id],
+      visible: relation.visible, brief_relevance: 'The authored subject must retain a coherent connected form.',
+      recheck: 'Inspect the same named joint on the next exact AFTER frame.' };
+    const critic = { request_id: req.request_id, reviewer: 'same-chat-role',
+      criteria: Object.fromEntries(CHAT_CRITIC_CRITERIA.map(key => [key, key === 'form_proportions' ? 'fail' : 'unknown'])),
+      visual_relationships: [relation], findings: [{ criterion: 'form_proportions', correction_kind: 'form',
+        structural_defect: defect, visible: relation.visible, next_change: defect.recheck }] };
+    const editable = editableScopeReviewForOperation(f, 'review-recovery-base', true);
+    const action = regionAction('review-recovery-region'); action.args.regions[0].layer_id = 9;
+    action.args.regions[0].contours[0].points = [{ x: 20, y: 20 }, { x: 180, y: 20 }, { x: 120, y: 160 }];
+    const next: any = { request_key: 'review-recovery-next', problem_id: relation.id, document_id: 42,
+      goal: 'Rebuild the named disconnected joint on its existing independent semantic owner.',
+      stage: 'SHAPE', scale: 'medium', region: 'subject', ...structuredMassContract('structural joint mass'),
+      addresses_problem_ids: [relation.id], structural_correction: { defect_id: relation.id,
+        part_ids: ['hot-loop-owner'], relation_ids: [relation.id], execution: 'brush', sequence: 'partial-rebuild',
+        target: 'Rebuild the subject contour to meet the neighbouring mass at the intended joint.' },
+      layer_separation_check: semanticLayerSeparation('continuation', 'low', false),
+      logical_layer: semanticLogicalLayer('hot-loop-owner', 'continue-logical-layer', { layerId: 9 }), actions: [action] };
+    if (route === 'construction') {
+      delete next.actions;
+      next.logical_layer.decision = 'adjust';
+      next.structural_correction.execution = 'construction';
+      next.construction = { part_id: 'hot-loop-owner', color: { red: 70, green: 90, blue: 60 }, model: {
+        model_id: 'review-recovery-model', revision: 1, basis: 'An artist-authored synthetic connected mass.',
+        objects: [{ id: 'hot-loop-subject', subject_kind: 'single-component', origin: [0, 0, 0] }],
+        points: [
+          { id: 'a', object_id: 'hot-loop-subject', position: [-80, -60, 0], fixed: true },
+          { id: 'b', object_id: 'hot-loop-subject', position: [80, -60, 0], fixed: true },
+          { id: 'c', object_id: 'hot-loop-subject', position: [0, 60, 0], fixed: true },
+        ], parts: [{ id: 'hot-loop-owner', object_id: 'hot-loop-subject', role: 'Independent subject', outline: ['a', 'b', 'c'] }],
+        constraints: [], camera: { kind: 'orthographic', origin: [200, 150], scale: 1 },
+      } };
+    }
+    const before = f.counts();
+    // Simulate the host's already demonstrated composition/medium in this
+    // synthetic routing fixture. This is distinct from its failed joint.
+    const foundation = { request_id: sceneFoundationRequest(f.runtime.store.read('review-recovery-base')!,
+      f.runtime.store.paintingState().documents['42']).request_id,
+      composition: { status: 'pass', visible: 'The complete synthetic composition and its required field are established.' },
+      technique: { status: 'pass', visible: 'The chosen flat graphic medium is visibly demonstrated on the subject.',
+        sample_region: { left: 0, top: 0, right: 32, bottom: 32 } } };
+    const denied = await body(await f.cycle.handler({ review_operation_id: 'review-recovery-base',
+      previous_observation: { observed: relation.visible, target: 'unresolved',
+        scene_foundation: foundation,
+        critic_review: { ...critic, visual_relationships: undefined }, editable_scope_review: { request_id: editable.request_id } },
+      next_pass: next }));
+    expect(denied.preflight_rejection?.compact_correction_recipe.field_correction_packet.corrections).toEqual(expect.arrayContaining([
+      expect.objectContaining({ path: 'previous_observation.critic_review.visual_relationships' }),
+      expect.objectContaining({ path: 'previous_observation.editable_scope_review' }),
+    ]));
+    expect(f.counts()).toEqual(before);
+    expect(f.runtime.store.read(next.request_key)).toBeUndefined();
+    expect(denied.preflight_rejection?.validation_coverage.operation_preflight).toBe('deferred');
+    if (route === 'construction') {
+      const decision = denied.preflight_rejection.compact_correction_recipe.field_correction_packet.corrections
+        .find((row: any) => row.path === 'next_pass.logical_layer.decision');
+      expect(decision).toMatchObject({ operator: 'equals', expected: 'continue-logical-layer' });
+      next.logical_layer.decision = decision.expected;
+    }
+    const accepted = await body(await f.cycle.handler({ review_operation_id: 'review-recovery-base',
+      previous_observation: { observed: relation.visible, target: 'unresolved', critic_review: critic, editable_scope_review: editable,
+        scene_foundation: foundation },
+      next_pass: next }));
+    expect(accepted.preflight_rejection, JSON.stringify(accepted.preflight_rejection)).toBeUndefined();
+    expect(accepted.execution).toMatchObject({ phase: 'completed', failed: false });
+    expect(f.counts().regionCalls - before.regionCalls).toBe(1);
+    const executed = f.runtime.store.read(next.request_key)!;
+    expect(executed.preview).toMatchObject({ document_id: 42, sha256: expect.any(String) });
+    expect(executed.operation_receipt).toBeDefined();
+    expect(f.runtime.store.artRunState(42).visual_problems[relation.id].status).toBe('open');
+    const after = f.counts();
+    await f.cycle.handler({ next_pass: next });
+    expect(f.counts()).toEqual(after);
+  });
   it.each([true, false])('localizes frame narration with initial commentary=%s and no additional painting or review', async initialCommentary => {
     const f = fixture({ stickyAfter: true });
     vi.spyOn(f.runtime.store, 'presentationContext').mockReturnValue({ language: 'ru', commentary_mode: 'artistic', commentary_detail: 'detailed' } as any);

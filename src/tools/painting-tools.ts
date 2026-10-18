@@ -1060,6 +1060,9 @@ export function createPaintingTools(
           type: 'object',
           properties: {
             replace_contents: { type: 'boolean', description: 'Explicit replacement of the single pinned raster component: clear old pixels and paint regions in one reversible history transaction. Guard requires action_class=REPLACE and exact owned layer.' },
+            replacement_bounds: { type: 'object', description: 'Limit BOTH replacement deletion and drawing to this canvas rectangle; preserve all pixels outside it.',
+              properties: { left: { type: 'number' }, top: { type: 'number' }, right: { type: 'number' }, bottom: { type: 'number' } },
+              required: ['left', 'top', 'right', 'bottom'], additionalProperties: false },
             regions: {
               type: 'array',
               minItems: 1,
@@ -1672,6 +1675,8 @@ async function paintRegions(
     if (topology.length) throw new Error(topology.map(issue => `${issue.code}: ${issue.message}`).join('; '));
     const regions = args.regions.map((region, index) => parseRegion(region, index));
     const clipBounds = parseClipBounds(args.clip_bounds);
+    const replacementBounds = parseClipBounds(args.replacement_bounds);
+    if (replacementBounds && args.replace_contents !== true) throw new Error('replacement_bounds requires replace_contents=true');
     const startedAt = Date.now();
     await backendRouter.backendFor('painting.regions');
     const documentId =
@@ -1685,6 +1690,7 @@ async function paintRegions(
       ...(documentId !== undefined ? { document_id: documentId } : {}),
       regions,
       ...(args.replace_contents === true ? { replace_contents: true } : {}),
+      ...(replacementBounds ? { replacement_bounds: replacementBounds } : {}),
       ...(clipBounds ? { clip_bounds: clipBounds } : {}),
     }, stableCommandId);
     if (!result.ok || !result.data) throw new Error(result.error ?? 'uxp_paint_regions_failed');
@@ -1696,6 +1702,7 @@ async function paintRegions(
       document_resolution_dpi: parsed.document_resolution_dpi,
       path_coordinate_scale: parsed.path_coordinate_scale,
       clip_bounds: parsed.clip_bounds ?? clipBounds ?? null,
+      replacement_bounds: parsed.replacement_bounds ?? replacementBounds ?? null,
       ...(stableCommandId ? { stable_command_id: stableCommandId } : {}),
       execution_duration_ms: Date.now() - startedAt,
       history_steps: 1,

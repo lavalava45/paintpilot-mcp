@@ -50,7 +50,7 @@ export const GEOMETRY_BINDING_SCHEMA = object({
   protocol: { type: 'string', enum: ['photoshop.guard.geometry_binding.v1'] },
   owner_id: id, scene_geometry_model_id: id, scene_geometry_revision: positiveInteger,
   support_plane_id: { ...id, description: 'Must name a declared support plane and also supply anchors.near_contact.' },
-  vanishing_family_ids: { ...list(id, 8), description: 'Use declared families; provide far_extent, centerline or near_contact+far_extent, and at least two depth-separated control sections.' }, dependencies: list(id, 32),
+  vanishing_family_ids: { ...list(id, 8), description: 'Declared family dependencies. supported_by/contact binds the support, not the owner axis. Use converges_to/parallel_family with subject_ref=owner_id or a named line member and target_ref=family id for actual directional alignment. Owner-axis convergence/depth needs far_extent and two separated control sections; legacy untyped bindings retain axis checks.' }, dependencies: list(id, 32),
   anchors: object({ near_contact: point, far_extent: point, centerline: line }),
   control_sections: list(object({ id, at: point, expected_bounds: object({ left: finite, top: finite, right: finite, bottom: finite },
     ['left', 'top', 'right', 'bottom']) }, ['id', 'at']), 12),

@@ -1,3 +1,4 @@
+import { DEPICTION_DETAIL_GUIDANCE, DEPICTION_DETAIL_SCHEMA, normalizeDepictionDetail, wholeObjectDepiction, type DepictionDetail } from './depiction-detail.js';
 export const SCENE_OWNERSHIP_PLAN_PROTOCOL = 'photoshop.guard.scene_ownership_plan.v1' as const;
 
 export const SCENE_OWNERSHIP_EDITABILITY = [
@@ -34,6 +35,7 @@ export interface SceneOwnershipSharedOwnerJustification {
 }
 
 export interface SceneOwnershipObject {
+  depiction?: DepictionDetail;
   object_id: string;
   kind: 'single-part' | 'compound-object';
   /** Optional only for historical plans. New owners must declare their actual scope. */
@@ -228,7 +230,8 @@ export function normalizeSceneOwnershipPlan(value: unknown): SceneOwnershipPlan 
         owners.add(unit.owner_id);
       }
       return { object_id: objectId, kind: kind as SceneOwnershipObject['kind'],
-        ...(subjectKind ? { subject_kind: subjectKind as SceneSubjectKind } : {}), component_semantic_ids: ids };
+        ...(subjectKind ? { subject_kind: subjectKind as SceneSubjectKind } : {}),
+        ...(row.depiction === undefined ? {} : { depiction: normalizeDepictionDetail(row.depiction) }), component_semantic_ids: ids };
     }).sort((a, b) => a.object_id.localeCompare(b.object_id));
     if (assigned.size !== units.length) throw new Error('Every semantic unit must be assigned to an object when objects are declared');
   }
@@ -262,28 +265,28 @@ export function sceneComponentScopeIssue(plan: SceneOwnershipPlan, ownerId: stri
   if (!units.length) return undefined; // Existing unplanned-owner validation supplies that error.
   if (!plan.objects?.length) return {
     code: 'scene_component_plan_required',
-    message: 'Declare scene_ownership_plan.objects for this owner in every rendering profile. A whole person/animal/furniture/window is compound, including initial block-in; name each visible independently editable part and give it its own owner/layer.',
+    message: `Declare scene_ownership_plan.objects for this owner. ${DEPICTION_DETAIL_GUIDANCE}`,
     details: { path: 'next_pass.scene_ownership_plan.objects', owner_id: ownerId,
       required_fields: ['object_id', 'subject_kind', 'kind', 'component_semantic_ids'],
       allowed_subject_kinds: [...SCENE_SUBJECT_KINDS],
       component_examples: { person: ['body', 'face', 'hair', 'garment'], animal: ['body', 'head', 'ears', 'eyes'],
         furniture: ['frame', 'cover', 'cushions'], window: ['frame', 'glass', 'curtains'] },
-      next: 'Keep one logical component per pass; create and review it, then paint the next component on a different layer. Small inseparable accents stay with that component. Preserve every existing binding.' },
+      next: DEPICTION_DETAIL_GUIDANCE },
   };
   for (const object of plan.objects.filter(row => row.component_semantic_ids.some(id => units.some(unit => unit.semantic_id === id)))) {
     const index = plan.objects.indexOf(object);
     const details = { path: `next_pass.scene_ownership_plan.objects[${index}]`, object_id: object.object_id,
       owner_id: ownerId, allowed_subject_kinds: [...SCENE_SUBJECT_KINDS],
       required_fields: ['subject_kind', 'kind', 'component_semantic_ids'],
-      component_rule: 'Each visible independently editable part has one semantic unit, one distinct owner and one distinct physical layer; review one component before the next. Initial block-in and simple_graphic do not waive this rule.' };
+      component_rule: DEPICTION_DETAIL_GUIDANCE };
     if (!object.subject_kind) return {
       code: 'scene_component_scope_required',
       message: `Declare objects[${index}].subject_kind for ${object.object_id}; single-component means one real part (e.g. face or hair), never an entire complex subject. Existing unknown scope may be classified additively without changing owner bindings.`, details,
     };
     const compound = !['single-component', 'continuous-field'].includes(object.subject_kind);
-    if (compound && object.kind !== 'compound-object') return {
+    if (compound && object.kind !== 'compound-object' && !wholeObjectDepiction(object.depiction)) return {
       code: 'scene_component_decomposition_required',
-      message: `${object.subject_kind} ${object.object_id} cannot be single-part: declare compound-object with separately editable visible parts on distinct owners/layers before painting, including the first block-in.`, details,
+      message: `${object.subject_kind} ${object.object_id} needs compound-object with independently editable parts, or a scale/task-grounded depiction for a tiny contextual whole-object component. Focal subjects and requested part edits still require decomposition.`, details,
     };
     if (object.subject_kind === 'single-component' && (object.kind !== 'single-part' || units.length !== 1)) return {
       code: 'scene_component_decomposition_required',
@@ -418,10 +421,11 @@ export function sceneScaffoldScopeIssue(plan: SceneOwnershipPlan, ownerId: strin
 
 export const SCENE_OWNERSHIP_OBJECTS_SCHEMA = {
   type: 'array', minItems: 1, maxItems: 64,
-  description: 'Required for semantic layer creation in every rendering profile, including initial block-in. subject_kind person/animal/furniture/window/plant/custom-compound requires compound-object and distinct component owners/layers. Person: body, face, hair, garment where visible; bed: frame/blanket/pillows; window: frame/glass/curtains; animal: body/head/ears/eyes where separately editable. single-component is one real part, never the whole complex subject. continuous-field is one background field. Create/review one component per pass; a virtual object owns no raster. Tiny inseparable accents remain on their component.',
+  description: DEPICTION_DETAIL_GUIDANCE,
   items: { type: 'object', properties: {
     object_id: { type: 'string' }, kind: { type: 'string', enum: ['single-part', 'compound-object'] },
     subject_kind: { type: 'string', enum: [...SCENE_SUBJECT_KINDS] },
+    depiction: DEPICTION_DETAIL_SCHEMA,
     component_semantic_ids: { type: 'array', minItems: 1, maxItems: 128, uniqueItems: true, items: { type: 'string' } },
   }, required: ['object_id', 'subject_kind', 'kind', 'component_semantic_ids'], additionalProperties: false },
 };

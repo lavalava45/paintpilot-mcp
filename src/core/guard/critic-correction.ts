@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto';
+import { activeCriticFindings } from './critic-finding-status.js';
+import { VISUAL_RELATION_RULES } from './visual-relationship-review.js';
 import { completedArtisticExecution } from './artistic-contract.js';
 import { openCriticObligation, criticObligationState } from './critic-obligations.js';
 import { requestProblemLinks } from './problem-links.js';
@@ -123,15 +125,17 @@ export function selectedCriticCorrection(state: Row, request?: Row): Row | undef
   const obligations = criticObligationState(state);
   const links = request ? requestProblemLinks(request) : [];
   const findings = [
-    ...(state.chat_critic_findings ?? []),
+    ...activeCriticFindings(state),
     ...Object.values(state.visual_problems ?? {})
       .filter((p: any) => p?.structural_defect && p.status !== 'resolved'
-        && !(state.chat_critic_findings ?? []).some((f: Row) => f.structural_defect?.id === p.structural_defect.id))
-      .map((p: any) => ({ criterion: p.structural_defect.kind === 'support-contact'
-          ? 'contact_and_protection'
-          : p.structural_defect.kind === 'composition-relation' ? 'composition_context' : 'form_proportions',
-        correction_kind: p.structural_defect.kind === 'support-contact' ? 'contact'
-          : p.structural_defect.kind === 'composition-relation' ? 'composition' : 'form',
+        && !activeCriticFindings(state).some((f: Row) => f.structural_defect?.id === p.structural_defect.id))
+      .map((p: any) => ({ criterion: p.critic_assessment?.criterion
+          ?? VISUAL_RELATION_RULES[p.visual_relationship_kind]?.criterion
+          ?? (p.structural_defect.kind === 'support-contact' ? 'contact_and_protection'
+            : p.structural_defect.kind === 'composition-relation' ? 'composition_context' : 'form_proportions'),
+        correction_kind: p.critic_assessment?.correction_kind
+          ?? (p.structural_defect.kind === 'support-contact' ? 'contact'
+          : p.structural_defect.kind === 'composition-relation' ? 'composition' : 'form'),
         visible: p.structural_defect.visible, next_change: p.structural_defect.recheck,
         structural_defect: p.structural_defect })),
   ].map(correctionFinding);
@@ -209,7 +213,7 @@ export function originalBriefAnchor(state: Row, restoreFull = false): Row {
     problem_id: row.id, requirement: row.visible,
     next_change: `Review ${row.id} after dependencies ${row.depends_on_ids.join(', ') || 'none'}.`,
   }));
-  if (!unmet.length) unmet.push(...(state.chat_critic_findings ?? [])
+  if (!unmet.length) unmet.push(...activeCriticFindings(state)
     .map(correctionFinding)
     .map((f: Row) => ({
       problem_id: f.problem_id,
@@ -394,7 +398,7 @@ export function criticCorrectionIssue(state: Row, request: Row, originalOperatio
   const finding = selectedCriticCorrection(state, request);
   if (!finding) return undefined;
   const linked = requestProblemLinks(request);
-  const otherTarget = (state.chat_critic_findings ?? []).map(correctionFinding)
+  const otherTarget = activeCriticFindings(state).map(correctionFinding)
     .find((item: Row) => linked.includes(item.problem_id) && !STRUCTURAL_PRIORITY_KINDS.has(item.correction_kind));
   if (otherTarget && otherTarget.problem_id !== finding.problem_id
     && STRUCTURAL_PRIORITY_KINDS.has(finding.correction_kind)

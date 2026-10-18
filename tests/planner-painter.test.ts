@@ -375,6 +375,41 @@ function seedTrendSignal(
 }
 
 describe('Art Director / Painter controller contract', () => {
+  it('accepts the pagoda same-scale structural recovery even without Critic spatial narrowing evidence', () => {
+    const s = store();
+    const id = 'cumulative-trend-primitive-footprint-repeating';
+    s.updatePaintingState(42, current => ({ ...current, visual_problems: {
+      [id]: { problem_id: id, scale: 'medium', status: 'open', severity: 'must-fix', strategy_switch_required: true },
+    } }));
+    const d: any = directive();
+    d.tasks = [{ task_id: 'curved-roof', summary: 'Rebuild the curved roof and its structural support',
+      allowed_scales: ['medium'], allowed_global_changes: ['silhouette', 'depth-structure'],
+      correction_target: { problem_id: id, region_bounds: { left: 300, top: 205, right: 602, bottom: 332 } },
+      construction_plan: { representation_strategy: 'Replace the wedge by a curved structural eave',
+        structural_features: ['curved eave', 'attached support bracket'], stage_exit_condition: 'The curved roof is visible on the delivered frame' } }];
+    const accepted = s.setArtDirectorState({ document_id: 42, action: 'review', directive: d });
+    expect(accepted.art_director.tasks[0]).not.toHaveProperty('correction_target');
+    expect(s.paintingState().documents['42'].visual_problems[id].status).toBe('open');
+    const narrow = structuredClone(d); narrow.directive_id = 'unreviewed-small'; narrow.tasks[0].allowed_scales = ['small'];
+    expect(() => s.setArtDirectorState({ document_id: 42, action: 'review', directive: narrow })).toThrow(/Critic-reviewed/);
+  });
+
+  it('never locates whole-frame primitive complaints at unrelated paint footprints and repairs retained derived scope', () => {
+    const s = store();
+    seedTrendSignal(s, 'pagoda-tiny-leg', 1, { bounds: { left: 699, top: 1447, right: 715, bottom: 1481 }, findingKind: 'proportion', region: 'tiny leg' });
+    seedTrendSignal(s, 'pagoda-timber', 2, { bounds: { left: 310, top: 306, right: 590, bottom: 785 }, findingKind: 'proportion', region: 'upper timber' });
+    const id = 'cumulative-trend-primitive-footprint-repeating';
+    const trend = s.cumulativeTrendState(42);
+    const promoted = s.promoteCumulativeTrendProblem(42, s.paintingState().documents['42'] ?? {}, trend);
+    expect(promoted.visual_problems[id]).toMatchObject({ scale: 'medium', status: 'open' });
+    expect(promoted.visual_problems[id].supporting_regions.every(row => row.region_source === 'none' && !row.region_bounds)).toBe(true);
+    const legacy = { ...promoted, visual_problems: { [id]: { ...promoted.visual_problems[id], scale: 'global',
+      supporting_regions: [{ operation_id: 'pagoda-tiny-leg', region_source: 'operation_region' }] } } };
+    const reconciled = s.reconcileTrendEvidenceToCurrentFrame(legacy, s.records());
+    expect(reconciled.visual_problems[id]).toMatchObject({ scale: 'medium', status: 'open', strategy_switch_required: true });
+    expect(reconciled.visual_problems[id].supporting_regions.every(row => !row.region_bounds)).toBe(true);
+  });
+
   it('surfaces hard-perceptual brief items as UNASSESSED durable debt before final assessment', () => {
     const s = store();
     const d = directive('brief-debt', 5) as any;
@@ -966,10 +1001,12 @@ describe('Art Director / Painter controller contract', () => {
     seedTrendSignal(s, 'trend-left', 1, {
       bounds: { left: 50, top: 100, right: 180, bottom: 260 },
       region: 'left-focalForm',
+      findingTrendSignals: ['primitive-footprint-repeating'],
     });
     seedTrendSignal(s, 'trend-right', 2, {
       bounds: { left: 760, top: 480, right: 900, bottom: 660 },
       region: 'lower-right',
+      findingTrendSignals: ['primitive-footprint-repeating'],
     });
 
     const trend = (s as any).cumulativeTrendState(42);
@@ -3135,10 +3172,12 @@ describe('bounded correction of a global priority defect', () => {
     seedTrendSignal(s, 'primitive-left', 1, {
       bounds: { left: 50, top: 100, right: 180, bottom: 260 },
       region: 'left-subject',
+      findingTrendSignals: ['primitive-footprint-repeating'],
     });
     seedTrendSignal(s, 'primitive-right', 2, {
       bounds: { left: 760, top: 480, right: 900, bottom: 660 },
       region: 'right-subject',
+      findingTrendSignals: ['primitive-footprint-repeating'],
     });
     const trend = (s as any).cumulativeTrendState(42);
     expect(trend.triggered).toBe(true);

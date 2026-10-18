@@ -70,7 +70,7 @@ it('lint forwards a full previous observation to the compiler without recording 
   const result = await runtime.lintNextPass({ document_id: 64, request_key: 'draft', goal: 'Build next component', actions: [] },
     { previous_operation_id: 'old', previous_observation: { observed: 'Exact delivered frame shows the previous contour', target: 'resolved' } });
   expect(closureCheck).toHaveBeenCalledWith(expect.objectContaining({ previous_operation_id: 'old',
-    previous_visual_verdict: expect.objectContaining({ target_resolved: 'yes' }) }));
+    previous_visual_verdict: expect.objectContaining({ target_resolved: 'yes' }) }), []);
   expect(mutate).not.toHaveBeenCalled(); expect(previous).not.toHaveProperty('verdict');
   expect(result.execution).toBe('not-executed'); expect(result.continuation).toContain('SAME');
 });

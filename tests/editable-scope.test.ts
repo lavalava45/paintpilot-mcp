@@ -15,6 +15,18 @@ const record = { id: 'pass-1', visual: true, args: { document_id: 850, logical_l
 const state = { original_brief: 'A cafe with independently editable doors and glazing', document_incarnation_id: 'incarnation-1' };
 const request = editableScopeRequest(record, state, plan, owners)!;
 
+it('reviews a tiny contextual whole figure at its declared scale without inventing anatomical inventory', () => {
+  const tinyPlan = normalizeSceneOwnershipPlan({ ...plan, objects: [{ object_id: 'traveler',
+    kind: 'single-part', subject_kind: 'person', component_semantic_ids: ['whole'],
+    depiction: { purpose: 'context', projected_size: { width: 24, height: 64 }, canvas_size: { width: 1024, height: 1536 } } }] });
+  const tinyRequest = editableScopeRequest(record, state, tinyPlan, owners)!;
+  expect(tinyRequest.parts).toHaveLength(1);
+  expect(tinyRequest.whole_object_components).toMatchObject([{ object_id: 'traveler', component_semantic_ids: ['whole'] }]);
+  const review = validateEditableScopeReview({ request_id: tinyRequest.request_id,
+    parts: [{ semantic_id: 'whole', layer_id: 2, status: 'independent', visible: 'The whole small traveler is isolated from the pagoda on its own layer.' }], unmapped_parts: [] }, tinyRequest, state);
+  expect(review.debt).toEqual({});
+});
+
 it('accepts an exact explicitly expanded review when the ordinary checkpoint covers one owner', () => {
   const store = Object.create(SessionStore.prototype) as SessionStore;
   const nextRecord = { ...record, id: 'partial-preparation' };

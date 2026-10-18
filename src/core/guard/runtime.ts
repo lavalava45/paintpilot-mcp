@@ -536,7 +536,7 @@ export class EmbeddedGuardRuntime {
 
   toolContract(toolName: string): Record<string, unknown> {
     const definition = this.registry.get(toolName);
-    if (!definition || !toolName.startsWith('photoshop_') || toolName.startsWith('photoshop_guard_')) {
+    if (!definition || !toolName.startsWith('photoshop_')) {
       if (/^photoshop_(?:reorder_layer(?:s)?|rearrange_layers|set_layer_order|layer_move|move_layer_relative)$/.test(toolName)) {
         const create = this.registry.get('photoshop_create_layer');
         return { ok: false, code: 'guard_tool_contract_unknown', tool_name: toolName, execution: 'not-executed',
@@ -555,7 +555,9 @@ export class EmbeddedGuardRuntime {
     }
     return { ok: true, tool_name: toolName, execution: 'not-executed',
       inputSchema: structuredClone(definition.tool.inputSchema),
-      dispatch: isGuardReadTool(toolName) ? 'read-only tool or Guard operation' : 'photoshop_guard_cycle_auto next_pass.actions',
+      dispatch: toolName.startsWith('photoshop_guard_')
+        ? 'Guard-managed public tool; call by its published name, without raw mutation bypass'
+        : isGuardReadTool(toolName) ? 'read-only tool or Guard operation' : 'photoshop_guard_cycle_auto next_pass.actions',
       raw_mutation_bypass_permitted: false };
   }
 

@@ -18,7 +18,7 @@ const { tryHandleP3LayerAdvancedOperation } = require('./p3-layer-advanced-ops')
 
 const BRIDGE_PORT = 38452;
 const BRIDGE_BASE = `http://127.0.0.1:${BRIDGE_PORT}`;
-const BRIDGE_REVISION = 'compact-v2-20261012-component-outline-v18';
+const BRIDGE_REVISION = 'compact-v2-20261018-bounded-rebuild-v19';
 // Generated paired-build identity, captured once. A rebuild must not relabel loaded UXP code.
 const DEPLOYMENT_SOURCE_SHA256 = (() => {
   try {
@@ -3323,6 +3323,13 @@ async function paintDabsBatch(params = {}) {
 }
 
 async function paintRegions(params = {}) {
+  const replacementBounds = params.replacement_bounds ?? null;
+  if (replacementBounds && (params.replace_contents !== true
+    || !['left', 'top', 'right', 'bottom'].every(key => Number.isFinite(replacementBounds[key]))
+    || replacementBounds.left < 0 || replacementBounds.top < 0
+    || replacementBounds.left >= replacementBounds.right || replacementBounds.top >= replacementBounds.bottom)) {
+    throw new Error('region_replacement_bounds_invalid');
+  }
   const regions = Array.isArray(params.regions) ? params.regions : [];
   for (const region of regions) {
     if (region.render_mode !== undefined && !['fill', 'outline'].includes(region.render_mode)) throw new Error('region_render_mode_invalid');
@@ -3355,6 +3362,9 @@ async function paintRegions(params = {}) {
   const height = documentPixelDimension(descriptors.documentDescriptor?.height, descriptors.documentDescriptor?.resolution);
   const resolution = numericValue(descriptors.documentDescriptor?.resolution) ?? 72;
   if (width == null || height == null) throw new Error('paint_regions document geometry unavailable');
+  if (replacementBounds && (replacementBounds.right > width || replacementBounds.bottom > height)) {
+    throw new Error('region_replacement_bounds_outside_canvas');
+  }
 
   const doc = app.activeDocument;
   const originalLayer = Array.from(doc.activeLayers ?? [])[0] ?? null;
@@ -3429,7 +3439,8 @@ async function paintRegions(params = {}) {
           }], { synchronousExecution: true });
           if (selected.some(result => result?._obj === 'error')) throw new Error('component_rebuild_pixel_target_failed');
           if (outlineBaseline) await selectVerifiedPaintLayerModal(doc, targets[0].id);
-          await doc.selection.selectAll();
+          if (replacementBounds) await doc.selection.selectRectangle(replacementBounds, constants.SelectionType.REPLACE, 0, false);
+          else await doc.selection.selectAll();
           const cleared = await action.batchPlay([{ _obj: 'delete', _options: { dialogOptions: 'silent' } }], { synchronousExecution: true });
           if (cleared.some(result => result?._obj === 'error')) throw new Error('component_rebuild_clear_failed');
           await doc.selection.deselect();
@@ -3449,7 +3460,8 @@ async function paintRegions(params = {}) {
           const outlinePath = await doc.pathItems.add(pathName, subpaths);
           try {
             if (region.render_mode === 'outline') {
-              await doc.selection.deselect();
+              if (replacementBounds) await doc.selection.selectRectangle(replacementBounds, constants.SelectionType.REPLACE, 0, false);
+              else await doc.selection.deselect();
               setForegroundColorModal(region.color);
               outlineState = (await applyVerifiedBatchBrushStyle({ size: region.stroke_size, opacity: region.opacity, flow: region.stroke_flow ?? 100 })).settings;
               await strokeNamedPathModal(doc, pathName, constants.ToolType.BRUSH, false, outlinePath);
@@ -3465,6 +3477,12 @@ async function paintRegions(params = {}) {
               }],
               { synchronousExecution: true }
             );
+            if (replacementBounds) {
+              await doc.selection.selectRectangle(replacementBounds, constants.SelectionType.INTERSECT, 0, false);
+              // Empty intersection means no selection: an unrestricted fill
+              // would damage the whole layer. Skip it instead.
+              if (!doc.selection.bounds) continue;
+            }
             await action.batchPlay(
               [{
                 _obj: 'fill',
@@ -3524,6 +3542,7 @@ async function paintRegions(params = {}) {
           document_resolution_dpi: resolution,
           path_coordinate_scale: 1,
           clip_bounds: clipBounds,
+          replacement_bounds: replacementBounds,
         };
       } catch (error) {
         if (!committed && outlineBaseline) {

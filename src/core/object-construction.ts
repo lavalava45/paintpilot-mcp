@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto';
+import { DEPICTION_DETAIL_SCHEMA, normalizeDepictionDetail, wholeObjectDepiction, type DepictionDetail } from './depiction-detail.js';
+import { unmetTransitionRequirements, type TransitionRequirement } from './transition-requirements.js';
 import { normalizeIKChains, solveIKChains, type ConstructionIKChain } from './ik-construction.js';
 import { CONTOUR_GEOMETRY, smoothClosedContour, ContourGeometryError } from './contour-geometry.js';
 import { filledContourIssues } from './filled-contour-topology.js';
@@ -20,6 +22,7 @@ export interface ConstructionPoint {
   axis_to?: string;
 }
 export interface ConstructionObject {
+  depiction?: DepictionDetail;
   id: string;
   subject_kind: SceneSubjectKind;
   origin: Vec;
@@ -84,6 +87,9 @@ export interface ConstructionIssue {
   path: string;
   message: string;
   residual?: number;
+  operator?: TransitionRequirement['operator'];
+  expected?: unknown;
+  actual?: unknown;
 }
 export class ConstructionError extends Error {
   constructor(readonly issues: ConstructionIssue[]) {
@@ -180,6 +186,7 @@ export function normalizeConstructionModel(value: unknown): ConstructionModel {
       rotation: vector(r.rotation, `${p}.rotation`),
       scale,
       ...(r.rigid === undefined ? {} : { rigid: r.rigid === true }),
+      ...(r.depiction === undefined ? {} : { depiction: normalizeDepictionDetail(r.depiction) }),
     };
   });
   const points = rows(raw.points, 'model.points', 128).map((v, i): ConstructionPoint => {
@@ -423,7 +430,9 @@ export function constructionOwnershipPlan(model: ConstructionModel) {
     objects: model.objects.map((o) => ({
       object_id: o.id,
       subject_kind: o.subject_kind,
+      ...(o.depiction ? { depiction: o.depiction } : {}),
       kind: ['single-component', 'continuous-field'].includes(o.subject_kind)
+        || (wholeObjectDepiction(o.depiction) && model.parts.filter(p => p.object_id === o.id).length === 1)
         ? 'single-part'
         : 'compound-object',
       component_semantic_ids: model.parts.filter((p) => p.object_id === o.id).map((p) => p.id),
@@ -800,6 +809,7 @@ export const CONSTRUCTION_MODEL_SCHEMA = object(
         {
           id,
           subject_kind: { type: 'string', enum: [...SCENE_SUBJECT_KINDS] },
+          depiction: DEPICTION_DETAIL_SCHEMA,
           origin: vec,
           rotation: { ...vec, description: 'Degrees [x,y,z], applied X then Y then Z.' },
           scale: { type: 'number', exclusiveMinimum: 0 },
@@ -1000,7 +1010,8 @@ export function validateRigidRevision(previous: ConstructionModel, current: Cons
 }
 
 export interface ConstructionContext {
-  construction_bindings?: Array<{ owner_id: string; rendering?: Record<string, unknown>; bounds?: { left: number; top: number; right: number; bottom: number } }>;
+  painterly_frame?: { canvas_width?: number; canvas_height?: number } | null;
+  construction_bindings?: Array<{ owner_id: string; contour?: Array<{ x: number; y: number }>; rendering?: Record<string, unknown>; bounds?: { left: number; top: number; right: number; bottom: number } }>;
   logical_layer_owners?: Array<Record<string, unknown>>;
   scene_ownership_plan?: Record<string, unknown> | null;
 }
@@ -1076,6 +1087,20 @@ export function expandConstructionPass(
   }
   const solved = solveConstruction(model),
     part = solved.parts.find((p) => p.id === request.part_id);
+  // Check the actual projected geometry, not just a host's small-size claim.
+  for (const object of model.objects.filter(o => wholeObjectDepiction(o.depiction))) {
+    const frame = context.painterly_frame;
+    if (frame?.canvas_width && frame?.canvas_height
+      && (frame.canvas_width !== object.depiction!.canvas_size.width || frame.canvas_height !== object.depiction!.canvas_size.height))
+      error('construction_depiction_canvas_mismatch', 'next_pass.construction.model.objects',
+        `Use the current delivered canvas size ${frame.canvas_width}x${frame.canvas_height} in object ${object.id} depiction.canvas_size; reassess detail at that scale.`);
+    const parts = solved.parts.filter(p => model.parts.find(row => row.id === p.id)?.object_id === object.id);
+    const width = Math.max(...parts.map(p => p.bounds.right)) - Math.min(...parts.map(p => p.bounds.left));
+    const height = Math.max(...parts.map(p => p.bounds.bottom)) - Math.min(...parts.map(p => p.bounds.top));
+    if (width > object.depiction!.projected_size.width + 1e-6 || height > object.depiction!.projected_size.height + 1e-6)
+      error('construction_depiction_size_mismatch', 'next_pass.construction.model.objects',
+        `Object ${object.id} projects to ${width}x${height}; update depiction.projected_size to these dimensions and reassess whole-object versus parts at current canvas scale.`);
+  }
   if (!part)
     error(
       'construction_part_unknown',
@@ -1083,38 +1108,32 @@ export function expandConstructionPass(
       `Choose ${model.parts.map((p) => p.id).join(', ')}`
     );
   const color = request.color as Record<string, unknown>;
-  if (
-    !color ||
-    !['red', 'green', 'blue'].every(
-      (k) =>
-        typeof color[k] === 'number' &&
-        Number.isFinite(color[k]) &&
-        Number(color[k]) >= 0 &&
-        Number(color[k]) <= 255
-    )
-  )
-    error(
-      'construction_color_required',
-      'next_pass.construction.color',
-      'Choose explicit RGB values in [0,255]; geometry does not invent color'
-    );
+  const requirements: TransitionRequirement[] = ['red', 'green', 'blue'].map(channel => ({
+    path: `next_pass.construction.color.${channel}`, code: 'construction_color_required',
+    message: 'Choose explicit RGB values in [0,255]; geometry does not invent color',
+    actual: color?.[channel], operator: 'number-range', expected: { min: 0, max: 255 },
+  }));
   const previousRendering = context.construction_bindings?.find(b => b.owner_id === request.part_id)?.rendering;
   const rendering = (request.rendering ?? previousRendering) as Record<string, unknown> | undefined;
   const renderMode = rendering?.mode ?? (raw.visual_intent === 'line' ? 'outline' : 'fill');
-  if (!['fill', 'outline'].includes(String(renderMode)))
-    error('construction_rendering_invalid', 'next_pass.construction.rendering.mode', 'Choose fill or outline explicitly.');
-  if (raw.visual_intent === 'line' && renderMode === 'fill')
-    error('construction_rendering_intent_conflict', 'next_pass.construction.rendering.mode', 'A line intention cannot execute a fill; choose outline and its width.');
+  requirements.push({ path: 'next_pass.construction.rendering.mode',
+    code: raw.visual_intent === 'line' ? 'construction_rendering_intent_conflict' : 'construction_rendering_invalid',
+    message: 'Choose rendering compatible with the visual intention; outline also needs an explicit width.',
+    actual: renderMode, operator: 'one-of', expected: raw.visual_intent === 'line' ? ['outline'] : ['fill', 'outline'] });
   const outline = renderMode === 'outline';
   const preset = rendering?.preset_name;
-  if (preset !== undefined && (typeof preset !== 'string' || !preset.trim()))
-    error('construction_preset_invalid', 'next_pass.construction.rendering.preset_name', 'Choose a nonempty installed preset name.');
+  if (preset !== undefined) requirements.push({ path: 'next_pass.construction.rendering.preset_name',
+    code: 'construction_preset_invalid', message: 'Choose a nonempty installed preset name.',
+    actual: preset, operator: 'nonempty-string', expected: true });
   const size = Number(rendering?.size);
-  if (outline && (!Number.isFinite(size) || size <= 0 || size > 5000))
-    error('construction_line_style_required', 'next_pass.construction.rendering.size', 'Choose a positive line width in canvas pixels; a line request is never silently converted to fill.');
+  if (outline || raw.visual_intent === 'line') requirements.push({ path: 'next_pass.construction.rendering.size',
+    code: 'construction_line_style_required', message: 'Choose a positive line width in canvas pixels; a line request is never silently converted to fill.',
+    actual: size, operator: 'number-range', expected: { min: 0, max: 5000, exclusive_min: true } });
   const opacity = Number(rendering?.opacity ?? 100), flow = Number(rendering?.flow ?? 100);
-  if (![opacity, flow].every(v => Number.isFinite(v) && v > 0 && v <= 100))
-    error('construction_line_style_invalid', 'next_pass.construction.rendering', 'Opacity and flow must be in (0,100].');
+  for (const [key, actual] of [['opacity', opacity], ['flow', flow]] as const)
+    requirements.push({ path: `next_pass.construction.rendering.${key}`, code: 'construction_line_style_invalid',
+      message: 'Opacity and flow must be in (0,100].', actual, operator: 'number-range',
+      expected: { min: 0, max: 100, exclusive_min: true } });
   const matches = (context.logical_layer_owners ?? []).filter(
     (o) => o.hypothesis_id === part!.id && o.temporary !== true
   );
@@ -1133,33 +1152,66 @@ export function expandConstructionPass(
       'Current owner has no valid physical layer id'
     );
   const supplied = raw.logical_layer as Record<string, unknown> | undefined;
-  if (
-    supplied &&
-    (supplied.hypothesis_id !== part!.id ||
-      (supplied.layer_id !== undefined && supplied.layer_id !== layerId) ||
-      supplied.decision !== (owner ? 'continue-logical-layer' : 'create-new'))
-  )
-    error(
-      'construction_owner_conflict',
-      'next_pass.logical_layer',
-      'Authored owner/layer/decision must match the selected construction part and its actual durable binding'
-    );
+  const binding = { hypothesis_id: part!.id, decision: owner ? 'continue-logical-layer' : 'create-new',
+    ...(owner ? { layer_id: layerId } : {}) };
+  if (supplied) {
+    for (const [key, expected] of Object.entries({ ...binding, layer_id: layerId })) {
+      if (key === 'layer_id' && supplied[key] === undefined) continue;
+      requirements.push({ path: `next_pass.logical_layer.${key}`, code: 'construction_owner_conflict',
+        message: 'Authored owner/layer/decision must match the selected construction part and its actual durable binding',
+        actual: supplied[key], ...(expected === undefined
+          ? { operator: 'absent' as const, expected: true as const }
+          : { operator: 'equals' as const, expected }) });
+    }
+  }
+  if (owner && raw.action_class !== undefined) requirements.push({ path: 'next_pass.action_class',
+    code: 'construction_rebuild_action_conflict', message: 'Rebuilding an owned component replaces its old pixels; use REPLACE or omit the class',
+    actual: raw.action_class, operator: 'equals', expected: 'REPLACE' });
   const previousBounds = context.construction_bindings?.find(b => b.owner_id === part!.id)?.bounds;
+  // Compare the contour actually rendered for this owner, not the latest model:
+  // another part may already have advanced the model revision. Unchanged edges
+  // and manual marks outside the changed footprint must survive reconstruction.
+  const previousContour = context.construction_bindings?.find(b => b.owner_id === part!.id)?.contour;
+  const edgeKey = (a: { x: number; y: number }, b: { x: number; y: number }) =>
+    [JSON.stringify(a), JSON.stringify(b)].sort().join('|');
+  const edges = (points: Array<{ x: number; y: number }>) => points.map((a, i) =>
+    ({ key: edgeKey(a, points[(i + 1) % points.length]), points: [a, points[(i + 1) % points.length]] }));
+  const oldEdges = previousContour ? edges(previousContour) : [];
+  const newEdges = edges(part!.contour);
+  const oldKeys = new Set(oldEdges.map(e => e.key)), newKeys = new Set(newEdges.map(e => e.key));
+  const changedPoints = [...oldEdges.filter(e => !newKeys.has(e.key)), ...newEdges.filter(e => !oldKeys.has(e.key))]
+    .flatMap(e => e.points);
+  const sameRendering = !request.rendering || ['mode', 'size', 'opacity', 'flow', 'preset_name']
+    .every(key => rendering?.[key] === previousRendering?.[key]);
+  const patchRadius = (outline ? Math.max(size, Number(previousRendering?.size ?? 0)) / 2 : 0) + 2;
+  const replacementBounds = owner && previousContour?.length && changedPoints.length && sameRendering ? {
+    left: Math.max(0, Math.floor(Math.min(...changedPoints.map(p => p.x)) - patchRadius)),
+    top: Math.max(0, Math.floor(Math.min(...changedPoints.map(p => p.y)) - patchRadius)),
+    right: Math.min(context.painterly_frame?.canvas_width ?? Infinity, Math.ceil(Math.max(...changedPoints.map(p => p.x)) + patchRadius)),
+    bottom: Math.min(context.painterly_frame?.canvas_height ?? Infinity, Math.ceil(Math.max(...changedPoints.map(p => p.y)) + patchRadius)),
+  } : undefined;
   const reviewBounds = previousBounds ? {
     left: Math.min(part!.bounds.left, previousBounds.left), top: Math.min(part!.bounds.top, previousBounds.top),
     right: Math.max(part!.bounds.right, previousBounds.right), bottom: Math.max(part!.bounds.bottom, previousBounds.bottom),
   } : part!.bounds;
-  if (outline) {
+  if (outline && Number.isFinite(size) && size > 0 && size <= 5000) {
     const radius = Math.max(size, Number(previousRendering?.size ?? 0)) / 2;
     reviewBounds.left -= radius; reviewBounds.top -= radius;
     reviewBounds.right += radius; reviewBounds.bottom += radius;
   }
-  if (raw.region_bounds !== undefined) {
-    const bounds = raw.region_bounds as Record<string, number>;
-    if (!bounds || !['left','top','right','bottom'].every(k => Number.isFinite(bounds[k]))
-      || bounds.left > reviewBounds.left || bounds.top > reviewBounds.top || bounds.right < reviewBounds.right || bounds.bottom < reviewBounds.bottom)
-      error('construction_review_bounds_conflict', 'next_pass.region_bounds', 'Review bounds must include both old and new component extents; omit them to derive the union');
+  if (replacementBounds) {
+    reviewBounds.left = Math.min(reviewBounds.left, replacementBounds.left);
+    reviewBounds.top = Math.min(reviewBounds.top, replacementBounds.top);
+    reviewBounds.right = Math.max(reviewBounds.right, replacementBounds.right);
+    reviewBounds.bottom = Math.max(reviewBounds.bottom, replacementBounds.bottom);
   }
+  if (raw.region_bounds !== undefined) {
+    requirements.push({ path: 'next_pass.region_bounds', code: 'construction_review_bounds_conflict',
+      message: 'Review bounds must include both old and new component extents; omit them to derive the union',
+      actual: raw.region_bounds, operator: 'contains-bounds', expected: reviewBounds });
+  }
+  const unmet = unmetTransitionRequirements(requirements);
+  if (unmet.length) throw new ConstructionError(unmet);
   const generated = constructionOwnershipPlan(model);
   // Geometry revisions do not redefine already-authorized semantic ownership.
   // Only genuinely new construction parts may introduce new units/owners.
@@ -1201,6 +1253,9 @@ export function expandConstructionPass(
       const generatedObject = alignedObjects.find(row => row.object_id === object.object_id);
       return generatedObject ? {
         ...object,
+        ...(generatedObject.depiction ? { depiction: generatedObject.depiction } : {}),
+        ...(object.kind === 'single-part' && generatedObject.kind === 'compound-object' && additions.length
+          ? { kind: 'compound-object' as const } : {}),
         component_semantic_ids: [...new Set([...object.component_semantic_ids,
           ...generatedObject.component_semantic_ids.filter(id => additions.some(unit => unit.semantic_id === id))])],
       } : object;
@@ -1210,14 +1265,12 @@ export function expandConstructionPass(
         && object.component_semantic_ids.some(id => additions.some(unit => unit.semantic_id === id)))
         objects.push(object);
     }
-    plan = additions.length
+    plan = additions.length || alignedObjects.some(object => object.depiction)
       ? extendSceneOwnershipPlan(durable, normalizeSceneOwnershipPlan({
           ...durable, units: [...durable.units, ...additions], objects,
         }))
       : durable;
   }
-  if (owner && raw.action_class !== undefined && raw.action_class !== 'REPLACE')
-    error('construction_rebuild_action_conflict', 'next_pass.action_class', 'Rebuilding an owned component replaces its old pixels; use REPLACE or omit the class');
   const target = owner ? layerId : '$steps.construction_layer.details.layerId';
   const actions: Record<string, unknown>[] = [];
   if (outline && preset) actions.push({ id: 'construction_brush', tool: 'photoshop_select_brush_preset', args: { name: preset } });
@@ -1233,6 +1286,7 @@ export function expandConstructionPass(
     args: {
       document_id: raw.document_id,
       ...(owner ? { replace_contents: true } : {}),
+      ...(replacementBounds ? { replacement_bounds: replacementBounds } : {}),
       ...(owner ? { clip_bounds: reviewBounds } : {}),
       regions: [
         {
@@ -1264,8 +1318,7 @@ export function expandConstructionPass(
       },
       region_bounds: raw.region_bounds ?? reviewBounds,
       logical_layer: {
-        decision: owner ? 'continue-logical-layer' : 'create-new',
-        hypothesis_id: part!.id,
+        ...binding,
         hypothesis: part!.role,
         rollback_value: owner ? 'moderate' : 'high',
         expected_independent_rollback: true,
@@ -1282,6 +1335,7 @@ export function expandConstructionPass(
       part_id: part!.id,
       target_sha256: part!.target_sha256,
       bounds: part!.bounds,
+      ...(replacementBounds ? { replacement_bounds: replacementBounds } : {}),
       model_sha256: solved.model_sha256,
       ...(solved.ik ? { ik: solved.ik } : {}),
       contour_geometry: CONTOUR_GEOMETRY,

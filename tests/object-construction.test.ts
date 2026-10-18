@@ -12,6 +12,7 @@ import {
   solveConstruction,
 } from '../src/core/object-construction.js';
 import { normalizeSceneOwnershipPlan, extendSceneOwnershipPlan } from '../src/core/scene-ownership-plan.js';
+import { requiredVisualRelationKinds } from '../src/core/guard/visual-relationship-review.js';
 import {
   collectSchemaErrors,
   compileGuardCycle,
@@ -302,6 +303,69 @@ function pass(input = model('crocodile')) {
     },
   };
 }
+function tinyContextModel() {
+  return {
+    model_id: 'tiny-traveler', revision: 1, basis: 'Small contextual silhouette for scene scale',
+    objects: [{ id: 'traveler', subject_kind: 'person',
+      depiction: { purpose: 'context', projected_size: { width: 24, height: 64 }, canvas_size: { width: 1024, height: 1536 } } }],
+    points: [[0, 0], [24, 0], [24, 64], [0, 64]].map((position, i) => ({ id: `p${i}`, object_id: 'traveler', position, fixed: true })),
+    parts: [{ id: 'whole-traveler', object_id: 'traveler', role: 'Recognizable whole contextual traveler', outline: ['p0', 'p1', 'p2', 'p3'] }],
+    constraints: [], camera: { kind: 'orthographic', origin: [690, 1410], scale: 1 },
+  };
+}
+
+it('compiles a tiny contextual person as one true-subject owner without anatomical pass prerequisites', async () => {
+  const input = tinyContextModel();
+  const f = compilerFixture({ construction_policy: 'enforced', painterly_frame: { canvas_width: 1024, canvas_height: 1536 } });
+  const compiled = await compileGuardCycle({ next_pass: pass(input as any) }, f.store, f.registry);
+  expect(compiled.violations, JSON.stringify(compiled.violations)).toEqual([]);
+  expect(compiled.nextOperation).toBeDefined();
+  const plan = constructionOwnershipPlan(normalizeConstructionModel(input));
+  expect(plan.units).toHaveLength(1);
+  expect(plan.objects![0]).toMatchObject({ subject_kind: 'person', kind: 'single-part', depiction: input.objects[0].depiction });
+  expect(requiredVisualRelationKinds({ scene_ownership_plan: plan })).toEqual(['support']);
+  expect(collectSchemaErrors(CONSTRUCTION_MODEL_SCHEMA, input)).toEqual([]);
+  expect(f.dispatch).not.toHaveBeenCalled();
+});
+
+it.each(['focal', 'part-edit', 'large'])('requires decomposition for %s even with a contextual-size declaration', async purpose => {
+  const input = tinyContextModel();
+  if (purpose === 'large') input.objects[0].depiction.projected_size = { width: 300, height: 500 };
+  else input.objects[0].depiction.purpose = purpose;
+  const f = compilerFixture({ construction_policy: 'enforced' });
+  const compiled = await compileGuardCycle({ next_pass: pass(input as any) }, f.store, f.registry);
+  expect(compiled.violations.length).toBeGreaterThan(0);
+  expect(compiled.nextOperation).toBeUndefined();
+  expect(f.dispatch).not.toHaveBeenCalled();
+});
+
+it('rejects understated projected geometry and an inflated canvas before dispatch', async () => {
+  for (const variant of ['geometry', 'canvas']) {
+    const input = tinyContextModel();
+    if (variant === 'geometry') input.camera.scale = 10;
+    else input.objects[0].depiction.canvas_size = { width: 10000, height: 10000 };
+    const f = compilerFixture({ construction_policy: 'enforced', painterly_frame: { canvas_width: 1024, canvas_height: 1536 } });
+    const compiled = await compileGuardCycle({ next_pass: pass(input as any) }, f.store, f.registry);
+    expect(compiled.violations).toContainEqual(expect.objectContaining({ code: variant === 'geometry'
+      ? 'construction_depiction_size_mismatch' : 'construction_depiction_canvas_mismatch' }));
+    expect(f.dispatch).not.toHaveBeenCalled();
+  }
+});
+
+it('inherits contextual depiction and preserves a whole-object owner when adding independently editable detail', () => {
+  const input = tinyContextModel();
+  const plan = constructionOwnershipPlan(normalizeConstructionModel(input));
+  const expanded = expandConstructionPass(pass(input as any), { scene_ownership_plan: plan as any }, () => null);
+  expect((expanded.pass.scene_ownership_plan as any).objects[0].depiction).toEqual(input.objects[0].depiction);
+  const detailed = structuredClone(plan);
+  detailed.objects![0].kind = 'compound-object';
+  detailed.objects![0].depiction!.purpose = 'part-edit';
+  detailed.objects![0].component_semantic_ids.push('hat');
+  detailed.units.push({ semantic_id: 'hat', owner_id: 'hat', role: 'Independently editable hat', editability: 'independent', edit_axes: ['color'] });
+  expect(extendSceneOwnershipPlan(plan, normalizeSceneOwnershipPlan(detailed)).units).toHaveLength(2);
+  expect(() => extendSceneOwnershipPlan(normalizeSceneOwnershipPlan(detailed), plan)).toThrow(/conflict/);
+});
+
 function compilerFixture(context: Record<string, unknown> = {}) {
   const registry = new ToolRegistry(),
     dispatch = vi.fn(async () => {
@@ -321,6 +385,32 @@ function compilerFixture(context: Record<string, unknown> = {}) {
   };
   return { registry, store, dispatch };
 }
+it('keeps a historical invalid model diagnostic local to its bindings instead of breaking all document status', () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'construction-read-isolation-')); dirs.push(root);
+  const store = new SessionStore(root, { workspaceRoot: root });
+  store.setArtRunState({ document_id: 4280, process_dir: 'processes/read-isolation-process/run',
+    original_brief: 'A scene with separately owned objects.', painting_profile: 'simple_graphic' });
+  const bad: any = { model_id: 'legacy-crossing', revision: 1, basis: 'A legacy model with invalid crossing segments.',
+    objects: [{ id: 'legacy-object', subject_kind: 'single-component', origin: [0, 0, 0] }],
+    points: [[0, 0, 0], [2, 2, 0], [0, 2, 0], [2, 0, 0]].map((position, i) => ({
+      id: `p${i}`, object_id: 'legacy-object', position, fixed: true })),
+    parts: [{ id: 'legacy-part', object_id: 'legacy-object', role: 'Legacy crossing shape', outline: ['p0', 'p1', 'p2', 'p3'] }],
+    camera: { kind: 'orthographic', origin: [50, 50], scale: 10 }, constraints: [] };
+  for (const [i, input] of [model('crocodile'), bad].entries()) store.write({
+    id: `historical-model-${i}`, tool: 'photoshop_paint_regions', args: { document_id: 4280 },
+    phase: 'completed', dispatched: true, failed: false, sequence: i + 1, created_at: new Date().toISOString(),
+    object_construction_model: input,
+    construction_provenance: { model_id: input.model_id, part_id: input.parts[0].id,
+      bounds: { left: 10, top: 10, right: 90, bottom: 90 }, target_sha256: 'legacy-target' },
+  } as any);
+  const bindings = store.constructionBindings(4280);
+  expect(bindings).toEqual(expect.arrayContaining([
+    expect.objectContaining({ model_id: bad.model_id, owner_id: 'legacy-part', validation: 'invalid-model', needs_rebuild: true }),
+    expect.objectContaining({ model_id: 'crocodile-study', constructed: true }),
+  ]));
+  expect(() => expandConstructionPass({ ...pass(bad) }, {}, () => null)).toThrow();
+});
+
 it('prevalidates generated layer IDs as backward references while keeping the runtime placeholder', async () => {
   const f = compilerFixture();
   const paint = f.registry.get('photoshop_paint_regions')!;
@@ -374,6 +464,53 @@ it('rejects authored actions mixed with generated geometry and refuses an owner/
     )
   ).toThrow(ConstructionError);
 });
+it.each(['crocodile', 'crane', 'violin-gnome'])('returns executable independent requirements and accepts their mechanical repairs: %s', async name => {
+  const input: any = pass(model(name));
+  const partId = input.construction.part_id;
+  input.logical_layer = { hypothesis_id: 'wrong-owner', layer_id: 999, decision: 'adjust' };
+  input.action_class = 'ADD';
+  const context = { logical_layer_owners: [{ hypothesis_id: partId, layer_id: 17 }] };
+  const fixture = compilerFixture(context);
+  const rejected = await compileGuardCycle({ next_pass: input }, fixture.store, fixture.registry);
+  const rules = rejected.violations.filter(row => row.details?.operator === 'equals');
+  expect(rules.map(row => row.details?.path)).toEqual(expect.arrayContaining([
+    'next_pass.logical_layer.hypothesis_id', 'next_pass.logical_layer.layer_id',
+    'next_pass.logical_layer.decision', 'next_pass.action_class',
+  ]));
+  const payload = JSON.parse((rejected.rejection!.content[0] as any).text);
+  expect(payload.validation_coverage).toMatchObject({ operation_preflight: 'deferred', operation_compilation: 'not-compiled' });
+  for (const row of rules) {
+    const fields = String(row.details!.path).split('.').slice(1);
+    let target = input;
+    for (const field of fields.slice(0, -1)) target = target[field];
+    target[fields.at(-1)!] = row.details!.expected;
+  }
+  const accepted = await compileGuardCycle({ next_pass: input }, fixture.store, fixture.registry);
+  expect(accepted.violations, JSON.stringify(accepted.violations)).toEqual([]);
+  expect(fixture.dispatch).not.toHaveBeenCalled();
+});
+
+it('reports impossible published corrections as a system defect instead of another payload retry', async () => {
+  const input: any = pass();
+  input.logical_layer = { hypothesis_id: input.construction.part_id, layer_id: 17, decision: 'adjust' };
+  const fixture = compilerFixture({ logical_layer_owners: [{ hypothesis_id: input.construction.part_id, layer_id: 17 }] });
+  fixture.registry.register('photoshop_guard_cycle_auto', {
+    tool: { name: 'photoshop_guard_cycle_auto', inputSchema: { type: 'object', properties: {
+      next_pass: { type: 'object', properties: { logical_layer: { type: 'object', properties: {
+        decision: { type: 'string', enum: ['adjust'] },
+      } } } },
+    } } }, handler: fixture.dispatch,
+  });
+  const rejected = await compileGuardCycle({ next_pass: input }, fixture.store, fixture.registry);
+  expect(rejected.violations).toEqual(expect.arrayContaining([
+    expect.objectContaining({ code: 'guard_requirement_unexpressible' }),
+  ]));
+  const payload = JSON.parse((rejected.rejection!.content[0] as any).text);
+  expect(payload.canonical_next_operation.action).toBe('stop-and-report-pipeline-blocker');
+  expect(payload.compact_correction_recipe.repeat_same_semantic_cycle).toBe(false);
+  expect(fixture.dispatch).not.toHaveBeenCalled();
+});
+
 it('reuses the durable model and exact physical component layer, refusing stale/conflicting revisions', () => {
   const normalized = normalizeConstructionModel(model('crocodile')),
     p = pass();
@@ -635,4 +772,5 @@ it('reports already constructed parts that need rebuilding after a proportion/po
     unconstructed_parts: ['crane-cable'],
     pixel_geometry_verified: false,
   });
+  expect(s.constructionBindings(4280).find(b => b.owner_id === 'crane-boom')?.contour).toEqual(boom.contour);
 });

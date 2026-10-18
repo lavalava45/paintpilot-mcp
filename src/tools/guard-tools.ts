@@ -1,4 +1,5 @@
 import { COMPONENT_SPACE_SCHEMA } from '../core/component-space.js';
+import { SCENE_FOUNDATION_SCHEMA, FOUNDATION_GOAL_SCHEMA, sceneFoundationRequest } from '../core/guard/scene-foundation.js';
 import { PHOTOSHOP_DRAWING_ROUTE } from '../prompts/host-guidance.js';
 import { CHAT_CRITIC_SCHEMA, criticRoleInstruction, criticSpawnHandoff, supportContactWeightInstruction } from '../core/guard/chat-critic.js';
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
@@ -450,6 +451,8 @@ async function explicitReviewImageResult(
     mode: 'same_chat',
     task_anchor: taskAnchor,
     editable_scope: runtime.store.editableScopeRequest(operationId, projectionContext, wholeSceneReview),
+    scene_foundation: sceneFoundationRequest(record, state ?? {},
+      runtime.store.sceneFoundationAdmission(record.args?.document_id, {}, projectionContext)),
     ...(criticRole ? { critic_role: { ...criticRole, ...(criticRole.required ? {
       instruction: criticRoleInstruction(presentationContext.language),
       optional_spawn: criticSpawnHandoff(criticRole, state ?? {}, record) } : {}) } } : {}),
@@ -552,6 +555,7 @@ function compactPassSchema(): Record<string, unknown> {
         description: 'Stable problem id across attempts; omit only if request_key also identifies the problem.',
       },
       structural_correction: STRUCTURAL_CORRECTION_SCHEMA,
+      foundation_goal: FOUNDATION_GOAL_SCHEMA,
       document_id: { type: 'number', minimum: 1 },
       restore_anchor_operation_id: {
         type: 'string',
@@ -1292,6 +1296,7 @@ function compactObservationSchema(): Record<string, unknown> {
       target_resolved: { type: 'string', enum: ['yes', 'no', 'uncertain'] },
       painting_completion: PAINTING_COMPLETION_SCHEMA,
       critic_review: CHAT_CRITIC_SCHEMA,
+      scene_foundation: SCENE_FOUNDATION_SCHEMA,
       brush_use_review: { type: 'object', additionalProperties: false,
         description: 'Evaluate a bounded novel-purpose brush trial on the exact delivered AFTER in this same visual closure; rationale and command success are not evidence.',
         properties: { status: { type: 'string', enum: ['pass', 'fail', 'unknown'] }, observed: { type: 'string', minLength: 12, maxLength: 400 } },

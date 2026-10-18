@@ -1,4 +1,5 @@
 import { canvasComponent, componentSpaceIssue } from '../component-space.js';
+import { wholeObjectDepiction } from '../depiction-detail.js';
 import type { ConstructionModel } from '../object-construction.js';
 
 const TRANSFORMS = new Set([
@@ -46,7 +47,7 @@ export function constructionExecutionIssue(raw: any, context: any, generated?: C
   if (generated && context.construction_policy === 'enforced') {
     const part = generated.parts.find((p) => p.id === raw.construction?.part_id);
     const object = generated.objects.find((o) => o.id === part?.object_id);
-    if (object && !['single-component', 'continuous-field'].includes(object.subject_kind)) {
+    if (object && !wholeObjectDepiction(object.depiction) && !['single-component', 'continuous-field'].includes(object.subject_kind)) {
       const ids = new Set(
         generated.points.filter((p) => p.object_id === object.id).map((p) => p.id)
       );

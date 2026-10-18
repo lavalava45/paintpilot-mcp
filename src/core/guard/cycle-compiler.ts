@@ -1,5 +1,7 @@
 import { canvasComponent } from '../component-space.js';
 import { createHash } from 'node:crypto';
+import type { FrameReviewIssue } from './review-validation.js';
+import { transitionRequirementSchemaErrors } from '../transition-requirements.js';
 import { brushRoleMatchesScale } from './brush-scale-fit.js';
 import { constructionExecutionIssue, unexpandedConstructionPrerequisites } from './construction-execution.js';
 import { ConstructionError, expandConstructionPass, type ConstructionModel } from '../object-construction.js';
@@ -124,7 +126,7 @@ export interface GuardCycleCompilerStore {
   constructionModel?(documentId: number, modelId: string, projectionContext?: GuardProjectionContext): ConstructionModel | null;
   read?(id: string): Record<string, unknown> | undefined;
   compactPendingNonvisualClosureId?(projectionContext?: GuardProjectionContext): string | undefined;
-  collectClosePreviousErrors(input: Record<string, unknown>): string[];
+  collectClosePreviousErrors(input: Record<string, unknown>, reviewIssues?: FrameReviewIssue[]): string[];
   projectCriticClosure?(input: Record<string, unknown>, projectionContext?: GuardProjectionContext): GuardProjectionContext | undefined;
   projectBoundedUndoClosure?(input: Record<string, unknown>, projectionContext: GuardProjectionContext): GuardProjectionContext;
   compactClosureDefaults?(id: string, previousVerdict?: Record<string, unknown>): {
@@ -396,7 +398,9 @@ function violation(
 function uniqueViolations(violations: GuardCycleCompileViolation[]): GuardCycleCompileViolation[] {
   const seen = new Set<string>();
   return violations.filter((item) => {
-    const key = `${item.scope}\u0000${item.code}\u0000${item.message}`;
+    // Equal prose/code can describe several independent rejected fields.
+    // Dropping their paths turns a complete validation into a serial bug hunt.
+    const key = stableJson([item.scope, item.code, item.message, item.details]);
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
@@ -483,6 +487,7 @@ function compactObservationToVerdict(
       ...(observation.edge_observations !== undefined ? { edge_observations: observation.edge_observations } : {}),
       ...(Array.isArray(observation.review_findings) ? { review_findings: observation.review_findings } : {}),
       ...(observation.recognition !== undefined ? { recognition: observation.recognition } : {}),
+      ...(observation.scene_foundation !== undefined ? { scene_foundation: observation.scene_foundation } : {}),
       ...(observation.planner_task_assessment !== undefined
         ? { planner_task_assessment: observation.planner_task_assessment }
         : {}),
@@ -881,7 +886,7 @@ function compileCompactPass(
     } catch (error) {
       const issues = [...(error instanceof ConstructionError ? error.issues : [{ code: 'construction_model_invalid', path: 'next_pass.construction', message: error instanceof Error ? error.message : String(error) }]),
         ...unexpandedConstructionPrerequisites(raw, store.compactPassContext?.(Number(raw.document_id), projectionContext) ?? {})];
-      for (const issue of issues) violations.push(violation('next_operation', issue.code, issue.message, { path: issue.path, residual: issue.residual }));
+      for (const issue of issues) violations.push(violation('next_operation', issue.code, issue.message, { ...issue }));
       return { violations, normalizations };
     }
   }
@@ -1130,7 +1135,7 @@ function compileCompactPass(
     // request into create/open. Never route bootstrap through method selection:
     // doing so can misclassify GLOBAL_BLOCK_IN + mass/construct as
     // region-block-in and reject the real create/open tool before dispatch.
-    if (!bootstrap && (visualIntent || impactClass || text(raw.preferred_method_id) || (Array.isArray(raw.avoid_method_ids) && raw.avoid_method_ids.length))) {
+    if (!bootstrap && onlyTool !== 'photoshop_undo' && (visualIntent || impactClass || text(raw.preferred_method_id) || (Array.isArray(raw.avoid_method_ids) && raw.avoid_method_ids.length))) {
       const inferred = text(raw.construction_role) ? null : inferUniqueClassification({
         registry, actionClass: directActionClass, executionTools: [onlyTool], visualIntent, impactClass,
         preferredMethodId: text(raw.preferred_method_id),
@@ -1170,7 +1175,8 @@ function compileCompactPass(
             violations.push(violation(
               'next_operation',
               'artistic_method_execution_mismatch',
-              `declared method ${plan.method.id} allows ${plan.allowedExecutionTools.join('|')} but compact pass executes ${onlyTool}`
+              `declared method ${plan.method.id} allows ${plan.allowedExecutionTools.join('|')} but compact pass executes ${onlyTool}`,
+              { path: 'next_pass.actions', allowed_commands: plan.allowedExecutionTools, method_id: plan.method.id }
             ));
           }
           // Validate the compact artistic-method contract here, but keep it
@@ -1419,14 +1425,15 @@ function compileCompactPass(
       violations.push(violation(
         'next_operation',
         'scene_ownership_plan_invalid',
-        error instanceof Error ? error.message : String(error)
+        error instanceof Error ? error.message : String(error),
+        { path: 'next_pass.scene_ownership_plan' }
       ));
     }
   }
   let sceneOwnershipPlan = durableSceneOwnershipPlan ?? suppliedSceneOwnershipPlan;
   if (durableSceneOwnershipPlan && suppliedSceneOwnershipPlan) {
     try { sceneOwnershipPlan = extendSceneOwnershipPlan(durableSceneOwnershipPlan, suppliedSceneOwnershipPlan); }
-    catch (error) { violations.push(violation('next_operation', 'scene_ownership_plan_conflict', error instanceof Error ? error.message : String(error))); }
+    catch (error) { violations.push(violation('next_operation', 'scene_ownership_plan_conflict', error instanceof Error ? error.message : String(error), { path: 'next_pass.scene_ownership_plan' })); }
   }
   const sceneOwnershipPlanToPersist = suppliedSceneOwnershipPlan
     && (!durableSceneOwnershipPlan || stableJson(sceneOwnershipPlan) !== stableJson(durableSceneOwnershipPlan))
@@ -1814,7 +1821,8 @@ function compileCompactPass(
     violations.push(violation(
       'next_operation',
       'scene_ownership_plan_required',
-      'scene_ownership_plan_required: predeclare component ownership before semantic layer creation or temporary-owner continuation in every rendering profile; substantial=false does not waive component scope'
+      'scene_ownership_plan_required: predeclare component ownership before semantic layer creation or temporary-owner continuation in every rendering profile; substantial=false does not waive component scope',
+      { path: 'next_pass.scene_ownership_plan' }
     ));
   }
 
@@ -2019,7 +2027,8 @@ function compileCompactPass(
       violations.push(violation(
         'next_operation',
         'scene_ownership_owner_unplanned',
-        `scene_ownership_owner_unplanned: committed logical owner ${logicalHypothesisId} is not predeclared by scene_ownership_plan=${sceneOwnershipPlan.plan_id}; replan ownership before Photoshop dispatch instead of inventing a new persistent owner reactively`
+        `scene_ownership_owner_unplanned: committed logical owner ${logicalHypothesisId} is not predeclared by scene_ownership_plan=${sceneOwnershipPlan.plan_id}; replan ownership before Photoshop dispatch instead of inventing a new persistent owner reactively`,
+        { path: 'next_pass.scene_ownership_plan' }
       ));
     }
   }
@@ -3003,7 +3012,8 @@ function compileCompactPass(
     ['photoshop_paint_strokes', 'photoshop_paint_dabs'].includes(text(step.tool) ?? ''));
   const preferredMethodId = novelBrushMethod ? 'installed-brush-preset'
     : rolePreferredMethodId ?? text(raw.preferred_method_id);
-  if (visualIntent || impactClass || preferredMethodId || (Array.isArray(raw.avoid_method_ids) && raw.avoid_method_ids.length)) {
+  const historyRollbackOnly = actionClass === 'ROLLBACK' && mutationSteps.length === 1 && mutationSteps[0].tool === 'photoshop_undo';
+  if (!historyRollbackOnly && (visualIntent || impactClass || preferredMethodId || (Array.isArray(raw.avoid_method_ids) && raw.avoid_method_ids.length))) {
     const inferred = constructionRole ? null : inferUniqueClassification({
       registry, actionClass,
       executionTools: [...new Set(mutationSteps.map(step => text(step.tool)).filter(Boolean))] as string[],
@@ -3058,7 +3068,8 @@ function compileCompactPass(
           violations.push(violation(
             'next_operation',
             'artistic_method_execution_mismatch',
-            `declared method ${plan.method.id} allows ${plan.allowedExecutionTools.join('|')} but compact pass executes ${drift.join('|')}`
+            `declared method ${plan.method.id} allows ${plan.allowedExecutionTools.join('|')} but compact pass executes ${drift.join('|')}`,
+            { path: 'next_pass.actions', allowed_commands: plan.allowedExecutionTools, method_id: plan.method.id }
           ));
         }
         // The compact artistic contract is validated here, but it is not forwarded
@@ -3375,6 +3386,7 @@ function compileCompactPass(
       problem_id: problemId,
       tool: 'photoshop_execute_visual_microplan',
       args,
+      ...(raw.foundation_goal !== undefined ? { foundation_goal: raw.foundation_goal } : {}),
       ...(stageReset ? { stage_reset: stageReset } : {}),
       significance_mode: significanceMode,
       ...(sceneOwnershipPlanToPersist ? { scene_ownership_plan: sceneOwnershipPlanToPersist } : {}),
@@ -3609,6 +3621,7 @@ export async function compileGuardCycle(
   let repairAudit: GuardCompilerRepairAudit | undefined;
   let geometryRepairs: StructuredRepairOperation[] = [];
   let initialViolationsForAccounting: GuardCycleCompileViolation[] = [];
+  let operationPreflightRan = false;
   const internalStateOnlyRevalidation = options.nextOperationValidation === 'state-only';
   let compactPreviousOperationId = text(compiledInput.previous_operation_id);
   const compactPreviousObservationSupplied = compiledInput.previous_observation !== undefined;
@@ -3724,9 +3737,12 @@ export async function compileGuardCycle(
   } else {
     const closureInput = compiledInput.next_pass !== undefined || compiledInput.painting_intent !== undefined
       ? { ...compiledInput, next_operation: {} } : compiledInput;
-    const closureErrors = store.collectClosePreviousErrors(closureInput);
+    const reviewIssues: FrameReviewIssue[] = [];
+    const closureErrors = store.collectClosePreviousErrors(closureInput, reviewIssues);
     for (const message of closureErrors) {
-      violations.push(violation('finalization', 'previous_operation_finalization_invalid', message));
+      const issue = reviewIssues.find(row => row.message === message);
+      violations.push(violation('finalization', 'previous_operation_finalization_invalid', message,
+        issue ? { ...issue, cause_code: issue.code } : undefined));
     }
     if (!closureErrors.length && store.projectCriticClosure) {
       try { options = { ...options, projectionContext: store.projectCriticClosure(compiledInput, options.projectionContext) }; }
@@ -3881,6 +3897,11 @@ export async function compileGuardCycle(
   const validateNextOperation = async (
     operation: Record<string, unknown>
   ): Promise<Awaited<ReturnType<typeof compileNextOperation>>> => {
+    // State preflight depends on the projected closure. Old state must not be
+    // reported as authoritative after the closure itself failed validation.
+    if (violations.some(item => item.scope === 'finalization'))
+      return { operation, violations: [], normalizations: [] };
+    operationPreflightRan = true;
     const validationStartedAt = Date.now();
     const result = await compileNextOperation(
       operation,
@@ -4051,9 +4072,21 @@ export async function compileGuardCycle(
         'A corrected geometry contract is still invalid. Stop automatic resubmission and report this complete diagnostic as a pipeline blocker; do not read source or schemas during painting.'));
     }
   }
+  // A runtime requirement that the published tool cannot express is a system
+  // defect. Never tell the model to keep reshaping an impossible payload.
+  const publicSchema = registry.get('photoshop_guard_cycle_auto')?.tool.inputSchema;
+  if (publicSchema) for (const item of [...violations]) {
+    const rule = item.details;
+    if (!rule?.operator || typeof rule.path !== 'string') continue;
+    const conflicts = transitionRequirementSchemaErrors({ path: rule.path, operator: String(rule.operator), expected: rule.expected },
+      publicSchema, collectSchemaErrors);
+    if (conflicts.length) violations.push(violation(item.scope, 'guard_requirement_unexpressible',
+      `Guard requires a correction at ${rule.path} that conflicts with its published input schema. Report this contract defect.`,
+      { path: rule.path, requirement: rule, schema_conflicts: conflicts }));
+  }
   const unique = uniqueViolations(violations);
   const classifiedFinal = classifyViolations(unique);
-  const key = (item: GuardCycleCompileViolation) => JSON.stringify([item.scope, item.code]);
+  const key = (item: GuardCycleCompileViolation) => stableJson([item.scope, item.code, item.details?.path]);
   const finalKeys = new Set(unique.map(key));
   const initialKeys = new Set(initialViolationsForAccounting.map(key));
   const repeatedRepair = repairAudit?.final_validation === 'systemic-repeat';
@@ -4133,6 +4166,18 @@ export async function compileGuardCycle(
   const geometryRecipe = sourceNextPass ? geometryContractRecipe(sourceNextPass, passContext ?? {}, unique) : {};
   const geometryIssues = (geometryRecipe.geometry_contract as { issues?: Array<{ path?: string; message?: string }> } | undefined)?.issues ?? [];
   const fieldPacket = fieldCorrectionPacket(unique);
+  const stopAutomaticRetry = systemicFailure || fieldPacket.unaddressable_count > 0
+    || errorCodes.includes('geometry_contract_retry_exhausted');
+  const validationCoverage = {
+    closure: unique.some(item => item.scope === 'finalization') ? 'rejected' : 'validated',
+    operation_compilation: nextOperation ? 'compiled' : 'not-compiled',
+    operation_preflight: operationPreflightRan ? 'ran' : 'deferred',
+    ...(operationPreflightRan ? {} : { deferred_reason: unique.some(item => item.scope === 'finalization')
+      ? 'A valid closure projection is required before state-dependent operation checks.'
+      : 'A compiled operation is required before execution and state checks.' }),
+    correction_contract: errorCodes.includes('guard_requirement_unexpressible') ? 'schema-conflict'
+      : fieldPacket.unaddressable_count ? 'unaddressable' : 'addressed',
+  };
   // Geometric diagnostics already carry full path/message and spatial fixes in
   // geometry_contract.issues. Preserve every unique field correction, but do not
   // quote the exact same diagnostic a sixth time in the packet: long malformed
@@ -4160,6 +4205,7 @@ export async function compileGuardCycle(
       rejection_fingerprint: rejectionFingerprint,
       error_codes: errorCodes,
       violations: unique,
+      validation_coverage: validationCoverage,
       errors,
       normalizations,
       planner_context: artDirector ? {
@@ -4190,10 +4236,12 @@ export async function compileGuardCycle(
         reconciliation: false,
       },
       canonical_next_operation: {
-        action: errorCodes.includes('geometry_contract_retry_exhausted') ? 'stop-and-report-pipeline-blocker' : 'correct-and-resubmit-cycle',
+        action: stopAutomaticRetry ? 'stop-and-report-pipeline-blocker' : 'correct-and-resubmit-cycle',
         tool: typeof nextOperation?.tool === 'string' ? nextOperation.tool : null,
         replaces_rejection_fingerprint: rejectionFingerprint,
-        requirement: 'Correct all listed deterministic cycle errors together, then resubmit the same semantic Guard cycle.',
+        requirement: stopAutomaticRetry
+          ? 'Report the contract blocker; no unsupported automatic retry.'
+          : 'Correct listed fields together. Deferred dependent checks are identified in validation_coverage; their completion is not yet claimed.',
       },
       compact_correction_recipe: {
         repeat_same_semantic_cycle: true,
@@ -4204,8 +4252,9 @@ export async function compileGuardCycle(
         first_response: 'apply the listed deterministic violations directly to the rejected payload and resubmit immediately',
         ...machineRepairRecipe(unique, repairAudit?.repairs ?? []),
         field_correction_packet: fieldPacket,
+        validation_coverage: validationCoverage,
         ...geometryRecipe,
-        ...(errorCodes.includes('geometry_contract_retry_exhausted')
+        ...(stopAutomaticRetry
           ? { repeat_same_semantic_cycle: false, first_response: 'stop-and-report-pipeline-blocker' } : {}),
         ...(currentTaskId ? { planner_task_id: currentTaskId } : {}),
         ...(text(currentTask?.status) ? { planner_task_status: text(currentTask?.status) } : {}),
@@ -4213,7 +4262,7 @@ export async function compileGuardCycle(
       next_required_action:
         errorCodes.includes('geometry_contract_retry_exhausted')
           ? 'Stop automatic resubmission and report the complete geometry contract diagnostic as a pipeline blocker. No Photoshop mutation was dispatched; no recovery, source reading or schema investigation is permitted during painting.'
-          : systemicFailure
+          : stopAutomaticRetry
           ? 'A bounded compiler/systemic defect remains after local validation. Inspect only the returned diagnostics, apply a supported correction or report the exact blocker. Do not read source, tests, schemas or use shell/imports during painting. No Photoshop mutation was dispatched and no recovery/reconcile is required.'
           : semanticDecisionRequired
             ? 'Provide the named artistic or structural decision and resubmit the same semantic Guard cycle. This is not recovery: no Photoshop mutation was dispatched and no fresh state/preview read is required solely because of this rejection. Never read source, tests, schemas or use shell/imports during painting; if the corrected attempt remains unactionable, report the exact blocker.'

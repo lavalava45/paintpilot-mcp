@@ -42,6 +42,24 @@ describe('Director / attention / catalog recovery, offline', () => {
     expect(unknown.command_sets.construct).toContain('photoshop_paint_strokes');
     expect(handler).not.toHaveBeenCalled();
   });
+  it('DP-02: pointed capabilities reports the exact registered Guard cycle schema without invoking it', async () => {
+    const registry = new ToolRegistry();
+    const stubRuntime: any = { registry, capabilities: EmbeddedGuardRuntime.prototype.capabilities };
+    stubRuntime.toolContract = (name: string) => EmbeddedGuardRuntime.prototype.toolContract.call(stubRuntime, name);
+    const definitions = createGuardTools(stubRuntime);
+    const cycle = definitions.find(def => def.tool.name === 'photoshop_guard_cycle_auto')!;
+    const capabilities = definitions.find(def => def.tool.name === 'photoshop_guard_capabilities')!;
+    const invokeCycle = vi.fn();
+    registry.register(cycle.tool.name, { tool: cycle.tool, handler: invokeCycle });
+    const result = body(await capabilities.handler({ tool_name: cycle.tool.name }));
+    expect(result).toMatchObject({ ok: true, execution: 'not-executed', tool_name: cycle.tool.name,
+      inputSchema: cycle.tool.inputSchema, raw_mutation_bypass_permitted: false });
+    expect(result.dispatch).toContain('Guard');
+    result.inputSchema.properties.previous_observation.properties.critic_review.required.push('bogus');
+    expect((cycle.tool.inputSchema as any).properties.previous_observation.properties.critic_review.required)
+      .not.toContain('bogus');
+    expect(invokeCycle).not.toHaveBeenCalled();
+  });
   it('does not demand atmospheric construction for bounded existing-owner mask carving, but retains the gate for ordinary painting', () => {
     const args: any = { action_class: 'ERASE', scale: 'medium', method_class: 'paint',
       region_bounds: { left: 272, top: 48, right: 1275, bottom: 160 },

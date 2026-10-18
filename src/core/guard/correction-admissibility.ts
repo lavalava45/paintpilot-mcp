@@ -14,6 +14,7 @@ export interface CorrectionProblem {
 }
 
 export interface CorrectionTargetFacts {
+  sameScaleMediumTarget: boolean;
   globalTarget: boolean;
   mediumTarget: boolean;
   boundedMediumTarget: boolean;
@@ -22,18 +23,21 @@ export interface CorrectionTargetFacts {
 
 /**
  * A Director-declared rectangle is *not* Critic evidence. A global debt permits
- * a planned medium construction task; a medium debt requires an actual reviewed
- * rectangle that contains the Director target. No state writes or inferred ROI.
+ * a planned medium construction task. A medium debt also permits same-scale
+ * construction; only medium-to-small authority needs a reviewed rectangle.
  */
 export function correctionTargetFacts(input: {
   problem?: CorrectionProblem;
   proposedBounds?: VisualReviewRegion;
   inheritedTarget?: boolean;
+  allowedScales?: readonly string[];
 }): CorrectionTargetFacts {
   const { problem, proposedBounds, inheritedTarget = false } = input;
   const scale = typeof problem?.scale === 'string' ? problem.scale.trim().toLowerCase() : undefined;
   const openMustFix = problem?.status === 'open' && problem.severity === 'must-fix';
   const globalTarget = !!openMustFix && scale === 'global';
+  const sameScaleMediumTarget = !!openMustFix && scale === 'medium'
+    && input.allowedScales?.includes('medium') === true && !input.allowedScales.includes('small');
   const mediumTarget = !!openMustFix && scale === 'medium'
     && ((typeof problem?.source_review_kind === 'string' && problem.source_review_kind.trim().length > 0)
       || !!problem?.structural_defect);
@@ -45,7 +49,7 @@ export function correctionTargetFacts(input: {
   }
   const reclassifiedMediumTarget = !globalTarget && !mediumTarget && inheritedTarget
     && openMustFix && scale === 'medium';
-  return { globalTarget, mediumTarget, boundedMediumTarget, reclassifiedMediumTarget };
+  return { globalTarget, mediumTarget, boundedMediumTarget, reclassifiedMediumTarget, sameScaleMediumTarget };
 }
 
 interface PlannedTask {

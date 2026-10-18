@@ -11,6 +11,10 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { sceneOwnershipPlanSchema } from '../../dist/core/scene-ownership-plan.js';
 import { PAINTING_INTENT_CONTRACT_FIELDS } from '../../dist/core/guard/painting-intent.js';
+import { collectSchemaErrors } from '../../dist/core/guard/cycle-compiler.js';
+import { transitionRequirementSchemaErrors } from '../../dist/core/transition-requirements.js';
+import { expandConstructionPass, ConstructionError } from '../../dist/core/object-construction.js';
+import { validateVisualRelationships, VISUAL_RELATION_RULES } from '../../dist/core/guard/visual-relationship-review.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const args = process.argv.slice(2);
@@ -27,6 +31,15 @@ if (diagnosticAt >= 0 && (!diagnosticPath || diagnosticPath.startsWith('--'))) {
 const requiredPaths = {
   photoshop_guard_cycle_auto: [
     'review_operation_id',
+    'previous_observation.scene_foundation.request_id',
+    'previous_observation.scene_foundation.composition.status',
+    'previous_observation.scene_foundation.composition.visible',
+    'previous_observation.scene_foundation.composition.next_change',
+    'previous_observation.scene_foundation.technique.status',
+    'previous_observation.scene_foundation.technique.visible',
+    'previous_observation.scene_foundation.technique.next_change',
+    'previous_observation.scene_foundation.technique.sample_region.left',
+    'next_pass.foundation_goal',
     'next_pass.addresses_problem_ids',
     'painting_intent.brush_use_reason',
     'previous_observation.critic_review.obligations[].parent_problem_id',
@@ -37,6 +50,10 @@ const requiredPaths = {
     'previous_observation.critic_review.visual_relationships[].expected',
     'previous_observation.critic_review.visual_relationships[].visible',
     'previous_observation.critic_review.visual_relationships[].status',
+    'previous_observation.critic_review.findings[].structural_defect.id',
+    'previous_observation.critic_review.findings[].structural_defect.kind',
+    'previous_observation.critic_review.findings[].structural_defect.part_ids[]',
+    'previous_observation.critic_review.findings[].structural_defect.relation_ids[]',
     'next_pass.request_key',
     'next_pass.document_id',
     'next_pass.goal',
@@ -180,6 +197,16 @@ function requiredPathErrors(schemas) {
     const keepObjects = locate(schemas.photoshop_guard_keep_logical_layer, 'scene_ownership_plan.objects[]');
     if (!keepObjects?.required?.includes('subject_kind')) errors.push('photoshop_guard_keep_logical_layer: subject_kind must be required');
   }
+  const critic = locate(schemas.photoshop_guard_cycle_auto, 'previous_observation.critic_review');
+  if (!critic?.required?.includes('visual_relationships'))
+    errors.push('photoshop_guard_cycle_auto: Critic requires visual_relationships in the published schema');
+  const relationship = locate(schemas.photoshop_guard_cycle_auto, 'previous_observation.critic_review.visual_relationships[]');
+  if (relationship?.additionalProperties !== false)
+    errors.push('photoshop_guard_cycle_auto: visual_relationships items must reject unknown fields');
+  for (const field of ['id', 'kind', 'part_ids', 'expected', 'visible', 'status']) {
+    if (!relationship?.required?.includes(field))
+      errors.push('photoshop_guard_cycle_auto: visual_relationships[].' + field + ' must be required');
+  }
   return errors;
 }
 
@@ -222,8 +249,13 @@ function diagnosticsErrors(schemas, diagnostics) {
   for (const item of violations) {
     const p = item.details?.path;
     if (!p) continue;
-    if (!locate(schemas.photoshop_guard_cycle_auto, p)) {
+    const fieldSchema = locate(schemas.photoshop_guard_cycle_auto, p);
+    if (!fieldSchema && item.details?.operator !== 'absent') {
       errors.push('Guard violation ' + (item.code ?? 'unknown') + ': required path ' + p + ' is unexpressible in cycle_auto');
+    }
+    if (fieldSchema && !fieldSchema.__opaque && item.details?.operator) {
+      errors.push(...transitionRequirementSchemaErrors(item.details, schemas.photoshop_guard_cycle_auto, collectSchemaErrors)
+        .map(error => 'Guard correction conflicts with public schema: ' + error));
     }
     for (const field of item.details?.required_fields ?? []) {
       const parent = p.replace(/\.\w+$/, '');
@@ -234,6 +266,42 @@ function diagnosticsErrors(schemas, diagnostics) {
     }
   }
   return errors;
+}
+
+/** Runtime-generated failures, not hand-written field-name promises. These
+ * remain offline and never instantiate a Photoshop connection or dispatch. */
+function replayContractDiagnostics() {
+  const violations = [];
+  for (const name of ['crocodile', 'crane', 'violin-gnome']) {
+    const model = JSON.parse(fs.readFileSync(path.join(root, 'examples/object-construction', name + '.json'), 'utf8'));
+    const ownerId = model.parts[0].id;
+    try {
+      expandConstructionPass({ document_id: 4280, visual_intent: 'mass', action_class: 'ADD',
+        construction: { model, part_id: ownerId, color: { red: 70, green: 90, blue: 60 } },
+        logical_layer: { hypothesis_id: 'foreign-owner', layer_id: 999, decision: 'adjust' },
+      }, { logical_layer_owners: [{ hypothesis_id: ownerId, layer_id: 17 }] }, () => null);
+      assert.fail('Expected a rejected construction contract');
+    } catch (error) {
+      assert.ok(error instanceof ConstructionError);
+      violations.push(...error.issues.map(issue => ({ code: issue.code, details: issue })));
+    }
+  }
+  for (const [kind, rule] of Object.entries(VISUAL_RELATION_RULES)) {
+    try {
+      validateVisualRelationships([{ id: 'named-relation', kind, part_ids: ['a', 'b'], status: 'fail',
+        expected: 'The named parts should form a connected visible relationship.',
+        visible: 'The exact AFTER shows a visible gap between the two named parts.' }],
+      { [rule.criterion]: 'fail' }, [{ criterion: 'wrong', structural_defect: {
+        id: 'named-relation', kind: 'wrong', part_ids: ['a'], relation_ids: [],
+      } }], {});
+      assert.fail('Expected a rejected relationship contract');
+    } catch (error) {
+      assert.ok(Array.isArray(error.issues));
+      violations.push(...error.issues.map(issue => ({ code: issue.code, details: issue })));
+    }
+  }
+  assert.equal(violations.length, 28);
+  return { violations };
 }
 
 function audit(tools, diagnostics) {
@@ -281,6 +349,14 @@ try {
     }
   }
   if (selfTest) {
+    const replay = replayContractDiagnostics();
+    const replayResult = audit(tools, replay);
+    assert.equal(replayResult.ok, true, JSON.stringify(replayResult.errors));
+    result.runtime_replay_violations_checked = replay.violations.length;
+    const impossibleCorrection = structuredClone(tools);
+    locate(impossibleCorrection.find(t => t.name === 'photoshop_guard_cycle_auto').inputSchema,
+      'next_pass.logical_layer.decision').enum = ['adjust'];
+    assert.ok(audit(impossibleCorrection, replay).errors.some(error => error.includes('correction conflicts')));
     const copy = structuredClone(tools);
     const schema = copy.find(t => t.name === 'photoshop_guard_cycle_auto').inputSchema;
     delete schema.properties.next_pass.properties.scene_ownership_plan.properties.objects.items.properties.subject_kind;
@@ -297,7 +373,19 @@ try {
     }] };
     assert.ok(diagnosticsErrors(Object.fromEntries(tools.map(t => [t.name, t.inputSchema])), example)
       .some(e => e.includes('new_guard_field')));
-    result.negative_controls = 'PASS (omitted subject_kind, compact edit_axes drift and newly required Guard field detected)';
+    const missingReview = structuredClone(tools);
+    const cycleReview = locate(missingReview.find(t => t.name === 'photoshop_guard_cycle_auto').inputSchema,
+      'previous_observation.critic_review');
+    cycleReview.required = cycleReview.required.filter(field => field !== 'visual_relationships');
+    assert.ok(audit(missingReview).errors.some(e => e.includes('Critic requires visual_relationships')));
+    const missingFoundationReview = structuredClone(tools);
+    delete missingFoundationReview.find(t => t.name === 'photoshop_guard_cycle_auto').inputSchema
+      .properties.previous_observation.properties.scene_foundation;
+    assert.ok(audit(missingFoundationReview).errors.some(e => e.includes('unexpressible required Guard field previous_observation.scene_foundation.request_id')));
+    const missingFoundationGoal = structuredClone(tools);
+    delete missingFoundationGoal.find(t => t.name === 'photoshop_guard_cycle_auto').inputSchema.properties.next_pass.properties.foundation_goal;
+    assert.ok(audit(missingFoundationGoal).errors.some(e => e.includes('unexpressible required Guard field next_pass.foundation_goal')));
+    result.negative_controls = 'PASS (omitted subject_kind, compact edit_axes drift, invented required Guard field, missing Critic visual_relationships and missing scene foundation fields detected)';
   }
   console.log(JSON.stringify(result, null, 2));
   if (!result.ok) process.exitCode = 1;

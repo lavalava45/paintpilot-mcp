@@ -1,10 +1,13 @@
 import { createHash } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
+import { activeCriticFindings, criticFindingStatus, CRITIC_FINDING_STATUS_GUIDANCE } from './critic-finding-status.js';
+import { validateReviewSections } from './review-validation.js';
 import { CORRECTION_KINDS, CORRECTION_KIND_SCHEMA, STRUCTURAL_DEFECT_SCHEMA, structuralDefectIssue, correctionFinding } from './critic-correction.js';
 import { canonicalPaintingStage } from '../painting-stage-policy.js';
 import { CRITIC_OBLIGATIONS_SCHEMA, validateCriticObligations, persistCriticObligations,
   criticObligationState, criticObligationNeedsRecheck } from './critic-obligations.js';
-import { VISUAL_RELATIONSHIP_REVIEW_VERSION, VISUAL_RELATION_SCHEMA,
-  validateVisualRelationships, requiredVisualRelationKinds } from './visual-relationship-review.js';
+import { VISUAL_RELATIONSHIP_REVIEW_VERSION, VISUAL_RELATION_SCHEMA, VISUAL_RELATION_DEFECT_KIND_GUIDANCE,
+  VISUAL_RELATION_RULES, validateVisualRelationships, requiredVisualRelationKinds } from './visual-relationship-review.js';
 
 type Row = Record<string, any>;
 export const CHAT_CRITIC_PROTOCOL = 'photoshop.guard.chat_critic.v1';
@@ -34,7 +37,7 @@ export const CHAT_CRITIC_SCHEMA = {
       properties: Object.fromEntries(CHAT_CRITIC_CRITERIA.map(key => [key, { type: 'string', enum: statuses,
         ...(key === 'contact_and_protection' ? { description: CONTACT_REVIEW_DESCRIPTION } : {}) }])),
       required: [...CHAT_CRITIC_CRITERIA] },
-    findings: { type: 'array', description: 'Every fail needs a concrete deficit/correction. Multiple independently identified structural defects may share a criterion but need distinct structural_defect.id. A pass for a retained structural defect must explicitly recheck the same id on current pixels.', maxItems: 12, items: { type: 'object', additionalProperties: false,
+    findings: { type: 'array', description: 'Every fail needs a concrete unresolved deficit/correction. Multiple independently identified structural defects may share a criterion but need distinct structural_defect.id. ' + CRITIC_FINDING_STATUS_GUIDANCE, maxItems: 12, items: { type: 'object', additionalProperties: false,
       properties: { criterion: { type: 'string', enum: [...CHAT_CRITIC_CRITERIA] },
         correction_kind: CORRECTION_KIND_SCHEMA,
         structural_defect: STRUCTURAL_DEFECT_SCHEMA,
@@ -101,13 +104,15 @@ export function chatCriticRequest(record: Row, state: Row, records: Row[], final
     scope: 'whole-scene-against-original-brief', stage: stageOf(record), visual_count: count,
     default_reviewer: 'same-chat-role', provider_call_required: false,
     response_field: 'previous_observation.critic_review', criteria: [...CHAT_CRITIC_CRITERIA] };
-  request.retained_findings = (state.chat_critic_findings ?? []).map(correctionFinding);
+  request.retained_findings = activeCriticFindings(state).map(correctionFinding);
   request.obligation_contract = CRITIC_OBLIGATIONS_SCHEMA;
   request.visual_relationship_contract = VISUAL_RELATION_SCHEMA;
   request.visual_relationship_required_kinds = requiredVisualRelationKinds(state);
   request.visual_relationship_guidance = 'On this exact delivered AFTER, inspect salient visible part-to-part relationships: for people/animals head-to-torso shape and scale; for gripping/using tools hand-to-object placement/contact; for resting or leaning objects actual supporting surface, balance and contact; plus scene depth and relative scale. Compare to the original brief and authorized style, never to a generic anatomy template. Return 1–8 visual_relationships with stable id, kind, named part_ids, expected, concrete AFTER-visible evidence and pass|fail|unknown|not-applicable. For each fail include a matching named structural_defect in findings (id and relation_ids contain the relationship id); for rechecking a prior failure return the same id and same structural_defect. If no relation applies (e.g. abstract field), one none/not-applicable with concrete reason is allowed. Unclear hidden contact/proportions are unknown. Native construction constraints, shadows and executed tool receipts are NOT visual evidence.';
+  request.visual_relationship_guidance += ' ' + VISUAL_RELATION_DEFECT_KIND_GUIDANCE;
   request.open_obligations = criticObligationState(state).filter(row => row.status !== 'pass');
   request.obligation_guidance = 'If an older single finding contains independently verifiable prerequisites, explicitly declare stable critic_review.obligations here on the already delivered frame; choose component IDs and dependencies, retain parent_problem_id from retained_findings, choose correction_kind separately for each subrequirement, and mark each pass/fail/unknown from visible evidence. List all subrequirements of a replaced parent; unrelated findings remain open. If the split is ambiguous, keep it unknown and ask for clarification in this existing review, not an extra tool call.';
+  request.visual_relationship_guidance += ' ' + CRITIC_FINDING_STATUS_GUIDANCE;
   request.obligation_rechecks = criticObligationState(state)
     .filter(row => row.status === 'pass'
       && criticObligationNeedsRecheck(row, record))
@@ -207,31 +212,40 @@ export function validateChatCritic(raw: unknown, request: Row | undefined, recor
         throw new Error('chat_critic_findings_invalid: unique non-pass criterion (or positive contact_and_protection evidence) with concrete visible/next_change (10-400 characters)');
       seen.add(finding.structural_defect?.id ?? finding.criterion);
     }
-    if (CHAT_CRITIC_CRITERIA.some(key => value.criteria[key] === 'fail'
-      && !value.findings.some((item: Row) => item.criterion === key)))
-      throw new Error('chat_critic_findings_required: every failed criterion needs its visible deficit and next construction change');
-    validateVisualRelationships(value.visual_relationships, value.criteria, value.findings, state,
-      request.visual_relationship_required_kinds ?? []);
+    // Finding shapes are valid now. These independent obligations must be
+    // diagnosed together; fixing one must not reveal an already missing report.
+    validateReviewSections([
+      { key: 'findings', path: 'previous_observation.critic_review.findings', validate: () => {
+        if (CHAT_CRITIC_CRITERIA.some(key => value.criteria[key] === 'fail'
+          && !value.findings.some((item: Row) => item.criterion === key && criticFindingStatus(value, item) !== 'pass')))
+          throw new Error('chat_critic_findings_required: every failed criterion needs its visible deficit and next construction change');
+        if (value.criteria.contact_and_protection === 'pass'
+          && !value.findings.some((item: Row) => item.criterion === 'contact_and_protection'))
+          throw new Error('chat_critic_support_observation_required: contact_and_protection pass needs one findings entry with concrete visible support/contact/weight evidence (or brief-grounded non-applicability) and next_change describing what to preserve; use unknown if support cannot be assessed. Same delivered frame and cycle, no new capture.');
+      } },
+      { key: 'relationships', path: 'previous_observation.critic_review.visual_relationships', validate: () =>
+        validateVisualRelationships(value.visual_relationships, value.criteria, value.findings, state,
+          request.visual_relationship_required_kinds ?? []) },
+    ]);
     const currentObligations = state.chat_critic_review
       && state.chat_critic_review.document_incarnation_id !== request.document_incarnation_id
       ? { ...state, critic_obligations: [] } : state;
     validateCriticObligations(value.obligations, currentObligations, record);
     const retainedStructural = Object.values(state.visual_problems ?? {})
-      .filter((p: any) => p?.structural_defect && p.status !== 'resolved') as Row[];
+      .filter((p: any) => p?.structural_defect) as Row[];
     for (const problem of retainedStructural) {
       const existing = problem.structural_defect;
       const reported = value.findings.find((item: Row) => item.structural_defect?.id === existing.id);
-      if (reported && JSON.stringify(reported.structural_defect) !== JSON.stringify(existing))
+      if (reported && !isDeepStrictEqual(reported.structural_defect, existing))
         throw new Error(`chat_critic_structural_identity_conflict: retain the original relation and recheck criterion for ${existing.id}; a new target needs a separately identified defect`);
       const previousCriterion = state.chat_critic_findings?.find((item: Row) => item.structural_defect?.id === existing.id)?.criterion
+        ?? problem.critic_assessment?.criterion
+        ?? VISUAL_RELATION_RULES[problem.visual_relationship_kind]?.criterion
         ?? (existing.kind === 'support-contact' ? 'contact_and_protection'
           : existing.kind === 'composition-relation' ? 'composition_context' : 'form_proportions');
-      if (value.criteria[previousCriterion] === 'pass' && !reported)
+      if (problem.status !== 'resolved' && value.criteria[previousCriterion] === 'pass' && !reported)
         throw new Error(`chat_critic_structural_recheck_required: current-frame pass of ${previousCriterion} must explicitly recheck unresolved ${existing.id}, not silently clear it`);
     }
-    if (value.criteria.contact_and_protection === 'pass'
-      && !value.findings.some((item: Row) => item.criterion === 'contact_and_protection'))
-      throw new Error('chat_critic_support_observation_required: contact_and_protection pass needs one findings entry with concrete visible support/contact/weight evidence (or brief-grounded non-applicability) and next_change describing what to preserve; use unknown if support cannot be assessed. Same delivered frame and cycle, no new capture.');
     review = { ...structuredClone(value), protocol: CHAT_CRITIC_PROTOCOL,
       support_review_version: SUPPORT_CONTACT_WEIGHT_REVIEW_VERSION, correction_version: CRITIC_CORRECTION_VERSION,
       visual_relationship_review_version: VISUAL_RELATIONSHIP_REVIEW_VERSION, operation_id: record.id,
@@ -244,6 +258,9 @@ export function validateChatCritic(raw: unknown, request: Row | undefined, recor
   if (completion && review && CHAT_CRITIC_CRITERIA.some(key => completion.criteria?.[key] === 'pass'
     && review!.criteria[key] !== 'pass'))
     throw new Error('chat_critic_completion_conflict: painting_completion cannot mark a Critic failed/unknown criterion pass; correct/review the current frame first');
+  if (completion && review && persistCriticObligations(state, review, record).some(row =>
+    row.status !== 'pass' && completion.criteria?.[row.criterion] === 'pass'))
+    throw new Error('chat_critic_completion_conflict: unresolved named Critic obligations cannot be hidden by an aggregate criterion pass');
   return review;
 }
 
@@ -253,7 +270,7 @@ export function persistChatCritic(state: Row, review?: Row, record?: Row): Row {
   const old = review.document_incarnation_id && compatiblePriorBrief(state, review.brief_sha256)
     && state.chat_critic_review.document_id === review.document_id
     && state.chat_critic_review.document_incarnation_id === review.document_incarnation_id
-    ? state.chat_critic_findings ?? [] : [];
+    ? activeCriticFindings(state) : [];
   const keyOf = (finding: Row) => finding.structural_defect?.id ?? finding.criterion;
   const findings = new Map<string, Row>(old.map((finding: Row) => [keyOf(finding), finding]));
   for (const key of CHAT_CRITIC_CRITERIA) {
@@ -265,8 +282,9 @@ export function persistChatCritic(state: Row, review?: Row, record?: Row): Row {
         if (!previous.structural_defect || positive) findings.delete(id);
       }
     }
-    else {
-      for (const finding of review.findings.filter((item: Row) => item.criterion === key))
+    for (const finding of review.findings.filter((item: Row) => item.criterion === key)) {
+      if (criticFindingStatus(review, finding) === 'pass') findings.delete(keyOf(finding));
+      else
         findings.set(keyOf(finding), { ...correctionFinding(finding), source_operation_id: review.operation_id,
         evidence_sha256: review.frame_sha256 });
     }
@@ -278,7 +296,9 @@ export function persistChatCritic(state: Row, review?: Row, record?: Row): Row {
     if (!defect) continue;
     const prior = problems[defect.id];
     const relation = (review.visual_relationships ?? []).find((row: Row) => row.id === defect.id);
-    const resolved = review.criteria[finding.criterion] === 'pass'
+    const findingStatus = criticFindingStatus(review, finding);
+    if (findingStatus === 'pass' && !prior?.structural_defect) continue;
+    const resolved = findingStatus === 'pass'
       && prior?.structural_defect?.id === defect.id;
     problems[defect.id] = {
       ...(prior ?? {}),
@@ -287,6 +307,9 @@ export function persistChatCritic(state: Row, review?: Row, record?: Row): Row {
       scale: prior?.scale ?? (defect.kind === 'composition-relation' ? 'global' : 'medium'),
       severity: prior?.severity ?? 'must-fix',
       status: resolved ? 'resolved' : 'open',
+      critic_assessment: { status: findingStatus, criterion: finding.criterion,
+        correction_kind: correctionFinding(finding).correction_kind, operation_id: review.operation_id,
+        frame_sha256: review.frame_sha256, visible: finding.visible },
       structural_review: true,
       ...(relation ? { visual_relationship_kind: relation.kind } : {}),
       hypothesis: defect.visible,
@@ -304,10 +327,10 @@ export function persistChatCritic(state: Row, review?: Row, record?: Row): Row {
   const sceneFailures: Row = {};
   for (const finding of findings.values()) {
     const id = keyOf(finding);
-    const criterion = finding.criterion;
-    if (review.criteria[criterion] === 'pass') continue;
+    const findingStatus = criticFindingStatus(review, finding);
+    if (findingStatus === 'pass') continue;
     const prior = previousFailures[id];
-    if (review.criteria[criterion] === 'unknown') {
+    if (findingStatus === 'unknown') {
       if (prior) sceneFailures[id] = prior;
       continue;
     }
@@ -327,6 +350,57 @@ export function persistChatCritic(state: Row, review?: Row, record?: Row): Row {
       ? { critic_obligations: persistCriticObligations(obligationSource, review, record) } : {}),
     chat_critic_findings: [...findings.values()].sort((a, b) => Number(rank.get(keyOf(a)) ?? 99) - Number(rank.get(keyOf(b)) ?? 99)),
     critic_scene_failures: sceneFailures,
+    ...(state.active_problem?.problem_id && problems[state.active_problem.problem_id]?.status === 'resolved'
+      ? { active_problem: undefined } : {}),
     ...(Object.keys(problems).length ? { visual_problems: problems } : {}),
   };
+}
+
+/** Repair derived caches from an already accepted exact-current-frame report.
+ * This is a pure projection, not a new visual judgment or a forced resolution.
+ * Old frames, changed briefs/incarnations and incomplete reports have no such
+ * authority. Readers and writers use the same projection after deployment. */
+export function reconcileCriticReviewState(state: Row): Row {
+  const active = activeCriticFindings(state);
+  if (active.length !== (state.chat_critic_findings?.length ?? 0))
+    state = { ...state, chat_critic_findings: active };
+  if (state.active_problem?.problem_id
+    && state.visual_problems?.[state.active_problem.problem_id]?.status === 'resolved')
+    state = { ...state, active_problem: undefined };
+  const review = state.chat_critic_review, frame = state.current_frame;
+  if (!review || !frame?.accepted || review.protocol !== CHAT_CRITIC_PROTOCOL
+    || !['same-chat-role-review', 'host-reported-delegation'].includes(review.validation)
+    || review.independent !== false || review.operation_id !== frame.operation_id
+    || review.frame_sha256 !== frame.sha256 || !incarnationOf(state)
+    || review.document_incarnation_id !== incarnationOf(state)
+    || review.document_id !== state.document_id || state.document_instance?.identity_pending
+    || typeof state.original_brief !== 'string'
+    || review.brief_sha256 !== createHash('sha256').update(state.original_brief).digest('hex')
+    || review.support_review_version !== SUPPORT_CONTACT_WEIGHT_REVIEW_VERSION
+    || review.correction_version !== CRITIC_CORRECTION_VERSION
+    || review.visual_relationship_review_version !== VISUAL_RELATIONSHIP_REVIEW_VERSION
+    || !Array.isArray(review.findings) || !review.criteria) return state;
+  const named = review.findings.filter((finding: Row) => finding.structural_defect);
+  const inconsistent = named.some((finding: Row) => {
+    const status = criticFindingStatus(review, finding);
+    const id = finding.structural_defect.id, problem = state.visual_problems?.[id];
+    return problem && ((status === 'pass' && (problem.status !== 'resolved'
+      || state.chat_critic_findings?.some((old: Row) => old.structural_defect?.id === id)))
+      || (status !== 'pass' && problem.status === 'resolved'));
+  }) || (state.active_problem?.problem_id
+    && state.visual_problems?.[state.active_problem.problem_id]?.status === 'resolved');
+  if (!inconsistent) return state;
+  try {
+    for (const finding of named) {
+      const prior = state.visual_problems?.[finding.structural_defect.id]?.structural_defect;
+      if (structuralDefectIssue(finding.structural_defect)
+        || prior && !isDeepStrictEqual(prior, finding.structural_defect)) return state;
+    }
+    validateVisualRelationships(review.visual_relationships, review.criteria, review.findings, state,
+      requiredVisualRelationKinds(state));
+    return { ...state, ...persistChatCritic(state, review) };
+  } catch {
+    // Incomplete/invalid legacy evidence cannot acquire resolution authority.
+    return state;
+  }
 }

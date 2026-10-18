@@ -1,5 +1,7 @@
 // @ts-nocheck
-import { chatCriticRequest, validateChatCritic, persistChatCritic } from './chat-critic.js';
+import { chatCriticRequest, validateChatCritic, persistChatCritic, reconcileCriticReviewState } from './chat-critic.js';
+import { FrameReviewValidationError, validateReviewSections } from './review-validation.js';
+import { SCENE_FOUNDATION_VERSION, foundationAdmission, validateSceneFoundation } from './scene-foundation.js';
 import { criticCorrectionIssue, advanceCriticCorrections, criticCorrectionContext, originalBriefAnchor, selectedCriticCorrection, correctionAttemptState } from './critic-correction.js';
 import { requestProblemLinks } from './problem-links.js';
 import { correctionTargetFacts, plannedGlobalComponentCorrection } from './correction-admissibility.js';
@@ -38,7 +40,7 @@ import {
 import { formatOperationNarrative, operationNarrative } from './operation-narrative.js';
 import { jobsDirectory, readJob } from './async-job.js';
 import { OPERATION_ACK_PROTOCOL, OPERATION_RECEIPT_PROTOCOL } from './guard-capabilities.js';
-import { normalizeConstructionModel, solveConstruction } from '../object-construction.js';
+import { ConstructionError, normalizeConstructionModel, solveConstruction } from '../object-construction.js';
 import type {
   GuardActiveJobProjection,
   GuardProjectionContext,
@@ -287,12 +289,12 @@ function exactCurrentFrameUndoSource(request, documentState, records) {
   const requestedSteps = compactUndoSteps(request);
   if (!requestedSteps || documentState?.pending_rollback) return undefined;
   const frame = documentState?.current_frame;
-  if (!frame?.accepted || !frame.operation_id) return undefined;
+  if (!frame?.operation_id) return undefined;
   const source = records.find(row => row.id === frame.operation_id);
   if (!source || source.args?.document_id !== request.args.document_id
     || source.phase !== 'completed' || source.failed || source.rolled_back
     || source.current_frame_authority === false || !source.visual
-    || source.verdict?.disposition !== 'accept'
+    || !['accept', 'correct'].includes(source.verdict?.disposition)
     || !source.operation_ack || !source.report
     || !Number.isSafeInteger(source.sequence)
     || !source.baseline_semantic_state || !source.baseline_preview
@@ -1463,7 +1465,9 @@ function trendSupportForRecord(record, signal) {
   const context = visualContext(record);
   const reviewRegions = trendFindingRegions(record, signal);
   const operationRegion = operationTrendRegion(record);
-  const representativeRegion = unionTrendRegions(reviewRegions) ?? operationRegion;
+  // A whole-frame finding may concern a different object from the last paint.
+  // Operation bounds describe execution, never the location of a visual defect.
+  const representativeRegion = unionTrendRegions(reviewRegions);
   return {
     operation_id: record.id,
     ineffective: record.verdict?.significance?.execution_effect === 'insufficient'
@@ -1481,11 +1485,10 @@ function trendSupportForRecord(record, signal) {
     scale: context.scale ?? null,
     ...(representativeRegion ? { region_bounds: representativeRegion } : {}),
     review_regions: reviewRegions,
+    ...(operationRegion ? { operation_region_bounds: operationRegion } : {}),
     region_source: reviewRegions.length
       ? 'signal_bound_review_findings'
-      : operationRegion
-        ? 'operation_region'
-        : 'none',
+      : 'none',
     whole_frame_global: signal === 'global-readability-degraded'
       && record.verdict?.global_readability === 'degraded',
   };
@@ -1989,6 +1992,12 @@ export class SessionStore {
     try {
       const state = JSON.parse(fs.readFileSync(this.paintingStateFile(), 'utf8'));
       if (state.schema_version !== RUNTIME_STATE_VERSION) throw runtimeStateSchemaError(state.schema_version);
+      for (const [key, document] of Object.entries(state.documents ?? {})) {
+        const reconciled = reconcileCriticReviewState(document);
+        state.documents[key] = reconciled === document ? document : {
+          ...reconciled, active_problem: this.primaryBlockingProblem(reconciled.visual_problems) ?? undefined,
+        };
+      }
       return state;
     }
     catch (e) { if (e.code === 'ENOENT') throw runtimeStateSchemaError('missing-painting-state'); throw e; }
@@ -2303,6 +2312,8 @@ export class SessionStore {
       ...(input.original_brief !== undefined ? { original_brief: input.original_brief.trim() } : {}),
       painting_profile: paintingProfile,
       ...(newRun ? { painting_profile_selection: runProfileSelection } : {}),
+      ...(['nontrivial_painting', 'simple_graphic'].includes(paintingProfile)
+        ? { scene_foundation_policy: SCENE_FOUNDATION_VERSION } : {}),
       ...(!current.project_started_at && paintingProfile === 'nontrivial_painting'
         && (!current.current_frame?.operation_id || (current.document_instance?.bootstrap_tool === 'photoshop_create_document'
           && current.current_frame.operation_id === current.document_instance.bootstrap_operation_id))
@@ -2343,7 +2354,11 @@ export class SessionStore {
     const key = String(documentId);
     const current = state.documents?.[key] ?? { document_id: documentId };
     state.documents ??= {};
-    state.documents[key] = updater(current);
+    const updated = updater(current);
+    const reconciled = reconcileCriticReviewState(updated);
+    state.documents[key] = reconciled === updated ? updated : {
+      ...reconciled, active_problem: this.primaryBlockingProblem(reconciled.visual_problems) ?? undefined,
+    };
     state.revision = Number(state.revision ?? 0) + 1;
     state.updated_at = new Date().toISOString();
     atomicJson(this.paintingStateFile(), state);
@@ -3333,18 +3348,19 @@ export class SessionStore {
         // this inherited privilege, not the problem or its structural debt.
         const inheritedTarget = (currentDocumentStateForRefinement.art_director?.tasks ?? [])
           .some(previousTask => previousTask.correction_target?.problem_id === targetId);
-        const { globalTarget, boundedMediumTarget, reclassifiedMediumTarget } = correctionTargetFacts({
+        const { globalTarget, boundedMediumTarget, reclassifiedMediumTarget, sameScaleMediumTarget } = correctionTargetFacts({
           problem,
           proposedBounds: target?.region_bounds,
           inheritedTarget,
+          allowedScales,
         });
         const problemScale = normalizeScale(problem?.scale);
         if (!target || typeof target !== 'object' || Array.isArray(target)
-          || !targetId || (!globalTarget && !boundedMediumTarget && !reclassifiedMediumTarget)) {
+          || !targetId || (!globalTarget && !boundedMediumTarget && !reclassifiedMediumTarget && !sameScaleMediumTarget)) {
           throw new Error(`directive.tasks[${index}].correction_target problem_id=${JSON.stringify(targetId ?? null)} requires an open global must-fix or an open medium must-fix with Critic-reviewed region_bounds enclosing the proposed target; current=${problem ? `${problem.status}/${problemScale ?? 'unknown'}/${problem.severity}` : 'missing'}. A label or Director-only region is not spatial evidence.`);
         }
         if ((!constructionPlan && (globalTarget || problem?.structural_review))
-          || !(boundedMediumTarget ? allowedScales.includes('small') : allowedScales.includes('medium'))) {
+          || !(boundedMediumTarget && !sameScaleMediumTarget ? allowedScales.includes('small') : allowedScales.includes('medium'))) {
           throw new Error(`directive.tasks[${index}].correction_target requires construction_plan for structural corrections and allowed_scales containing ${boundedMediumTarget ? 'small' : 'medium'}`);
         }
         if (!target.region_bounds || typeof target.region_bounds !== 'object' || Array.isArray(target.region_bounds)) {
@@ -3352,6 +3368,8 @@ export class SessionStore {
         }
         const bounds = normalizeRegion(target.region_bounds);
         if (bounds.left < 0 || bounds.top < 0) throw new Error('correction_target.region_bounds must use nonnegative document coordinates');
+        // Same-scale work needs no spatial waiver. Accept the plan but retire
+        // the supplied target; it must never become medium-to-small authority.
         if (globalTarget || boundedMediumTarget) correctionTarget = { problem_id: targetId, region_bounds: bounds };
       }
       return {
@@ -4155,6 +4173,20 @@ export class SessionStore {
       }
     }
   }
+  sceneFoundationAdmission(documentId, request, projectionContext: GuardProjectionContext | undefined = undefined) {
+    const state = (projectionContext?.paintingState ?? this.paintingState()).documents?.[String(documentId)] ?? {};
+    const proof = state.scene_foundation;
+    let retained = true;
+    if (proof) {
+      const source = projectionContext?.records.find(row => row.id === proof.operation_id) ?? this.read(proof.operation_id);
+      retained = !!source && source.phase === 'completed' && !source.failed && !source.rolled_back
+        && source.current_frame_authority !== false && source.verdict?.disposition !== 'rollback'
+        && source.preview?.sha256 === proof.frame_sha256 && source.args?.document_id === documentId
+        && (state.current_frame?.operation_id === proof.operation_id && state.current_frame.sha256 === proof.frame_sha256
+          || this.currentFrameAncestry(state, projectionContext?.records ?? this.records())?.has(source.id) === true);
+    }
+    return foundationAdmission(state, request, retained);
+  }
   plannerGate(documentId, request, projectionContext, deferPhysicalStackReview = false) {
     if (!isVisual(request.tool)) return null;
     if (!Number.isSafeInteger(documentId) || documentId <= 0) return null;
@@ -4164,6 +4196,9 @@ export class SessionStore {
     // Combined closure+continuation installs the reviewed check first. Runtime
     // revalidates this gate from durable state before any Photoshop dispatch.
     if (!deferPhysicalStackReview) this.physicalStackGate(documentId, documentState, context, projectionContext);
+    const foundation = this.sceneFoundationAdmission(documentId, request, projectionContext);
+    if (foundation.status === 'blocked') throw new Error(foundation.message);
+    if (foundation.status === 'foundation-repair') return null;
 
     const representationDebts = ownerRepresentationDebt(documentState);
     const targetOwner = representationOwnerContext(request);
@@ -4854,6 +4889,9 @@ export class SessionStore {
     // A repeated, reviewed primitive-footprint defect is a behavioral gate,
     // not just advisory debt. Reject further polygon passes even when their
     // colors, number of contours, strategy labels or problem IDs change.
+    const foundation = this.sceneFoundationAdmission(documentId, request, projectionContext);
+    if (foundation.status === 'blocked') throw new Error(foundation.message);
+    if (foundation.status === 'foundation-repair') return null;
     const primitiveDebt = doc?.visual_problems?.['cumulative-trend-primitive-footprint-repeating'];
     const footprintRelated = context.problem_id === primitiveDebt?.problem_id
       || context.addresses_problem_ids.includes(primitiveDebt?.problem_id)
@@ -6179,9 +6217,6 @@ export class SessionStore {
       ? 'inspect/classify preview before another visual mutation'
       : 'obtain recovery/required preview before another visual mutation';
     const art = state.art_director;
-    if (art?.status === 'interrupted' || art?.status === 'review_due' || art?.review_due) {
-      return `Art Director review required for directive ${art.directive_id}: ${art.review_reason ?? art.status}`;
-    }
     const generatedGeometryDebt = this.generatedGeometryRebuildDebt(documentId, all, projectionContext);
     if (generatedGeometryDebt.length) {
       const debt = generatedGeometryDebt[0];
@@ -6193,6 +6228,11 @@ export class SessionStore {
     }
     const checkpoint = this.checkpointState(documentId, all, projectionContext);
     if (checkpoint.due) return 'save required checkpoint, then dispatch next meaningful visual pass';
+    const foundation = this.sceneFoundationAdmission(documentId, {}, projectionContext);
+    if (foundation.status === 'blocked') return foundation.message;
+    if (art?.status === 'interrupted' || art?.status === 'review_due' || art?.review_due) {
+      return `Art Director review required for directive ${art.directive_id}: ${art.review_reason ?? art.status}`;
+    }
     if (art?.status === 'completed') {
       return `Art Director directive ${art.directive_id} completed; issue the next directive or end the painting stage`;
     }
@@ -6281,7 +6321,7 @@ export class SessionStore {
     const allowed = new Set([
       'id', 'tool', 'args', 'summary', 'purpose', 'replan', 'timeout_ms',
       'problem_id', 'region', 'hypothesis', 'failure_signals', 'significance_mode',
-      'stage', 'stage_reset', 'scale', 'severity', 'impact_class',
+      'stage', 'stage_reset', 'scale', 'severity', 'impact_class', 'foundation_goal',
       'planner_directive_id', 'planner_task_id', 'painter_scope', 'change_domains',
       'affected_relations', 'affected_qualities', 'preservation_facts',
       'independent_region', 'addresses_primary_mismatch', 'addresses_problem_id', 'addresses_problem_ids',
@@ -6466,7 +6506,7 @@ export class SessionStore {
         undoRecords);
       if (!undoSource && !(options.stateOnly !== true
         && pendingAcceptedFrameUndoSource(request, options.plannedAcceptedUndoSourceOperationId, undoRecords))) {
-        add('bounded_undo_source_unproven: one-step microplan Undo requires the current accepted frame, exact source History, and an intact semantic baseline; use an accepted-anchor restore otherwise');
+        add('bounded_undo_source_unproven: one-step microplan Undo requires the current reviewed frame, exact source History, and an intact semantic baseline; use an accepted-anchor restore otherwise');
       }
     }
     if (!documentState?.pending_rollback
@@ -8539,14 +8579,21 @@ export class SessionStore {
       if (!problemId.startsWith('cumulative-trend-') || !problem || typeof problem !== 'object') continue;
       const sources = Array.isArray(problem.source_operations) ? problem.source_operations : [];
       const liveSources = sources.filter(id => this.recordHasCurrentFrameAuthority(recordsById.get(id), current, records));
-      if (liveSources.length === sources.length) continue;
+      const reprojectSpatialScope = problem.status === 'open'
+        && problem.supporting_regions?.some(row => row.region_source === 'operation_region');
+      if (liveSources.length === sources.length && !reprojectSpatialScope) continue;
       const live = new Set(liveSources);
       const supportingEvidence = Array.isArray(problem.supporting_evidence)
         ? problem.supporting_evidence.filter(row => live.has(row?.operation_id)) : [];
-      const supportingRegions = Array.isArray(problem.supporting_regions)
+      let supportingRegions = Array.isArray(problem.supporting_regions)
         ? problem.supporting_regions.filter(row => live.has(row?.operation_id)) : [];
       const supports = liveSources.map(id => recordsById.get(id)).filter(Boolean)
         .map(record => trendSupportForRecord(record, problem.trend_signal));
+      if (reprojectSpatialScope) supportingRegions = supports.map(support => ({
+        operation_id: support.operation_id, named_region: support.named_region,
+        scale: support.scale, region_source: support.region_source,
+        ...(support.region_bounds ? { region_bounds: support.region_bounds } : {}),
+      }));
       const stillSupported = liveSources.length >= trendRepeatLimit(problem.trend_signal, supports);
       problems[problemId] = {
         ...problem,
@@ -8554,6 +8601,7 @@ export class SessionStore {
         supporting_evidence: supportingEvidence,
         supporting_regions: supportingRegions,
         trend_count: liveSources.length,
+        ...(reprojectSpatialScope ? trendScopeFromSupports(supports) : {}),
         ...(stillSupported ? {} : {
           status: 'resolved',
           resolution_epoch: Number(problem.resolution_epoch ?? 0) + 1,
@@ -9168,16 +9216,45 @@ export class SessionStore {
         && r.execution !== 'uncertain' && deriveExecutionOutcome(r) === 'completed'
         && !r.rolled_back && r.current_frame_authority !== false && r.resolved?.outcome !== 'abandoned')
       .sort((a,b) => Number(b.sequence ?? 0) - Number(a.sequence ?? 0));
-    const seen = new Set(), bindings = [];
+    const seen = new Set(), bindings = [], renderedModels = new Map();
     for (const record of records) {
       const model = record.object_construction_model;
       if (!model || seen.has(model.model_id)) continue;
       seen.add(model.model_id);
-      const solved = solveConstruction(model);
+      let solved;
+      try { solved = solveConstruction(model); }
+      catch (error) {
+        // Inventory/status must remain readable when stricter current geometry
+        // validation rejects a historical model. Keep it visibly invalid; never
+        // supply solved targets or silently fall back to an older revision.
+        const invalid = { model_id: model.model_id, revision: model.revision,
+          validation: 'invalid-model', needs_rebuild: true, constructed: false,
+          validation_issues: error instanceof ConstructionError ? error.issues
+            : [{ code: 'construction_model_invalid', message: error instanceof Error ? error.message : String(error) }] };
+        const parts = Array.isArray(model.parts) ? model.parts.filter(part => typeof part?.id === 'string') : [];
+        if (!parts.length) bindings.push(invalid);
+        for (const part of parts) {
+          const painted = records.find(r => r.construction_provenance?.model_id === model.model_id
+            && r.construction_provenance?.part_id === part.id);
+          bindings.push({ ...invalid, owner_id: part.id, object_id: part.object_id,
+            bounds: painted?.construction_provenance?.bounds, constructed: !!painted });
+        }
+        continue;
+      }
+      renderedModels.set(record.id, solved);
       for (const part of solved.parts) {
         const painted = records.find(r => r.construction_provenance?.model_id === model.model_id && r.construction_provenance?.part_id === part.id);
+        let renderedContour;
+        if (painted?.object_construction_model) {
+          if (!renderedModels.has(painted.id)) {
+            try { renderedModels.set(painted.id, solveConstruction(painted.object_construction_model)); }
+            catch { renderedModels.set(painted.id, null); }
+          }
+          renderedContour = renderedModels.get(painted.id)?.parts.find(rendered => rendered.id === part.id)?.contour;
+        }
         bindings.push({ owner_id: part.id, object_id: part.object_id, model_id: model.model_id, revision: model.revision,
           bounds: painted?.construction_provenance?.bounds, target_bounds: part.bounds,
+          ...(renderedContour ? { contour: renderedContour } : {}),
           ...(painted?.construction_provenance?.rendering ? { rendering: structuredClone(painted.construction_provenance.rendering) } : {}),
           constructed: !!painted, needs_rebuild: !!painted && painted.construction_provenance.target_sha256 !== part.target_sha256 });
       }
@@ -9780,8 +9857,21 @@ export class SessionStore {
     return validateChatCritic(input.critic_review, request, record,
       plan ? { ...state, scene_ownership_plan: plan } : state, input.painting_completion);
   }
+  validateFrameReviews(record, input, final = false, providedOnly = false) {
+    const sections = [];
+    if (input.scene_foundation !== undefined) sections.push({ key: 'foundation', path: 'previous_observation.scene_foundation',
+      validate: () => validateSceneFoundation(input.scene_foundation, record,
+        this.paintingState().documents?.[String(record.args?.document_id)] ?? {}) });
+    if (!providedOnly || input.critic_review !== undefined || input.painting_completion !== undefined)
+      sections.push({ key: 'critic', path: 'previous_observation.critic_review',
+        validate: () => this.validateChatCritic(record, input, final) });
+    if (!providedOnly || input.editable_scope_review !== undefined || input.painting_completion !== undefined)
+      sections.push({ key: 'editableScope', path: 'previous_observation.editable_scope_review',
+        validate: () => this.validateEditableScope(record, input, final) });
+    return validateReviewSections(sections);
+  }
   retainedFrameReview(record, observation, persist = false, expectedOperationId = undefined) {
-    if (!observation || !['critic_review', 'editable_scope_review', 'painting_completion'].some(key => observation[key] !== undefined)) return undefined;
+    if (!observation || !['critic_review', 'editable_scope_review', 'painting_completion', 'scene_foundation'].some(key => observation[key] !== undefined)) return undefined;
     const documentId = record.args?.document_id;
     this.assertDocumentIdentityVerified(documentId);
     const state = this.paintingState().documents?.[String(documentId)];
@@ -9803,18 +9893,17 @@ export class SessionStore {
       throw new Error('current_frame_review_stale: use the exact retained, delivered current whole frame; resolve newer visual/uncertain work first, never reclose or replay historical operations');
     if (observation.painting_completion !== undefined && (!frame.accepted || source.verdict.disposition !== 'accept'))
       throw new Error('painting_completion needs the exact retained, delivered current whole frame accepted for retention');
-    const critic = observation.critic_review !== undefined || observation.painting_completion !== undefined
-      ? this.validateChatCritic(source, observation, true) : undefined;
-    const editableScope = observation.editable_scope_review !== undefined || observation.painting_completion !== undefined
-      ? this.validateEditableScope(source, observation, true) : undefined;
+    const { critic, editableScope, foundation } = this.validateFrameReviews(source, observation, true, true);
     const completion = observation.painting_completion === undefined ? undefined
       : bindPaintingCompletion(observation.painting_completion, state, frame.sha256);
     const patch = { ...persistChatCritic(state, critic, source), ...persistEditableScopeReview(editableScope),
+      ...(foundation ? { scene_foundation: foundation } : {}),
       ...(completion ? { painting_completion: completion } : {}) };
     if (persist) this.updatePaintingState(documentId, current => {
       if (current.current_frame?.operation_id !== source.id || current.current_frame?.sha256 !== frame.sha256
         || current.original_brief !== state.original_brief
-        || (critic && this.currentDocumentIncarnationId(documentId) !== critic.document_incarnation_id))
+        || (critic && this.currentDocumentIncarnationId(documentId) !== critic.document_incarnation_id)
+        || (foundation && this.currentDocumentIncarnationId(documentId) !== foundation.document_incarnation_id))
         throw new Error('current_frame_review_stale: frame, brief or document changed during review');
       return { ...current, ...patch };
     });
@@ -9836,11 +9925,20 @@ export class SessionStore {
     return this.retainedFrameReview(record, input.previous_visual_verdict, persist,
       record.visual ? record.id : undefined)?.completion;
   }
-  collectClosePreviousErrors(input = {}) {
+  collectClosePreviousErrors(input = {}, reviewIssues = undefined) {
     const errors = [];
+    const collectFailure = (error, prefix = '') => {
+      if (error instanceof FrameReviewValidationError) {
+        for (const issue of error.issues) {
+          const message = prefix + issue.message;
+          errors.push(message);
+          reviewIssues?.push({ ...issue, message });
+        }
+      } else errors.push(prefix + String(error?.message ?? error));
+    };
     const id = textOrUndefined(input.previous_operation_id);
     if (input.review_operation_id !== undefined) {
-      try { this.explicitCurrentFrameReview(input); } catch (error) { errors.push(String(error?.message ?? error)); }
+      try { this.explicitCurrentFrameReview(input); } catch (error) { collectFailure(error); }
       return errors;
     }
     if (!id) return errors;
@@ -9854,7 +9952,7 @@ export class SessionStore {
     if (this.hasDurableNotExecutedProof(record)) return errors;
     if (isTerminalBootstrapFailure(record)) return errors;
     try { this.finalWholeBriefReview(input, record); }
-    catch (error) { errors.push(String(error?.message ?? error)); }
+    catch (error) { collectFailure(error); }
 
     if (!record.report) {
       const report = input.previous_report;
@@ -9911,7 +10009,7 @@ export class SessionStore {
             this.cacheValidatedVerdict(verdictInput, validated);
           }
         } catch (error) {
-          errors.push(`previous_visual_verdict invalid for ${id}: ${String(error?.message ?? error)}`);
+          collectFailure(error, `previous_visual_verdict invalid for ${id}: `);
         }
       }
     }
@@ -10192,8 +10290,8 @@ export class SessionStore {
       || brushReview.observed.length > 400))
       throw new Error('brush_use_review_required: assess the bounded novel-purpose trial on this exact delivered AFTER with pass|fail|unknown and concrete visible evidence; omit no findings. No extra review call.');
     if (!brushTrial && brushReview !== undefined) throw new Error('brush_use_review_unbound: only a bounded novel-purpose trial may record this review');
-    const chatCritic = input.disposition === 'rollback' ? undefined : this.validateChatCritic(record, input);
-    const editableScope = input.disposition === 'rollback' ? undefined : this.validateEditableScope(record, input);
+    const { critic: chatCritic, editableScope } = input.disposition === 'rollback'
+      ? {} : this.validateFrameReviews(record, input);
     if (!['improvement', 'neutral', 'regression'].includes(input.verdict)) throw new Error('Visual verdict required');
     if (!['accept', 'correct', 'rollback'].includes(input.disposition)) throw new Error('Visual disposition accept|correct|rollback required');
     if (input.disposition === 'rollback') {
@@ -10475,6 +10573,9 @@ export class SessionStore {
     catch { return undefined; }
     try { currentEditableScope = input.disposition === 'rollback' ? undefined : this.validateEditableScope(current, input); }
     catch { return undefined; }
+    try { if (input.scene_foundation !== undefined) validateSceneFoundation(input.scene_foundation, current,
+      this.paintingState().documents?.[String(current.args?.document_id)] ?? {}); }
+    catch { return undefined; }
     if (cached.validated.boundedUndoRestore) {
       const source = this.read(current.undo_source_operation_id);
       if (!source || cached.source_signature !== fingerprint(source) || !materializedEvidenceMatches(source.baseline_preview)) return undefined;
@@ -10517,7 +10618,8 @@ export class SessionStore {
     const critic = this.validateChatCritic(record, input.previous_visual_verdict);
     return { ...captured, paintingState: { ...captured.paintingState,
       documents: { ...captured.paintingState.documents, [id]: { ...state,
-        ...advanceCriticCorrections(state, record, input.previous_visual_verdict, critic), ...persistChatCritic(state, critic, record) } } } };
+        ...advanceCriticCorrections(state, record, input.previous_visual_verdict, critic), ...persistChatCritic(state, critic, record),
+        ...(input.previous_visual_verdict.scene_foundation ? { scene_foundation: validateSceneFoundation(input.previous_visual_verdict.scene_foundation, record, state) } : {}) } } } };
   }
   projectBoundedUndoClosure(input, projectionContext) {
     const id = input.previous_operation_id;
@@ -10878,6 +10980,8 @@ export class SessionStore {
         ...(input.disposition !== 'rollback' ? advanceCriticCorrections(current, record, input, chatCritic) : {}),
         ...(input.disposition !== 'rollback' ? persistChatCritic(current, chatCritic, record) : {}),
         ...(input.disposition !== 'rollback' ? persistEditableScopeReview(editableScope) : {}),
+        ...(input.disposition !== 'rollback' && input.scene_foundation
+          ? { scene_foundation: validateSceneFoundation(input.scene_foundation, record, current) } : {}),
         ...(record.args?.paint_strategy?.brush_fitness_key && input.brush_use_review?.status === 'pass'
           && input.disposition === 'accept' ? { brush_fitness_reviews: [
             ...(current.brush_fitness_reviews ?? []).filter(item => item.key !== record.args.paint_strategy.brush_fitness_key),

@@ -49,6 +49,36 @@ function binding(overrides: Record<string, unknown> = {}) {
 }
 
 describe('geometry preflight', () => {
+  it('keeps a vertical lamp on a receding street without forcing its pole towards the road vanishing point', () => {
+    const lamp = binding({ owner_id: 'lamp',
+      anchors: { near_contact: { x: 720, y: 700 }, far_extent: { x: 720, y: 300 },
+        centerline: { line: [{ x: 720, y: 700 }, { x: 720, y: 300 }] } },
+      control_sections: [],
+      constraints: [{ type: 'supported_by', subject_ref: 'lamp', target_ref: 'track_plane', evidence: ['base contact'] }],
+    });
+    const result = runGeometryPreflight(lamp, scene());
+    expect(result.issues).toEqual([]);
+    expect(result.report.checks).toContainEqual(expect.objectContaining({ kind: 'support-contact', status: 'pass' }));
+    expect(result.report.checks.some(c => c.kind === 'projection-family')).toBe(false);
+    const outside = structuredClone(lamp); outside.anchors.near_contact = { x: 1100, y: 700 };
+    expect(runGeometryPreflight(outside, scene()).issues.map(i => i.code)).toContain('support_contact_conflict');
+    const falselyAligned = structuredClone(lamp);
+    falselyAligned.constraints.push({ type: 'converges_to', subject_ref: 'lamp', target_ref: 'rail_family', evidence: ['incorrect direction'] });
+    expect(runGeometryPreflight(falselyAligned, scene()).issues.map(i => i.code)).toContain('projection_family_conflict');
+  });
+
+  it('checks the named facade/road edge rather than borrowing the vertical owner axis', () => {
+    const lamp = binding({ owner_id: 'lamp',
+      anchors: { near_contact: { x: 720, y: 700 }, centerline: { line: [{ x: 720, y: 700 }, { x: 720, y: 300 }] } },
+      control_sections: [], constraints: [
+        { type: 'supported_by', subject_ref: 'lamp', target_ref: 'track_plane', evidence: ['base'] },
+        { type: 'converges_to', subject_ref: 'rail_left', target_ref: 'rail_family', evidence: ['edge'] },
+      ],
+    });
+    expect(runGeometryPreflight(lamp, scene()).issues).toEqual([]);
+    const invalid = structuredClone(lamp); invalid.constraints[1].subject_ref = 'missing_edge';
+    expect(runGeometryPreflight(invalid, scene()).issues.map(i => i.code)).toContain('geometry_preflight_insufficient');
+  });
   it('resolves a quantitative coherent-3D binding against the exact scene revision', () => {
     const result = runGeometryPreflight(binding(), scene());
     expect(result.issues).toEqual([]);

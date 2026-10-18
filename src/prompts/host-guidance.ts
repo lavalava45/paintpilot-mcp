@@ -2,6 +2,8 @@
  * Server-level guidance for MCP host LLMs (Chat On Steroids, Cursor, Claude Desktop, and peers).
  * Advertised on MCP `initialize` via ServerOptions.instructions.
  */
+import { DEPICTION_DETAIL_GUIDANCE } from '../core/depiction-detail.js';
+import { SCENE_FOUNDATION_GUIDANCE } from '../core/guard/scene-foundation.js';
 /** Visible in tools/list as well as initialize: hosts may omit server instructions. */
 export const PHOTOSHOP_DRAWING_ROUTE = 'When the user requests Photoshop/COS/MCP drawing or forbids imagegen/image_gen, use only the Chat On Steroids Plugins Photoshop tools for that task. Start with photoshop_get_state to establish the document, or photoshop_guard_resume for an interrupted run; reuse an already confirmed target. Draw through photoshop_guard_cycle_auto. If the intended open document is inactive, discover photoshop_set_active_document via photoshop_guard_capabilities(tool_names) even when no standalone tool appears. With explicit authorization to switch focus, activate its exact document_id through photoshop_guard_cycle_auto, then verify photoshop_get_state before painting. Without focus permission ask permission to activate through MCP, not for a manual tab click. Never switch silently or remove document_id pinning. A decision-loop stall is advisory, not a mutation blocker: dispatch the next meaningful visual pass or one bounded diagnostic. Do not call built-in/external image generation, even for a reference, preview or fallback. If the selected tools are unavailable, report the exact blocker and stop; only an explicit later user change authorizes another execution mode.';
 
@@ -309,8 +311,8 @@ Multi-step etiquette
   A compound object is a virtual container, not a flattened raster owner. Enumerate independently
   editable parts in units with distinct owner ids and physical layers: bed frame/mattress/blanket/pillows,
   window frame/glass/curtains, animal body/head/ears/eyes when separately adjustable.
-  Build one component in one bounded pass, deliver its exact intermediate frame and inspect it before
-  choosing the next component. Keep dependent placement/occlusion in existing construction bindings.
+  ${DEPICTION_DETAIL_GUIDANCE}
+  Keep dependent placement/occlusion in existing construction bindings.
   Tiny inseparable accents stay on their component; do not create a layer for every stroke.
   Extend the same durable plan additively when a new object/part is needed; preserve old bindings.
   editability=temporary is a composition scaffold, frozen after its initial pass: no continue, adjust
@@ -360,6 +362,7 @@ Multi-step etiquette
    same problem in addresses_problem_ids on the Painter pass. The Guard retires
    inherited global-only targets when safe, but never clears the medium defect,
    waives strategy exhaustion, or admits small/detail changes across medium debt.
+- EARLY FOUNDATION: ${SCENE_FOUNDATION_GUIDANCE}
 - SUBJECT-FIRST START: the first meaningful visual pass must contain the requested main subject
   and its discriminative recognition cues. Establish its relationship to the setting/path/large
   scene masses in the next bounded construction passes before polishing any one component.

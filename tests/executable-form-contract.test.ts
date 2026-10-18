@@ -34,6 +34,17 @@ import { collectSchemaErrors } from '../src/core/guard/cycle-compiler.js';
 import { compileGuardCycle } from '../src/core/guard/cycle-compiler.js';
 import { ToolRegistry } from '../src/core/tool-registry.js';
 import { createGuardTools } from '../src/tools/guard-tools.js';
+import { SCENE_FOUNDATION_VERSION } from '../src/core/guard/scene-foundation.js';
+
+// Completion fixtures start after the separately tested early foundation.
+function establishedFoundation(state: any) {
+  state.document_id = 7;
+  state.document_incarnation_id = 'fixture-instance';
+  state.scene_foundation = { version: SCENE_FOUNDATION_VERSION, document_id: 7,
+    document_incarnation_id: state.document_incarnation_id,
+    brief_sha256: createHash('sha256').update(state.original_brief).digest('hex'),
+    composition: { status: 'pass' }, technique: { status: 'pass' } };
+}
 
 function model() {
   return {
@@ -505,6 +516,7 @@ it('requires current whole-brief assessment, independent of local success and sa
     current_frame: { sha256: 'frame-1' },
     last_critique: { target_resolved: 'yes', primitive_footprint: 'none' },
   };
+  establishedFoundation(state);
   expect(documentArtisticDebt(state)).toEqual(['whole_brief_review_required']);
   expect(artisticContinuation(state)).toContain('previous_observation.painting_completion');
   const review = {
@@ -516,6 +528,7 @@ it('requires current whole-brief assessment, independent of local success and sa
   expect(documentArtisticDebt(state)).toContain('whole_brief_critic_review_required');
   state.chat_critic_review = {
     protocol: CHAT_CRITIC_PROTOCOL, validation: 'same-chat-role-review', independent: false, operation_id: 'visual-1',
+    document_incarnation_id: state.document_incarnation_id,
     frame_sha256: 'frame-1',
     brief_sha256: createHash('sha256').update(state.original_brief).digest('hex'),
     criteria: Object.fromEntries(CHAT_CRITIC_CRITERIA.map(key => [key, 'pass'])),
@@ -534,6 +547,7 @@ it('requires current whole-brief assessment, independent of local success and sa
   state.current_frame.sha256 = 'frame-1';
   state.original_brief += ' plus a curtain';
   expect(documentArtisticDebt(state)).toContain('whole_brief_review_required');
+  state.scene_foundation.brief_sha256 = createHash('sha256').update(state.original_brief).digest('hex');
   state.painting_completion = bindPaintingCompletion(
     { ...review, criteria: { ...review.criteria, light_material: 'fail' } },
     state,
@@ -556,6 +570,7 @@ it('publishes a fail-closed whole-brief completion decision across saves, false 
     last_critique: { target_resolved: 'yes' },
     workflow_lifecycle: { status: 'stopped', reason: 'close_only_finalization' },
   };
+  establishedFoundation(state);
   const unfinished = wholeBriefCompletionContract(state, 'ready');
   expect(unfinished).toMatchObject({
     protocol: 'paintpilot.whole-brief-completion.v1',
@@ -575,6 +590,7 @@ it('publishes a fail-closed whole-brief completion decision across saves, false 
   });
   state.chat_critic_review = {
     protocol: CHAT_CRITIC_PROTOCOL, validation: 'same-chat-role-review', independent: false, operation_id: 'visual-1',
+    document_incarnation_id: state.document_incarnation_id,
     frame_sha256: 'frame-1',
     brief_sha256: createHash('sha256').update(state.original_brief).digest('hex'),
     criteria: Object.fromEntries(CHAT_CRITIC_CRITERIA.map(key => [key, 'pass'])),
@@ -606,6 +622,7 @@ it('publishes a fail-closed whole-brief completion decision across saves, false 
   state.document_incarnation_id = 'host:new';
   expect(wholeBriefCompletionContract(state, 'ready').completion_allowed).toBe(false);
   state.chat_critic_review.document_incarnation_id = 'host:new';
+  state.scene_foundation.document_incarnation_id = 'host:new';
   expect(wholeBriefCompletionContract(state, 'ready').completion_allowed).toBe(true);
   state.painting_completion.criteria.form_proportions = 'unknown';
   expect(wholeBriefCompletionContract(state, 'ready').reasons).toContain('whole_brief_criteria_unmet');
@@ -639,6 +656,7 @@ it('adds whole-brief assessment after save without repainting or overwriting the
       verdict: { disposition: 'accept' },
       preview: { sha256: sha, materialized_path: file },
     };
+    establishedFoundation(state);
     const store: any = Object.create(SessionStore.prototype);
     store.assertDocumentIdentityVerified = vi.fn();
     store.paintingState = () => ({ documents: { 7: state } });
@@ -668,6 +686,7 @@ it('adds whole-brief assessment after save without repainting or overwriting the
     // The technical save and the Painter assessment cannot replace a second exact-frame Critic review.
     state.chat_critic_review = {
       protocol: CHAT_CRITIC_PROTOCOL, validation: 'same-chat-role-review', independent: false, operation_id: 'visual-1',
+      document_incarnation_id: state.document_incarnation_id,
       frame_sha256: sha,
       brief_sha256: createHash('sha256').update(state.original_brief).digest('hex'),
       criteria: Object.fromEntries(CHAT_CRITIC_CRITERIA.map(key => [key, 'pass'])),
