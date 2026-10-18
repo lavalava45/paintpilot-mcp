@@ -154,6 +154,8 @@ const PATCH_CODES = new Set([
 ]);
 
 export function classifyViolation(violation: RepairableViolation): ViolationRepairClass {
+  if (violation.code === 'deterministic_repair_repeat'
+    || violation.code === 'compiled_operation_missing') return 'SYSTEMIC_FAILURE';
   if (violation.code === 'guard_requirement_conflict') return 'SYSTEMIC_FAILURE';
   if (violation.code === 'guard_requirement_unexpressible') return 'SYSTEMIC_FAILURE';
   if (violation.code === 'current_frame_review_stale'

@@ -2,6 +2,7 @@ import { canvasComponent } from '../component-space.js';
 import { createHash } from 'node:crypto';
 import type { FrameReviewIssue } from './review-validation.js';
 import { contradictoryTransitionRequirements, transitionRequirementSchemaErrors, type TransitionRequirement } from '../transition-requirements.js';
+import { convergeTechnicalContracts, MAX_TECHNICAL_CONVERGENCE_PASSES, type ContractConvergenceStop } from './contract-convergence.js';
 import { brushRoleMatchesScale } from './brush-scale-fit.js';
 import { constructionExecutionIssue, unexpandedConstructionPrerequisites } from './construction-execution.js';
 import { ConstructionError, expandConstructionPass, type ConstructionModel } from '../object-construction.js';
@@ -236,6 +237,8 @@ export interface GuardCompilerRepairAudit {
   first_violation_fingerprint?: string;
   final_violation_fingerprint?: string;
   final_validation: 'valid' | 'rejected' | 'systemic-repeat';
+  convergence_passes?: number;
+  convergence_stop?: ContractConvergenceStop;
   deferred_next_pass?: Record<string, unknown>;
 }
 
@@ -392,7 +395,50 @@ function violation(
   message: string,
   details?: Record<string, unknown>
 ): GuardCycleCompileViolation {
+  if (scope === 'next_operation' && !details?.path) {
+    const field = code.match(/^(scene_geometry_model|scene_lighting_color_model|scene_camera_imaging_model)_invalid$/)?.[1];
+    if (field) {
+      const named = message.match(new RegExp(`\\b${field}(?:\\.[A-Za-z_][A-Za-z0-9_]*(?:\\[\\d+\\])?)*`))?.[0];
+      details = { ...details, path: `next_pass.${named ?? field}` };
+    }
+  }
   return { scope, code, message, ...(details ? { details } : {}) };
+}
+
+/** Same invariant gate before local repair, after every recompile and before
+ * final dispatch. Incompatible runtime requirements are server defects; they
+ * must not be disguised as a model-visible sequence of field guesses. */
+function contractInvariantViolations(
+  issues: GuardCycleCompileViolation[],
+  registry: ToolRegistry,
+): GuardCycleCompileViolation[] {
+  const conflicts: GuardCycleCompileViolation[] = [];
+  for (const scope of ['cycle', 'finalization', 'next_operation'] as const) {
+    const typed = issues.filter(item => item.scope === scope
+      && typeof item.details?.path === 'string' && typeof item.details?.operator === 'string');
+    const requirements = typed.map(item => ({
+      path: String(item.details?.path),
+      operator: String(item.details?.operator) as TransitionRequirement['operator'],
+      expected: item.details?.expected,
+    }));
+    for (const conflict of contradictoryTransitionRequirements(requirements)) {
+      conflicts.push(violation(scope, 'guard_requirement_conflict',
+        `Guard published contradictory requirements for ${conflict.path}. Stop automatic retries and report this internal contract defect; no Photoshop mutation was dispatched.`,
+        { path: conflict.path, conflicting_requirements: [requirements[conflict.first], requirements[conflict.second]] }));
+    }
+  }
+  const publicSchema = registry.get('photoshop_guard_cycle_auto')?.tool.inputSchema;
+  if (publicSchema) for (const item of issues) {
+    const rule = item.details;
+    if (!rule?.operator || typeof rule.path !== 'string') continue;
+    const errors = transitionRequirementSchemaErrors({
+      path: rule.path, operator: String(rule.operator), expected: rule.expected,
+    }, publicSchema, collectSchemaErrors);
+    if (errors.length) conflicts.push(violation(item.scope, 'guard_requirement_unexpressible',
+      `Guard requires a correction at ${rule.path} that conflicts with its published input schema. Report this contract defect.`,
+      { path: rule.path, requirement: rule, schema_conflicts: errors }));
+  }
+  return uniqueViolations(conflicts);
 }
 
 function uniqueViolations(violations: GuardCycleCompileViolation[]): GuardCycleCompileViolation[] {
@@ -3966,91 +4012,113 @@ export async function compileGuardCycle(
       item.scope !== 'next_operation' || item.code !== 'invalid_visual_microplan'
     ));
   }
+  const initialContractDefects = contractInvariantViolations(initialNextViolations, registry);
+  if (initialContractDefects.length) {
+    initialNextViolations = uniqueViolations([...initialNextViolations, ...initialContractDefects]);
+    violations.push(...initialContractDefects);
+  }
   initialViolationsForAccounting = uniqueViolations(violations);
   if (sourceNextPass && initialNextViolations.length) {
-    const classified = classifyViolations(initialNextViolations);
-    const hasSemanticOrSystemic = classified.some(item =>
-      item.repair_class === 'MODEL_SEMANTIC_DECISION' || item.repair_class === 'SYSTEMIC_FAILURE'
-    );
     const repairStartedAt = Date.now();
     const documentId = Number(sourceNextPass.document_id);
     const context = Number.isSafeInteger(documentId) && documentId > 0
       ? store.compactPassContext?.(documentId, options.projectionContext) ?? {}
       : {};
-    const deterministic = applyDeterministicPassRepairs(sourceNextPass, initialNextViolations, context);
-    let repairCandidate = deterministic.repaired_pass;
-    const appliedRepairs = [...deterministic.repairs];
-    let deferredNextPass: Record<string, unknown> | undefined;
-
-    if (!hasSemanticOrSystemic) {
-      const split = splitPassForBudget(repairCandidate, initialNextViolations);
-      if (split) {
-        repairCandidate = split.first_pass;
-        deferredNextPass = split.deferred_pass;
-        appliedRepairs.push(split.repair);
-        autoSplitCount = 1;
-      }
-    }
-
-    if (appliedRepairs.length) {
-      const firstViolationFingerprint = fingerprint(initialNextViolations);
-      const firstCompiledPayloadFingerprint = fingerprint(nextOperation ?? rawNextOperation ?? sourceNextPass);
-      const preservedViolations = violations.filter(item => item.scope !== 'next_operation');
-      const repairedCompact = compileCompactPass(repairCandidate, store, registry, options.projectionContext);
-      const repairedNextViolations = [...repairedCompact.violations];
-      if (repairedCompact.normalizations?.length) normalizations.push(...repairedCompact.normalizations);
-      let repairedOperation = repairedCompact.operation;
-      if (repairedOperation) {
-        const repairedValidation = await validateNextOperation(repairedOperation);
-        repairedOperation = repairedValidation.operation;
-        repairedNextViolations.push(...repairedValidation.violations);
-        normalizations.push(...repairedValidation.normalizations);
-      }
-      const uniqueRepairedNextViolations = uniqueViolations(repairedNextViolations);
-      const finalViolationFingerprint = fingerprint(uniqueRepairedNextViolations);
-      const repeatedSameViolation = uniqueRepairedNextViolations.length > 0
-        && finalViolationFingerprint === firstViolationFingerprint;
-
-      violations.splice(0, violations.length, ...preservedViolations);
-      if (repeatedSameViolation) {
-        // A no-progress repair is a compiler diagnostic, not a replacement for
-        // the actionable validation failures. In particular, an explicitly
-        // foreign physical-layer target must remain a visible owner mismatch.
-        violations.push(...uniqueRepairedNextViolations);
-        violations.push(violation(
-          'next_operation',
-          'deterministic_repair_repeat',
-          'A bounded deterministic repair pass reproduced the same violation fingerprint. Treat this as a compiler/systemic defect; do not retry automatically.',
-          {
-            violation_fingerprint: finalViolationFingerprint,
-            original_error_codes: [...new Set(uniqueRepairedNextViolations.map(item => item.code))],
+    const firstViolationFingerprint = fingerprint(initialNextViolations);
+    const firstCompiledPayloadFingerprint = fingerprint(nextOperation ?? rawNextOperation ?? sourceNextPass);
+    const converged = await convergeTechnicalContracts({
+      pass: sourceNextPass,
+      operation: nextOperation,
+      violations: initialNextViolations,
+      fingerprint,
+      systemic: issue => classifyViolations([issue])[0].repair_class === 'SYSTEMIC_FAILURE',
+      needsDecision: issue => classifyViolations([issue])[0].repair_class === 'MODEL_SEMANTIC_DECISION',
+      repair: (pass, current, round) => {
+        const deterministic = applyDeterministicPassRepairs(pass, current, context);
+        let candidate = deterministic.repaired_pass;
+        const repairs = [...deterministic.repairs];
+        let deferredPass: Record<string, unknown> | undefined;
+        const hasSemanticOrSystemic = classifyViolations(current).some(item =>
+          item.repair_class === 'MODEL_SEMANTIC_DECISION' || item.repair_class === 'SYSTEMIC_FAILURE');
+        // Split only once, only for safe independent actions. The deferred
+        // suffix still requires a new cycle after visual acceptance.
+        if (round === 0 && !hasSemanticOrSystemic) {
+          const split = splitPassForBudget(candidate, current);
+          if (split) {
+            candidate = split.first_pass;
+            deferredPass = split.deferred_pass;
+            repairs.push(split.repair);
+            autoSplitCount = 1;
           }
-        ));
-      } else {
-        violations.push(...uniqueRepairedNextViolations);
+        }
+        return { pass: candidate, repairs, ...(deferredPass ? { deferredPass } : {}) };
+      },
+      check: async candidate => {
+        // Re-run the SAME technical and geometry preflights after each local
+        // repair; never silently drop an upstream error just because the
+        // downstream compiled operation now validates.
+        const technical = prepareTechnicalPassBindings(candidate, context);
+        const geometry = prepareGeometryContract(technical.pass, context);
+        const current: GuardCycleCompileViolation[] = [
+          ...technical.issues.map(item => violation('next_operation', 'technical_binding_conflict', item.message,
+            { path: item.path })),
+          ...geometry.issues.map(item => violation('next_operation',
+            item.code ?? (item.decision ? 'geometry_binding_required' : 'geometry_contract_invalid'),
+            item.message, { ...item })),
+        ];
+        const compact = compileCompactPass(geometry.pass, store, registry, options.projectionContext);
+        current.push(...compact.violations);
+        const next = compact.operation ? await validateNextOperation(compact.operation) : undefined;
+        if (next) current.push(...next.violations);
+        if (!compact.operation && !current.length) current.push(violation('next_operation',
+          'compiled_operation_missing', 'The compiler produced no executable operation and no diagnostic. Stop; no Photoshop action is authorized.'));
+        current.push(...contractInvariantViolations(current, registry));
+        return {
+          pass: geometry.pass,
+          operation: next?.operation ?? compact.operation,
+          violations: uniqueViolations(current),
+          repairs: [...technical.repairs, ...geometry.repairs],
+          normalizations: [
+            ...technical.repairs.map(repair => ({ code: 'technical_owner_binding_derived', message: `${repair.path}: ${repair.reason}` })),
+            ...geometry.repairs.map(repair => ({ code: 'geometry_technical_default', message: `${repair.path}: ${repair.reason}` })),
+            ...(compact.normalizations ?? []),
+            ...(next?.normalizations ?? []),
+          ],
+        };
+      },
+    });
+    if (converged.passes) {
+      const preservedViolations = violations.filter(item => item.scope !== 'next_operation');
+      violations.splice(0, violations.length, ...preservedViolations, ...converged.violations);
+      if (['no-progress', 'repeated-candidate', 'budget-exhausted'].includes(converged.stop)) {
+        violations.push(violation('next_operation', 'deterministic_repair_repeat',
+          `Bounded technical contract convergence stopped (${converged.stop}) after ${converged.passes}/${MAX_TECHNICAL_CONVERGENCE_PASSES} local checks. Report the complete remaining contract diagnostic; do not automatically retry.`,
+          { convergence_stop: converged.stop, convergence_passes: converged.passes,
+            original_error_codes: [...new Set(converged.violations.map(item => item.code))] }));
       }
-
-      nextOperation = repairedOperation;
-      rawNextOperation = repairedOperation;
-      hasNextOperation = repairedOperation !== undefined;
-      if (repairedOperation) compiledInput.next_operation = repairedOperation;
-      sourceNextPass = repairCandidate;
+      nextOperation = converged.operation;
+      rawNextOperation = converged.operation;
+      hasNextOperation = converged.operation !== undefined;
+      if (converged.operation) compiledInput.next_operation = converged.operation;
+      else delete compiledInput.next_operation;
+      sourceNextPass = converged.pass;
+      normalizations.push(...converged.normalizations);
       repairedAt = new Date().toISOString();
-      autoRepairCount = deterministic.repairs.length;
+      autoRepairCount = converged.repairs.length;
       repairAudit = {
         protocol: 'photoshop.guard.compiler_repair.v1',
         ...(originalIntentFingerprint ? { original_intent_fingerprint: originalIntentFingerprint } : {}),
         first_compiled_payload_fingerprint: firstCompiledPayloadFingerprint,
-        repairs: appliedRepairs,
-        repaired_payload_fingerprint: fingerprint(repairedOperation ?? repairCandidate),
+        repairs: converged.repairs,
+        repaired_payload_fingerprint: fingerprint(converged.operation ?? converged.pass),
         first_violation_fingerprint: firstViolationFingerprint,
-        final_violation_fingerprint: repeatedSameViolation
-          ? finalViolationFingerprint
-          : fingerprint(uniqueRepairedNextViolations),
-        final_validation: repeatedSameViolation
+        final_violation_fingerprint: fingerprint(converged.violations),
+        convergence_passes: converged.passes,
+        convergence_stop: converged.stop,
+        final_validation: ['no-progress', 'repeated-candidate', 'budget-exhausted'].includes(converged.stop)
           ? 'systemic-repeat'
-          : uniqueRepairedNextViolations.length ? 'rejected' : 'valid',
-        ...(deferredNextPass ? { deferred_next_pass: deferredNextPass } : {}),
+          : converged.violations.length ? 'rejected' : 'valid',
+        ...(converged.deferredPass ? { deferred_next_pass: converged.deferredPass } : {}),
       };
     }
     autoRepairMs = Date.now() - repairStartedAt;
@@ -4078,35 +4146,7 @@ export async function compileGuardCycle(
         'A corrected geometry contract is still invalid. Stop automatic resubmission and report this complete diagnostic as a pipeline blocker; do not read source or schemas during painting.'));
     }
   }
-  // Two typed requirements for one field may contradict each other even when
-  // each fits the public schema independently. That is an internal contract
-  // defect, never a request for the Painter to guess a new artistic choice.
-  for (const scope of ['cycle', 'finalization', 'next_operation'] as const) {
-    const typed = violations.filter(item => item.scope === scope
-      && typeof item.details?.path === 'string' && typeof item.details?.operator === 'string');
-    const requirements = typed.map(item => ({
-      path: String(item.details?.path),
-      operator: String(item.details?.operator) as TransitionRequirement['operator'],
-      expected: item.details?.expected,
-    }));
-    for (const conflict of contradictoryTransitionRequirements(requirements)) {
-      violations.push(violation(scope, 'guard_requirement_conflict',
-        `Guard published contradictory requirements for ${conflict.path}. Stop automatic retries and report this internal contract defect; no Photoshop mutation was dispatched.`,
-        { path: conflict.path, conflicting_requirements: [requirements[conflict.first], requirements[conflict.second]] }));
-    }
-  }
-  // A runtime requirement that the published tool cannot express is a system
-  // defect. Never tell the model to keep reshaping an impossible payload.
-  const publicSchema = registry.get('photoshop_guard_cycle_auto')?.tool.inputSchema;
-  if (publicSchema) for (const item of [...violations]) {
-    const rule = item.details;
-    if (!rule?.operator || typeof rule.path !== 'string') continue;
-    const conflicts = transitionRequirementSchemaErrors({ path: rule.path, operator: String(rule.operator), expected: rule.expected },
-      publicSchema, collectSchemaErrors);
-    if (conflicts.length) violations.push(violation(item.scope, 'guard_requirement_unexpressible',
-      `Guard requires a correction at ${rule.path} that conflicts with its published input schema. Report this contract defect.`,
-      { path: rule.path, requirement: rule, schema_conflicts: conflicts }));
-  }
+  violations.push(...contractInvariantViolations(violations, registry));
   const unique = uniqueViolations(violations);
   const classifiedFinal = classifyViolations(unique);
   const key = (item: GuardCycleCompileViolation) => stableJson([item.scope, item.code, item.details?.path]);
@@ -4198,6 +4238,14 @@ export async function compileGuardCycle(
     closure: unique.some(item => item.scope === 'finalization') ? 'rejected' : 'validated',
     operation_compilation: nextOperation ? 'compiled' : 'not-compiled',
     operation_preflight: operationPreflightRan ? 'ran' : 'deferred',
+    technical_convergence: {
+      passes: repairAudit?.convergence_passes ?? 0,
+      max_passes: MAX_TECHNICAL_CONVERGENCE_PASSES,
+      outcome: repairAudit?.convergence_stop ?? (initialNextViolations.length ? 'no-safe-repair' : 'not-needed'),
+      // Closure-dependent and pixel-dependent checks are not pre-authorized
+      // merely because the technical fixed point has been reached.
+      authorization: 'pre-dispatch-validation-only',
+    },
     ...(operationPreflightRan ? {} : { deferred_reason: unique.some(item => item.scope === 'finalization')
       ? 'A valid closure projection is required before state-dependent operation checks.'
       : 'A compiled operation is required before execution and state checks.' }),
