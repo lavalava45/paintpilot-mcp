@@ -3,6 +3,7 @@ import type { CallToolResult, Tool } from '@modelcontextprotocol/sdk/types.js';
 import { createHash } from 'node:crypto';
 import { ATTENTION_BINDING_SCHEMA } from '../core/perceptual-hierarchy.js';
 import { ADDRESSES_PROBLEM_IDS_SCHEMA } from '../core/guard/problem-links.js';
+import { SEMANTIC_EXECUTION_SPEC } from '../core/guard/semantic-contract-spec.js';
 import { bezierCriticalPoints } from '../core/bezier-geometry.js';
 import { paintRegionTopologyIssues } from '../core/filled-contour-topology.js';
 import {
@@ -1545,7 +1546,7 @@ function visualMicroPlanToolSchema(): Tool {
             stamp_profile_id: { type: 'string' },
             pressure_policy: { type: 'string', enum: [...VISUAL_MICROPLAN_PRESSURE_POLICIES] },
           },
-          required: ['material_role', 'visual_intent', 'pressure_policy'],
+          required: [...SEMANTIC_EXECUTION_SPEC.method.requiredFields],
           additionalProperties: false,
         },
         material_response: {

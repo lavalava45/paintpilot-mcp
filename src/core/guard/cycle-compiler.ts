@@ -4,6 +4,7 @@ import type { FrameReviewIssue } from './review-validation.js';
 import { contradictoryTransitionRequirements, transitionRequirementSchemaErrors, type TransitionRequirement } from '../transition-requirements.js';
 import { convergeTechnicalContracts, MAX_TECHNICAL_CONVERGENCE_PASSES, type ContractConvergenceStop } from './contract-convergence.js';
 import { compileSemanticContracts } from './semantic-entity-registry.js';
+import { compileSemanticOwnership, compileSemanticMethod, compileSemanticExecutablePlan } from './semantic-execution-compiler.js';
 import { brushRoleMatchesScale } from './brush-scale-fit.js';
 import { constructionExecutionIssue, unexpandedConstructionPrerequisites } from './construction-execution.js';
 import { ConstructionError, expandConstructionPass, type ConstructionModel } from '../object-construction.js';
@@ -11,7 +12,6 @@ import { PainterlyError, expandPainterlyPass, type PainterlyFrame } from '../pai
 import { prepareGeometryContract, geometryContractRecipe } from '../geometry-contract.js';
 import type { ToolRegistry, ToolResult } from '../tool-registry.js';
 import { DOCUMENT_ID_SCHEMA_EXCLUDES } from '../document-target.js';
-import { compileVisualMicroPlan } from '../visual-microplan-compiler.js';
 import {
   preflightVisualMicroPlanForExecution,
   type VisualMicroPlanDocumentBounds,
@@ -3275,8 +3275,7 @@ function compileCompactPass(
       }
       paintStrategy = {
         ...(constructionRole ? { construction_role: constructionRole } : {}),
-        material_role: requestedMaterialRole
-          ?? (Array.isArray(brushRole.material_roles) ? text(brushRole.material_roles[0]) : undefined),
+        material_role: requestedMaterialRole,
         visual_intent: visualIntent
           ?? (Array.isArray(brushRole.visual_intents) ? text(brushRole.visual_intents[0]) : undefined),
         brush_role: text(brushRole.role_id),
@@ -3308,6 +3307,20 @@ function compileCompactPass(
       pressure_policy: 'none',
     };
   }
+  // One typed method contract for every rendering mechanism. It may inherit
+  // only uniquely proven brush material; it never picks the first of several
+  // candidate materials or masks a missing artistic choice.
+  const compiledMethod = compileSemanticMethod(paintStrategy, {
+    authoredMaterial: requestedMaterialRole,
+    authoredVisualIntent: visualIntent,
+    brushMaterialRoles: brushRole?.material_roles,
+  });
+  paintStrategy = compiledMethod.strategy;
+  violations.push(...compiledMethod.issues.map(item => violation('next_operation', item.code, item.message,
+    { path: `next_operation.args.${item.path}`, candidates: item.candidates })));
+  normalizations.push(...compiledMethod.repairs.map(item => ({
+    code: 'semantic_method_compiled', message: `${item.path}: ${item.reason}`,
+  })));
 
   const requiresLocalInspection = visualMicroPlanRequiresLocalInspection(
     scale ?? '',
@@ -3565,14 +3578,18 @@ async function compileNextOperation(
 
   if (!stateOnly && compiled.tool === 'photoshop_execute_visual_microplan') {
     try {
+      const executable = compileSemanticExecutablePlan((compiled.args ?? {}) as Record<string, unknown>);
       compiled = {
         ...compiled,
-        args: compileVisualMicroPlan((compiled.args ?? {}) as Record<string, unknown>),
+        args: executable.args,
         ...(typeof compiled.stage === 'string' && /^block[ _-]?in$/i.test(compiled.stage.trim())
           ? { stage: 'GLOBAL_BLOCK_IN' }
           : {}),
       };
       visualMicroPlanCompiled = true;
+      normalized.normalizations.push(...executable.repairs.map(item => ({
+        code: 'semantic_execution_plan_compiled', message: `${item.path}: ${item.reason}`,
+      })));
     } catch (error) {
       // The compact compiler already emits typed mutation-budget violations with
       // numeric details above. Do not add a prose-only duplicate that would turn
@@ -3887,12 +3904,18 @@ export async function compileGuardCycle(
       const context = Number.isSafeInteger(documentId) && documentId > 0
         ? store.compactPassContext?.(documentId, options.projectionContext) ?? {} : {};
       const semantic = compileSemanticContracts(sourceNextPass, context);
-      sourceNextPass = semantic.pass;
+      const ownership = compileSemanticOwnership(semantic.pass, context);
+      sourceNextPass = ownership.pass;
       for (const issue of semantic.issues) violations.push(violation('next_operation',
+        issue.code, issue.message, { path: `next_pass.${issue.path}`, candidates: issue.candidates }));
+      for (const issue of ownership.issues) violations.push(violation('next_operation',
         issue.code, issue.message, { path: `next_pass.${issue.path}`, candidates: issue.candidates }));
       for (const repair of semantic.repairs) normalizations.push({
         code: 'semantic_contract_compiled', message: `next_pass.${repair.path}: ${repair.reason}`,
       });
+      normalizations.push(...ownership.repairs.map(item => ({
+        code: 'semantic_owner_compiled', message: `${item.path}: ${item.reason}`,
+      })));
       // Geometry contract preflight runs before compileCompactPass, where durable
       // owner facts are normally inherited. Carry forward only the exact binding
       // of a unique, non-temporary continuing owner; never invent a spatial
@@ -3928,6 +3951,7 @@ export async function compileGuardCycle(
       geometryRepairs = [
         ...semantic.repairs.map(item => ({ kind: 'inject_from_context' as const,
           path: `next_pass.${item.path}`, source: item.source, reason: item.reason })),
+        ...ownership.repairs,
         ...geometry.repairs,
       ];
       for (const repair of geometry.repairs) normalizations.push({
@@ -4085,10 +4109,13 @@ export async function compileGuardCycle(
         // repair; never silently drop an upstream error just because the
         // downstream compiled operation now validates.
         const semantic = compileSemanticContracts(candidate, context);
-        const technical = prepareTechnicalPassBindings(semantic.pass, context);
+        const ownership = compileSemanticOwnership(semantic.pass, context);
+        const technical = prepareTechnicalPassBindings(ownership.pass, context);
         const geometry = prepareGeometryContract(technical.pass, context);
         const current: GuardCycleCompileViolation[] = [
           ...semantic.issues.map(item => violation('next_operation', item.code, item.message,
+            { path: `next_pass.${item.path}`, candidates: item.candidates })),
+          ...ownership.issues.map(item => violation('next_operation', item.code, item.message,
             { path: `next_pass.${item.path}`, candidates: item.candidates })),
           ...technical.issues.map(item => violation('next_operation', 'technical_binding_conflict', item.message,
             { path: item.path })),
@@ -4110,10 +4137,12 @@ export async function compileGuardCycle(
           repairs: [
             ...semantic.repairs.map(item => ({ kind: 'inject_from_context' as const,
               path: `next_pass.${item.path}`, source: item.source, reason: item.reason })),
+            ...ownership.repairs,
             ...technical.repairs, ...geometry.repairs,
           ],
           normalizations: [
             ...semantic.repairs.map(item => ({ code: 'semantic_contract_compiled', message: `next_pass.${item.path}: ${item.reason}` })),
+            ...ownership.repairs.map(item => ({ code: 'semantic_owner_compiled', message: `${item.path}: ${item.reason}` })),
             ...technical.repairs.map(repair => ({ code: 'technical_owner_binding_derived', message: `${repair.path}: ${repair.reason}` })),
             ...geometry.repairs.map(repair => ({ code: 'geometry_technical_default', message: `${repair.path}: ${repair.reason}` })),
             ...(compact.normalizations ?? []),

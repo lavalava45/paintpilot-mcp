@@ -39,6 +39,33 @@ export interface SemanticContractSpec {
   pins: readonly SemanticPinSpec[];
 }
 
+/** Execution binding policy belongs to the same source of truth as IDs/refs.
+ * Required strategy fields mirror the VisualMicroPlan tool contract; neither
+ * owner identity nor an artistic material choice is inferred from free text. */
+export const SEMANTIC_EXECUTION_SPEC = {
+  owner: {
+    selector: 'target_owner_id',
+    declaration: 'logical_layer',
+    durableOwners: 'logical_layer_owners',
+    durableId: 'hypothesis_id',
+    physicalTarget: 'layer_id',
+    continuationDecisions: ['continue-logical-layer', 'adjust'],
+    creationDecisions: ['create-new', 'temporary-hypothesis'],
+  },
+  method: {
+    requiredFields: ['material_role', 'visual_intent', 'pressure_policy'],
+    materialSource: 'material_role',
+    brushMaterialsSource: 'material_roles',
+    artisticFields: ['construction_role', 'material_role', 'visual_intent'],
+  },
+  plan: {
+    executableTool: 'photoshop_execute_visual_microplan',
+    terminalRead: 'photoshop_get_preview',
+    stepField: 'steps',
+    explicitStepTarget: 'layer_id',
+  },
+} as const;
+
 // All paths are relative to next_pass / painting_intent. [] denotes an array
 // element. The compiler walks objects without relying on human-readable prose.
 export const SEMANTIC_CONTRACT_SPEC: SemanticContractSpec = {

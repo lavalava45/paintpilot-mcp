@@ -12,6 +12,16 @@ The shared specification is `src/core/guard/semantic-contract-spec.ts` (`SEMANTI
 
 `semantic-entity-registry.ts` consumes this specification. `applySemanticPublicSchema` derives the optional technical ID and provenance fields in the public `next_pass` and `painting_intent` schemas. `compileGuardCycle` uses the same specification before ownership/model normalization and during bounded revalidation. The existing Guard remains authoritative for execution permission, visual checks, undo, document incarnation, ownership and rollback.
 
+## Intent → ownership → method → executable plan
+
+`SEMANTIC_EXECUTION_SPEC` in the same specification and `semantic-execution-compiler.ts` extend the pipeline beyond entity IDs. They enforce three separate contracts:
+
+1. **Ownership binding:** one explicitly selected `target_owner_id` can inherit its unique current non-temporary durable `logical_layer` and numeric layer target. An explicitly foreign target, duplicate owner registration, uncommitted new layer, or cross-layer action cannot be silently retargeted. The existing Guard's physical-stack and separation/rollback checks remain mandatory.
+2. **Method compilation:** the required `paint_strategy` fields come from the same declarative specification as the published VisualMicroPlan input schema. A material is derived only from the caller's explicit `material_role` or the *single* verified role of the chosen brush. Multiple eligible materials require an artistic decision. No first-item fallback, `undefined` material acceptance, or invented brush evidence.
+3. **Executable plan:** the immutable final compiler applies deterministic sequencing and an exact terminal preview after a visual mutation. The existing VisualMicroPlan parser, tool schema, real UXP behavior, execution journal and review gates still validate/admit the result.
+
+This fixes **some** missing-owner and method-schema cases at the cause, rather than filtering error codes. `semantic_mutation_target_owner_mismatch` for a genuinely foreign layer and `invalid_visual_microplan` for genuinely invalid executable steps remain valid safety rejections.
+
 ## Example
 
 An agent may submit a complete scene-light declaration with one emitter but **without** technical `id`, `model_id`, `revision` and `source_frame`. If the current document witness is known, the compiler deterministically allocates the new IDs, binds the exact witness and derives the initial revision. An authored prose `local_value_anchor` can bind to the single compatible declared emitter; multiple possible emitters produce a **semantic-reference ambiguity** rather than a guessed choice. Existing explicit unknown IDs are not remapped.
@@ -35,6 +45,6 @@ The specification currently covers the main scene-light/color, geometry, camera 
 
 ## Verification
 
-`tests/semantic-contract-registry.test.ts` checks deterministic IDs, schema derivation, typed ambiguity, stale pins, model continuation, and reference safety. `tests/semantic-contract-end-to-end.test.ts` exercises both acceptance and rejection through the actual `compileGuardCycle` without dispatch. Live artistic acceptance of `nontrivial_painting` remains separate from compilation correctness.
+`tests/semantic-contract-registry.test.ts` checks deterministic IDs, schema derivation, typed ambiguity, stale pins, model continuation, and reference safety. `tests/semantic-execution-compiler.test.ts` covers owner binding, foreign and ambiguous targets, method derivation and executable preview compilation. `tests/semantic-contract-end-to-end.test.ts` exercises both acceptance and rejection through the actual `compileGuardCycle` without dispatch. Live artistic acceptance of `nontrivial_painting` remains separate from compilation correctness.
 
 [Русская версия](../ru/semantic-contract-compiler.md)
