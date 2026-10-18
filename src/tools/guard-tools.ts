@@ -22,6 +22,7 @@ import { PAINTING_CONSTRUCTION_ROLES, PAINTING_VISUAL_INTENTS } from '../core/pa
 import { PAINTING_STAGE_RESET_REASONS } from '../core/painting-stage-policy.js';
 import { ATTENTION_BINDING_SCHEMA } from '../core/perceptual-hierarchy.js';
 import { collectSchemaErrors, type JsonSchemaNode } from '../core/guard/cycle-compiler.js';
+import { applySemanticPublicSchema } from '../core/guard/semantic-contract-spec.js';
 import { SCENE_GEOMETRY_SCHEMA, GEOMETRY_BINDING_SCHEMA } from '../core/geometry-contract.js';
 import { CAMERA_BINDING_SCHEMA } from '../core/scene-camera-imaging-model.js';
 import { VISUAL_MICROPLAN_SURFACE_FRAME_SCHEMA } from '../core/visual-microplan.js';
@@ -544,7 +545,7 @@ async function inlineReviewImageResult(runtime: EmbeddedGuardRuntime, operationI
 }
 
 function compactPassSchema(): Record<string, unknown> {
-  return {
+  const schema: Record<string, unknown> = {
     type: 'object',
     properties: {
       request_key: {
@@ -655,10 +656,10 @@ function compactPassSchema(): Record<string, unknown> {
       scene_ownership_plan: sceneOwnershipContinuationSchema(
         'First declaration must be complete: plan_id, objects, units, each new unit with owner_id, role, editability and edit_axes. Once saved, omit unchanged entries entirely; for extensions supply only new explicit units/objects or existing object component lists that preserve all old components. Saved owner/subject/classification edits remain rejected. Existing ownership/geometry bindings are inherited by Guard, not guessed by the artist.'
       ),
-      scene_geometry_model: SCENE_GEOMETRY_SCHEMA,
+      scene_geometry_model: structuredClone(SCENE_GEOMETRY_SCHEMA),
       construction: { ...CONSTRUCTION_PASS_SCHEMA, description: 'General object proportions/connections and articulated reach/contact/pose edits: model.ik_chains preserves authored bone lengths and joint limits; curve=smooth builds continuous contours. Supply model once, then durable model_id, part_id and explicit color. Generates one component on its own layer. Do not also supply actions. No source reads or extra preparation call.' },
       painterly: PAINTERLY_PASS_SCHEMA,
-      scene_camera_imaging_model: SCENE_CAMERA_IMAGING_MODEL_SCHEMA,
+      scene_camera_imaging_model: structuredClone(SCENE_CAMERA_IMAGING_MODEL_SCHEMA),
       imaging_preflight: IMAGING_PREFLIGHT_SCHEMA,
       scene_lighting_color_model: {
         type: 'object',
@@ -1087,6 +1088,8 @@ function compactPassSchema(): Record<string, unknown> {
       required: ['request_key', 'goal'],
     additionalProperties: false,
   };
+  applySemanticPublicSchema(schema);
+  return schema;
 }
 
 function paintingIntentSchema(): Record<string, unknown> {

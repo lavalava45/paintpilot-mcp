@@ -1270,9 +1270,16 @@ describe('embedded Photoshop Guard', () => {
     expect(
       schema('photoshop_guard_cycle_auto').properties.next_pass.properties.scene_camera_imaging_model.required
     ).toEqual(expect.arrayContaining([
-      'model_id', 'revision', 'source_frame', 'geometry_model_id', 'geometry_model_revision',
+      'geometry_model_id', 'geometry_model_revision',
       'camera', 'focus', 'motion', 'optical_response', 'capture_finish',
     ]));
+    // IDs, revisions and exact host frame pins are compiler-owned technical
+    // values. The public contract must allow omission while keeping all
+    // artistic camera/optical requirements mandatory.
+    for (const field of ['model_id', 'revision', 'source_frame']) {
+      expect(schema('photoshop_guard_cycle_auto').properties.next_pass.properties.scene_camera_imaging_model.required)
+        .not.toContain(field);
+    }
     expect(
       schema('photoshop_guard_cycle_auto').properties.next_pass.properties.imaging_preflight.required
     ).toEqual([
@@ -1295,9 +1302,6 @@ describe('embedded Photoshop Guard', () => {
       schema('photoshop_guard_cycle_auto').properties.next_pass.properties.scene_lighting_color_model
         .required
     ).toEqual([
-      'model_id',
-      'revision',
-      'source_frame',
       'global_value_structure',
       'emitters',
       'palette_relations',
@@ -1308,8 +1312,6 @@ describe('embedded Photoshop Guard', () => {
       schema('photoshop_guard_cycle_auto').properties.next_pass.properties.color_gradient_preflight
         .required
     ).toEqual([
-      'scene_model_id',
-      'scene_model_revision',
       'field_role',
       'interaction',
       'stops',

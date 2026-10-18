@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import type { FrameReviewIssue } from './review-validation.js';
 import { contradictoryTransitionRequirements, transitionRequirementSchemaErrors, type TransitionRequirement } from '../transition-requirements.js';
 import { convergeTechnicalContracts, MAX_TECHNICAL_CONVERGENCE_PASSES, type ContractConvergenceStop } from './contract-convergence.js';
+import { compileSemanticContracts } from './semantic-entity-registry.js';
 import { brushRoleMatchesScale } from './brush-scale-fit.js';
 import { constructionExecutionIssue, unexpandedConstructionPrerequisites } from './construction-execution.js';
 import { ConstructionError, expandConstructionPass, type ConstructionModel } from '../object-construction.js';
@@ -3819,7 +3820,22 @@ export async function compileGuardCycle(
   } else if (rawPaintingIntent !== undefined) {
     const paintingIntentStartedAt = Date.now();
     try {
-      const intent = parsePaintingIntent(rawPaintingIntent);
+      // Resolve technical identities before ownership normalization, which
+      // rightfully accepts only canonical stable ids.
+      const intentData = rawPaintingIntent && typeof rawPaintingIntent === 'object'
+        && !Array.isArray(rawPaintingIntent) ? rawPaintingIntent as Record<string, unknown> : undefined;
+      const id = Number(intentData?.document_id);
+      const durable = Number.isSafeInteger(id) && id > 0
+        ? store.compactPassContext?.(id, options.projectionContext) ?? {} : {};
+      const semantic = intentData ? compileSemanticContracts(intentData, durable) : undefined;
+      if (semantic) {
+        for (const issue of semantic.issues) violations.push(violation('next_operation',
+          issue.code, issue.message, { path: `painting_intent.${issue.path}`, candidates: issue.candidates }));
+        for (const repair of semantic.repairs) normalizations.push({
+          code: 'semantic_contract_compiled', message: `painting_intent.${repair.path}: ${repair.reason}`,
+        });
+      }
+      const intent = parsePaintingIntent(semantic?.pass ?? rawPaintingIntent);
       originalIntentFingerprint = paintingIntentFingerprint(intent);
       compilerDeferredFromOperationId = intent.deferred_from_operation_id;
       const intentCompilation = compilePaintingIntentToNextPass(intent, store, options.projectionContext);
@@ -3870,6 +3886,13 @@ export async function compileGuardCycle(
       const documentId = Number(sourceNextPass.document_id);
       const context = Number.isSafeInteger(documentId) && documentId > 0
         ? store.compactPassContext?.(documentId, options.projectionContext) ?? {} : {};
+      const semantic = compileSemanticContracts(sourceNextPass, context);
+      sourceNextPass = semantic.pass;
+      for (const issue of semantic.issues) violations.push(violation('next_operation',
+        issue.code, issue.message, { path: `next_pass.${issue.path}`, candidates: issue.candidates }));
+      for (const repair of semantic.repairs) normalizations.push({
+        code: 'semantic_contract_compiled', message: `next_pass.${repair.path}: ${repair.reason}`,
+      });
       // Geometry contract preflight runs before compileCompactPass, where durable
       // owner facts are normally inherited. Carry forward only the exact binding
       // of a unique, non-temporary continuing owner; never invent a spatial
@@ -3902,8 +3925,12 @@ export async function compileGuardCycle(
       ));
       const geometry = prepareGeometryContract(sourceNextPass, context);
       sourceNextPass = geometry.pass;
-      geometryRepairs = geometry.repairs;
-      for (const repair of geometryRepairs) normalizations.push({
+      geometryRepairs = [
+        ...semantic.repairs.map(item => ({ kind: 'inject_from_context' as const,
+          path: `next_pass.${item.path}`, source: item.source, reason: item.reason })),
+        ...geometry.repairs,
+      ];
+      for (const repair of geometry.repairs) normalizations.push({
         code: 'geometry_technical_default', message: `${repair.path}: ${repair.reason}`,
       });
       // Geometry issues do not suppress independent action/ownership errors.
@@ -4057,9 +4084,12 @@ export async function compileGuardCycle(
         // Re-run the SAME technical and geometry preflights after each local
         // repair; never silently drop an upstream error just because the
         // downstream compiled operation now validates.
-        const technical = prepareTechnicalPassBindings(candidate, context);
+        const semantic = compileSemanticContracts(candidate, context);
+        const technical = prepareTechnicalPassBindings(semantic.pass, context);
         const geometry = prepareGeometryContract(technical.pass, context);
         const current: GuardCycleCompileViolation[] = [
+          ...semantic.issues.map(item => violation('next_operation', item.code, item.message,
+            { path: `next_pass.${item.path}`, candidates: item.candidates })),
           ...technical.issues.map(item => violation('next_operation', 'technical_binding_conflict', item.message,
             { path: item.path })),
           ...geometry.issues.map(item => violation('next_operation',
@@ -4077,8 +4107,13 @@ export async function compileGuardCycle(
           pass: geometry.pass,
           operation: next?.operation ?? compact.operation,
           violations: uniqueViolations(current),
-          repairs: [...technical.repairs, ...geometry.repairs],
+          repairs: [
+            ...semantic.repairs.map(item => ({ kind: 'inject_from_context' as const,
+              path: `next_pass.${item.path}`, source: item.source, reason: item.reason })),
+            ...technical.repairs, ...geometry.repairs,
+          ],
           normalizations: [
+            ...semantic.repairs.map(item => ({ code: 'semantic_contract_compiled', message: `next_pass.${item.path}: ${item.reason}` })),
             ...technical.repairs.map(repair => ({ code: 'technical_owner_binding_derived', message: `${repair.path}: ${repair.reason}` })),
             ...geometry.repairs.map(repair => ({ code: 'geometry_technical_default', message: `${repair.path}: ${repair.reason}` })),
             ...(compact.normalizations ?? []),
