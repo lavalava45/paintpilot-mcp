@@ -1092,8 +1092,12 @@ function compileCompactPass(
     const { validDomains: declaredDomains, violations: domainViolations } =
       validateCompactChangeDomains(raw.change_domains);
     violations.push(...domainViolations);
+    // Keep validated authored semantic scope for *every* direct operation.
+    // A Planner task may add method-derived domains, but absence of a Planner
+    // must never silently discard the caller's explicit foundation/correction
+    // contract before sceneFoundationAdmission and the final Guard gates.
     const directChangeDomains = methodDomains ? [...new Set([...methodDomains,
-      ...declaredDomains])] : undefined;
+      ...declaredDomains])] : declaredDomains.length ? [...new Set(declaredDomains)] : undefined;
     if (plannerDirectiveId && plannerTaskId && isVisual(onlyTool) && !directChangeDomains) {
       violations.push(violation(
         'next_operation',
@@ -1116,7 +1120,9 @@ function compileCompactPass(
       ...(stage ? { stage } : {}),
       ...(stageReset ? { stage_reset: stageReset } : {}),
       ...(scale ? { scale } : {}),
+      ...(raw.foundation_goal !== undefined ? { foundation_goal: raw.foundation_goal } : {}),
       ...(text(raw.significance_mode) ? { significance_mode: significanceMode } : {}),
+      ...(directChangeDomains ? { change_domains: directChangeDomains } : {}),
       ...(!bootstrap ? { artistic_commentary: text(raw.artistic_commentary) ?? goal } : {}),
       ...(plannerDirectiveId && plannerTaskId ? {
         planner_directive_id: plannerDirectiveId,
