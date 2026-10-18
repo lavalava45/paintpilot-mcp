@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { bindUniqueNewLayerStepTarget } from './technical-step-targets.js';
 
 export const VIOLATION_REPAIR_CLASSES = [
   'AUTO_NORMALIZE',
@@ -153,6 +154,7 @@ const PATCH_CODES = new Set([
 ]);
 
 export function classifyViolation(violation: RepairableViolation): ViolationRepairClass {
+  if (violation.code === 'guard_requirement_conflict') return 'SYSTEMIC_FAILURE';
   if (violation.code === 'guard_requirement_unexpressible') return 'SYSTEMIC_FAILURE';
   if (violation.code === 'current_frame_review_stale'
     || (violation.code === 'previous_operation_finalization_invalid'
@@ -223,13 +225,14 @@ export function fieldCorrectionPacket(violations: RepairableViolation[]) {
         ? { artistic_decision_required: true } : {}),
     };
   });
+  const systemic = violations.some(item => classifyViolation(item) === 'SYSTEMIC_FAILURE');
   return {
     corrections: rows.slice(0, 24),
     remaining_count: Math.max(0, rows.length - 24),
     unaddressable_count: rows.filter(row => !row.path).length,
     preserved_input: 'Keep valid ownership, model, component, proportion and light declarations; edit only rejected fields. Nothing was registered or painted.',
-    next: rows.some(row => !row.path)
-      ? 'Report the unaddressable Guard contract diagnostic. Do not guess a field or automatically retry the same cycle.'
+    next: systemic || rows.some(row => !row.path)
+      ? 'Report the Guard contract/systemic diagnostic. Do not guess fields or automatically retry the same cycle.'
       : 'Resubmit the corrected cycle in the SAME cycle_auto call, preserving valid previous_observation and next_pass fields; no repeated unchanged status, preview or separate schema round.',
   };
 }
@@ -489,6 +492,11 @@ export function prepareTechnicalPassBindings(
     'next_pass.logical_layer.camera_binding.scene_camera_revision', 'selected_camera.revision');
   if (record(logical?.geometry_binding)) inject(binding, 'geometry_binding_owner_id', ownerId,
     'next_pass.logical_layer.camera_binding.geometry_binding_owner_id', 'next_pass.logical_layer.hypothesis_id');
+  if (!issues.length) {
+    const bound = bindUniqueNewLayerStepTarget(pass);
+    repairs.push(...bound.repairs);
+    return { pass: bound.pass, repairs, issues };
+  }
   return { pass, repairs, issues };
 }
 

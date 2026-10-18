@@ -1,7 +1,7 @@
 import { canvasComponent } from '../component-space.js';
 import { createHash } from 'node:crypto';
 import type { FrameReviewIssue } from './review-validation.js';
-import { transitionRequirementSchemaErrors } from '../transition-requirements.js';
+import { contradictoryTransitionRequirements, transitionRequirementSchemaErrors, type TransitionRequirement } from '../transition-requirements.js';
 import { brushRoleMatchesScale } from './brush-scale-fit.js';
 import { constructionExecutionIssue, unexpandedConstructionPrerequisites } from './construction-execution.js';
 import { ConstructionError, expandConstructionPass, type ConstructionModel } from '../object-construction.js';
@@ -4078,6 +4078,23 @@ export async function compileGuardCycle(
         'A corrected geometry contract is still invalid. Stop automatic resubmission and report this complete diagnostic as a pipeline blocker; do not read source or schemas during painting.'));
     }
   }
+  // Two typed requirements for one field may contradict each other even when
+  // each fits the public schema independently. That is an internal contract
+  // defect, never a request for the Painter to guess a new artistic choice.
+  for (const scope of ['cycle', 'finalization', 'next_operation'] as const) {
+    const typed = violations.filter(item => item.scope === scope
+      && typeof item.details?.path === 'string' && typeof item.details?.operator === 'string');
+    const requirements = typed.map(item => ({
+      path: String(item.details?.path),
+      operator: String(item.details?.operator) as TransitionRequirement['operator'],
+      expected: item.details?.expected,
+    }));
+    for (const conflict of contradictoryTransitionRequirements(requirements)) {
+      violations.push(violation(scope, 'guard_requirement_conflict',
+        `Guard published contradictory requirements for ${conflict.path}. Stop automatic retries and report this internal contract defect; no Photoshop mutation was dispatched.`,
+        { path: conflict.path, conflicting_requirements: [requirements[conflict.first], requirements[conflict.second]] }));
+    }
+  }
   // A runtime requirement that the published tool cannot express is a system
   // defect. Never tell the model to keep reshaping an impossible payload.
   const publicSchema = registry.get('photoshop_guard_cycle_auto')?.tool.inputSchema;
@@ -4184,7 +4201,7 @@ export async function compileGuardCycle(
     ...(operationPreflightRan ? {} : { deferred_reason: unique.some(item => item.scope === 'finalization')
       ? 'A valid closure projection is required before state-dependent operation checks.'
       : 'A compiled operation is required before execution and state checks.' }),
-    correction_contract: errorCodes.includes('guard_requirement_unexpressible') ? 'schema-conflict'
+    correction_contract: errorCodes.some(code => ['guard_requirement_unexpressible', 'guard_requirement_conflict'].includes(code)) ? 'schema-conflict'
       : fieldPacket.unaddressable_count ? 'unaddressable' : 'addressed',
   };
   // Geometric diagnostics already carry full path/message and spatial fixes in

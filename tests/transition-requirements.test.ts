@@ -32,8 +32,12 @@ it('detects forbidden fields, values, numeric ranges and removal of required fie
     { path: 'next_pass.unknown', operator: 'equals', expected: 'x' },
     { path: 'next_pass.decision', operator: 'equals', expected: 'continue-logical-layer' },
     { path: 'next_pass.decision', operator: 'absent', expected: true },
-    { path: 'next_pass.width', operator: 'number-range', expected: { min: 0, max: 5000 } },
+    { path: 'next_pass.width', operator: 'number-range', expected: { min: 101, max: 5000 } },
   ]) expect(transitionRequirementSchemaErrors(rule, schema, collectSchemaErrors)).not.toEqual([]);
+  // A partially overlapping runtime range is actionable: the model may
+  // choose a valid value within the published intersection.
+  expect(transitionRequirementSchemaErrors({ path: 'next_pass.width', operator: 'number-range',
+    expected: { min: 0, max: 5000 } }, schema, collectSchemaErrors)).toEqual([]);
   expect(transitionRequirementSchemaErrors({ path: 'next_pass.width', operator: 'number-range',
     expected: { min: 1, max: 100 } }, schema, collectSchemaErrors)).toEqual([]);
 });
