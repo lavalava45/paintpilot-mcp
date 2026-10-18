@@ -13,6 +13,10 @@
 artwork, posters, podcast assets, books, storyboards, game concepts,
 existing PSD refinement, recorded process videos and bounded client pilots.
 
+**Which painting profile?** [Profile guide](painting-profiles.md) explains
+why `nontrivial_painting` is an experimental, user-assisted workflow rather
+than a guarantee of autonomous completion.
+
 **Start here:** [How it works](how-it-works.md) →
 [Painting method](painting-method.md) →
 [Engineering findings](findings.md) →
@@ -30,6 +34,7 @@ existing PSD refinement, recorded process videos and bounded client pilots.
 | Article | Main question |
 | --- | --- |
 | [Practical use cases](use-cases.md) | What to make, how to scope pilot briefs, and what must still be reviewed |
+| [Painting profiles](painting-profiles.md) | Which profile to try, why the experimental mode can stop repeatedly, and how users can help |
 | [How it works](how-it-works.md) | How a brief becomes bounded Photoshop edits and evidence-bound review |
 | [Painting method](painting-method.md) | How recognition, construction, light, materials and selective detail develop |
 | [Guard and recovery](guard-and-recovery.md) | How uncertain execution, ownership and rollback avoid blind replay |

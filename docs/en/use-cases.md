@@ -20,7 +20,10 @@ but their correctness must be checked on each real job.
 
 For **new** painting runs, the Photoshop panel offers
 `simple_graphic` (graphic/marker style), `nontrivial_painting`
-(more demanding painting) and an Auto artist choice. An explicit panel
+(experimental complex painting with possible frequent Guard blockers and
+user-guided troubleshooting) and an Auto artist choice. For a first trial,
+explicitly choose `simple_graphic`; `Auto` can still select the experimental
+profile. See [painting profiles and their limitations](painting-profiles.md). An explicit panel
 selection does not retroactively alter an active run or bypass Guard.
 Before actual painting, verify the loaded MCP child and UXP bridge are
 ready and have compatible revisions.

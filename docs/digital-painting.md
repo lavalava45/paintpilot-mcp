@@ -65,8 +65,15 @@ controls) has a persistent **Painting profile** selector:
 | Panel setting | Meaning |
 | --- | --- |
 | `simple_graphic` — graphic / markers | Force the simpler graphic/marker workflow for a **new** art run. |
-| `nontrivial_painting` — complex / experimental | Force the stronger construction, material and brush-preflight workflow for a **new** art run. |
-| **Auto — artist chooses** | Artist selects either supported profile from the original brief when binding a new run. If omitted, the prior `nontrivial_painting` default still applies. |
+| `nontrivial_painting` — complex / experimental | Opt into a **research-stage, interactive** workflow with stronger construction, material and brush-preflight requirements for a **new** art run. Repeated Guard blockers and unfinished paintings are currently possible; this is not a guaranteed autonomous quality upgrade. |
+| **Auto — artist chooses** | Artist selects either supported profile from the original brief when binding a new run. If omitted, the prior `nontrivial_painting` default still applies, so Auto may enter the experimental workflow. |
+
+For a first controlled trial, explicitly select `simple_graphic`; neither profile
+guarantees completion. In `nontrivial_painting`, user feedback can clarify
+artistic intent and help diagnose supported correction paths, but cannot
+override Guard's safety gates or automatically train persistent new capabilities.
+See the reader-facing [English](en/painting-profiles.md) and
+[Russian](ru/painting-profiles.md) profile guides.
 
 The selector is stored in the existing versioned controller user configuration
 and travels through `/settings/user-config`. Guard status exposes
