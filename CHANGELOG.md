@@ -289,7 +289,7 @@
   as complete (SHA-256
   `EBB88D770F904BAD9B212E5E329E77D18CD6A5DE9C8E4485BEF25F2BA6E03CC5`);
   the full cumulative patch, six separate per-commit patches and change
-  index remain under `docs/painting-baseline-20261014/`. Nothing was
+  index remain under `docs/archive/2026-10/painting-baseline-20261014/`. Nothing was
   cherry-picked, merged or deployed. Review and possible selective reuse
   of those technical/artistic changes remain **open in PAINTING-ROADMAP.md**.
 - **Removed obsolete Git master branch, locally and on GitHub.** The identical
@@ -326,7 +326,7 @@
   config checked against the before-intervention backup. The archived
   post-first-city delta spans six commits and 33 changed paths; a full
   binary-safe patch, six standalone format-patches, exact indexes and
-  hashes were committed in docs/painting-baseline-20261014/. Independently
+  hashes were committed in docs/archive/2026-10/painting-baseline-20261014/. Independently
   verified npm run verify:canonical on the baseline: 176 files/1915 tests
   passed; the ledger holds 21 local verified entries and two missing
   ignored evidence artifacts. This proves engineering consistency, NOT
@@ -610,7 +610,7 @@ is maintenance-only. [Details: E.8](docs/PAINTING-WORK-DETAILS.md#e8).
   integration had independently passed 1906/1906 tests. Original
   `digital-painting` branch and unrelated uncommitted work untouched, no
   merge/cherry-pick, publication, runtime restart or Photoshop/UXP mutation.
-  See `docs/REFACTORING-INTEGRATION-ACCEPTANCE-2026-10-14.md`.
+  See `docs/archive/2026-10/REFACTORING-INTEGRATION-ACCEPTANCE-2026-10-14.md`.
 
 
 - 2026-10-14 — **Night refactoring integration acceptance (offline, full gate PASS).**
@@ -629,7 +629,7 @@ is maintenance-only. [Details: E.8](docs/PAINTING-WORK-DETAILS.md#e8).
   `cycle-compiler.ts` and `CHANGELOG.md` contain intermixed earlier uncommitted
   work; staging them whole would absorb unrelated changes, while staging only
   the new helper files would omit actual compiler integration. See
-  `docs/REFACTORING-INTEGRATION-ACCEPTANCE-2026-10-14.md` for boundaries and
+  `docs/archive/2026-10/REFACTORING-INTEGRATION-ACCEPTANCE-2026-10-14.md` for boundaries and
   required follow-up. P0/P1/P2/P3 remain open.
 
 - 2026-10-14 — **Night refactoring / Agent 3: pure compact brush material-preflight extracted (source-only).**

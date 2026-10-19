@@ -143,12 +143,12 @@ qualification; retain the first-city baseline for comparison.
 | 5 — **highest artistic risk** | Review aef5269 tonal_regions, 7392a44 recognition prompt and fac85ea artistic/Director instructions only with blind, multi-prompt visual A/B. Reject sterile block-in or new mandatory creative strategies. |
 
 **Full evidence and exact patch (retained, not applied):**
-[ordered 33-path catalog](painting-baseline-20261014/POST_BASELINE_CHANGES_SORTED.md),
-[binary-safe cumulative patch](painting-baseline-20261014/ALL_CHANGES_AFTER_FIRST_CITY.patch),
-[six individually attributable patches](painting-baseline-20261014/patches/),
-[first-run environment audit](painting-baseline-20261014/FIRST_CITY_ENVIRONMENT_AUDIT.md),
-[commit/file indexes and build logs](painting-baseline-20261014/),
-[SHA-256 manifest](painting-baseline-20261014/ARTIFACTS.sha256).
+[ordered 33-path catalog](archive/2026-10/painting-baseline-20261014/POST_BASELINE_CHANGES_SORTED.md),
+[binary-safe cumulative patch](archive/2026-10/painting-baseline-20261014/ALL_CHANGES_AFTER_FIRST_CITY.patch),
+[six individually attributable patches](archive/2026-10/painting-baseline-20261014/patches/),
+[first-run environment audit](archive/2026-10/painting-baseline-20261014/FIRST_CITY_ENVIRONMENT_AUDIT.md),
+[commit/file indexes and build logs](archive/2026-10/painting-baseline-20261014/),
+[SHA-256 manifest](archive/2026-10/painting-baseline-20261014/ARTIFACTS.sha256).
 The full-history bundle is at
 E:/Downloads/devspace-test/_archives/paintpilot-first-city-baseline-20261014/POST_FIRST_CITY_FULL_HISTORY.bundle;
 all six commits remain reachable through the local and GitHub annotated tag
@@ -296,10 +296,10 @@ approval to delete them.
 
 ## Foreign, unexplained or obsolete tracked files — cleanup still open
 
-- [ ] **Unsupported locale README stubs:** examine README.de.md,
-  README.es.md, README.ja.md, README.tr.md and README.zh-CN.md for actual
-  content, references and provenance. Propose their removal separately
-  from deferred post-first-city commits; preserve real RU/EN docs.
+- [x] **Unsupported locale README stubs:** removed the five unsupported
+  English-only locale placeholders (DE/ES/JA/TR/ZH-CN) after checking
+  references and provenance; the product-identity verifier now checks
+  the maintained `README.md` and `README.ru.md` instead.
 - [ ] **Upstream-derived examples:** audit current examples/* for source
   overlap, project applicability, documentation consumers and license
   requirements. Retain useful owned examples, replace or propose removal
