@@ -41,7 +41,7 @@ export function normalizeSimpleGraphicPass(
   // (continuous field) into a closed polygon by guessing.
   const preferred = text(pass.preferred_method_id);
   if (registry && preferred && painted.length === 1
-    && painted[0]?.tool === 'photoshop_paint_regions'
+    && ['photoshop_paint_regions', 'photoshop_paint_color_gradient', 'photoshop_fill_layer'].includes(String(painted[0]?.tool))
     && !text(painted[0]?.method_id)
     && text(pass.visual_intent) && text(pass.impact_class)
     && ['ADD', 'REFINE'].includes(String(pass.action_class ?? 'ADD'))) {
@@ -130,48 +130,39 @@ export function normalizeSimpleGraphicPass(
 }
 
 /**
- * Pure aesthetic priority advisory. Only one explicitly owned, native clipped
- * gradient on an existing layer is eligible, and only if its whole polygon is
- * disjoint from all reviewed structural debt. No brush/filter or active-layer
- * operation can qualify.
+ * Scene foundation is artistic ordering, not execution authority. Simple
+ * may continue bounded non-destructive painting while composition/medium
+ * remain unverified; independent Guard mutation and ownership gates remain.
  */
 export function simpleGraphicFoundationAdvisory(
   state: Row, operation: Row, owners: readonly Row[],
 ): boolean {
-  if (state.painting_profile !== 'simple_graphic'
-    || !state.current_frame?.operation_id
-    || operation.tool !== 'photoshop_execute_visual_microplan') return false;
-  const args = row(operation.args);
-  if (!args || !exactId(args.document_id) || args.document_id !== state.document_id
-    || args.action_class === 'ROLLBACK'
-    || args.action_class === 'ERASE' || args.action_class === 'REPLACE') return false;
+  if (state.painting_profile !== 'simple_graphic' || !state.current_frame?.operation_id) return false;
+  // Read-only next-action advice must not announce the aesthetic foundation
+  // as an execution blocker; the actual next command still needs preflight.
+  if (!operation.tool && !Object.keys(operation).length) return true;
+  const args = row(operation.args) ?? operation;
+  if (!exactId(args.document_id) || args.document_id !== state.document_id
+    || args.restore_anchor_operation_id || args.cross_layer_correction
+    || !['ADD', 'REFINE'].includes(String(args.action_class ?? operation.action_class ?? 'ADD').toUpperCase())) return false;
+  const additiveTools = new Set([
+    'photoshop_create_layer', 'photoshop_paint_color_gradient', 'photoshop_fill_layer',
+    'photoshop_paint_regions', 'photoshop_paint_strokes', 'photoshop_paint_dabs',
+    'photoshop_get_preview',
+  ]);
+  const steps = operation.tool === 'photoshop_execute_visual_microplan'
+    ? args.steps : [{ tool: operation.tool, args }];
+  if (!Array.isArray(steps) || !steps.length || !steps.every(step => additiveTools.has(step?.tool))
+    || !steps.some(step => step?.tool !== 'photoshop_create_layer' && step?.tool !== 'photoshop_get_preview')) return false;
   const logical = row(args.logical_layer);
-  const ownerId = text(logical?.hypothesis_id);
-  const layerId = logical?.layer_id;
-  if (!ownerId || !exactId(layerId)
-    || owners.filter(owner => owner.hypothesis_id === ownerId
-      && owner.layer_id === layerId && owner.temporary !== true).length !== 1) return false;
-  const steps = Array.isArray(args.steps) ? args.steps : [];
-  const changes = steps.filter(step => step?.tool !== 'photoshop_get_preview');
-  if (changes.length !== 1 || changes[0]?.tool !== 'photoshop_paint_color_gradient') return false;
-  const paint = row(changes[0].args);
-  if (paint?.layer_id !== layerId || paint.preserve_transparency !== true) return false;
-  const points = paint.clip_contour;
-  if (!Array.isArray(points) || points.length < 3 || points.length > 256
-    || points.some(point => !Number.isFinite(point?.x) || !Number.isFinite(point?.y))) return false;
-  const xs = points.map((p: Row) => p.x), ys = points.map((p: Row) => p.y);
-  const bounds = { left: Math.min(...xs), right: Math.max(...xs),
-    top: Math.min(...ys), bottom: Math.max(...ys) };
-  if (bounds.right <= bounds.left || bounds.bottom <= bounds.top) return false;
-  const debt = Object.values(state.visual_problems ?? {}).filter((problem: any) =>
-    problem?.status === 'open' && problem?.structural_defect);
-  // No reviewed structural debts means there is nothing for this local clip
-  // to intersect; foundation remains incomplete, but may be an advisory.
-  if (!debt.length) return true;
-  return debt.every((problem: any) => {
-    const b = problem.structural_defect.region_bounds ?? problem.review_region_bounds;
-    return b && [b.left, b.top, b.right, b.bottom].every(Number.isFinite)
-      && (bounds.right <= b.left || bounds.left >= b.right
-        || bounds.bottom <= b.top || bounds.top >= b.bottom);
-  });
+  if (['continue-logical-layer', 'adjust'].includes(String(logical?.decision))) {
+    const matches = owners.filter(owner => owner.hypothesis_id === logical?.hypothesis_id
+      && owner.temporary !== true && exactId(owner.layer_id));
+    if (matches.length !== 1 || (logical?.layer_id !== undefined && logical.layer_id !== matches[0].layer_id)) return false;
+    if (steps.some(step => {
+      const target = row(step?.args)?.layer_id;
+      return target !== undefined && typeof target === 'number' && target !== matches[0].layer_id;
+    })) return false;
+  }
+  return true;
 }

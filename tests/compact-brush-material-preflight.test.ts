@@ -18,12 +18,12 @@ const check = (overrides: Partial<Parameters<typeof resolveCompactBrushMaterialP
   });
 
 describe('compact brush material preflight', () => {
-  it('derives the single compatible material with the exact normalization', () => {
+  it('suggests a compatible material without replacing authored classification', () => {
     expect(check()).toEqual({
-      requestedMaterialRole: 'fur',
+      requestedMaterialRole: undefined,
       normalizations: [{
-        code: 'material_role_normalized',
-        message: 'Derived material_role=fur from the unambiguous durable brush preflight.',
+        code: 'material_role_suggested',
+        message: 'Optional artistic material_role suggestion: fur. Authored intent is unchanged.',
       }],
       violations: [],
     });
@@ -31,7 +31,7 @@ describe('compact brush material preflight', () => {
 
   it('derives only when every compatible role has the same sole material', () => {
     const result = check({ roles: [role('fur-a', ['fur']), role('fur-b', ['fur'])] });
-    expect(result.requestedMaterialRole).toBe('fur');
+    expect(result.requestedMaterialRole).toBeUndefined();
     expect(result.violations).toEqual([]);
   });
 
@@ -39,20 +39,16 @@ describe('compact brush material preflight', () => {
     const result = check({ roles: [role('fur', ['fur']), role('skin', ['skin'])] });
     expect(result.requestedMaterialRole).toBeUndefined();
     expect(result.normalizations).toEqual([]);
-    expect(result.violations).toEqual([{
-      scope: 'next_operation',
-      code: 'brush_material_role_required',
-      message: 'substantial FORM_AND_LIGHT brush work requires next_pass.material_role so Guard can match the installed/preflighted brush inventory to the requested material instead of choosing a generic first role',
-    }]);
+    expect(result.violations).toEqual([]);
   });
 
   it('does not infer from a multi-material role even when values repeat', () => {
     const result = check({ roles: [role('multi', ['fur', 'fur'])] });
-    expect(result.requestedMaterialRole).toBe('fur');
+    expect(result.requestedMaterialRole).toBeUndefined();
     expect(result.violations).toEqual([]);
     const ambiguous = check({ roles: [role('multi', ['fur', 'skin'])] });
     expect(ambiguous.requestedMaterialRole).toBeUndefined();
-    expect(ambiguous.violations.map(item => item.code)).toEqual(['brush_material_role_required']);
+    expect(ambiguous.violations).toEqual([]);
   });
 
   it('respects an explicit brush role even when visual intents differ', () => {
@@ -60,33 +56,28 @@ describe('compact brush material preflight', () => {
       explicitBrushRole: 'skin',
       roles: [role('fur', ['fur']), role('skin', ['skin'], ['local-edge'])],
     });
-    expect(result.requestedMaterialRole).toBe('skin');
+    expect(result.requestedMaterialRole).toBeUndefined();
     expect(result.violations).toEqual([]);
   });
 
   it('respects visual intent and typed working scale when no explicit role is supplied', () => {
     const intent = check({ roles: [role('edge', ['ink'], ['local-edge']), role('fur', ['fur'])] });
-    expect(intent.requestedMaterialRole).toBe('fur');
+    expect(intent.requestedMaterialRole).toBeUndefined();
     const scale = check({ roles: [role('detail-only', ['fur'], ['directional-mass'], ['detail'])] });
     expect(scale.requestedMaterialRole).toBeUndefined();
-    expect(scale.violations.map(item => item.code)).toEqual(['brush_material_role_required']);
+    expect(scale.violations).toEqual([]);
   });
 
-  it('reports filtered inventory after missing material, preserving both diagnostics', () => {
+  it('does not turn filtered inventory into a Photoshop execution refusal', () => {
     const result = check({ brushInventoryScope: 'filtered', roles: [role('multi', ['fur', 'skin'])] });
-    expect(result.violations.map(item => item.code)).toEqual([
-      'brush_material_role_required', 'brush_inventory_scope_insufficient',
-    ]);
-    expect(result.violations[1]?.message).toBe(
-      'substantial form/material/detail brush work requires a full installed-inventory or evidence-bound brush-pack preflight; a filtered familiar-preset lookup is insufficient'
-    );
+    expect(result.violations).toEqual([]);
   });
 
   it('preserves supplied material and skips the finish-stage gates when not required', () => {
     const supplied = check({ requestedMaterialRole: 'authored', brushInventoryScope: 'filtered' });
     expect(supplied.requestedMaterialRole).toBe('authored');
     expect(supplied.normalizations).toEqual([]);
-    expect(supplied.violations.map(item => item.code)).toEqual(['brush_inventory_scope_insufficient']);
+    expect(supplied.violations).toEqual([]);
     const early = check({ materialFitnessRequired: false, brushInventoryScope: 'filtered' });
     expect(early).toEqual({ requestedMaterialRole: undefined, normalizations: [], violations: [] });
   });

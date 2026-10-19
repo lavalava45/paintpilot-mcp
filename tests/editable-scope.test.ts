@@ -107,8 +107,17 @@ it('binds review to exact frame, incarnation, complete inventory and actual laye
   expect(() => validateEditableScopeReview(uncertain, request, state, { criteria: { editable_parts: 'pass' } })).toThrow('completion_unproven');
   const accepted = validateEditableScopeReview(report(), request, state)!;
   const retained = { ...state, ...persistEditableScopeReview(accepted) };
+  expect(validateEditableScopeReview(undefined, request, retained)).toEqual(accepted);
+  // A cached exact-frame review cannot be promoted into final completion proof.
+  expect(() => validateEditableScopeReview(undefined, request, retained,
+    { criteria: { editable_parts: 'pass' } })).toThrow('editable_scope_review_required');
   expect(editableScopeRequest(record, retained, plan, owners)?.request_id).toBe(request.request_id); // revalidation after closure
   const next = editableScopeRequest({ ...record, id: 'pass-2' }, retained, plan, owners)!;
+  expect(() => validateEditableScopeReview(undefined, next, retained)).not.toThrow(); // optional touched-owner review
+  const changedFrame = editableScopeRequest({ ...record, preview: { sha256: 'new-frame' } }, retained, plan, owners, true)!;
+  expect(() => validateEditableScopeReview(undefined, changedFrame, retained)).toThrow('editable_scope_review_required');
+  const changedTopology = editableScopeRequest(record, retained, plan, [{ hypothesis_id: 'whole', layer_id: 3 }], true)!;
+  expect(() => validateEditableScopeReview(undefined, changedTopology, retained)).toThrow('editable_scope_review_required');
   expect(next.scope).toBe('touched-owner');
   expect(validateEditableScopeReview(report(next), next, retained)?.debt).toEqual({}); // any number of marks, one part
 });

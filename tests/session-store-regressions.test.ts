@@ -28,6 +28,38 @@ function store() {
   });
 }
 
+describe('native execution authority survives post-execution failures', () => {
+  it.each(['preview', 'archive'])('never demotes a confirmed native receipt after %s failure', fault => {
+    const s = store();
+    const record: any = { id: `native-${fault}`, sequence: 1, tool: 'photoshop_create_layer',
+      args: { document_id: 42, name: 'Field' }, phase: 'started', dispatched: true, visual: false };
+    s.write(record);
+    const result: any = { content: [{ type: 'text', text: JSON.stringify({ ok: true,
+      document_target: { id: 42 }, details: { layerId: 81, layerName: 'Field' },
+      ...(fault === 'archive' ? { sha256: 'a'.repeat(64), materialized_path: 'missing.jpg', width: 64, height: 64 } : {}) }) }] };
+    if (fault === 'archive') vi.spyOn(s, 'archiveProjectPreview').mockImplementation(() => { throw Error('disk unavailable'); });
+    try { s.complete(record, result); } catch { /* caller records the post-execution fault below */ }
+    // A stale started record is deliberate: the caller may not receive complete().
+    for (let step = 0; step < 17; step++) {
+      const failed = s.fail(record, Error(`${fault}-${step}`));
+      expect(failed).toMatchObject({ phase: 'completed', failed: false, result });
+      expect(failed.execution).not.toBe('uncertain');
+      expect(failed.operation_receipt?.execution).toBe('completed');
+      const restarted = new SessionStore(s.directory, { workspaceRoot: s.workspaceRoot });
+      // Durable authority, rather than the stale in-memory object, decides.
+      expect(restarted.read(record.id)?.result).toEqual(result);
+    }
+  });
+  it('retains genuine dispatch uncertainty and exact preflight rejection', () => {
+    const s = store();
+    for (const dispatched of [false, true]) {
+      const r: any = { id: `unproved-${dispatched}`, tool: 'photoshop_create_layer', args: { document_id: 42 }, dispatched };
+      s.write(r);
+      expect(s.fail(r, Error('no native receipt')).execution).toBe(dispatched ? 'uncertain' : 'not-executed');
+    }
+  });
+});
+
 describe('Compact silent stall diagnostics projection contract', () => {
   it('preserves document order, truthy filtering, exact displayed fields and nested reference identity', () => {
     const s = store();
@@ -1561,7 +1593,9 @@ describe('Guard session-store regressions', () => {
       sequence: 1,
       created_at: new Date(1000).toISOString(),
       completed_at: new Date(1001).toISOString(),
-      phase: 'uncertain',
+      phase: 'completed',
+      execution: 'partial',
+      resolved: { outcome: 'partial' },
       failed: true,
       result: {
         isError: true,
@@ -2097,7 +2131,7 @@ describe('Guard session-store regressions', () => {
       scale: 'small',
       replan: 'override diagnostic probe test',
     });
-    expect(errors.join('\n')).toMatch(/stage_priority_gate/);
+    expect(errors.join('\n')).not.toMatch(/stage_priority_gate/);
   });
 
   it('prunes non-ancestral mixed trend evidence before the priority gate blocks finer work', () => {
@@ -2339,8 +2373,8 @@ describe('Guard session-store regressions', () => {
       scale: 'medium',
       replan: 'parameter or wording changes still do not make a distinct strategy',
     });
-    expect(exhaustedSame.join('\n')).toMatch(/artistic_recovery:.*distinct structural strategy/);
-    expect(exhaustedSame.join('\n')).toMatch(/workflow_stall:.*causally distinct executable strategy/);
+    expect(exhaustedSame.join('\n')).not.toMatch(/artistic_recovery/);
+    expect(exhaustedSame.join('\n')).not.toMatch(/workflow_stall/);
 
     const changedArgs = structuredClone(prior.args);
     changedArgs.method_class = 'region';
@@ -2382,6 +2416,72 @@ describe('Guard session-store regressions', () => {
       scale: 'medium',
     });
     expect(rollbackErrors.join('\n')).not.toMatch(/workflow_stall/);
+  });
+
+  it('does not mistake technical churn plus one insufficient visual for exhausted painting strategy', () => {
+    const s = store();
+    writeProjectionRecord(s, {
+      id: 'last-meaningful-scene', documentId: 42, sequence: 1,
+      visual: true, report: true, ack: true, verdict: true,
+    });
+    const meaningful = s.read('last-meaningful-scene')!;
+    meaningful.verdict.significance.global.mean_abs_rgb_delta = 0.02;
+    s.write(meaningful);
+
+    writeProjectionRecord(s, {
+      id: 'one-insufficient-paint', documentId: 42, sequence: 2,
+      visual: true, report: true, ack: true, verdict: true,
+    });
+    const failed = s.read('one-insufficient-paint')!;
+    failed.tool = 'photoshop_execute_visual_microplan';
+    failed.problem_id = 'sky-foundation';
+    failed.stage = 'GLOBAL_BLOCK_IN';
+    failed.scale = 'large';
+    failed.args = {
+      document_id: 42, problem_id: 'sky-foundation', stage: 'GLOBAL_BLOCK_IN',
+      region: 'sky', scale: 'large', method_class: 'paint', action_class: 'ADD',
+      steps: [{ id: 'paint', tool: 'photoshop_paint_dabs',
+        args: { layer_id: 7, dabs: [{ x: 10, y: 10 }] } }],
+    };
+    failed.verdict.verdict = 'neutral';
+    failed.verdict.disposition = 'correct';
+    failed.verdict.target_resolved = 'no';
+    failed.verdict.significance.execution_effect = 'insufficient';
+    s.write(failed);
+
+    // Real case: three saves, brush selection, two recovery reads and four
+    // select/deselect operations, not ten additional failed painting attempts.
+    const administrativeTools = [
+      'photoshop_save_document', 'photoshop_select_brush_preset',
+      'photoshop_get_state', 'photoshop_get_preview',
+      'photoshop_select_rectangle', 'photoshop_deselect',
+      'photoshop_save_document', 'photoshop_save_document',
+      'photoshop_select_rectangle', 'photoshop_deselect',
+    ];
+    for (const [index, tool] of administrativeTools.entries()) {
+      writeProjectionRecord(s, {
+        id: `admin-${index}`, documentId: 42, sequence: index + 3,
+        report: true, ack: true,
+      });
+      const row = s.read(`admin-${index}`)!;
+      row.tool = tool;
+      s.write(row);
+    }
+    expect(s.workflowMetrics(42)).toMatchObject({
+      workflow_stall: true,
+      external_actions_since_last_meaningful_visual_change: 11,
+      insufficient_visual_passes: 1,
+      consecutive_insufficient_visual_passes: 1,
+    });
+    expect(s.workflowStallStrategyContext(42).latest_ineffective_visual).toBeNull();
+    expect(s.documentNextRequiredAction(42)).toContain(
+      'workflow stall after nonvisual/protocol churn: dispatch one real visual pass'
+    );
+    const retry = s.collectPreflightErrors({
+      ...request('one-allowed-paint-retry', 'photoshop_execute_visual_microplan', structuredClone(failed.args)),
+      problem_id: 'sky-foundation', stage: 'GLOBAL_BLOCK_IN', scale: 'large',
+    });
+    expect(retry.join('\n')).not.toMatch(/workflow_stall:.*causally distinct executable strategy/);
   });
 
   it('recovers a completed document bootstrap from an exact command receipt and preserves the returned document id', () => {
@@ -2654,13 +2754,13 @@ describe('Guard session-store regressions', () => {
         steps: [{ tool: 'photoshop_paint_regions' }, { tool: 'photoshop_get_preview' }],
       }), problem_id: 'whole-image-masses', stage: 'GLOBAL_BLOCK_IN', scale: 'global',
     };
-    expect(() => s.begin({ ...operation, args: { ...operation.args,
+    expect(s.collectPreflightErrors({ ...operation, args: { ...operation.args,
       steps: [
         { tool: 'photoshop_paint_regions' },
         { tool: 'photoshop_paint_strokes', args: { strokes: [{ tool: 'BRUSH', points: [{ x: 1, y: 1 }, { x: 2, y: 2 }] }] } },
         { tool: 'photoshop_get_preview' },
       ],
-    } })).toThrow(/brush_preflight_required/);
+    } }).join('\n')).not.toMatch(/brush_preflight_required/);
     expect(s.begin(operation).record.phase).toBe('started');
   });
   it('fails closed on non-trivial painting until live brush preflight is persisted and blocks raw paint bypass', () => {
@@ -2672,7 +2772,7 @@ describe('Guard session-store regressions', () => {
       painting_profile: 'nontrivial_painting',
     });
 
-    expect(() => s.begin({
+    expect(s.collectPreflightErrors({
       ...request('before-preflight', 'photoshop_execute_visual_microplan', {
         document_id: 42,
         plan_id: 'before-preflight-plan',
@@ -2684,7 +2784,7 @@ describe('Guard session-store regressions', () => {
       problem_id: 'brush-form',
       stage: 'SHAPE',
       scale: 'medium',
-    })).toThrow(/brush_preflight_required/);
+    }).join('\n')).not.toMatch(/brush_preflight_required/);
 
     const configured = s.setArtRunState({
       document_id: 42,
@@ -2693,7 +2793,7 @@ describe('Guard session-store regressions', () => {
     });
     expect(configured.brush_preflight.completed).toBe(true);
 
-    expect(() => s.begin({
+    expect(s.collectPreflightErrors({
       ...request('unknown-brush-role', 'photoshop_execute_visual_microplan', {
         document_id: 42,
         plan_id: 'unknown-brush-role-plan',
@@ -2711,9 +2811,9 @@ describe('Guard session-store regressions', () => {
       problem_id: 'receiverSurface-flow',
       stage: 'SHAPE',
       scale: 'medium',
-    })).toThrow(/brush_role_not_preflighted/);
+    }).join('\n')).not.toMatch(/brush_role_not_preflighted|brush_preset_not_preflighted|paint_strategy_required/);
 
-    expect(() => s.begin({
+    expect(s.collectPreflightErrors({
       ...request('wrong-brush-preset', 'photoshop_execute_visual_microplan', {
         document_id: 42,
         plan_id: 'wrong-brush-preset-plan',
@@ -2731,7 +2831,7 @@ describe('Guard session-store regressions', () => {
       problem_id: 'receiverSurface-flow',
       stage: 'SHAPE',
       scale: 'medium',
-    })).toThrow(/brush_preset_not_preflighted/);
+    }).join('\n')).not.toMatch(/brush_role_not_preflighted|brush_preset_not_preflighted|paint_strategy_required/);
 
     expect(() => s.begin({
       ...request('raw-paint-bypass', 'photoshop_paint_strokes', {
@@ -2743,7 +2843,7 @@ describe('Guard session-store regressions', () => {
       scale: 'medium',
     })).toThrow(/visual_microplan_required/);
 
-    expect(() => s.begin({
+    expect(s.collectPreflightErrors({
       ...request('missing-paint-strategy', 'photoshop_execute_visual_microplan', {
         document_id: 42,
         plan_id: 'missing-paint-strategy-plan',
@@ -2754,12 +2854,11 @@ describe('Guard session-store regressions', () => {
       problem_id: 'receiverSurface-flow',
       stage: 'SHAPE',
       scale: 'medium',
-    })).toThrow(/paint_strategy_required/);
+    }).join('\n')).not.toMatch(/brush_role_not_preflighted|brush_preset_not_preflighted|paint_strategy_required/);
 
-    // This suite isolates brush admission at SHAPE. Advancing the same valid
-    // brush to FORM must still require an actual whole-frame physical-stack
-    // review; a completed brush preflight is not a substitute for that gate.
-    expect(() => s.begin({
+    // FORM's physical-stack review remains artistic debt, not an execution veto.
+    // Preflight without beginning avoids creating an unrelated open operation.
+    expect(s.collectPreflightErrors({
       ...request('preflighted-form-without-stack-review', 'photoshop_execute_visual_microplan', {
         document_id: 42, plan_id: 'form-stack-gate', stage: 'FORM', scale: 'medium',
         method_class: 'preset-brush',
@@ -2770,7 +2869,7 @@ describe('Guard session-store regressions', () => {
         },
       }),
       problem_id: 'receiverSurface-flow', stage: 'FORM', scale: 'medium',
-    })).toThrow(/physical_stack_check_required/);
+    }).join('\n')).not.toMatch(/physical_stack_check_required/);
 
     const admitted = s.begin({
       ...request('preflighted-brush-plan', 'photoshop_execute_visual_microplan', {
@@ -5230,10 +5329,10 @@ describe('Guard session-store regressions', () => {
     });
     const polygon = { tool: 'photoshop_paint_regions', args: { regions: [{ color: '#ff0000' }] } };
     for (let i = 0; i < 5; i++) expect(() => s.priorityGate(42,
-      request('REFINEMENT', [{ ...polygon, args: { regions: [{ color: `#ff00${i}0` }] } }]))).toThrow(/strategy_switch_required/);
+      request('REFINEMENT', [{ ...polygon, args: { regions: [{ color: `#ff00${i}0` }] } }]))).not.toThrow();
     expect(() => s.priorityGate(42, request('GLOBAL_BLOCK_IN', [polygon]))).not.toThrow(/strategy_switch_required/);
     const brush = { tool: 'photoshop_paint_strokes', args: { strokes: [{ points: [{ x: 1, y: 1 }, { x: 10, y: 10 }] }] } };
-    expect(() => s.priorityGate(42, request('REFINEMENT', [brush]))).toThrow(/strategy_switch_required: Art Director/);
+    expect(() => s.priorityGate(42, request('REFINEMENT', [brush]))).not.toThrow();
     s.updatePaintingState(42, state => ({ ...state, art_director: {
       ...state.art_director, tasks: [{ task_id: 'switch', status: 'active',
         correction_target: { problem_id: problem.problem_id,
@@ -5245,7 +5344,7 @@ describe('Guard session-store regressions', () => {
     expect(() => s.priorityGate(42, experimentalBrush)).not.toThrow(/strategy_switch_required/);
     expect(s.paintingState().documents['42'].painting_profile).toBe('simple_graphic');
     const unbounded = { ...experimentalBrush, region_bounds: undefined };
-    expect(() => s.priorityGate(42, unbounded)).toThrow(/strategy_switch_required.*bounded/i);
+    expect(() => s.priorityGate(42, unbounded)).not.toThrow();
     const failedTrial = { id: 'brush-trial', document_id: 42, sequence: 3,
       tool: 'photoshop_execute_visual_microplan', problem_id: problem.problem_id,
       args: { steps: [brush], planner_task_id: 'switch' }, visual: true,
@@ -5258,7 +5357,7 @@ describe('Guard session-store regressions', () => {
       { id: 'failed-2', sequence: 2, visual: true }, failedTrial,
     ];
     s.recordHasCurrentFrameAuthority = () => true;
-    expect(() => s.priorityGate(42, experimentalBrush)).toThrow(/strategy_switch_required.*experiment.*improv/i);
+    expect(() => s.priorityGate(42, experimentalBrush)).not.toThrow();
     const alternate = { tool: 'photoshop_paint_dabs', args: { dabs: [{ x: 5, y: 5 }] } };
     s.updatePaintingState(42, current => ({ ...current, art_director: {
       ...current.art_director, tasks: [{ task_id: 'switch-2', status: 'active',

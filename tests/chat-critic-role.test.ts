@@ -17,6 +17,22 @@ import { validateVisualRelationships, VISUAL_RELATION_RULES } from '../src/core/
 import { collectSchemaErrors } from '../src/core/guard/cycle-compiler.js';
 import { openCriticObligation } from '../src/core/guard/critic-obligations.js';
 const dirs: string[] = [];
+it('Simple ignores the entire Critic technique/priority/strategy gate, but nontrivial stays strict', () => {
+  const request: any = { tool: 'photoshop_execute_visual_microplan', impact_class: 'tone',
+    visual_intent: 'continuous-field', args: { stage: 'GLOBAL_BLOCK_IN', steps: [
+      { tool: 'photoshop_paint_color_gradient', args: { layer_id: 3 } },
+    ] } };
+  const findings = [{ criterion: 'brief_fidelity', problem_id: 'ob-canal-field',
+    correction_kind: 'missing-object', visible: 'Water missing from the canal.',
+    next_change: 'Establish the canal water as a distinct visible field.' }];
+  const simple: any = { painting_profile: 'simple_graphic', chat_critic_findings: findings };
+  expect(criticCorrectionIssue(simple, request)).toBeUndefined();
+  expect(criticCorrectionIssue({ ...simple, painting_profile: 'nontrivial_painting' }, request)?.code)
+    .toBe('critic_correction_method_mismatch');
+  const causal = structuredClone(request);
+  causal.structural_correction = { causal_source: { operation_id: 'unknown' } };
+  expect(criticCorrectionIssue(simple, causal)?.code).toBe('critic_correction_method_mismatch');
+});
 it('regression: admits substantive brush construction on an existing semantic component for missing-object and form findings', () => {
   const request: any = { tool: 'photoshop_execute_visual_microplan', impact_class: 'construct', visual_intent: 'line',
     args: { stage: 'GLOBAL_BLOCK_IN', logical_layer: { hypothesis_id: 'frame', layer_id: 2 }, steps: [
@@ -823,9 +839,9 @@ it('DP-02: a rejected exact-frame relationship report can be corrected and retai
         }] }] },
       }] } };
   expect(criticCorrectionIssue(persisted, correction)).toBeUndefined();
-  // The relationship correction is expressible, but a fresh run must first
-  // establish its scene/medium foundation before ordinary local development.
-  expect(() => f.runtime.store.priorityGate(42, correction)).toThrow(/scene_foundation_required/);
+  // Artistic scene/medium foundation is advisory, not a substitute for
+  // authentic frame-bound Critic evidence or executable document ownership.
+  expect(() => f.runtime.store.priorityGate(42, correction)).not.toThrow();
   const nextPass = { request_key: 'shoulder-correction-next', problem_id: relation.id, document_id: 42,
     goal: 'Rebuild the independently owned right shoulder attachment with one bounded region pass.',
     stage: 'SHAPE', scale: 'medium', visual_intent: 'mass', impact_class: 'construct',

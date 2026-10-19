@@ -49,26 +49,15 @@ export function resolveCompactBrushMaterialPreflight(input: {
         return materials.length === 1 && materials[0] === compatibleMaterials[0];
       });
     if (compatibleMaterials.length === 1 && everyCompatibleRoleIsSingleMaterial) {
-      requestedMaterialRole = compatibleMaterials[0];
       normalizations.push({
-        code: 'material_role_normalized',
-        message: `Derived material_role=${requestedMaterialRole} from the unambiguous durable brush preflight.`,
+        code: 'material_role_suggested',
+        message: `Optional artistic material_role suggestion: ${compatibleMaterials[0]}. Authored intent is unchanged.`,
       });
     }
   }
-  if (materialFitnessRequired && !requestedMaterialRole) {
-    violations.push({
-      scope: 'next_operation',
-      code: 'brush_material_role_required',
-      message: `substantial ${stage} brush work requires next_pass.material_role so Guard can match the installed/preflighted brush inventory to the requested material instead of choosing a generic first role`,
-    });
-  }
-  if (materialFitnessRequired && brushInventoryScope === 'filtered') {
-    violations.push({
-      scope: 'next_operation',
-      code: 'brush_inventory_scope_insufficient',
-      message: 'substantial form/material/detail brush work requires a full installed-inventory or evidence-bound brush-pack preflight; a filtered familiar-preset lookup is insufficient',
-    });
-  }
+  // A filtered inventory and missing material classification affect quality of
+  // recommendations, not the safety of an explicitly valid Photoshop command.
+  void stage;
+  void brushInventoryScope;
   return { requestedMaterialRole, normalizations, violations };
 }

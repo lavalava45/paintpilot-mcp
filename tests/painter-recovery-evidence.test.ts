@@ -29,13 +29,14 @@ function fixture() {
   let activeWitness = witness('original');
   let previewBytes: Buffer = bytes;
   let layerIds = [9];
+  let preparedLayerBody: any;
   let bootstrapHistory: Record<string, unknown> = { totalStates: 2, currentIndex: 1, currentState: 'New',
     states: [{ name: 'Untitled-1', snapshot: true }, { name: 'New', snapshot: false }] };
   const preview = vi.fn(async () => ({ content: [{ type: 'image' as const, data: previewBytes.toString('base64'), mimeType: 'image/jpeg' }] }));
   registry.register('photoshop_get_preview', { tool: { name: 'photoshop_get_preview', inputSchema: { type: 'object' } }, handler: preview });
   registry.register('photoshop_get_layers', { tool: { name: 'photoshop_get_layers', inputSchema: { type: 'object' } },
     handler: async () => ({ content: [{ type: 'text', text: JSON.stringify({ ok: true,
-      details: { layers: layerIds.map(id => ({ id, name: 'Background' })), context: {
+      details: preparedLayerBody ?? { layers: layerIds.map(id => ({ id, name: 'Background' })), context: {
         document: { id: 42 }, activeLayer: { isBackground: true },
       } } }) }] }) });
   registry.register('photoshop_get_history', { tool: { name: 'photoshop_get_history', inputSchema: { type: 'object' } },
@@ -54,6 +55,27 @@ function fixture() {
   return { runtime, registry, preview, sha, file, restart: () => { activeWitness = witness('restarted'); }, replace: () => { activeWitness = witness('original', 2); },
     changePreview: () => { previewBytes = Buffer.from('different'); }, loseOwner: () => { layerIds = [10]; },
     setHistory: (history: Record<string, unknown>) => { bootstrapHistory = history; },
+    prepareEmptyLayer: () => {
+      runtime.store.updatePaintingState(42, current => ({ ...current, current_frame: null, accepted_frame: null,
+        confirmed_goal_frame: null, document_instance: { ...current.document_instance, bootstrap_operation_id: 'bootstrap' } }));
+      vi.spyOn(runtime.store, 'semanticLayerOwners').mockReturnValue([]);
+      runtime.store.write({ id: 'bootstrap', sequence: 1, created_at: new Date().toISOString(), tool: 'photoshop_create_document',
+        args: {}, phase: 'completed', failed: false, dispatched: true,
+        bootstrap_outcome: { document: { id: 42, name: 'Untitled-1', width: 16, height: 16 } } } as any);
+      runtime.store.write({ id: 'created-sky', sequence: 2, created_at: new Date().toISOString(), tool: 'photoshop_create_layer',
+        args: { document_id: 42, name: 'Sky' }, phase: 'completed', failed: false, dispatched: true, visual: false,
+        result: { content: [{ type: 'text', text: JSON.stringify({ ok: true, document_target: { id: 42 },
+          details: { layerId: 2, layerName: 'Sky', relativeToId: 1, history_steps: 1,
+            history_evidence: 'uxp_modal_native_history_cursor',
+            context: { activeLayer: { isBackground: false, bounds: { left: 0, top: 0, right: 0, bottom: 0 } } } } }) }] } } as any);
+      bootstrapHistory = { totalStates: 3, currentIndex: 2, currentState: 'New Layer',
+        states: [{ name: 'Untitled-1', snapshot: true }, { name: 'New', snapshot: false }, { name: 'New Layer', snapshot: false }] };
+      preparedLayerBody = { layers: [
+        { id: 2, name: 'Sky', depth: 0, kind: 'LayerKind.NORMAL', isBackground: false, bounds: { left: 0, top: 0, right: 0, bottom: 0 } },
+        { id: 1, name: 'Background', depth: 0, kind: 'LayerKind.NORMAL', isBackground: true },
+      ], context: { document: { id: 42, name: 'Untitled-1', width: 16, height: 16 } } };
+      return preparedLayerBody;
+    },
     makePristine: () => {
       runtime.store.updatePaintingState(42, current => ({ ...current, current_frame: null, accepted_frame: null,
         confirmed_goal_frame: null, logical_layer_owners: [] }));
@@ -63,6 +85,42 @@ function fixture() {
 }
 
 describe('public painter recovery and evidence (offline mocks only)', () => {
+  it.each([{ ok: false, error: 'uxp_bridge_unavailable' }, { ok: true, data: {} }])(
+    'does not turn an unavailable identity observation into a document mismatch: %j', async probe => {
+      const f = fixture(); f.restart();
+      const before = f.runtime.store.paintingState();
+      (f.runtime as any).uxpStateProbe = async () => probe;
+      await expect(f.runtime.resumeWithRecovery({ document_id: 42, same_document_confirmed: true }))
+        .rejects.toThrow('document_identity_probe_unavailable');
+      expect(f.runtime.store.paintingState()).toEqual(before);
+      expect(f.preview).not.toHaveBeenCalled();
+    });
+  it('recovers after UXP reload with a proven created empty layer before the first frame, without pixel mutation', async () => {
+    const f = fixture(); f.prepareEmptyLayer(); f.restart();
+    const recovered = await f.runtime.resumeWithRecovery({ document_id: 42, same_document_confirmed: true });
+    expect(recovered.identity_recovery).toMatchObject({ status: 'confirmed', recovery_mode: 'empty_layer_setup' });
+    expect(f.runtime.store.artRunState(42)?.document_instance.identity_pending).toBeUndefined();
+    expect(f.runtime.store.compactPassContext(42).pending_created_layers).toMatchObject([{ layer_id: 2, source_operation_id: 'created-sky' }]);
+    expect(f.preview).not.toHaveBeenCalled();
+  });
+
+  it.each(['pixels', 'history', 'unclaimed-layer', 'bootstrap-size', 'receipt', 'unconfirmed'] as const)
+    ('keeps prepaint state quarantined on %s disagreement', async kind => {
+      const f = fixture(); const layers = f.prepareEmptyLayer(); f.restart();
+      if (kind === 'pixels') layers.layers[0].bounds.right = 4;
+      if (kind === 'history') f.setHistory({ totalStates: 4, currentIndex: 3, currentState: 'Brush Tool',
+        states: [{ name: 'Untitled-1', snapshot: true }, { name: 'New' }, { name: 'New Layer' }, { name: 'Brush Tool' }] });
+      if (kind === 'unclaimed-layer') layers.layers[0].id = 3;
+      if (kind === 'bootstrap-size') layers.context.document.width = 20;
+      if (kind === 'receipt') f.runtime.store.write({ ...f.runtime.store.read('created-sky'), failed: true });
+      if (kind === 'unconfirmed') {
+        f.runtime.store.observeDocumentInstance(42, witness('restarted'));
+        const response = await f.runtime.resumeWithRecovery({ document_id: 42 });
+        expect(response).not.toHaveProperty('identity_recovery');
+      } else await expect(f.runtime.resumeWithRecovery({ document_id: 42, same_document_confirmed: true }))
+        .rejects.toThrow('document_identity_saved_frame_unavailable');
+      expect(f.runtime.store.artRunState(42)?.document_instance.identity_pending).toBeTruthy();
+    });
   it('quarantines a connection epoch without destroying work, then rebinds only with user confirmation and fresh exact pixels/owners', async () => {
     const f = fixture(); f.restart();
     const problems = await (f.runtime as any).collectDynamicOperationViolations({ tool: 'photoshop_set_layer_opacity', args: { document_id: 42, opacity: 50 } });
@@ -173,7 +231,7 @@ describe('public painter recovery and evidence (offline mocks only)', () => {
     expect(Buffer.byteLength(JSON.stringify(body))).toBeLessThan(4096);
   });
 
-  it('rejects prepared filters before dispatch when imaging authority is missing', async () => {
+  it('advises on missing imaging preflight but rejects invalid native filter arguments before dispatch', async () => {
     const f = fixture();
     const blur = vi.fn(async () => ({ content: [] }));
     f.registry.register('photoshop_apply_gaussian_blur', { tool: { name: 'photoshop_apply_gaussian_blur', inputSchema: { type: 'object', properties: { radius: { type: 'number' }, layer_id: { type: 'integer' } }, required: ['radius', 'layer_id'] } }, handler: blur });
@@ -183,7 +241,20 @@ describe('public painter recovery and evidence (offline mocks only)', () => {
       actions: [{ id: 'selection', tool: 'photoshop_select_rectangle', args: {} },
         { id: 'filter', tool: 'photoshop_apply_gaussian_blur', method_id: 'gaussian-blur', args: { layer_id: 9, radius: 2 } }],
     } }, f.runtime.store, f.registry);
-    expect(compiled.violations.some(item => item.code === 'imaging_preflight_required')).toBe(true);
+    expect(compiled.violations.some(item => item.code === 'imaging_preflight_required')).toBe(false);
+    expect(compiled.normalizations).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'artistic_imaging_review_advisory' }),
+    ]));
+    const invalid = await compileGuardCycle({ next_pass: { request_key: 'invalid-native-filter', document_id: 42,
+      goal: 'Reject a filter radius which Photoshop cannot execute', stage: 'SHAPE', scale: 'global',
+      actions: [{ id: 'selection', tool: 'photoshop_select_rectangle', args: {} },
+        { id: 'filter', tool: 'photoshop_apply_gaussian_blur', method_id: 'gaussian-blur',
+          args: { layer_id: 9, radius: 'invalid-radius' } }],
+    } }, f.runtime.store, f.registry);
+    expect(invalid.violations).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'compact_action_schema_invalid',
+        message: expect.stringMatching(/radius must be number/) }),
+    ]));
     expect(blur).not.toHaveBeenCalled();
     expect(f.preview).not.toHaveBeenCalled();
   });

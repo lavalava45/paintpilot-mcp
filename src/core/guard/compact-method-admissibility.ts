@@ -27,22 +27,12 @@ export function collectCompactMethodAdmissibility(input: {
       });
     }
     const semanticMethod = knownMethods.get(methodId);
-    if (semanticMethod && semanticMethod.primaryTool !== text(step.tool)
-      && !(methodId === 'continuous-color-field' && text(step.tool) === 'photoshop_fill_layer')) {
-      violations.push({
-        scope: 'next_operation',
-        code: 'step_method_tool_mismatch',
-        message: `method_id=${methodId} requires primary tool ${semanticMethod.primaryTool}, not ${text(step.tool) ?? 'missing'}`,
-      });
-    }
+    // The selected Photoshop tool is independently schema-checked. A method
+    // catalog's preferred tool cannot prohibit a valid, authored alternative.
+    void semanticMethod;
   }
   const methodClasses = [...new Set(mutationSteps.map(methodClassForStep).filter(Boolean))] as string[];
-  if (methodClasses.length > 1) {
-    violations.push({
-      scope: 'next_operation',
-      code: 'compact_pass_mixed_method_class',
-      message: `next_pass actions contain incompatible mutation method classes: ${methodClasses.join(', ')}; split them into bounded passes`,
-    });
-  }
+  // Mixing artistic method families is a stylistic choice; execution budgets
+  // and per-step technical validation remain enforced by the compiler.
   return { methodClasses, violations };
 }

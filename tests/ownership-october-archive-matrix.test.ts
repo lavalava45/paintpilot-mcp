@@ -53,7 +53,7 @@ describe('Oct 10 baseline vs Oct 14–18 regression classes; both painting profi
     expect(compileMinimalOwnerBootstrap(input).derived).toBe(false);
   });
 
-  it('Oct 18 optional material no longer blocks a native gradient; real brush ambiguity still blocks', () => {
+  it('allows any brush/material artistic combination without inventing a role or Photoshop preset', () => {
     const gradient = compileSemanticMethod({ construction_role: 'continuous-field',
       visual_intent: 'continuous-field', pressure_policy: 'none',
       material_role: undefined,
@@ -63,7 +63,8 @@ describe('Oct 10 baseline vs Oct 14–18 regression classes; both painting profi
     const brush = compileSemanticMethod({ brush_role: 'preflighted-texture',
       visual_intent: 'directional-mass', pressure_policy: 'none',
     }, { methodClass: 'preset-brush', brushMaterialRoles: ['fur', 'fabric'] });
-    expect(brush.issues.map(item => item.code)).toContain('semantic_method_contract_required');
+    expect(brush.issues).toEqual([]);
+    expect(brush.strategy).not.toHaveProperty('material_role');
   });
 
   it('Oct 10 already-registered simple owner can continue without any fresh create or rebinding', () => {

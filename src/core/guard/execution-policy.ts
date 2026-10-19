@@ -55,6 +55,7 @@ const PREPARATION_ONLY_TOOLS = new Set([
 ]);
 
 const SEMANTIC_MUTATION_TOOLS = new Set([
+  'photoshop_source_bound_reflection',
   'photoshop_adjust_brightness_contrast',
   'photoshop_adjust_curves',
   'photoshop_adjust_exposure',

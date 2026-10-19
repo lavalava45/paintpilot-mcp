@@ -176,8 +176,7 @@ describe('microplan request compilation and pre-dispatch diagnostics', () => {
     expect(body.message).toMatch(/plan_id must be a non-empty string/);
     expect(body.message).toMatch(/stage must be one of/);
     expect(body.message).toMatch(/red/);
-    expect(body.message).toMatch(/invented-method/);
-    expect(body.message).toMatch(/region-block-in/);
+    // Artistic method labels have no veto authority; malformed schema and stage still do.
     expect(calls).toEqual([]);
   });
 
@@ -248,12 +247,11 @@ describe('microplan request compilation and pre-dispatch diagnostics', () => {
     expect(resultBody(rejection).execution).toBe('not-executed');
   });
 
-  it('rejects an unknown method id before execution', () => {
+  it('allows an unknown artistic method label when its executable payload is valid', () => {
     const input = template();
     input.steps[1].method_id = 'region-fill-made-up';
     const { registry: tools } = registry();
-    const rejection = preflightVisualMicroPlan(input, tools)!;
-    expect(resultBody(rejection).errors.join('\n')).toMatch(/unknown method_id=region-fill-made-up/);
+    expect(preflightVisualMicroPlan(input, tools)).toBeUndefined();
   });
 
   it('does not reject free step prose that differs from the root intent', () => {
@@ -342,7 +340,7 @@ describe('microplan request compilation and pre-dispatch diagnostics', () => {
     const rejection = await preflightVisualMicroPlanForExecution(input, tools);
     const errors = resultBody(rejection!).errors.join('\n');
     expect(errors).toMatch(/stage must be one of/);
-    expect(errors).toMatch(/unknown method_id=region-fill-made-up/);
+    expect(errors).not.toMatch(/unknown method_id=region-fill-made-up/);
     expect(errors).not.toMatch(/intent must match micro-plan intent/);
     expect(errors).toMatch(/red/);
     expect(errors).toMatch(/outside document 42 bounds/);
@@ -350,7 +348,7 @@ describe('microplan request compilation and pre-dispatch diagnostics', () => {
 
   it('returns terminal not-executed debt-free state and stable fingerprint on exact repeats', async () => {
     const input = template();
-    input.steps[1].method_id = 'region-fill-made-up';
+    input.stage = 'BLOCKIIN';
     const { registry: tools, calls } = registry();
     let begins = 0;
     const run = () => executeLogicalOperation({

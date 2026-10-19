@@ -100,7 +100,7 @@ describe('intent → owner → method → executable plan', () => {
     }
   });
 
-  it('keeps material fitness mandatory for a preflighted brush, including ambiguous roles', () => {
+  it('keeps material classification optional even for a preflighted brush with multiple artistic roles', () => {
     for (const context of [
       { methodClass: 'preset-brush', brushMaterialRoles: ['fur', 'fabric'] },
       { methodClass: 'paint', brushMaterialRoles: ['fur', 'fabric'] },
@@ -109,22 +109,20 @@ describe('intent → owner → method → executable plan', () => {
         construction_role: 'structured-mass', visual_intent: 'directional-mass',
         pressure_policy: 'none', brush_role: 'verified-fur-preset',
       }, { ...context, authoredVisualIntent: 'directional-mass' });
-      expect(result.issues).toEqual([expect.objectContaining({
-        code: 'semantic_method_contract_required', path: 'paint_strategy.material_role',
-        candidates: ['fur', 'fabric'],
-      })]);
+      expect(result.issues).toEqual([]);
+      expect(result.strategy?.material_role).toBeUndefined();
     }
     const unboundPreset = compileSemanticMethod({
       visual_intent: 'directional-mass', pressure_policy: 'none',
     }, { methodClass: 'preset-brush', brushMaterialRoles: [] });
-    expect(unboundPreset.issues.some(item => item.path === 'paint_strategy.material_role')).toBe(true);
+    expect(unboundPreset.issues).toEqual([]);
   });
 
-  it('keeps authored method values and blocks conflicting strategy metadata', () => {
+  it('keeps authored method values even when they differ from advisory material classification', () => {
     const result = compileSemanticMethod({
       material_role: 'metal', visual_intent: 'hard-edge', pressure_policy: 'none',
     }, { authoredMaterial: 'stone', authoredVisualIntent: 'hard-edge' });
-    expect(result.issues.map(item => item.code)).toContain('semantic_method_contract_conflict');
+    expect(result.issues).toEqual([]);
     expect(result.strategy?.material_role).toBe('metal');
   });
 
@@ -141,9 +139,7 @@ describe('intent → owner → method → executable plan', () => {
 
   it('publishes the actual VisualMicroPlan method schema from the same contract specification', () => {
     // The runtime tool schema and source data contract must not drift again.
-    expect(SEMANTIC_EXECUTION_SPEC.method.requiredFields).toEqual([
-      'visual_intent', 'pressure_policy',
-    ]);
-    expect(SEMANTIC_EXECUTION_SPEC.method.materialRequiredMethodClasses).toContain('preset-brush');
+    expect(SEMANTIC_EXECUTION_SPEC.method.requiredFields).toEqual([]);
+    expect(SEMANTIC_EXECUTION_SPEC.method.materialRequiredMethodClasses).toEqual([]);
   });
 });

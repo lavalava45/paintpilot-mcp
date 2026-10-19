@@ -46,6 +46,58 @@ it('permits the first subject and non-painting closures without demanding an ext
   expect(validateSceneFoundation(undefined, record(), state())).toBeUndefined();
   const s = store(); expect(() => s.priorityGate(479, { tool: 'photoshop_save_document', args: { document_id: 479 } })).not.toThrow();
 });
+it('does not block a new non-destructive Simple component through both actual planner and priority gates', () => {
+  const s = store();
+  s.updatePaintingState(479, current => ({ ...current, painting_profile: 'simple_graphic' }));
+  const water: any = { tool: 'photoshop_execute_visual_microplan', stage: 'GLOBAL_BLOCK_IN',
+    scale: 'medium', args: { document_id: 479, action_class: 'ADD',
+      logical_layer: { decision: 'create-new', hypothesis_id: 'canal-water', component_space: 'canvas' },
+      steps: [
+        { id: 'new-water', tool: 'photoshop_create_layer', args: { name: 'Canal Water' } },
+        { id: 'paint-water', tool: 'photoshop_paint_color_gradient', args: {
+          layer_id: '$steps.new-water.details.layerId', from: { x: 0, y: 500 },
+          to: { x: 900, y: 1550 }, stops: [] } },
+      ],
+    } };
+  expect(s.sceneFoundationAdmission(479, water)).toMatchObject({ status: 'advisory',
+    missing: ['composition', 'technique'] });
+  expect(() => s.plannerGate(479, water)).not.toThrow();
+  expect(() => s.priorityGate(479, water)).not.toThrow();
+  expect(s.sceneFoundationAdmission(479, {}).status).toBe('advisory');
+  s.updatePaintingState(479, current => ({ ...current, painting_profile: 'nontrivial_painting' }));
+  expect(() => s.plannerGate(479, water)).not.toThrow();
+});
+it('reports incomplete Nontrivial art and priority as WARN while still checking hard planner authority', () => {
+  const s = store();
+  s.updatePaintingState(479, current => ({ ...current, painting_profile: 'nontrivial_painting',
+    visual_problems: { unresolved: { problem_id: 'unresolved', status: 'open', severity: 'must-fix', scale: 'global' } } }));
+  const warnings: string[] = [];
+  expect(() => s.plannerGate(479, detail, undefined, false, warnings)).not.toThrow();
+  expect(() => s.priorityGate(479, { ...detail, scale: 'small' }, undefined, warnings)).not.toThrow();
+  expect(warnings.some(text => text.startsWith('scene_foundation_required:'))).toBe(true);
+  expect(warnings.some(text => text.startsWith('stage_priority_gate:'))).toBe(true);
+  const hardState = s.paintingState().documents['479'];
+  s.updatePaintingState(479, current => ({ ...current, art_director: {
+    directive_id: 'director-one', status: 'active', tasks: [{ task_id: 'task-one', status: 'active', allowed_scales: ['medium'] }],
+  } }));
+  const hardWarnings: string[] = [];
+  expect(() => s.plannerGate(479, detail, undefined, false, hardWarnings))
+    .not.toThrow();
+  expect(hardWarnings.some(text => text.startsWith('scene_foundation_required:'))).toBe(true);
+  expect(hardState.visual_problems.unresolved.status).toBe('open');
+});
+it('does not downgrade a pending checkpoint recovery to WARN even when artistic foundation is incomplete', () => {
+  const s = store();
+  s.updatePaintingState(479, current => ({ ...current,
+    painting_profile: 'nontrivial_painting',
+    project_recovery: { status: 'blocked', reason: 'checkpoint identity must be recovered' },
+  }));
+  const notices: string[] = [];
+  const errors = s.collectPreflightErrors({ ...detail, id: 'checkpoint-negative' },
+    { stateOnly: true, artisticAdvisories: notices } as any);
+  expect(notices.some(message => message.startsWith('scene_foundation_required:'))).toBe(true);
+  expect(errors.some(message => message.startsWith('project_checkpoint_recovery_required:'))).toBe(true);
+});
 it('uses a separate early milestone rather than requiring the whole unfinished artwork to pass Critic', () => {
   const r = review('pass'); r.composition.visible = 'The whole subject, required surroundings, ground and kraft-paper field are established.';
   r.technique.visible = 'The upper eave has thin broken pencil contours and directional hatch marks against kraft paper.';
@@ -76,7 +128,7 @@ it('preempts conflicting artistic priorities and Director tasks while preserving
     expect(() => s.priorityGate(479, request)).not.toThrow();
     expect(() => s.plannerGate(479, request)).not.toThrow();
   }
-  expect(() => s.plannerGate(479, detail)).toThrow(/scene_foundation_required/);
+  expect(() => s.plannerGate(479, detail)).not.toThrow();
   expect(s.paintingState().documents['479'].visual_problems.shell.status).toBe('open');
 });
 it('does not inherit a passed foundation after its source pixels are rolled back', () => {
@@ -92,4 +144,6 @@ it('publishes both review and recovery fields in the actual ordinary cycle schem
   const cycle = createGuardTools(runtime).find(t => t.tool.name === 'photoshop_guard_cycle_auto')!.tool.inputSchema as any;
   expect(cycle.properties.previous_observation.properties.scene_foundation).toEqual(SCENE_FOUNDATION_SCHEMA);
   expect(cycle.properties.next_pass.properties.foundation_goal.enum).toEqual(['composition', 'technique']);
+  expect(String(cycle.properties.previous_observation.properties.scene_foundation.description))
+    .toContain('For simple_graphic, unfinished foundation is an artistic advisory');
 });

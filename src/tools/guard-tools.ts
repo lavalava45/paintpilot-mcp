@@ -841,7 +841,7 @@ function compactPassSchema(): Record<string, unknown> {
       },
       logical_layer: {
         type: 'object',
-        description: 'Stable owner binding; hypothesis_id, not request_key, identifies the owner across passes.',
+        description: 'Stable owner binding; hypothesis_id, not request_key, identifies the owner across passes. A separately created, still-empty layer may be explicitly bound using continue-logical-layer + its exact layer_id and owner declaration; Guard resolves the creation receipt and rechecks native emptiness. Do not declare an existing layer create-new.',
         properties: {
           decision: { type: 'string', enum: [...VISUAL_MICROPLAN_LOGICAL_LAYER_DECISIONS] },
           hypothesis_id: { type: 'string' },
@@ -850,6 +850,7 @@ function compactPassSchema(): Record<string, unknown> {
           expected_independent_rollback: { type: 'boolean' },
           separation_reasons: { type: 'array', items: { type: 'string' }, description: 'Optional audit/artistic guidance. Isolation authority comes from the structured Layer Separation Check plus rollback semantics.' },
           layer_id: { type: 'number', minimum: 1 },
+          binding_source_operation_id: { type: 'string', description: 'Guard-derived pristine creation receipt for first binding of an existing empty layer. Never invent this id; rejected plans do not register ownership.' },
           layer_name: { type: 'string' },
           merge_target_layer_id: { type: 'number', minimum: 1 },
           physical_role: { type: 'string', enum: [...VISUAL_MICROPLAN_PHYSICAL_ROLES] },

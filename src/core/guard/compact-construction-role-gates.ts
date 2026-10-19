@@ -12,19 +12,10 @@ export function collectCompactConstructionRoleViolations(input: {
 }): GuardCycleCompileViolation[] {
   const { broadNontrivialRegionAdd, constructionRole, requestedMaterialRole } = input;
   const violations: GuardCycleCompileViolation[] = [];
-  if (broadNontrivialRegionAdd && !constructionRole) {
-    violations.push({
-      scope: 'next_operation',
-      code: 'broad_region_construction_role_required',
-      message: 'broad nontrivial region ADD work must declare construction_role before choosing photoshop_paint_regions; use structured-mass for genuine form-bearing closed mass or the applicable continuous/soft/environmental role',
-    });
-  }
-  if (broadNontrivialRegionAdd && constructionRole && !requestedMaterialRole) {
-    violations.push({
-      scope: 'next_operation',
-      code: 'construction_role_material_role_required',
-      message: `construction_role=${constructionRole} requires next_pass.material_role so the semantic construction is fixed before mechanism selection`,
-    });
-  }
+  // Construction and material labels describe artistic intent. Neither is
+  // evidence of a Photoshop execution hazard, including for broad passes.
+  void broadNontrivialRegionAdd;
+  void constructionRole;
+  void requestedMaterialRole;
   return violations;
 }

@@ -1,5 +1,4 @@
 import { createHash } from 'node:crypto';
-import { VISUAL_MICROPLAN_CHANGE_DOMAINS } from '../visual-microplan.js';
 import { normalizeProblemLinks } from './problem-links.js';
 
 /** Fill omitted technical keys without changing caller-owned references or input. */
@@ -129,6 +128,22 @@ export class PaintingIntentError extends Error {
   ) {
     super(message);
     this.name = 'PaintingIntentError';
+    const paths: Record<string, string> = {
+      painting_intent_invalid: 'painting_intent',
+      painting_intent_request_key_required: 'painting_intent.request_key',
+      painting_intent_problem_id_required: 'painting_intent.problem_id',
+      painting_intent_document_required: 'painting_intent.document_id',
+      painting_intent_goal_required: 'painting_intent.goal',
+      painting_intent_action_invalid: 'painting_intent.action',
+      painting_intent_visual_intent_invalid: 'painting_intent.visual_intent',
+      painting_intent_scale_invalid: 'painting_intent.scale',
+      painting_intent_region_bounds_invalid: 'painting_intent.region_bounds',
+      painting_intent_actions_invalid: 'painting_intent.actions',
+      painting_intent_change_domains_invalid: 'painting_intent.change_domains',
+      painting_intent_problem_link_invalid: 'painting_intent.addresses_problem_ids',
+    };
+    const path = details?.path ?? paths[code];
+    if (path) this.details = { ...details, path };
   }
 }
 
@@ -179,13 +194,13 @@ export function parsePaintingIntent(value: unknown): PaintingIntent {
   const contracts: Partial<Record<PaintingIntentContractField, Record<string, unknown>>> = {};
   for (const key of Object.keys(raw)) if (!ACCEPTED_FIELDS.has(key)) {
     errors.push(new PaintingIntentError('painting_intent_field_unsupported',
-      `painting_intent.${key} is unsupported and was not discarded. Use a supported field from the public typed contract; use complete next_pass only for fields actually published there. Do not move unknown fields blindly between forms. Retain ownership, construction and scene declarations when correcting the request. Do not read source.`));
+      `painting_intent.${key} is unsupported and was not discarded. Use a supported field from the public typed contract; use complete next_pass only for fields actually published there. Do not move unknown fields blindly between forms. Retain ownership, construction and scene declarations when correcting the request. Do not read source.`, { path: `painting_intent.${key}` }));
   }
   for (const key of PAINTING_INTENT_CONTRACT_FIELDS) {
     if (raw[key] === undefined) continue;
     const value = raw[key];
     if (!value || typeof value !== 'object' || Array.isArray(value)) errors.push(new PaintingIntentError(
-      'painting_intent_contract_invalid', `painting_intent.${key} must be an object using the same contract as next_pass.${key}.`));
+      'painting_intent_contract_invalid', `painting_intent.${key} must be an object using the same contract as next_pass.${key}.`, { path: `painting_intent.${key}` }));
     else contracts[key] = structuredClone(value as Record<string, unknown>);
   }
   if (!requestKey) errors.push(new PaintingIntentError('painting_intent_request_key_required', 'PaintingIntent request_key is required.'));
@@ -198,12 +213,8 @@ export function parsePaintingIntent(value: unknown): PaintingIntent {
       `PaintingIntent action must be one of ${PAINTING_INTENT_ACTIONS.join('|')}.`
     ));
   }
-  if (!visualIntent || !PAINTING_INTENT_VISUAL_INTENTS.includes(visualIntent as PaintingIntentVisualIntent)) {
-    errors.push(new PaintingIntentError(
-      'painting_intent_visual_intent_invalid',
-      `PaintingIntent visual_intent must be one of ${PAINTING_INTENT_VISUAL_INTENTS.join('|')}.`
-    ));
-  }
+  // Visual intent is an open artistic vocabulary. Preset intent categories
+  // help recommendations but cannot enumerate future styles and techniques.
   if (raw.scale !== undefined && (!scale || !PAINTING_INTENT_SCALES.includes(scale as PaintingIntentScale))) {
     errors.push(new PaintingIntentError(
       'painting_intent_scale_invalid',
@@ -218,16 +229,15 @@ export function parsePaintingIntent(value: unknown): PaintingIntent {
   try { problemLinks = normalizeProblemLinks(raw.addresses_problem_id, raw.addresses_problem_ids); }
   catch (error) { errors.push(new PaintingIntentError('painting_intent_problem_link_invalid', String((error as Error).message))); }
   if (raw.change_domains !== undefined && (!Array.isArray(raw.change_domains)
-    || raw.change_domains.some(value => typeof value !== 'string'
-      || !(VISUAL_MICROPLAN_CHANGE_DOMAINS as readonly string[]).includes(value)))) {
-    errors.push(new PaintingIntentError('painting_intent_change_domains_invalid', `change_domains must contain only ${VISUAL_MICROPLAN_CHANGE_DOMAINS.join('|')}.`));
+    || raw.change_domains.some(value => typeof value !== 'string' || !value.trim()))) {
+    errors.push(new PaintingIntentError('painting_intent_change_domains_invalid', 'change_domains must contain nonempty artistic domain names.'));
   }
   let regionBounds: PaintingIntentBounds | undefined;
   try { regionBounds = bounds(raw.region_bounds); }
   catch (error) { if (error instanceof PaintingIntentError) errors.push(error); else throw error; }
   if (errors.length) throw new PaintingIntentError(errors[0]!.code,
     errors.map(error => error.message).join('\n'),
-    { errors: errors.map(error => ({ code: error.code, message: error.message })) });
+    { errors: errors.map(error => ({ code: error.code, message: error.message, details: error.details })) });
 
   return {
     ...contracts,
@@ -241,7 +251,7 @@ export function parsePaintingIntent(value: unknown): PaintingIntent {
     ...(raw.region_bounds !== undefined ? { region_bounds: regionBounds } : {}),
     action: action as PaintingIntentAction,
     ...(scale ? { scale: scale as PaintingIntentScale } : {}),
-    visual_intent: visualIntent as PaintingIntentVisualIntent,
+    visual_intent: (visualIntent ?? 'unspecified') as PaintingIntentVisualIntent,
     ...(nonEmptyText(raw.material_role) ? { material_role: nonEmptyText(raw.material_role) } : {}),
     ...(nonEmptyText(raw.preferred_method_id) ? { preferred_method_id: nonEmptyText(raw.preferred_method_id) } : {}),
     ...(nonEmptyText(raw.preferred_brush_role) ? { preferred_brush_role: nonEmptyText(raw.preferred_brush_role) } : {}),

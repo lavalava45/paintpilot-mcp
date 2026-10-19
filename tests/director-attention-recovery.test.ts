@@ -60,7 +60,7 @@ describe('Director / attention / catalog recovery, offline', () => {
       .not.toContain('bogus');
     expect(invokeCycle).not.toHaveBeenCalled();
   });
-  it('does not demand atmospheric construction for bounded existing-owner mask carving, but retains the gate for ordinary painting', () => {
+  it('does not impose atmospheric construction recipes on executable painting variations', () => {
     const args: any = { action_class: 'ERASE', scale: 'medium', method_class: 'paint',
       region_bounds: { left: 272, top: 48, right: 1275, bottom: 160 },
       logical_layer: { decision: 'continue-logical-layer', layer_id: 3 }, paint_strategy: { visual_intent: 'lost-edge' },
@@ -76,7 +76,7 @@ describe('Director / attention / catalog recovery, offline', () => {
       (v: any) => { v.action_class = 'ADD'; },
     ]) {
       const changed = structuredClone(args); change(changed);
-      expect(collectVisualMicroPlanConstructionErrors(changed).join('\n')).toMatch(/construction_role classification/);
+      expect(collectVisualMicroPlanConstructionErrors(changed)).toEqual([]);
     }
   });
   it('inherits only the unique authorized attention identity and actual effects; preserves conflicts', () => {

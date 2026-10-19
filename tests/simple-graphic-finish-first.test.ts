@@ -47,6 +47,24 @@ const state = () => ({
 const owners = [{ hypothesis_id: 'sky-owner', layer_id: 20, temporary: false }];
 
 describe('simple_graphic finish-first is WARN/AUTO-FIX only for provable artistic metadata', () => {
+  it('normalizes a stale method hint for a native gradient only when the executable method is unique', () => {
+    const registry = new ToolRegistry();
+    for (const name of ['photoshop_paint_color_gradient', 'photoshop_fill_layer', 'photoshop_paint_regions']) {
+      registry.register(name, { tool: { name, inputSchema: { type: 'object' } },
+        handler: async () => { throw new Error('No mutation'); } });
+    }
+    const request = { document_id: 42, action_class: 'ADD',
+      visual_intent: 'continuous-field', impact_class: 'construct',
+      preferred_method_id: 'constructed-contour',
+      actions: [{ tool: 'photoshop_paint_color_gradient', args: { layer_id: 12 } }] };
+    const normalized = normalizeSimpleGraphicPass(request, ctx(), registry);
+    expect(normalized.pass.actions).toEqual(request.actions);
+    expect(normalized.pass.visual_intent).toBe(request.visual_intent);
+    expect(normalized.pass.preferred_method_id).not.toBe(request.preferred_method_id);
+    expect(normalized.notices.some(item => item.code === 'simple_graphic_auto_fix')).toBe(true);
+    expect(normalizeSimpleGraphicPass(request, ctx('nontrivial_painting'), registry).pass).toEqual(request);
+    expect(normalizeSimpleGraphicPass({ ...request, action_class: 'ERASE' }, ctx(), registry).pass.preferred_method_id).toBe(request.preferred_method_id);
+  });
   it('derives a single canvas owner, separation and native field role, leaving authored input unchanged', () => {
     const authored = canvas();
     const original = structuredClone(authored);
@@ -117,7 +135,7 @@ describe('simple_graphic finish-first is WARN/AUTO-FIX only for provable artisti
     ] }).pass.material_role).toBeUndefined();
   });
 
-  it('turns artistic foundation priority into a warning only for exact-owner clipped, disjoint native sky', () => {
+  it('treats unfinished artistic foundation as advice for ordinary Simple paint, not a mandatory prerequisite', () => {
     const s = state();
     const o = skyProof();
     expect(foundationAdmission(s, o).status).toBe('blocked');
@@ -136,29 +154,48 @@ describe('simple_graphic finish-first is WARN/AUTO-FIX only for provable artisti
     expect(SessionStore.prototype.sceneFoundationAdmission.call(fakeStore, 42, o).status)
       .toBe('blocked');
     expect(simpleGraphicFoundationAdvisory({ ...s, visual_problems: {} }, o, owners)).toBe(true);
+    expect(simpleGraphicFoundationAdvisory(s, {}, owners)).toBe(true); // read-only next-action guidance
+    const newCanal = { tool: 'photoshop_execute_visual_microplan', args: {
+      document_id: 42, action_class: 'ADD', logical_layer: { decision: 'create-new',
+        hypothesis_id: 'canal_water', layer_name: 'Canal Water', component_space: 'canvas' },
+      steps: [
+        { id: 'create', tool: 'photoshop_create_layer', args: { name: 'Canal Water' } },
+        { id: 'water', tool: 'photoshop_paint_color_gradient', args: {
+          layer_id: '$steps.create.details.layerId', from: { x: 0, y: 250 },
+          to: { x: 400, y: 600 }, stops: [] } },
+      ],
+    } };
+    expect(foundationAdmission(s, newCanal).status).toBe('blocked');
+    expect(simpleGraphicFoundationAdvisory(s, newCanal, owners)).toBe(true);
+    expect(SessionStore.prototype.sceneFoundationAdmission.call(fakeStore, 42, newCanal).status)
+      .toBe('blocked'); // fakeStore above was switched to nontrivial_painting
+    fakeStore.paintingState = () => ({ documents: { '42': s } });
+    expect(SessionStore.prototype.sceneFoundationAdmission.call(fakeStore, 42, newCanal).status)
+      .toBe('advisory');
+    expect(SessionStore.prototype.sceneFoundationAdmission.call(fakeStore, 42, {}).status)
+      .toBe('advisory');
   });
 
-  it('never warns for foreign owner, unsafe Undo, mismatched document, overlapping, unbounded or unknown debt', () => {
+  it('retains hard guards for cross-document, destructive and explicitly foreign-owner commands', () => {
     const invalid = [
       [state(), { ...skyProof(), args: { ...skyProof().args, document_id: 43 } }, owners],
       [state(), { ...skyProof(), args: { ...skyProof().args, action_class: 'ROLLBACK' } }, owners],
       [state(), skyProof(), [{ hypothesis_id: 'foreign', layer_id: 20 }]],
       [state(), { ...skyProof(), args: { ...skyProof().args,
-        steps: [{ tool: 'photoshop_paint_strokes', args: { layer_id: 20 } }] } }, owners],
+        steps: [{ tool: 'photoshop_erase', args: { layer_id: 20 } }] } }, owners],
       [state(), { ...skyProof(), args: { ...skyProof().args,
-        steps: [{ tool: 'photoshop_paint_color_gradient',
-          args: { layer_id: 20, preserve_transparency: false,
-            clip_contour: skyProof().args.steps[0].args.clip_contour } }] } }, owners],
+        steps: [{ tool: 'photoshop_paint_regions', args: { layer_id: 22 } }] } }, owners],
       [state(), { ...skyProof(), args: { ...skyProof().args,
-        steps: [{ tool: 'photoshop_paint_color_gradient', args: {
-          layer_id: 20, preserve_transparency: true,
-          clip_contour: [{ x: 0, y: 0 }, { x: 400, y: 0 },
-            { x: 400, y: 340 }, { x: 0, y: 340 }],
-        } }] } }, owners],
-      [{ ...state(), visual_problems: { 'bad-roofs': { status: 'open',
-        structural_defect: {} } } }, skyProof(), owners],
+        logical_layer: { ...skyProof().args.logical_layer, layer_id: 88 } } }, owners],
     ] as const;
     for (const [s, operation, linked] of invalid)
       expect(simpleGraphicFoundationAdvisory(s, operation, linked as any)).toBe(false);
+    // Artistic region overlap and technique selection are reviewed after
+    // painting, not turned into a mandatory pre-paint foundation declaration.
+    expect(simpleGraphicFoundationAdvisory(state(), { ...skyProof(), args: { ...skyProof().args,
+      steps: [{ tool: 'photoshop_paint_strokes', args: { layer_id: 20 } }] } }, owners)).toBe(true);
+    expect(simpleGraphicFoundationAdvisory(state(), { ...skyProof(), args: { ...skyProof().args,
+      steps: [{ tool: 'photoshop_paint_color_gradient', args: { layer_id: 20,
+        preserve_transparency: false } }] } }, owners)).toBe(true);
   });
 });

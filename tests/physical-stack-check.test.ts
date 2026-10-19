@@ -187,7 +187,7 @@ describe('physical stack / occlusion gate', () => {
     })).toMatchObject({ status: 'fail' });
   });
 
-  it('blocks VALUE on pending evidence and invalidates a pass when the physical owner graph changes', () => {
+  it('warns on pending VALUE evidence and invalidates a pass when the physical owner graph changes', () => {
     const s = store();
     s.setArtRunState({
       document_id: 42,
@@ -214,7 +214,9 @@ describe('physical stack / occlusion gate', () => {
       },
     }));
 
-    expect(() => s.plannerGate(42, valueRequest())).toThrow(/physical_stack_check_required/);
+    const pendingWarnings: string[] = [];
+    expect(() => s.plannerGate(42, valueRequest(), undefined, false, pendingWarnings)).not.toThrow();
+    expect(pendingWarnings.join('\n')).toMatch(/physical_stack_check_required/);
 
     const ownerSignature = s.physicalStackOwnerSignature(42);
     s.updatePaintingState(42, current => ({
@@ -227,7 +229,9 @@ describe('physical stack / occlusion gate', () => {
     expect(() => s.plannerGate(42, valueRequest())).not.toThrow();
 
     s.write(physicalOwnerRecord('front-owner-shape', 'front-owner', 8));
-    expect(() => s.plannerGate(42, valueRequest())).toThrow(/physical_stack_check_stale/);
+    const staleWarnings: string[] = [];
+    expect(() => s.plannerGate(42, valueRequest(), undefined, false, staleWarnings)).not.toThrow();
+    expect(staleWarnings.join('\n')).toMatch(/physical_stack_check_stale/);
   });
 
   it.each([false, true])('uses the ordinary visual verdict with Director active=%s and keeps omission pending', async directorActive => {
@@ -242,7 +246,9 @@ describe('physical stack / occlusion gate', () => {
       physical_stack_check: normalizePhysicalStackCheck({ status: 'pending', observed: false }),
     } }));
     s.verdict(input);
-    expect(() => s.plannerGate(42, valueRequest())).toThrow(/physical_stack_check_required/);
+    const pendingWarnings: string[] = [];
+    expect(() => s.plannerGate(42, valueRequest(), undefined, false, pendingWarnings)).not.toThrow();
+    expect(pendingWarnings.join('\n')).toMatch(/physical_stack_check_required/);
     // Exact provenance is supplied by closure, not retyped in the observation.
     s.verdict({ ...input, physical_stack_check: { status: 'pass', observed: true, criteria: criteria() } });
     expect(s.paintingState().documents['42'].physical_stack_check).toMatchObject({
@@ -251,7 +257,9 @@ describe('physical stack / occlusion gate', () => {
     expect(() => s.plannerGate(42, valueRequest())).not.toThrow();
     expect(s.statusCompact().documents['42'].physical_stack_check.status).toBe('pass');
     s.write(physicalOwnerRecord('new-front', 'front-owner', 8));
-    expect(() => s.plannerGate(42, valueRequest())).toThrow(/physical_stack_check_stale/);
+    const staleWarnings: string[] = [];
+    expect(() => s.plannerGate(42, valueRequest(), undefined, false, staleWarnings)).not.toThrow();
+    expect(staleWarnings.join('\n')).toMatch(/physical_stack_check_stale/);
   });
 
   it('retains observed physical debt and refuses false completion on the same ordinary review', () => {
@@ -262,9 +270,16 @@ describe('physical stack / occlusion gate', () => {
     const physical_stack_check = { status: 'fail', observed: true, criteria: criteria({ opaque_mass_coverage: 'debt' }) };
     expect(() => s.verdict({ ...input, physical_stack_check, target_resolved: 'yes' })).toThrow(/physical_stack_debt_unresolved/);
     s.verdict({ ...input, physical_stack_check });
-    expect(() => s.plannerGate(42, valueRequest())).toThrow(/physical_stack_debt_unresolved/);
+    const debtWarnings: string[] = [];
+    expect(() => s.plannerGate(42, valueRequest(), undefined, false, debtWarnings)).not.toThrow();
+    expect(debtWarnings.join('\n')).toMatch(/physical_stack_debt_unresolved/);
     s.verdict(input); // Omitting the check cannot erase the known debt.
-    expect(() => s.plannerGate(42, valueRequest())).toThrow(/physical_stack_debt_unresolved/);
+    const retainedWarnings: string[] = [];
+    expect(() => s.plannerGate(42, valueRequest(), undefined, false, retainedWarnings)).not.toThrow();
+    expect(retainedWarnings.join('\n')).toMatch(/physical_stack_debt_unresolved/);
+    expect(s.paintingState().documents['42'].physical_stack_check).toMatchObject({
+      status: 'fail', criteria: { opaque_mass_coverage: { status: 'debt' } },
+    });
   });
 
   it('rejects forged, stale and crop-bound ordinary review evidence and does not persist rolled-back evidence', () => {

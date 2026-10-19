@@ -404,7 +404,8 @@ describe('Task 23 progressive refinement contract', () => {
       action: 'review',
       directive: directive({ status: 'pending', observed: false }),
     });
-    expect(() => s.plannerGate(42, detailRequest())).toThrow(/refinement_check_required/);
+    expect(() => s.plannerGate(42, detailRequest())).not.toThrow();
+    expect(s.paintingState().documents['42'].art_director.refinement_check.status).toBe('pending');
   });
 
   it('blocks DETAIL for durable texture-only/form debt and admits it after a current-frame pass', () => {
@@ -423,7 +424,8 @@ describe('Task 23 progressive refinement contract', () => {
         confidence: 0.9,
       }),
     });
-    expect(() => s.plannerGate(42, detailRequest())).toThrow(/refinement_debt_unresolved/);
+    expect(() => s.plannerGate(42, detailRequest())).not.toThrow();
+    expect(s.paintingState().documents['42'].art_director.refinement_check.status).toBe('fail');
 
     s.setArtDirectorState({
       document_id: 42,

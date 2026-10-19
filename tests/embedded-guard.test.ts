@@ -3178,11 +3178,12 @@ describe('embedded Photoshop Guard', () => {
       },
     }) as any;
 
-    expect(rejected.preflight_rejection?.violations).toEqual(expect.arrayContaining([
+    expect(rejected.preflight_rejection?.violations ?? []).not.toEqual(expect.arrayContaining([
       expect.objectContaining({ code: 'artistic_method_execution_mismatch' }),
     ]));
-    expect(paintDispatches).toBe(0);
-    expect(runtime.store.read('method-drift-pass')).toBeUndefined();
+    expect(rejected.preflight_rejection).toBeUndefined();
+    expect(paintDispatches).toBe(1);
+    expect(runtime.store.read('method-drift-pass')).toBeDefined();
   });
 
   it('executes a direct compact artistic method without leaking artistic_operation into the public Guard request', async () => {
@@ -4076,9 +4077,10 @@ describe('embedded Photoshop Guard', () => {
       ],
     } }) as any;
     const intentErrors = intentResult.preflight_rejection.errors.join('\n');
-    for (const field of ['request_key', 'goal', 'action', 'visual_intent', 'scale', 'opacity', 'dabs']) {
+    for (const field of ['request_key', 'goal', 'action', 'scale', 'opacity', 'dabs']) {
       expect(intentErrors).toContain(field);
     }
+    expect(intentErrors).not.toContain('PaintingIntent visual_intent');
     expect(runtime.store.records()).toEqual([]);
   });
 
@@ -5559,7 +5561,7 @@ describe('embedded Photoshop Guard', () => {
     expect(runtime.store.read('low-delta-structural-source')?.verdict).toBeUndefined();
   });
 
-  it('promotes a must-fix perspective review into structural debt and blocks cosmetic continuation immediately', async () => {
+  it('keeps a must-fix perspective review as structural debt while warning on cosmetic continuation', async () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'embedded-guard-structural-review-debt-'));
     dirs.push(dir);
     const { registry } = fakeRegistry(dir);
@@ -5617,26 +5619,15 @@ describe('embedded Photoshop Guard', () => {
         strategy_family: 'surface-mask-cosmetic',
       }),
     }) as any;
-    expect(cosmetic.preflight_rejection?.errors.join('\n')).toMatch(
-      /structural_debt_requires_structural_correction|requires a causally distinct structural strategy/
-    );
-    expect(runtime.store.read('perspective-cosmetic-attempt')).toBeUndefined();
-
-    const structural = await runtime.cycleAuto({
-      next_pass: compactPassFromOperation({
-        id: 'perspective-structural-rebuild',
-        tool: 'photoshop_paint_dabs',
-        args: { document_id: 42, dabs: [{ x: 20, y: 20 }] },
-        summary: 'Run the structural correction path for the same perspective problem',
-        purpose: 'Verify structural correction remains admissible',
-        problem_id: 'facade-perspective',
-        scale: 'global',
-        stage: 'SHAPE',
-        strategy_family: 'perspective-structural-rebuild',
-        causal_escalation_level: 3,
-      }),
-    }) as any;
-    expect(structural.preflight_rejection).toBeUndefined();
+    expect(cosmetic.preflight_rejection).toBeUndefined();
+    expect(cosmetic.compiler_normalizations).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'artistic_admission_warning',
+        message: expect.stringMatching(/structural_debt_requires_structural_correction|artistic_recovery/) }),
+    ]));
+    expect(runtime.store.read('perspective-cosmetic-attempt')).toBeDefined();
+    // A permitted artistic experiment cannot certify that perspective was fixed.
+    expect(runtime.store.paintingState().documents['42'].visual_problems['facade-perspective'])
+      .toMatchObject({ status: 'open', severity: 'must-fix', structural_review: true });
   });
 
   it('does not promote uncertain recognition into a confirmed recognition milestone or goal frame', async () => {

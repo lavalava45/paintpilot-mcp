@@ -518,9 +518,15 @@ function obligationsForFinding(state: Row, problemId: string): boolean {
   return criticObligationState(state).some(row => row.id === problemId || (row.parent_problem_id ?? `critic-${row.criterion}`) === problemId);
 }
 export function criticCorrectionIssue(state: Row, request: Row, originalOperation?: Row) {
+  // Simple is finish-first: a Critic finding informs the next visual choice,
+  // but does not dictate the painting primitive, correction order or strategy.
+  // Keep explicit causal-source reconstruction under the strict evidence gates
+  // below; it can affect a different owner's pixels and is not mere art advice.
+  if (state.painting_profile === 'simple_graphic'
+    && !(request.structural_correction ?? request.args?.structural_correction)?.causal_source) return undefined;
   const finding = selectedCriticCorrection(state, request);
   if (!finding) return (request.structural_correction ?? request.args?.structural_correction)?.causal_source
-    ? { code: 'structural_correction_owner_mismatch',
+    ? { authority: 'execution-integrity' as const, code: 'structural_correction_owner_mismatch',
         message: 'A causal_source cannot authorize reconstruction without an unresolved, exact Critic-reviewed structural defect.' }
     : undefined;
   const linked = requestProblemLinks(request);
@@ -581,7 +587,7 @@ export function criticCorrectionIssue(state: Row, request: Row, originalOperatio
     const reviewedSource = verifiedReviewedCausalSource(
       state, request, finding, plan, originalOperation);
     if (plan.causal_source && !reviewedSource)
-      return { code: 'structural_correction_owner_mismatch',
+      return { authority: 'execution-integrity' as const, code: 'structural_correction_owner_mismatch',
         message: `Defect ${defect.id}: causal_source did not match the reviewed frame, native owner receipt, active scene owner and exact single target. Do not retarget an unrelated layer.` };
     if (plan.execution === 'construction' && !plan.part_ids.includes(provenance?.part_id)
       && !(reviewedSource && provenance?.part_id === plan.causal_source?.semantic_id))

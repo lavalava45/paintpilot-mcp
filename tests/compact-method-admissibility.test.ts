@@ -19,14 +19,12 @@ const check = (
 });
 
 describe('compact method admissibility extraction', () => {
-  it('preserves exclusion followed by tool mismatch for the same authored step', () => {
+  it('preserves explicit exclusion while catalog tool preferences remain advisory', () => {
     expect(check([step('soft-edges', 'photoshop_fill_layer')], ['soft-edges'])).toEqual({
       methodClasses: ['brush'],
       violations: [
         { scope: 'next_operation', code: 'artistic_method_unavailable',
           message: 'Executed method_id=soft-edges is explicitly excluded.' },
-        { scope: 'next_operation', code: 'step_method_tool_mismatch',
-          message: 'method_id=soft-edges requires primary tool photoshop_paint_strokes, not photoshop_fill_layer' },
       ],
     });
   });
@@ -42,20 +40,16 @@ describe('compact method admissibility extraction', () => {
       .toEqual({ methodClasses: ['brush'], violations: [] });
   });
 
-  it('keeps missing primaryTool as a mismatch rather than silently admitting a catalogued method', () => {
-    expect(check([step('descriptive-only', 'photoshop_fill_layer')]).violations).toEqual([{
-      scope: 'next_operation', code: 'step_method_tool_mismatch',
-      message: 'method_id=descriptive-only requires primary tool undefined, not photoshop_fill_layer',
-    }]);
+  it('does not treat a missing catalog primaryTool as execution authority', () => {
+    expect(check([step('descriptive-only', 'photoshop_fill_layer')]).violations).toEqual([]);
   });
 
-  it('preserves mixed-class ordering and the exact diagnostic', () => {
+  it('preserves mixed-class classification without an artistic refusal', () => {
     expect(check([step(undefined, 'photoshop_fill_layer', 'fill'),
       step(undefined, 'photoshop_paint_strokes', 'brush'),
       step(undefined, 'photoshop_paint_regions', 'fill')])).toEqual({
       methodClasses: ['fill', 'brush'],
-      violations: [{ scope: 'next_operation', code: 'compact_pass_mixed_method_class',
-        message: 'next_pass actions contain incompatible mutation method classes: fill, brush; split them into bounded passes' }],
+      violations: [],
     });
   });
 

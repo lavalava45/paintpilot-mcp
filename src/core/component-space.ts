@@ -2,7 +2,7 @@
 // A canvas field is still subject to semantic ownership and exact-image Critic review.
 export const COMPONENT_SPACE_SCHEMA = {
   type: 'string', enum: ['canvas', 'world'],
-  description: 'world (default): depicted spatial component. canvas: paper/backdrop/flat graphic field in canvas coordinates, with no physical support, construction model or spatial parent. For a flat fill/gradient use construction_role=continuous-field, visual_intent=continuous-field and method continuous-color-field; omit spatial construction_tier/change/bindings. Geometry is not required for that field; applicable color preflight and visual review remain required.',
+  description: 'world (default): depicted spatial component; canvas: two-dimensional canvas-space component. Neither choice prescribes style, material or Photoshop painting method. Existing durable owner coordinate space cannot be silently relabelled.',
 };
 
 export function canvasComponent(raw: any, context: any = {}): boolean {
@@ -11,6 +11,21 @@ export function canvasComponent(raw: any, context: any = {}): boolean {
     ? context.logical_layer_owners.find((owner: any) => owner?.hypothesis_id === logical?.hypothesis_id)
     : undefined;
   return (logical?.component_space ?? prior?.component_space) === 'canvas';
+}
+
+/** A declared 2D contour is not a spatial construction model. This predicate
+ * is shared by admission and owner-plan compilation; neither may advertise a
+ * transition that the other forbids. Native contour/topology checks still run. */
+export function flatCanvasContour(raw: any): boolean {
+  if (raw.logical_layer?.component_space !== 'canvas' || raw.construction) return false;
+  // Coordinate-space intent does not imply one prescribed contour method or
+  // artistic object type. Exact contour validity and targeting are checked by
+  // the Photoshop operation itself.
+  const mutations = (Array.isArray(raw.actions) ? raw.actions : [])
+    .filter((step: any) => !['photoshop_create_layer', 'photoshop_get_preview'].includes(step?.tool));
+  return mutations.length > 0 && mutations.every((step: any) => step?.tool === 'photoshop_paint_regions'
+    && Array.isArray(step?.args?.regions) && step.args.regions.length > 0
+    && step.args.regions.every((region: any) => Array.isArray(region?.contours) && region.contours.length > 0));
 }
 
 export function componentSpaceIssue(raw: any, context: any = {}) {
@@ -25,14 +40,8 @@ export function componentSpaceIssue(raw: any, context: any = {}) {
   if (prior && logical?.component_space !== undefined
       && logical.component_space !== (prior.component_space ?? 'world'))
     return { code: 'component_space_owner_conflict', message: 'Preserve the durable component coordinate space; create a distinct owner for a different component.' };
-  if (space === 'canvas' && (raw.construction || ['structured-mass', 'structured-contour'].includes(raw.construction_role)
-      || logical?.construction_change || logical?.construction_tier || logical?.parent_hypothesis_id
-      || logical?.geometry_binding || logical?.surface_frame || logical?.camera_binding
-      || ['support-surface', 'transmissive-surface'].includes(logical?.physical_role)
-      || prior?.geometry_binding || prior?.construction_tier
-      || (Array.isArray(context.construction_bindings)
-        && context.construction_bindings.some((binding: any) => binding?.owner_id === logical?.hypothesis_id))))
-    return { code: 'component_space_conflict', path: 'next_pass.logical_layer.component_space',
-      message: 'Canvas components cannot claim spatial construction/support/parent bindings. For a flat field keep canvas, use fill/gradient with construction_role=continuous-field, and omit construction, construction_change, construction_tier, spatial parent/bindings and support-surface/transmissive-surface roles. For a depicted spatial component choose world and supply actual geometry. A durable world owner requires a distinct canvas owner; preserve semantic units.' };
+  // Artistic combinations (canvas-space contours, diagrams, imaginary
+  // perspective, support surfaces, optical overlays) are not errors. A truly
+  // contradictory existing owner is rejected by component_space_owner_conflict.
   return undefined;
 }

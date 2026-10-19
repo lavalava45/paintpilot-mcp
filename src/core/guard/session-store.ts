@@ -1,7 +1,10 @@
 // @ts-nocheck
+import { ownershipEvidence, pendingCreatedLayers, committedSceneRecord } from './ownership-evidence.js';
+import { PROJECT_CHECKPOINT_PROTOCOL, projectFileIdentity, sha256Bytes, restoredProjectRecords, verifyProjectCheckpoint } from './project-checkpoint.js';
 import { chatCriticRequest, validateChatCritic, persistChatCritic, reconcileCriticReviewState } from './chat-critic.js';
 import { FrameReviewValidationError, validateReviewSections } from './review-validation.js';
 import { SCENE_FOUNDATION_VERSION, foundationAdmission, validateSceneFoundation } from './scene-foundation.js';
+import { ArtisticReviewNotice, reportArtisticAdvice } from './admission-policy.js';
 import { criticCorrectionIssue, advanceCriticCorrections, criticCorrectionContext, originalBriefAnchor, selectedCriticCorrection, correctionAttemptState } from './critic-correction.js';
 import { requestProblemLinks } from './problem-links.js';
 import { correctionTargetFacts, plannedGlobalComponentCorrection } from './correction-admissibility.js';
@@ -798,16 +801,12 @@ function validateBrushStrategyAgainstPreflight(artRun, request) {
     : {};
   const methodClass = textOrUndefined(micro.method_class)?.toLowerCase();
   if (!methodClass || !['paint', 'preset-brush'].includes(methodClass)) return;
-  const strategy = micro.paint_strategy;
-  if (!strategy || typeof strategy !== 'object' || Array.isArray(strategy)) {
-    throw new Error(
-      'paint_strategy_required: non-trivial brush painting must bind material_role -> visual_intent -> brush_role -> preset/pressure policy'
-    );
-  }
+  // A brush inventory is a reference for choosing a medium, not a whitelist of
+  // styles. Only enforce an actual pack-exclusivity restriction or a concrete
+  // stamp profile identity here; Photoshop validates its live selected preset.
+  const strategy = micro.paint_strategy && typeof micro.paint_strategy === 'object'
+    && !Array.isArray(micro.paint_strategy) ? micro.paint_strategy : {};
   const brushRole = textOrUndefined(strategy.brush_role);
-  const materialRole = textOrUndefined(strategy.material_role);
-  const visualIntent = textOrUndefined(strategy.visual_intent)?.toLowerCase();
-  const pressurePolicy = textOrUndefined(strategy.pressure_policy)?.toLowerCase();
   const presetName = textOrUndefined(strategy.preset_name);
   const strategyPackId = textOrUndefined(strategy.brush_pack_id);
   const strategyStampProfileId = textOrUndefined(strategy.stamp_profile_id);
@@ -818,14 +817,6 @@ function validateBrushStrategyAgainstPreflight(artRun, request) {
   ].includes(step?.tool));
   const stampOnly = stampSteps.length > 0 && mutationLikeSteps.length === stampSteps.length;
   const packPolicy = artRun?.brush_pack_policy;
-  const stage = canonicalPaintingStage(textOrUndefined(micro.stage) ?? textOrUndefined(request?.stage));
-  const stageRank = paintingStageRank(stage);
-  const materialFitnessRequired = stageRank !== undefined && stageRank >= 4;
-  if (materialFitnessRequired && artRun?.brush_preflight?.inventory_scope === 'filtered') {
-    throw new Error(
-      'brush_inventory_scope_insufficient: substantial form/material/detail brush work requires a full installed-inventory or evidence-bound brush-pack preflight, not a narrow filtered familiar-preset lookup'
-    );
-  }
   if (stampSteps.length) {
     for (const step of stampSteps) {
       const stepPackId = textOrUndefined(step?.args?.brush_pack_id);
@@ -842,47 +833,9 @@ function validateBrushStrategyAgainstPreflight(artRun, request) {
     }
     if (stampOnly) return;
   }
-  const role = artRun?.brush_preflight?.roles?.find(row => row.role_id === brushRole);
-  if (!role) {
-    throw new Error(`brush_role_not_preflighted: brush_role=${brushRole ?? 'missing'} is not present in the durable brush_preflight role map`);
-  }
-  if (!materialRole || !role.material_roles?.includes(materialRole)) {
-    throw new Error(`brush_material_role_mismatch: material_role=${materialRole ?? 'missing'} is not assigned to brush_role=${brushRole}`);
-  }
-  if (!visualIntent) throw new Error('brush_visual_intent_required: declare a concrete visual_intent');
-  const novel = !role.visual_intents?.includes(visualIntent);
-  if (novel) {
-    const key = brushUseKey(role, materialRole, visualIntent,
-      textOrUndefined(micro.scale)?.toLowerCase() ?? '', presetName ?? '', artRun?.brush_preflight?.brush_pack_id);
-    const cached = (artRun?.brush_fitness_reviews ?? []).some(row => row.key === key && row.status === 'pass');
-    if (!cached) {
-      const reason = textOrUndefined(strategy.brush_use_reason);
-      const issue = boundedBrushTrial(strategy, mutationLikeSteps, textOrUndefined(micro.scale)?.toLowerCase() ?? '');
-      if (!reason || reason.length < 12 || issue || strategy.brush_fitness_key !== key)
-        throw new Error(`brush_role_new_purpose_trial_required: material=${materialRole} and scale remain mandatory; visual_intent=${visualIntent} is advisory, not forbidden. Add next_pass.brush_use_reason (12+ chars), bounded region_bounds and trial strokes/dabs. ${issue ?? ''} ${strategy.brush_fitness_key !== key ? 'Compiler-provided brush settings identity does not match durable preflight.' : ''} Current role intents=${JSON.stringify(role.visual_intents ?? [])}. Review on the exact AFTER before reuse.`);
-    }
-  }
-  const selectedCandidate = presetName && Array.isArray(role.candidate_evidence)
-    ? role.candidate_evidence.find(candidate => candidate.preset_name === presetName)
-    : undefined;
-  const expectedPressurePolicy = selectedCandidate?.pressure_policy ?? role.pressure_policy;
-  if (pressurePolicy !== expectedPressurePolicy) {
-    throw new Error(`brush_pressure_policy_mismatch: brush_role=${brushRole} preset_name=${presetName ?? 'missing'} requires pressure_policy=${expectedPressurePolicy}, got ${pressurePolicy ?? 'missing'}`);
-  }
-  const acceptedPresets = new Set([role.preferred_preset, ...(role.alternative_presets ?? [])]);
-  if (presetName && !acceptedPresets.has(presetName)) {
-    throw new Error(`brush_preset_not_preflighted: preset_name=${presetName} is not an accepted preset for brush_role=${brushRole}`);
-  }
-  if (methodClass === 'preset-brush' && !presetName) {
-    throw new Error(`brush_preset_required: method_class=preset-brush requires preset_name from brush_role=${brushRole}`);
-  }
-  if (materialFitnessRequired && ['MATERIAL', 'DETAIL', 'MICRO_DETAIL'].includes(stage ?? '')) {
-    const probeStatus = textOrUndefined(role.probe_status)?.toLowerCase();
-    if (!['pass', 'cached'].includes(probeStatus ?? '')) {
-      throw new Error(`brush_role_probe_required: brush_role=${brushRole} requires probe_status=pass|cached for ${stage} material/finish work`);
-    }
-  }
   if (packPolicy?.mode === 'exclusive') {
+    const role = artRun?.brush_preflight?.roles?.find(row => row.role_id === brushRole);
+    if (!role) throw new Error(`exclusive_brush_pack_role_required: ${brushRole ?? 'missing'} is not bound to the explicitly exclusive pack`);
     if (artRun?.brush_preflight?.brush_pack_id !== packPolicy.brush_pack_id) {
       throw new Error(`exclusive_brush_pack_preflight_required: durable brush_preflight must belong to ${packPolicy.brush_pack_id}`);
     }
@@ -1317,13 +1270,16 @@ export function previewOf(result) {
   }
   return undefined;
 }
-function bindPreviewDocument(preview, documentId) {
+export function bindPreviewDocument(preview, documentId) {
   if (!preview) return preview;
   if (!Number.isSafeInteger(documentId) || documentId <= 0) {
     throw new Error('Preview provenance requires a positive pinned document_id');
   }
   if (preview.document_id !== undefined && preview.document_id !== documentId) {
     throw new Error(`Preview document_id ${preview.document_id} does not match pinned document ${documentId}`);
+  }
+  if (preview.document_target?.id !== undefined && preview.document_target.id !== documentId) {
+    throw new Error(`Preview document_target ${preview.document_target.id} does not match pinned document ${documentId}`);
   }
   return { ...preview, document_id: documentId };
 }
@@ -2420,11 +2376,97 @@ export class SessionStore {
       ?? documentState?.document_instance?.bootstrap_sequence
       ?? 0
     );
-    return records.filter(record => {
+    const live = records.filter(record => {
+      if (record.checkpoint_origin) return false;
       if (record.args?.document_id !== documentId) return false;
+      if (record.id === documentState?.project_checkpoint_restore?.operation_id) return true;
       if (!Number.isSafeInteger(supersededThroughSequence) || supersededThroughSequence <= 0) return true;
       return Number(record.sequence ?? 0) > supersededThroughSequence;
     });
+    const restore = documentState?.project_checkpoint_restore;
+    if (!restore) return live;
+    const checkpoint = this.loadProjectCheckpoint(restore.checkpoint);
+    const incarnation = documentState.document_instance?.host_witness?.token;
+    if (!incarnation) throw Error('project_checkpoint_restoration_identity_missing');
+    return [...restoredProjectRecords(checkpoint, documentId, incarnation, restore.operation_id), ...live];
+  }
+  loadProjectCheckpoint(reference) {
+    if (!reference?.save_operation_id || !reference.sha256) throw Error('project_checkpoint_reference_invalid');
+    const file = path.join(this.directory, 'project-checkpoints', `${validId(reference.save_operation_id)}.json`);
+    const bytes = fs.readFileSync(file);
+    if (sha256Bytes(bytes) !== reference.sha256) throw Error('project_checkpoint_manifest_changed');
+    const checkpoint = JSON.parse(bytes.toString('utf8'));
+    if (checkpoint.protocol !== PROJECT_CHECKPOINT_PROTOCOL || checkpoint.save_operation_id !== reference.save_operation_id)
+      throw Error('project_checkpoint_reference_invalid');
+    return checkpoint;
+  }
+  projectCheckpointForFile(file) {
+    if (typeof file !== 'string') return undefined;
+    const save = this.records().filter(record => record.tool === 'photoshop_save_document'
+      && record.phase === 'completed' && !record.failed && record.checkpoint
+      && path.resolve(record.checkpoint).toLowerCase() === path.resolve(file).toLowerCase())
+      .sort((a, b) => Number(b.sequence ?? 0) - Number(a.sequence ?? 0))[0];
+    if (!save) return undefined;
+    return { save, reference: save.project_checkpoint,
+      checkpoint: save.project_checkpoint ? this.loadProjectCheckpoint(save.project_checkpoint) : undefined };
+  }
+  writeProjectCheckpoint(id, observation, captureArgs) {
+    const record = this.read(id);
+    const documentId = record?.args?.document_id;
+    if (record?.tool !== 'photoshop_save_document' || record.phase !== 'completed' || record.failed || !record.checkpoint)
+      throw Error('project_checkpoint_save_unverified');
+    this.assertDocumentIdentityVerified(documentId);
+    const state = this.paintingState().documents?.[String(documentId)];
+    const frame = state?.current_frame;
+    const origin = frame?.operation_id ? this.read(frame.operation_id) : undefined;
+    if (!frame || !origin?.verdict || origin.verdict.disposition === 'rollback'
+      || frame.sha256 !== observation.preview?.sha256 || state.pending_rollback)
+      throw Error('project_checkpoint_current_frame_unverified');
+    const records = this.currentDocumentRecords(documentId);
+    if (records.some(row => row.phase !== 'completed' || (row.visual && !row.verdict && row.execution !== 'not-executed')))
+      throw Error('project_checkpoint_pending_operation');
+    const checkpoint = { protocol: PROJECT_CHECKPOINT_PROTOCOL, save_operation_id: id,
+      document_id: documentId, source_incarnation: this.currentDocumentIncarnationId(documentId),
+      created_at: new Date().toISOString(), file: projectFileIdentity(record.checkpoint),
+      preview: observation.preview, capture_args: captureArgs, layers: observation.layers,
+      owners: this.semanticLayerOwners(documentId), state: structuredClone(state), records: structuredClone(records.filter(row => row.id !== id)) };
+    verifyProjectCheckpoint(checkpoint, observation);
+    const file = path.join(this.directory, 'project-checkpoints', `${validId(id)}.json`);
+    atomicJson(file, checkpoint);
+    const reference = { save_operation_id: id, sha256: sha256Bytes(fs.readFileSync(file)) };
+    this.write({ ...record, project_checkpoint: reference });
+    return reference;
+  }
+  restoreProjectCheckpoint(id, reference, observation) {
+    const record = this.read(id);
+    const documentId = record?.bootstrap_outcome?.document_id;
+    if (record?.tool !== 'photoshop_open_image' || record.phase !== 'completed' || record.failed || !documentId)
+      throw Error('project_checkpoint_open_unverified');
+    const checkpoint = this.loadProjectCheckpoint(reference);
+    if (observation.preview?.document_id !== documentId) throw Error('project_checkpoint_document_mismatch');
+    verifyProjectCheckpoint(checkpoint, observation);
+    const observed = this.observeDocumentInstance(documentId, observation.witness);
+    if (!['bound', 'match'].includes(observed.status)) throw Error('project_checkpoint_document_replaced');
+    const identity = this.paintingState().documents[String(documentId)].document_instance;
+    // This is a native OPEN receipt plus freshly proven restored frame, not a
+    // fabricated paint/create receipt. A new exact visual review remains due.
+    const restored = { ...record, args: { ...record.args, document_id: documentId }, visual: true,
+      stage: checkpoint.state.current_stage ?? 'GLOBAL_BLOCK_IN', scale: 'global', region: 'whole-canvas',
+      baseline_preview: { ...checkpoint.preview, document_id: documentId, document_target: { id: documentId, pinned: true } },
+      before_preview: { ...checkpoint.preview, document_id: documentId, document_target: { id: documentId, pinned: true } },
+      native_history_available: false,
+      project_recovery: { status: 'verified', checkpoint: reference, source_document_id: checkpoint.document_id } };
+    this.write(restored);
+    this.updatePaintingState(documentId, () => ({ ...structuredClone(checkpoint.state), document_id: documentId,
+      document_instance: identity, current_frame: undefined, accepted_frame: undefined, confirmed_goal_frame: undefined,
+      pending_rollback: undefined, last_rollback: undefined, continuation_checkpoint: undefined,
+      project_checkpoint_restore: { operation_id: id, checkpoint: reference, native_history_available: false },
+      workflow_lifecycle: { status: 'active', reason: 'verified_project_reopen', operation_id: id, at: new Date().toISOString() },
+    }));
+    this.attachPreview(id, { content: [{ type: 'text', text: JSON.stringify(observation.preview) }] });
+    this.setVisualBarrier(documentId, { planId: this.visualPlanId(restored), operationId: id,
+      operationSequence: restored.sequence, sha256: observation.preview.sha256, requiresExternalPreview: false });
+    return this.read(id);
   }
   observeDocumentInstance(documentId, rawWitness, observation = {}) {
     if (!Number.isSafeInteger(documentId) || documentId <= 0) {
@@ -4132,7 +4174,7 @@ export class SessionStore {
     check.owner_signature = this.physicalStackOwnerSignature(documentId);
     return check;
   }
-  physicalStackGate(documentId, documentState, context, projectionContext) {
+  physicalStackGate(documentId, documentState, context, projectionContext, artisticAdvisories = undefined) {
     if (
       documentState?.painting_profile === 'nontrivial_painting'
       && isPhysicalStackGatedStage(context.stage)
@@ -4147,19 +4189,13 @@ export class SessionStore {
         && durableStageRank >= 3;
       if (!legacyAlreadyPastGate) {
         if (!physicalStackCheck || physicalStackCheck.status === 'pending') {
-          throw new Error(
-            `physical_stack_check_required: ${context.stage} is blocked until the ordinary current-frame review records coherent depth/occlusion, opaque coverage, transparency intent and layer order in previous_observation.physical_stack_check`
-          );
+          reportArtisticAdvice(`physical_stack_check_required: ${context.stage} has not yet been reviewed for depth, occlusion, opacity and layer order; a visual concern, not a Photoshop mutation veto`, artisticAdvisories);
         }
         if (physicalStackCheck.status === 'fail') {
-          throw new Error(
-            `physical_stack_debt_unresolved: ${context.stage} is blocked while physical scene-stack debt remains`
-          );
+          reportArtisticAdvice(`physical_stack_debt_unresolved: ${context.stage} still has visual scene-stack debt; review the outcome but do not dictate a painting method`, artisticAdvisories);
         }
         if (physicalStackCheck.status !== 'pass') {
-          throw new Error(
-            `physical_stack_check_required: ${context.stage} is blocked by unresolved physical-stack status ${physicalStackCheck.status}`
-          );
+          reportArtisticAdvice(`physical_stack_check_required: ${context.stage} has unresolved artistic stack review status ${physicalStackCheck.status}`, artisticAdvisories);
         }
         const currentOwnerSignature = this.physicalStackOwnerSignature(
           documentId,
@@ -4170,9 +4206,7 @@ export class SessionStore {
           !textOrUndefined(physicalStackCheck.owner_signature)
           || physicalStackCheck.owner_signature !== currentOwnerSignature
         ) {
-          throw new Error(
-            `physical_stack_check_stale: ${context.stage} is blocked because the physical semantic layer graph changed after the last accepted physical-stack review`
-          );
+          reportArtisticAdvice(`physical_stack_check_stale: ${context.stage} scene-layer arrangement changed since the last artistic stack evaluation; refresh visual review`, artisticAdvisories);
         }
       }
     }
@@ -4190,27 +4224,27 @@ export class SessionStore {
           || this.currentFrameAncestry(state, projectionContext?.records ?? this.records())?.has(source.id) === true);
     }
     const admission = foundationAdmission(state, request, retained);
-    // Only aesthetic foundation ordering can be advisory in simple_graphic,
-    // and only for a proven clipped existing-owner native sky operation.
-    // Stop, document identity, owned targets and other Guard gates still apply.
+    // A Simple composition/technique milestone is advisory, not Photoshop
+    // mutation authorization. All document, ownership, Undo and pixel gates apply.
     if (admission.status === 'blocked' && simpleGraphicFoundationAdvisory(
       state, request, this.semanticLayerOwners(documentId, projectionContext?.records, projectionContext),
     )) return { ...admission, status: 'advisory',
       warning_code: 'simple_graphic_foundation_deferred',
-      warning: 'Foundation remains incomplete. One exact-owner clipped sky gradient may proceed away from reviewed structural debt; missing composition/technique is not certified.' };
+      warning: 'Composition/technique foundation remains incomplete, not certified. Simple may continue bounded non-destructive painting; document, owner, Undo and pixel evidence still require normal Guard validation.' };
     return admission;
   }
-  plannerGate(documentId, request, projectionContext, deferPhysicalStackReview = false) {
+  plannerGate(documentId, request, projectionContext, deferPhysicalStackReview = false, artisticAdvisories = undefined) {
     if (!isVisual(request.tool)) return null;
+    const advise = (message) => reportArtisticAdvice(message, artisticAdvisories);
     if (!Number.isSafeInteger(documentId) || documentId <= 0) return null;
     const documentState = (projectionContext ? projectionContext.paintingState : this.paintingState()).documents?.[String(documentId)];
     const art = documentState?.art_director;
     const context = visualContext(request);
     // Combined closure+continuation installs the reviewed check first. Runtime
     // revalidates this gate from durable state before any Photoshop dispatch.
-    if (!deferPhysicalStackReview) this.physicalStackGate(documentId, documentState, context, projectionContext);
+    if (!deferPhysicalStackReview) this.physicalStackGate(documentId, documentState, context, projectionContext, artisticAdvisories);
     const foundation = this.sceneFoundationAdmission(documentId, request, projectionContext);
-    if (foundation.status === 'blocked') throw new Error(foundation.message);
+    if (foundation.status === 'blocked') advise(foundation.message);
     if (foundation.status === 'foundation-repair') return null;
 
     const representationDebts = ownerRepresentationDebt(documentState);
@@ -4221,7 +4255,7 @@ export class SessionStore {
     const styleExemption = exactRepresentationStyleExemption(request, documentState);
     if (!styleExemption && ((isRefinementGatedStage(context.stage) && representationDebts.length) || (textureOnly && targetDebt))) {
       const blocked = isRefinementGatedStage(context.stage) ? representationDebts : [targetDebt];
-      throw new Error('refinement_owner_representation_debt: review/refine object form before dependent material/texture/detail work: ' + blocked.map(row => row.owner_id).join(', '));
+      advise('refinement_owner_representation_debt: review/refine object form before dependent material/texture/detail work: ' + blocked.map(row => row.owner_id).join(', '));
     }
     if (!art?.directive_id) return null;
     if (art.whole_image_glance?.due === true) {
@@ -4236,15 +4270,13 @@ export class SessionStore {
       const uncertaintyNotice = unresolved.length
         ? `; unresolved relations: ${unresolved.join(', ')}. Do not repeat without better evidence; report an actionable blocker if the original frame cannot resolve them`
         : '';
-      throw new Error(
-        `whole_image_glance_required: directive ${art.directive_id} must review${exactFrame} for ${art.whole_image_glance.reason ?? 'pending boundary'} before another Painter mutation${uncertaintyNotice}`
-      );
+      advise(`whole_image_glance_required: directive ${art.directive_id} should review${exactFrame} for ${art.whole_image_glance.reason ?? 'pending boundary'} before another Painter mutation${uncertaintyNotice}`);
     }
     if (art.status === 'interrupted' || art.review_due) {
-      throw new Error(`planner_review_required: directive ${art.directive_id} requires Art Director review before another Painter mutation (${art.review_reason ?? art.status})`);
+      advise(`planner_review_required: directive ${art.directive_id} requires Art Director review before another Painter mutation (${art.review_reason ?? art.status})`);
     }
     if (art.status === 'completed') {
-      throw new Error(`planner_review_required: directive ${art.directive_id} is completed; issue a new Art Director directive before more Painter work`);
+      advise(`planner_review_required: directive ${art.directive_id} is completed; issue a new Art Director directive before more Painter work`);
     }
     const rawMaterialResponse = request?.tool === 'photoshop_execute_visual_microplan'
       ? request?.args?.material_response
@@ -4255,22 +4287,20 @@ export class SessionStore {
         const field = textOrUndefined(rawBasis.field);
         const criterion = textOrUndefined(rawBasis.criterion);
         if (!field || !criterion || art.style_contract?.[field] !== criterion) {
-          throw new Error(
-            'material_response_style_basis_mismatch: material response style_contract_basis must exactly match the active Art Director style_contract'
-          );
+          advise('material_response_style_basis_mismatch: material response cites a different Art Director style criterion; inspect the rendered result rather than blocking the chosen technique');
         }
       }
     }
     if (isDetailStage(context.stage)) {
       const valueCheck = art.value_check;
       if (!valueCheck) {
-        throw new Error(`value_check_required: DETAIL is blocked until Art Director records an observed grayscale/value check for directive ${art.directive_id}`);
+        advise(`value_check_required: DETAIL should follow an observed grayscale/value check for directive ${art.directive_id}`);
       }
-      if (valueCheck.status === 'fail') {
-        throw new Error(`value_structure_unstable: DETAIL is blocked by failed grayscale/value check for directive ${art.directive_id}`);
+      if (valueCheck?.status === 'fail') {
+        advise(`value_structure_unstable: DETAIL follows a failed grayscale/value check for directive ${art.directive_id}`);
       }
-      if (!['pass', 'override', 'style-not-applicable'].includes(valueCheck.status)) {
-        throw new Error(`value_check_required: DETAIL is blocked by unresolved value-check status ${valueCheck.status}`);
+      if (valueCheck && !['pass', 'override', 'style-not-applicable'].includes(valueCheck.status)) {
+        advise(`value_check_required: DETAIL follows unresolved value-check status ${valueCheck.status}`);
       }
     }
     if (isRefinementGatedStage(context.stage)) {
@@ -4280,50 +4310,39 @@ export class SessionStore {
         unresolvedOwnerRepresentation.length
         && refinementCheck?.status !== 'style-not-applicable'
       ) {
-        throw new Error(
-          `refinement_owner_representation_debt: DETAIL is blocked while primitive scaffold representation remains on semantic owners: ${unresolvedOwnerRepresentation.map(row => row.owner_id).join(', ')}`
-        );
+        advise(`refinement_owner_representation_debt: DETAIL follows unresolved primitive scaffold representation on owners: ${unresolvedOwnerRepresentation.map(row => row.owner_id).join(', ')}`);
       }
       if (!refinementCheck) {
-        throw new Error(
-          `refinement_check_required: DETAIL is blocked until Art Director records durable progressive-refinement evidence for directive ${art.directive_id}`
-        );
+        advise(`refinement_check_required: DETAIL should follow progressive-refinement evidence for directive ${art.directive_id}`);
       }
-      if (refinementCheck.status === 'pending') {
-        throw new Error(
-          `refinement_check_required: DETAIL is blocked while progressive-refinement evidence remains pending for directive ${art.directive_id}`
-        );
+      if (refinementCheck?.status === 'pending') {
+        advise(`refinement_check_required: DETAIL follows pending progressive-refinement evidence for directive ${art.directive_id}`);
       }
-      if (refinementCheck.status === 'fail') {
-        throw new Error(
-          `refinement_debt_unresolved: DETAIL is blocked while major/secondary form, edge/material, or residual block-in debt remains for directive ${art.directive_id}`
-        );
+      if (refinementCheck?.status === 'fail') {
+        advise(`refinement_debt_unresolved: DETAIL follows unresolved major/secondary form or edge/material debt for directive ${art.directive_id}`);
       }
-      if (!['pass', 'style-not-applicable'].includes(refinementCheck.status)) {
-        throw new Error(
-          `refinement_check_required: DETAIL is blocked by unresolved refinement status ${refinementCheck.status}`
-        );
+      if (refinementCheck && !['pass', 'style-not-applicable'].includes(refinementCheck.status)) {
+        advise(`refinement_check_required: DETAIL follows unresolved refinement status ${refinementCheck.status}`);
       }
       if (
-        refinementCheck.status === 'pass'
+        refinementCheck?.status === 'pass'
         && refinementCheck.low_frequency_evidence?.status !== 'resolved'
       ) {
-        throw new Error(
-          `refinement_low_frequency_required: DETAIL is blocked until major-form modelling is confirmed on exact-current low-frequency evidence for directive ${art.directive_id}`
-        );
+        advise(`refinement_low_frequency_required: DETAIL should follow confirmed major-form modelling on current low-frequency evidence for directive ${art.directive_id}`);
       }
     }
     if (!context.planner_directive_id || !context.planner_task_id || !context.painter_scope) {
-      throw new Error(`painter_contract_gate: active directive ${art.directive_id} requires planner_directive_id, planner_task_id and painter_scope on every visual micro-plan`);
+      advise(`painter_contract_gate: directive ${art.directive_id} recommends planner_directive_id, planner_task_id and painter_scope to retain artistic planning traceability`);
     }
     if (context.planner_directive_id !== art.directive_id) {
-      throw new Error(`painter_contract_gate: micro-plan directive ${context.planner_directive_id} does not match active directive ${art.directive_id}`);
+      advise(`painter_contract_gate: micro-plan directive ${context.planner_directive_id} differs from active artistic directive ${art.directive_id}`);
     }
-    if (!PAINTER_SCOPES.has(context.painter_scope)) throw new Error('painter_contract_gate: painter_scope must be local|medium');
+    if (!PAINTER_SCOPES.has(context.painter_scope)) advise('painter_contract_gate: suggested painter_scope is local|medium');
     const task = (art.tasks ?? []).find(row => row.task_id === context.planner_task_id);
-    if (!task) throw new Error(`painter_contract_gate: unknown planner_task_id ${context.planner_task_id}`);
-    if (task.status !== 'active') {
-      throw new Error(`painter_contract_gate: task ${task.task_id} is ${task.status}; only the active task may be executed`);
+    if (!task) {
+      advise(`painter_contract_gate: planner_task_id ${context.planner_task_id ?? 'missing'} has no current artistic task; technical document and ownership gates remain mandatory`);
+    } else if (task.status !== 'active') {
+      advise(`painter_contract_gate: task ${task.task_id} is ${task.status}; consider re-planning after evaluating the image`);
     }
     const activeBrushPackId = textOrUndefined(documentState?.brush_pack_policy?.brush_pack_id)
       ?? textOrUndefined(documentState?.brush_preflight?.brush_pack_id);
@@ -4343,23 +4362,23 @@ export class SessionStore {
         const scenePlan = art.brush_pack_scene_plan;
         const bound = scenePlan?.brush_pack_id === activeBrushPackId
           && (scenePlan.uses ?? []).some(use =>
-            use.task_id === task.task_id && use.source_kind === sourceKind && use.source_id === sourceId
+            use.task_id === task?.task_id && use.source_kind === sourceKind && use.source_id === sourceId
           );
         if (!bound) {
-          throw new Error(`brush_pack_scene_binding_required: ${sourceKind}=${sourceId} is not causally assigned to active task ${task.task_id}`);
+          advise(`brush_pack_scene_binding_required: ${sourceKind}=${sourceId} is not assigned to suggested artistic task ${task?.task_id ?? 'none'}`);
         }
       }
     }
     const requestScale = normalizeScale(context.scale);
-    if (!requestScale || requestScale === 'global' || !(task.allowed_scales ?? []).includes(requestScale)) {
+    if (task && (!requestScale || requestScale === 'global' || !(task.allowed_scales ?? []).includes(requestScale))) {
       const blocker = this.largestOpenMustFix(documentState?.visual_problems);
       const scaleRoute = this.priorityScaleAlternatives(documentState, request, blocker);
       const route = scaleRoute.admissible.length
         ? `Use scale=${scaleRoute.admissible.join('|')}; these are the task scales that also clear the current stage-priority relation.`
         : `Task allowed_scales=${scaleRoute.candidates.join('|') || 'none'} has no scale that currently clears stage priority; re-review the Director task/correction_target before retrying.`;
-      throw new Error(`painter_contract_gate: scale ${requestScale ?? 'missing'} is outside task ${task.task_id} allowed_scales=${(task.allowed_scales ?? []).join(',')}. ${route}`);
+      advise(`painter_contract_gate: scale ${requestScale ?? 'missing'} is outside artistic task ${task.task_id} suggested scales=${(task.allowed_scales ?? []).join(',')}. ${route}`);
     }
-    if (!context.change_domains.length) throw new Error('painter_contract_gate: Painter micro-plan requires change_domains');
+    if (!context.change_domains.length) advise('painter_contract_gate: change_domains help document artistic intent but do not authorize the Photoshop executor');
     // Painter, compiler context and method admission share the same ranked
     // exact-frame correction. Old local prose is a fallback, not a competing gate.
     const correction = selectedCriticCorrection(documentState ?? {}, request);
@@ -4383,19 +4402,19 @@ export class SessionStore {
         if (!context.independent_region) {
           const available = [...new Set([unresolvedProblemId, task.correction_target?.problem_id,
             ...(documentState?.chat_critic_findings ?? []).map(finding => finding.problem_id)].filter(Boolean))];
-          throw new Error(`primary_mismatch_unresolved: Critic requires link to unresolved obligation/defect=${JSON.stringify(unresolvedProblemId ?? null)}; received problem_id=${JSON.stringify(context.problem_id ?? null)}, addresses_problem_ids=${JSON.stringify(context.addresses_problem_ids)}. Add this ID to painting_intent.addresses_problem_ids (or next_pass.addresses_problem_ids), retaining Director/global links; available IDs=${JSON.stringify(available)}. Prior pass success does not resolve another obligation.`);
+          advise(`primary_mismatch_unresolved: Critic requires link to unresolved obligation/defect=${JSON.stringify(unresolvedProblemId ?? null)}; received problem_id=${JSON.stringify(context.problem_id ?? null)}, addresses_problem_ids=${JSON.stringify(context.addresses_problem_ids)}. Add this ID to painting_intent.addresses_problem_ids (or next_pass.addresses_problem_ids), retaining Director/global links; available IDs=${JSON.stringify(available)}. Prior pass success does not resolve another obligation.`);
         }
         if (!context.preservation_facts.length) {
-          throw new Error('primary_mismatch_unresolved: independent_region=true requires concrete preservation_facts');
+          advise('primary_mismatch_unresolved: independent_region=true requires concrete preservation_facts');
         }
       }
     }
-    const allowedGlobal = new Set(task.allowed_global_changes ?? []);
+    const allowedGlobal = new Set(task?.allowed_global_changes ?? []);
     const blocked = context.change_domains.filter(domain =>
       (art.forbidden_without_review ?? []).includes(domain) && !allowedGlobal.has(domain)
     );
     if (blocked.length) {
-      throw new Error(`planner_review_required: Painter cannot change ${blocked.join(', ')} under directive ${art.directive_id}; return to Art Director before dispatch`);
+      advise(`planner_review_required: the Art Director suggests reviewing ${blocked.join(', ')} under directive ${art.directive_id}; this artistic routing hint does not prohibit technically safe Photoshop actions`);
     }
     return { directive: art, task, context };
   }
@@ -4894,7 +4913,18 @@ export class SessionStore {
       globalDomains: GLOBAL_CHANGE_DOMAINS,
     });
   }
-  priorityGate(documentId, request, projectionContext) {
+  priorityGate(documentId, request, projectionContext, artisticAdvisories = undefined) {
+    try { return this.enforcedPriorityGate(documentId, request, projectionContext, artisticAdvisories); }
+    catch (error) {
+      // Only failures intentionally produced by artistic evaluation can be
+      // downgraded. Unexpected runtime faults must never be hidden by a code
+      // matching an artistic advisory or a permissive painting profile.
+      if (!(error instanceof ArtisticReviewNotice)) throw error;
+      reportArtisticAdvice(error.message, artisticAdvisories);
+      return null;
+    }
+  }
+  enforcedPriorityGate(documentId, request, projectionContext, artisticAdvisories = undefined) {
     if (!isVisual(request.tool)) return null;
     const context = visualContext(request);
     const requestScale = normalizeScale(context.scale);
@@ -4915,7 +4945,7 @@ export class SessionStore {
     // not just advisory debt. Reject further polygon passes even when their
     // colors, number of contours, strategy labels or problem IDs change.
     const foundation = this.sceneFoundationAdmission(documentId, request, projectionContext);
-    if (foundation.status === 'blocked') throw new Error(foundation.message);
+    if (foundation.status === 'blocked') reportArtisticAdvice(foundation.message, artisticAdvisories);
     if (foundation.status === 'foundation-repair') return null;
     const primitiveDebt = doc?.visual_problems?.['cumulative-trend-primitive-footprint-repeating'];
     const footprintRelated = context.problem_id === primitiveDebt?.problem_id
@@ -4931,14 +4961,14 @@ export class SessionStore {
         : [];
       const hasPolygon = paintTools.some(step => step.tool === 'photoshop_paint_regions');
       if (hasPolygon || !paintTools.length) {
-        throw new Error('strategy_switch_required: repeated primitive-footprint-repeating after two reviewed passes; further polygon/fill-based work is blocked. Obtain Art Director review and test a causally different executable painting method in the selected Photoshop profile; changing color, polygon counts or strategy labels is not a method switch.');
+        throw new ArtisticReviewNotice('strategy_switch_required: repeated primitive-footprint-repeating after two reviewed passes; consider a different visual approach, without prohibiting the chosen Photoshop primitive.');
       }
       const director = doc.art_director;
       const task = director?.tasks?.find(row => row.task_id === context.planner_task_id);
       if (!task || task.status !== 'active' || !task.correction_target
         || task.correction_target.problem_id !== primitiveDebt.problem_id
         || !task.construction_plan?.representation_strategy) {
-        throw new Error('strategy_switch_required: Art Director must review the repeated footprint defect and authorize an explicitly bounded alternative method before its experimental pass.');
+        throw new ArtisticReviewNotice('strategy_switch_required: Art Director review is recommended for a repeated footprint defect; alternative methods remain available.');
       }
       const sourceIds = new Set(primitiveDebt.source_operations ?? []);
       const sourceSequence = Math.max(0, ...lineageRecords
@@ -4961,7 +4991,7 @@ export class SessionStore {
       const acceptedExperiment = lastExperiment?.verdict?.verdict === 'improvement'
         && lastExperiment?.verdict?.disposition === 'accept';
       if (acceptedExperiment && methodFamily(lastExperiment) !== proposedFamily) {
-        throw new Error('strategy_switch_required: the accepted experiment proves only its executed method, not a new untested tool family.');
+        throw new ArtisticReviewNotice('strategy_switch_required: the accepted experiment is evidence for one method; evaluate the outcome of a new tool family independently.');
       }
       if (lastExperiment && !acceptedExperiment) {
         const previousContext = visualContext(lastExperiment);
@@ -4969,7 +4999,7 @@ export class SessionStore {
           || !context.planner_directive_id
           || context.planner_directive_id === previousContext.planner_directive_id
           || context.planner_task_id === previousContext.planner_task_id) {
-          throw new Error('strategy_switch_required: experiment showed no accepted improvement; Art Director must authorize a new task and different executable method.');
+          throw new ArtisticReviewNotice('strategy_switch_required: experiment showed no accepted improvement; recommend another strategy.');
         }
       }
       // After an accepted visual experiment the verified family may continue;
@@ -4980,7 +5010,7 @@ export class SessionStore {
           || !task.correction_target.region_bounds
           || !regionContains(task.correction_target.region_bounds, experimentBounds)
           || boundedCorrectionMutationIssue(request, experimentBounds)) {
-          throw new Error('strategy_switch_required: a bounded medium/small experiment with actual brush coordinates inside the Director correction target is required before further painting.');
+          throw new ArtisticReviewNotice('strategy_switch_required: a small bounded experiment is recommended before further painting; actual canvas bounds and ownership remain independently checked.');
         }
       }
     }
@@ -4988,7 +5018,7 @@ export class SessionStore {
     const attempted = obligations.find(row => row.status !== 'pass' &&
       (context.problem_id === row.id || context.addresses_problem_ids.includes(row.id)));
     if (attempted && attempted.depends_on_ids.some(id => !obligations.some(row => row.id === id && row.status === 'pass')))
-      throw new Error(`stage_priority_gate: obligation ${attempted.id} requires verified prerequisite(s) ${JSON.stringify(attempted.depends_on_ids)}; correct the prerequisite on exact delivered pixels first, or return unknown. Received links=${JSON.stringify(context.addresses_problem_ids)}.`);
+      throw new ArtisticReviewNotice(`stage_priority_gate: obligation ${attempted.id} has unresolved artistic prerequisite(s) ${JSON.stringify(attempted.depends_on_ids)}; preserve these Critic findings during image review.`);
     const blocker = this.largestOpenMustFix(doc?.visual_problems);
     if (!blocker) return null;
     if (blocker.structural_review === true) {
@@ -4996,13 +5026,13 @@ export class SessionStore {
         || context.addresses_problem_ids.includes(blocker.problem_id);
       if (!addressesBlocker) {
         if (!(context.independent_region && context.preservation_facts.length > 0)) {
-          throw new Error(
+          throw new ArtisticReviewNotice(
             `primary_blocker_unresolved: required defect=${JSON.stringify(blocker.problem_id)}; received problem_id=${JSON.stringify(context.problem_id ?? null)}, addresses_problem_ids=${JSON.stringify(context.addresses_problem_ids)}. Add it to addresses_problem_ids or declare proven independent_region with preservation_facts.`
           );
         }
       }
       if (addressesBlocker && isCosmeticCorrectiveAttempt(request)) {
-        throw new Error(
+        throw new ArtisticReviewNotice(
           `structural_debt_requires_structural_correction: must-fix "${blocker.problem_id}" came from structural whole-frame review; cosmetic/detail masking is blocked until a structural correction resolves or reclassifies it`
         );
       }
@@ -5020,19 +5050,19 @@ export class SessionStore {
           : blockerScale === 'medium'
             ? ' no currently allowed task scale clears this medium must-fix; use a same-scale medium task or review a bounded correction_target that allows small.'
             : ' no currently allowed task scale clears the open must-fix; review the active task before retrying.';
-      throw new Error(`stage_priority_gate: invalid scale=${JSON.stringify(context.scale ?? null)}; requested scale is not a permitted priority scale.${taskNote}${recovery}`);
+      throw new ArtisticReviewNotice(`stage_priority_gate: scale=${JSON.stringify(context.scale ?? null)} is outside the preferred artistic priority scale.${taskNote}${recovery}`);
     }
     if (SCALE_RANK[requestScale] <= SCALE_RANK[blockerScale]) return null;
     if (this.plannedComponentCorrection(doc, request, blocker)) return null;
     if (blockerScale === 'medium') {
       const why = this.boundedMediumCorrectionIssue(doc, request, blocker);
-      throw new Error(`stage_priority_gate: ${requestScale} correction blocked by unresolved medium must-fix "${blocker.problem_id}": ${why ?? 'insufficient correction evidence'}`);
+      throw new ArtisticReviewNotice(`stage_priority_gate: ${requestScale} work leaves medium Critic issue "${blocker.problem_id}" unresolved: ${why ?? 'insufficient correction evidence'}`);
     }
     const hasLink = context.addresses_problem_ids.includes(blocker.problem_id);
     const correctionRoute = blockerScale === 'global'
       ? ` Use photoshop_guard_art_director action=review to bind an active medium construction task to correction_target={problem_id:"${blocker.problem_id}",region_bounds:{left,top,right,bottom}} with construction_plan and allowed_global_changes for the structural change. Submit scale=medium, a distinct component problem_id, addresses_problem_id="${blocker.problem_id}" and region_bounds contained in that planned region. This permits a component correction, not unrelated detail or automatic closure of the global defect; retain strategy/protection gates and whole-frame review.`
       : ' Resolve or reclassify the larger problem before finer work.';
-    throw new Error(`stage_priority_gate: ${requestScale} mutation blocked by unresolved ${blockerScale} must-fix "${blocker.problem_id}"; received addresses_problem_ids=${JSON.stringify(context.addresses_problem_ids)}; ${hasLink ? 'The priority ID is already linked; supply the required bounded correction plan and valid geometry.' : `Link the priority problem "${blocker.problem_id}" in addresses_problem_ids.`}${correctionRoute}`);
+    throw new ArtisticReviewNotice(`stage_priority_gate: ${requestScale} work proceeds while ${blockerScale} Critic issue "${blocker.problem_id}" remains open; received addresses_problem_ids=${JSON.stringify(context.addresses_problem_ids)}; ${hasLink ? 'The priority ID is already linked; review the next result.' : `Consider linking the priority problem "${blocker.problem_id}" in addresses_problem_ids.`}${correctionRoute}`);
   }
   cumulativeTrendState(documentId, suppliedRecords) {
     const documentRecords = this.currentDocumentRecords(documentId, suppliedRecords ?? this.records());
@@ -5775,7 +5805,13 @@ export class SessionStore {
       projectionContext
     );
     const metrics = this.workflowMetrics(documentId, records, projectionContext);
-    if (!metrics.workflow_stall) return { metrics, latest_ineffective_visual: null };
+    // Protocol/administrative churn is a throughput warning, not evidence that
+    // an artistic method has been exhausted. An actual strategy-switch gate
+    // requires repeated visually insufficient passes; save, selection, brush
+    // setup and recovery reads must never manufacture a second failed painting.
+    if (!metrics.workflow_stall
+      || metrics.consecutive_insufficient_visual_passes < WORKFLOW_STALL_INSUFFICIENT_LIMIT)
+      return { metrics, latest_ineffective_visual: null };
     const tracked = records.filter(record => record.visual && record.verdict?.significance?.execution_effect
       && record.rolled_back !== true && record.current_frame_authority !== false);
     const lastMeaningful = [...tracked].reverse().find(record =>
@@ -6211,6 +6247,7 @@ export class SessionStore {
       ? projectionContext.paintingState.documents?.[String(documentId)]
       : this.paintingState().documents?.[String(documentId)])
       ?? { document_id: documentId };
+    if (state.project_recovery?.status === 'blocked') return `project_checkpoint_recovery_required: ${state.project_recovery.reason}; call photoshop_guard_resume, never adopt numeric layer ids`;
     const cadence = this.visualCadenceState(documentId, all, projectionContext);
     const activeJob = (projectionContext
       ? activeJobsForDocument(projectionContext.activeJobs, documentId)
@@ -6253,16 +6290,16 @@ export class SessionStore {
       return `rebuild generated geometry for owner ${debt.owner_id} against Scene Geometry revision ${debt.current_scene_geometry_revision}; changed dependencies=${debt.changed_dependency_ids.join(',') || debt.reason}`;
     }
     const lastClassifiedVisual = [...records].reverse().find(r => r.visual && r.verdict);
+    if (art?.status === 'interrupted' || art?.status === 'review_due' || art?.review_due) {
+      return `Art Director review required for directive ${art.directive_id}: ${art.review_reason ?? art.status}`;
+    }
     if (!this.workflowContinuationActive(state, records, lastClassifiedVisual)) {
       return 'ready';
     }
     const checkpoint = this.checkpointState(documentId, all, projectionContext);
     if (checkpoint.due) return 'save required checkpoint, then dispatch next meaningful visual pass';
     const foundation = this.sceneFoundationAdmission(documentId, {}, projectionContext);
-    if (foundation.status === 'blocked') return foundation.message;
-    if (art?.status === 'interrupted' || art?.status === 'review_due' || art?.review_due) {
-      return `Art Director review required for directive ${art.directive_id}: ${art.review_reason ?? art.status}`;
-    }
+    if (foundation.status === 'blocked') return `Artistic advisory (not a Guard execution block): ${foundation.message}`;
     if (art?.status === 'completed') {
       return `Art Director directive ${art.directive_id} completed; issue the next directive or end the painting stage`;
     }
@@ -6340,11 +6377,22 @@ export class SessionStore {
   }
   collectPreflightErrors(request, options = {}) {
     const errors = [];
+    const savedDocument = (options.projectionContext?.paintingState ?? this.paintingState()).documents?.[String(request.args?.document_id)];
+    if (!isRead(request.tool) && savedDocument?.project_recovery?.status === 'blocked') {
+      errors.push(`project_checkpoint_recovery_required: ${savedDocument.project_recovery.reason}; restore the checkpoint and call photoshop_guard_resume`);
+    }
+    if (isRollbackMutation(request) && savedDocument?.current_frame?.operation_id) {
+      const source = this.read(savedDocument.current_frame.operation_id);
+      if (source?.native_history_available === false) errors.push('project_checkpoint_native_history_unavailable: reopened projects do not inherit old Photoshop Undo history; retain the restored frame and continue on owned layers');
+    }
     const capture = (fn) => {
       try { fn(); }
       catch (error) { errors.push(String(error?.message ?? error)); }
     };
     const add = (message) => { if (message) errors.push(message); };
+    const artistic = (message) => {
+      reportArtisticAdvice(message, options.artisticAdvisories);
+    };
     const projectionContext = options.projectionContext;
     const stateOnly = options.stateOnly === true;
     const compilerDeferredFromOperationId = textOrUndefined(options.compilerDeferredFromOperationId);
@@ -6496,10 +6544,10 @@ export class SessionStore {
           && canonicalPaintingStage(reset.to_stage) === requestedStage
           && PAINTING_STAGE_RESET_REASONS.includes(reset.reason);
         if (reset && !validReset) {
-          add(`painting_stage_reset_invalid: explicit stage_reset must match durable stage ${durableStage}, requested stage ${requestedStage}, and an allowed reason`);
+          artistic(`painting_stage_reset_invalid: stage_reset metadata does not match durable stage ${durableStage} and proposed stage ${requestedStage}; keep artistic history truthful without prohibiting executable Photoshop commands`);
         }
       } else if (context.stage_reset) {
-        add(`painting_stage_reset_not_applicable: stage_reset is valid only for a backward transition from the durable stage`);
+        artistic('painting_stage_reset_not_applicable: supplied stage_reset is not a backward artistic transition; descriptive metadata does not authorize or forbid Photoshop mutations');
       }
     }
     if (isVisual(request?.tool) && !rollbackMutation && request?.tool !== 'photoshop_delete_layer') {
@@ -6511,7 +6559,13 @@ export class SessionStore {
         logical_layer_owners: this.semanticLayerOwners(documentId, projectionContext?.records, projectionContext),
         scene_ownership_plan: this.sceneOwnershipPlan(documentId, projectionContext?.records, projectionContext),
       }, request, sourceRecord);
-      if (issue) add(`${issue.code}: ${issue.message}`);
+      if (issue) {
+        // Critic's choice of next subject, technique or correction sequence is
+        // image guidance. A forged causal-source execution receipt, in contrast,
+        // authorizes another owner's pixels and remains a technical veto.
+        if (issue.authority === 'execution-integrity') add(`${issue.code}: ${issue.message}`);
+        else artistic(`${issue.code}: ${issue.message}`);
+      }
     }
     if (documentState?.document_instance?.identity_pending && !isRead(request?.tool)) {
       add('document_identity_unverified: recover through photoshop_guard_resume before mutation; preserved art state must not be reused or overwritten until identity is confirmed');
@@ -6560,13 +6614,13 @@ export class SessionStore {
         && (request?.tool === 'photoshop_execute_visual_microplan' || NONTRIVIAL_DIRECT_PAINT_TOOLS.has(request?.tool))
       ) {
         const brushPreflightRequired = requestRequiresBrushPreflight(request);
-        if (brushPreflightRequired && !artRun.brush_preflight?.completed) {
-          add('brush_preflight_required: this brush-dependent mutation is blocked until the same art run records a completed live brush_preflight from the installed Photoshop preset inventory');
+        if (brushPreflightRequired && artRun.brush_pack_policy?.mode === 'exclusive' && !artRun.brush_preflight?.completed) {
+          add('exclusive_brush_pack_preflight_required: verify the user-restricted brush pack before executing a brush-dependent mutation');
         }
         if (NONTRIVIAL_DIRECT_PAINT_TOOLS.has(request?.tool)) {
           add('visual_microplan_required: non-trivial painting must route strokes, dabs and region block-in through photoshop_execute_visual_microplan so method, brush-role and stage contracts are enforced');
         }
-        if ((brushPreflightRequired && artRun.brush_preflight?.completed) || requestHasBrushStrategyOrStamp(request)) {
+        if (requestHasBrushStrategyOrStamp(request) || (brushPreflightRequired && artRun.brush_pack_policy?.mode === 'exclusive')) {
           capture(() => validateBrushStrategyAgainstPreflight(artRun, request));
         }
       }
@@ -6635,8 +6689,9 @@ export class SessionStore {
     }
     if (!rollbackMutation) {
       capture(() => this.plannerGate(documentId, request, projectionContext,
-        !!plannedPreviousOperationId && plannedPreviousVisualVerdict && options.plannedPhysicalStackReview === true));
-      capture(() => this.priorityGate(documentId, request, projectionContext));
+        !!plannedPreviousOperationId && plannedPreviousVisualVerdict && options.plannedPhysicalStackReview === true,
+        options.artisticAdvisories));
+      capture(() => this.priorityGate(documentId, request, projectionContext, options.artisticAdvisories));
     }
     capture(() => {
       let visualBarrier = this.visualBarrier(documentId);
@@ -6670,10 +6725,10 @@ export class SessionStore {
     });
     if (isVisual(request?.tool) && !rollbackMutation && problemId) {
       const deferredSource = compilerDeferredFromOperationId
-        ? this.read(compilerDeferredFromOperationId)
+        ? this.currentDocumentRecords(documentId, undefined, projectionContext).find(row => row.id === compilerDeferredFromOperationId)
         : undefined;
       const deferredPass = compilerDeferredFromOperationId
-        ? this.compilerDeferredNextPass(compilerDeferredFromOperationId)
+        ? this.compilerDeferredNextPass(compilerDeferredFromOperationId, documentId)
         : undefined;
       const compilerDeferredContinuation = !!(
         deferredSource
@@ -6690,9 +6745,7 @@ export class SessionStore {
         && !compilerDeferredContinuation
         && !strategyChanged(request, workflowStall.latest_ineffective_visual)
       ) {
-        add(
-          `workflow_stall: another visual mutation requires a causally distinct executable strategy after ${workflowStall.metrics.stall_reasons.join('; ')}; parameter/prose-only variants of ${workflowStall.latest_ineffective_visual.id} are blocked`
-        );
+        artistic(`workflow_stall: another visual mutation should use a causally distinct executable strategy after ${workflowStall.metrics.stall_reasons.join('; ')}; parameter/prose-only variants of ${workflowStall.latest_ineffective_visual.id} may not resolve the defect`);
       }
       const recoveryContext = visualContext(request);
       const documentState = (projectionContext ? projectionContext.paintingState : this.paintingState())
@@ -6719,7 +6772,7 @@ export class SessionStore {
         && recoveryContext.independent_region !== true
         && isCosmeticCorrectiveAttempt(request)
       ) {
-        add(
+        artistic(
           `causal_strategy_exhausted: problem "${problemId}" remains unresolved against construction_plan.stage_exit_condition="${stageExitCondition}" after ${recovery.same_primary_mismatch_count} same-problem attempts; attempted strategy families=${recovery.strategy_families_tried.join(', ') || 'unknown'}; revise the construction plan, structurally rebuild, or rollback/replan instead of adding dependent cosmetic/detail work`
         );
       }
@@ -6740,13 +6793,13 @@ export class SessionStore {
         && cosmeticExploratoryAttempts >= 1
         && isCosmeticCorrectiveAttempt(request)
       ) {
-        add(
+        artistic(
           `causal_strategy_exhausted: structural mismatch for problem "${problemId}" already consumed its one bounded cosmetic exploratory correction; use a causally distinct structural rebuild or rollback/replan instead of texture, edge noise, blur, grain, stamps, microdetail, or another surface-masking variant`
         );
       }
       if (!compilerDeferredContinuation && recovery?.decision === 'require_distinct_strategy'
         && !strategyChanged(request, latestSameProblem)) {
-        add(`artistic_recovery: problem "${problemId}" requires a causally distinct structural strategy; color/opacity/count/preset variants do not qualify`);
+        artistic(`artistic_recovery: problem "${problemId}" requires a causally distinct structural strategy; color/opacity/count/preset variants do not qualify`);
       } else if (!compilerDeferredContinuation && recovery?.decision === 'block_dependent_problem') {
         const requestFingerprint = visualStrategyFingerprint(request);
         const exhausted = new Set(recovery.exhausted_strategy_ids ?? []);
@@ -6760,12 +6813,12 @@ export class SessionStore {
           ? declaredStrategyExhausted
           : exhausted.has(requestFingerprint);
         if (reusesExhaustedStrategy || !distinctCandidate) {
-          add(`artistic_recovery: problem "${problemId}" cannot reuse an exhausted causal strategy; choose a genuinely distinct visual strategy, rollback/replan, or continue independent work`);
+          artistic(`artistic_recovery: problem "${problemId}" cannot reuse an exhausted causal strategy; choose a genuinely distinct visual strategy, rollback/replan, or continue independent work`);
         }
       } else if (!compilerDeferredContinuation && recovery?.decision === 'continue_independent_work') {
         const context = visualContext(request);
         if (!(context.independent_region && context.preservation_facts.length > 0)) {
-          add(`artistic_recovery: dependent problem "${problemId}" is exhausted; only explicitly independent work with preservation_facts may continue`);
+          artistic(`artistic_recovery: dependent problem "${problemId}" is exhausted; only explicitly independent work with preservation_facts may continue`);
         }
       }
     }
@@ -6779,8 +6832,10 @@ export class SessionStore {
   begin(request, options = {}) {
     const projectionContext = options.projectionContext;
     const compilerDeferredFromOperationId = textOrUndefined(options.compilerDeferredFromOperationId);
+    const artisticAdvisories = [];
     const preflightErrors = this.collectPreflightErrors(request, {
       projectionContext,
+      artisticAdvisories,
       ...(options.closedDocumentRecoveryFor ? { closedDocumentRecoveryFor: options.closedDocumentRecoveryFor } : {}),
       ...(options.cachedValueEvidenceFor ? { cachedValueEvidenceFor: options.cachedValueEvidenceFor } : {}),
       ...(compilerDeferredFromOperationId ? { compilerDeferredFromOperationId } : {}),
@@ -6822,6 +6877,8 @@ export class SessionStore {
     }
     const record = {
       ...request,
+      ...(artisticAdvisories.length ? { artistic_admission_warnings: artisticAdvisories } : {}),
+      ...(options.authoredRequestFingerprint ? { authored_request_fingerprint: options.authoredRequestFingerprint } : {}),
       hash,
       sequence,
       created_at: new Date().toISOString(),
@@ -6874,6 +6931,23 @@ export class SessionStore {
     const bootstrapOutcome = bootstrapOutcomeFromResult(result);
     const beforePreview = bindPreviewDocument(beforePreviewOf(result), record.args?.document_id);
     const rawPreview = bindPreviewDocument(previewOf(result), record.args?.document_id);
+    // Persist the native outcome before archival or projection writes. A capture/
+    // filesystem failure cannot erase evidence that Photoshop already executed.
+    // The preview remains untrusted until materialized and attached below.
+    const nativeOutcome = { ...record,
+      phase: failed && !isRead(record.tool) && !notExecuted ? 'uncertain' : 'completed',
+      ...(notExecuted ? { visual: false, execution: 'not-executed' } : {}),
+      ...(bootstrapOutcome ? { bootstrap_outcome: bootstrapOutcome } : {}),
+      completed_at: new Date().toISOString(), result, failed,
+    };
+    if (!notExecuted && !(bootstrap && failed)) {
+      nativeOutcome.operation_receipt = record.operation_receipt ?? {
+        protocol: OPERATION_RECEIPT_PROTOCOL, operation_id: record.id, token: randomUUID(),
+        issued_at: nativeOutcome.completed_at, phase: nativeOutcome.phase,
+        execution: nativeOutcome.execution ?? (failed ? 'uncertain' : 'completed'),
+      };
+    }
+    this.write(nativeOutcome);
     const archivedPreview = rawPreview ? this.archiveProjectPreview(record, rawPreview) : undefined;
     const observedMotifInstances = record.tool === 'photoshop_execute_visual_microplan'
       ? observedMotifInstancesFromResult(result)
@@ -6886,7 +6960,7 @@ export class SessionStore {
       completed_at: new Date().toISOString(), result, failed, preview: archivedPreview };
     if (archivedPreview) updated.preview_attached_at = updated.completed_at;
     if (!notExecuted && !(bootstrap && failed)) {
-      updated.operation_receipt = record.operation_receipt ?? {
+      updated.operation_receipt = nativeOutcome.operation_receipt ?? {
         protocol: OPERATION_RECEIPT_PROTOCOL,
         operation_id: record.id,
         token: randomUUID(),
@@ -8042,6 +8116,7 @@ export class SessionStore {
         error_codes: attempt.error_codes ?? [],
       })),
       logical_layer_owners: logicalLayerOwners,
+      pending_created_layers: pendingCreatedLayers(this.currentDocumentRecords(documentId, records, projectionContext), documentId, logicalLayerOwners),
       scene_ownership_plan: sceneOwnershipPlan,
       critic_obligations: criticObligationState(state).map(row => ({ id: row.id, status: row.status,
         depends_on_ids: row.depends_on_ids, component_ids: row.component_ids,
@@ -8266,10 +8341,11 @@ export class SessionStore {
       protected_qualities: protectedQualities,
     };
   }
-  compilerDeferredNextPass(operationId) {
+  compilerDeferredNextPass(operationId, documentId = undefined) {
     const id = textOrUndefined(operationId);
     if (!id) return undefined;
-    const record = this.read(id);
+    const record = Number.isSafeInteger(documentId)
+      ? this.currentDocumentRecords(documentId).find(row => row.id === id) : this.read(id);
     const deferred = record?.latency?.compiler_repair_audit?.deferred_next_pass;
     return deferred && typeof deferred === 'object' && !Array.isArray(deferred)
       ? structuredClone(deferred)
@@ -8313,7 +8389,11 @@ export class SessionStore {
     const reconcileObservedLayers = record => {
       if (record.phase !== 'completed' || record.failed || record.tool !== 'photoshop_get_layers') return;
       const bodies = parseTexts(record.result);
-      const body = bodies.find(item => item && typeof item === 'object' && !Array.isArray(item));
+      const envelope = bodies.find(item => item && typeof item === 'object' && !Array.isArray(item));
+      if (envelope?.ok === false || (envelope?.document_target?.id !== undefined
+        && envelope.document_target.id !== documentId)) return;
+      const body = envelope?.details ?? envelope;
+      if (body?.context?.document?.id !== undefined && body.context.document.id !== documentId) return;
       if (!body || !Array.isArray(body.layers)) return;
       const observed = new Set();
       const visit = rows => {
@@ -8341,7 +8421,10 @@ export class SessionStore {
       // Rolled-back visual operations are historical evidence, not current-frame
       // ownership authority. In particular, a rolled-back cross-layer migration
       // must not move the authoritative semantic binding on resume/restart.
-      if (record.rolled_back === true || record.current_frame_authority === false) continue;
+      if (record.rolled_back === true || record.current_frame_authority === false
+        || record.rollback?.completed === true || record.resolved?.outcome === 'abandoned') continue;
+      if (record.phase !== 'completed' || record.dispatched === false || ['not-executed', 'uncertain', 'failed'].includes(record.execution)
+        || (record.failed === true && record.execution !== 'partial')) continue;
       reconcileObservedLayers(record);
       if (record.phase === 'completed' && !record.failed && record.tool === 'photoshop_delete_layer') {
         removeLayer(Number(record.args?.layer_id));
@@ -8379,31 +8462,15 @@ export class SessionStore {
         }
       }
       for (const body of parseTexts(record.result)) {
-        const rows = Array.isArray(body?.continuation_layers) ? body.continuation_layers : [];
-        // A reconciled preparation may have created its dedicated layer before
-        // a later setter failed. Preserve that exact physical owner so remaining
-        // work can reuse it without repeating creation or claiming painted pixels.
-        const logical = record.args?.logical_layer;
-        if (!rows.length && record.phase === 'completed' && !record.failed
-          && record.execution === 'partial' && record.resolved?.outcome === 'partial'
-          && ['create-new', 'temporary-hypothesis'].includes(logical?.decision)
-          && textOrUndefined(logical?.hypothesis_id)) {
-          const created = (record.args?.steps ?? []).filter(step => step.tool === 'photoshop_create_layer'
-            && body?.steps?.some(status => status.id === step.id && status.tool === step.tool
-              && status.ok === true && status.execution === 'completed'));
-          const receipt = created.length === 1 ? body.completed_results?.[created[0].id] : undefined;
-          const layerId = receipt?.details?.layerId;
-          if (receipt?.ok === true && receipt.document_target?.id === documentId
-            && Number.isSafeInteger(layerId) && layerId > 0) {
-            rows.push({ ...structuredClone(logical), layer_id: layerId,
-              temporary: logical.decision === 'temporary-hypothesis' });
-          }
-        }
+        const rows = ownershipEvidence({ ...record,
+          result: { content: [{ type: 'text', text: JSON.stringify(body) }] } }, documentId);
         for (const row of rows) {
           const hypothesisId = textOrUndefined(row?.hypothesis_id);
           const layerId = Number(row?.layer_id);
           if (!hypothesisId || !Number.isSafeInteger(layerId) || layerId <= 0) continue;
           const prior = byHypothesis.get(hypothesisId);
+          // Metadata-only promotion cannot resurrect an undone/deleted owner.
+          if (row.decision === 'keep' && (!prior || prior.layer_id !== layerId)) continue;
           const physicalLayerIds = [
             ...(Array.isArray(prior?.physical_layer_ids) ? prior.physical_layer_ids : []),
             ...(Number.isSafeInteger(prior?.layer_id) && prior.layer_id > 0 ? [prior.layer_id] : []),
@@ -8448,6 +8515,12 @@ export class SessionStore {
           const priorAlignment = prior?.construction_clip_alignment;
           const alignmentInvalidated = !!prior && structuralRevision === record.id && !modelAlignment;
           byHypothesis.set(hypothesisId, {
+            // Omitted continuation metadata means unchanged, including keep,
+            // restart and partial-create recovery. Clone to keep projections pure.
+            ...Object.fromEntries(['layer_name', 'hypothesis', 'rollback_value', 'physical_role',
+              'opacity_role', 'construction_tier', 'parent_hypothesis_id', 'parent_construction_revision',
+              'depth_relations'].filter(key => prior?.[key] !== undefined)
+              .map(key => [key, structuredClone(prior[key])])),
             hypothesis_id: hypothesisId,
             layer_id: layerId,
             physical_layer_ids: physicalLayerIds,
@@ -8703,7 +8776,7 @@ export class SessionStore {
     ).sort((a, b) => Number(a.sequence ?? 0) - Number(b.sequence ?? 0));
     let current = null;
     for (const record of records) {
-      if (!record?.scene_geometry_model) continue;
+      if (!record?.scene_geometry_model || !committedSceneRecord(record)) continue;
       if (record.rolled_back === true || record.current_frame_authority === false) continue;
       try {
         const model = normalizeSceneGeometryModel(record.scene_geometry_model);
@@ -8734,7 +8807,7 @@ export class SessionStore {
     const incarnation = this.currentDocumentIncarnationId(documentId, projectionContext);
     let current = null;
     for (const record of records) {
-      if (!record?.scene_lighting_color_model) continue;
+      if (!record?.scene_lighting_color_model || !committedSceneRecord(record)) continue;
       if (record.rolled_back === true || record.current_frame_authority === false) continue;
       try {
         const model = normalizeSceneLightingColorModel(record.scene_lighting_color_model);
@@ -8758,7 +8831,7 @@ export class SessionStore {
     const incarnation = this.currentDocumentIncarnationId(documentId, projectionContext);
     let current = null;
     for (const record of records) {
-      if (!record?.scene_camera_imaging_model) continue;
+      if (!record?.scene_camera_imaging_model || !committedSceneRecord(record)) continue;
       if (record.rolled_back === true || record.current_frame_authority === false) continue;
       try {
         const model = normalizeSceneCameraImagingModel(record.scene_camera_imaging_model);
@@ -8782,7 +8855,7 @@ export class SessionStore {
     const incarnation = this.currentDocumentIncarnationId(documentId, projectionContext);
     let match = null;
     for (const record of records) {
-      if (!record?.scene_camera_imaging_model) continue;
+      if (!record?.scene_camera_imaging_model || !committedSceneRecord(record)) continue;
       try {
         const model = normalizeSceneCameraImagingModel(record.scene_camera_imaging_model);
         if (model.source_frame.document_id !== documentId) continue;
@@ -8901,7 +8974,7 @@ export class SessionStore {
     const incarnation = this.currentDocumentIncarnationId(documentId, projectionContext);
     let match = null;
     for (const record of records) {
-      if (!record?.scene_lighting_color_model) continue;
+      if (!record?.scene_lighting_color_model || !committedSceneRecord(record)) continue;
       try {
         const model = normalizeSceneLightingColorModel(record.scene_lighting_color_model);
         if (model.source_frame.document_id !== documentId) continue;
@@ -9005,7 +9078,7 @@ export class SessionStore {
     const incarnation = this.currentDocumentIncarnationId(documentId, projectionContext);
     let match = null;
     for (const record of records) {
-      if (!record?.scene_geometry_model) continue;
+      if (!record?.scene_geometry_model || !committedSceneRecord(record)) continue;
       try {
         const model = normalizeSceneGeometryModel(record.scene_geometry_model);
         if (model.source_frame.document_id !== documentId) continue;
@@ -9318,13 +9391,18 @@ export class SessionStore {
     ).sort((a, b) => Number(b.sequence ?? 0) - Number(a.sequence ?? 0));
     for (const record of records) {
       if (!record?.scene_ownership_plan) continue;
-      if (record.rolled_back === true || record.current_frame_authority === false) continue;
+      if (record.rolled_back === true || record.current_frame_authority === false
+        || record.rollback?.completed === true || record.resolved?.outcome === 'abandoned') continue;
       // A submitted scene plan is not a durable owner certificate. In
       // particular, a rejected/queued/stopped create-layer pass must NOT
       // register its unexecuted owner just because the proposal was journaled.
       if (record.phase !== 'completed'
-        || record.execution === 'not-executed' || record.execution === 'uncertain') continue;
+        || record.dispatched === false || ['not-executed', 'uncertain', 'failed'].includes(record.execution)
+        || (record.resolved?.outcome === 'partial' && record.execution !== 'partial')) continue;
       if (record.failed === true && record.execution !== 'partial') continue;
+      if (record.tool === 'photoshop_guard_keep_logical_layer'
+        && !this.semanticLayerOwners(documentId, records, projectionContext).some(owner =>
+          owner.hypothesis_id === record.args?.hypothesis_id && owner.layer_id === record.args?.layer_id)) continue;
       const logical = record.args?.logical_layer;
       const newOwner = ['create-new', 'temporary-hypothesis'].includes(logical?.decision);
       // For a first-owner bootstrap, "completed" alone is not physical
@@ -9332,10 +9410,7 @@ export class SessionStore {
       // numeric receipt associated with exactly this declared owner.
       if (record.execution === 'partial' || newOwner) {
         const ownerId = textOrUndefined(logical?.hypothesis_id);
-        if (!ownerId || !parseTexts(record.result).some(body =>
-          Array.isArray(body?.continuation_layers)
-          && body.continuation_layers.some(layer => layer?.hypothesis_id === ownerId
-            && Number.isSafeInteger(layer?.layer_id) && layer.layer_id > 0)))
+        if (!ownerId || !ownershipEvidence(record, documentId).some(layer => layer.hypothesis_id === ownerId))
           continue;
       }
       try {
@@ -10169,6 +10244,16 @@ export class SessionStore {
     };
   }
   fail(record, error) {
+    const durable = this.read(record.id);
+    if (durable?.phase === 'completed' && durable.result && durable.failed === false
+      && durable.execution !== 'not-executed') {
+      const updated = { ...durable,
+        post_execution_error: String(error?.message ?? error),
+        post_execution_error_at: new Date().toISOString(),
+      };
+      this.write(updated);
+      return updated;
+    }
     const bootstrap = isDocumentBootstrap(record);
     const updated = { ...record, phase: record.dispatched ? 'uncertain' : 'completed', visual: record.dispatched ? record.visual : false,
       execution: record.dispatched ? 'uncertain' : 'not-executed', error: String(error?.message ?? error), failed: true };

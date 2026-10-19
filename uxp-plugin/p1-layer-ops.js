@@ -236,6 +236,109 @@ async function transformLayer(params = {}) {
   }, { commandName: 'MCP Guarded Transform Layer' });
 }
 
+// Creates actual reflected pixels from one existing raster source. It never
+// synthesizes another building/tree and never modifies the source or water
+// receiver. A failed native flip/geometry verification aborts the History
+// suspension rather than leaving a half-created semantic owner behind.
+async function createSourceBoundReflection(params = {}) {
+  const sourceId = params.source_layer_id;
+  const receiverId = params.receiver_layer_id;
+  const waterline = params.waterline_y;
+  const xOffset = params.horizontal_offset ?? 0;
+  const opacity = params.opacity ?? 65;
+  const expected = params.expected_source_bounds;
+  const layerName = params.name;
+  if (!Number.isSafeInteger(sourceId) || sourceId <= 0 || !Number.isSafeInteger(receiverId)
+      || receiverId <= 0 || sourceId === receiverId
+      || typeof layerName !== 'string' || !layerName.trim() || layerName.length > 120
+      || !Number.isFinite(waterline) || !Number.isFinite(xOffset) || Math.abs(xOffset) > 128
+      || !Number.isFinite(opacity) || opacity < 5 || opacity > 90
+      || !expected || !['left', 'top', 'right', 'bottom'].every(k => Number.isFinite(expected[k]))) {
+    throw new Error('reflection_manifest_invalid: pin source, water receiver, source bounds, waterline, opacity and new layer name');
+  }
+  return core.executeAsModal(async (executionContext) => {
+    const doc = requirePinnedActiveDocument(params);
+    const source = findLayerEntry(doc, sourceId)?.layer;
+    const receiver = findLayerEntry(doc, receiverId)?.layer;
+    if (!source || !receiver || source.isBackgroundLayer || source.visible !== true
+        || source.kind !== constants.LayerKind.NORMAL || receiver.visible !== true
+        || receiver.id === sourceId) throw new Error('reflection_source_or_receiver_unavailable');
+    const bounds = source.bounds;
+    const before = { left: bounds.left, top: bounds.top, right: bounds.right, bottom: bounds.bottom };
+    if (!Object.keys(before).every(k => Number.isFinite(before[k]) && Math.abs(before[k] - expected[k]) <= 1)
+        || !(before.right > before.left && before.bottom > before.top)
+        || before.bottom > waterline + 1 || waterline <= 0 || waterline >= doc.height) {
+      throw new Error('reflection_source_bounds_stale: expected visible source pixels entirely above the waterline');
+    }
+    const yOffset = 2 * waterline - before.top - before.bottom;
+    const target = { left: before.left + xOffset, right: before.right + xOffset,
+      top: before.top + yOffset, bottom: before.bottom + yOffset };
+    if (target.left < 0 || target.right > doc.width || target.top < waterline - 1
+        || target.bottom > doc.height) throw new Error('reflection_target_out_of_canvas');
+    const receiverBounds = receiver.bounds;
+    if (!Number.isFinite(receiverBounds.top) || !Number.isFinite(receiverBounds.bottom)
+        || receiverBounds.top > waterline + 1 || receiverBounds.bottom <= waterline) {
+      throw new Error('reflection_receiver_waterline_mismatch: pin the actual receiving water layer');
+    }
+    const originalActiveId = Array.from(doc.activeLayers ?? [])[0]?.id ?? null;
+    let suspensionId;
+    try {
+      suspensionId = await executionContext.hostControl.suspendHistory({
+        documentID: doc.id, name: 'MCP Source-Bound Water Reflection',
+      });
+      await selectOnlyLayer(sourceId);
+      if (requireActiveLayer(doc, 'source_bound_reflection').id !== sourceId) throw new Error('reflection_source_selection_unverified');
+      const duplicate = await source.duplicate();
+      if (!Number.isSafeInteger(duplicate?.id) || duplicate.id === sourceId || duplicate.id === receiverId) {
+        throw new Error('reflection_duplicate_id_unverified');
+      }
+      await selectOnlyLayer(duplicate.id);
+      if (requireActiveLayer(doc, 'source_bound_reflection').id !== duplicate.id) throw new Error('reflection_copy_selection_unverified');
+      const flipped = await action.batchPlay([{
+        _obj: 'transform',
+        _target: [{ _ref: 'layer', _id: duplicate.id }],
+        freeTransformCenterState: { _enum: 'quadCenterState', _value: 'QCSAverage' },
+        width: { _unit: 'percentUnit', _value: 100 },
+        height: { _unit: 'percentUnit', _value: -100 },
+        linked: false,
+        _options: { dialogOptions: 'dontDisplay' },
+      }], { synchronousExecution: true, modalBehavior: 'execute' });
+      if (!Array.isArray(flipped) || flipped.length !== 1 || flipped[0]?._obj === 'error') {
+        throw new Error('reflection_native_vertical_flip_unverified');
+      }
+      await duplicate.translate(xOffset, yOffset);
+      duplicate.name = layerName.trim();
+      duplicate.opacity = opacity;
+      duplicate.move(receiver, constants.ElementPlacement.PLACEBEFORE);
+      const actualCopy = findLayerEntry(doc, duplicate.id)?.layer;
+      const actualSource = findLayerEntry(doc, sourceId)?.layer;
+      if (!actualCopy || !actualSource || actualCopy.name !== layerName.trim()
+          || Math.abs(actualCopy.opacity - opacity) > 1) throw new Error('reflection_copy_missing_after_transform');
+      const after = actualCopy.bounds;
+      const sourceAfter = actualSource.bounds;
+      if (!Object.keys(target).every(k => Math.abs(after[k] - target[k]) <= 1)
+          || !Object.keys(before).every(k => Math.abs(sourceAfter[k] - before[k]) <= 1)) {
+        throw new Error('reflection_native_geometry_unverified: copied or original raster bounds changed unexpectedly');
+      }
+      if (originalActiveId != null && findLayerEntry(doc, originalActiveId)) await selectOnlyLayer(originalActiveId);
+      await executionContext.hostControl.resumeHistory(suspensionId, true);
+      suspensionId = undefined;
+      return { reflected: true, document_id: doc.id, layerId: duplicate.id,
+        layerName: duplicate.name, source_layer_id: sourceId, receiver_layer_id: receiverId,
+        source_bounds: before, reflected_bounds: target, waterline_y: waterline,
+        transform: 'native_vertical_flip_then_translation', history_steps: 1 };
+    } catch (error) {
+      if (suspensionId !== undefined) {
+        try { await executionContext.hostControl.resumeHistory(suspensionId, false); }
+        catch (abortError) {
+          throw new Error(`reflection_rollback_unconfirmed: ${String(abortError?.message ?? abortError)}; cause=${String(error?.message ?? error)}`);
+        }
+      }
+      throw error;
+    }
+  }, { commandName: 'MCP Source-Bound Water Reflection' });
+}
+
 // One bounded, native, all-or-nothing translation. A semantic relationship
 // never implies that Photoshop automatically moves dependent raster layers.
 // The caller must pin every physical layer and its observed BEFORE bounds.
@@ -471,6 +574,8 @@ async function tryHandleP1LayerOperation(cmdAction, params = {}) {
       return { handled: true, data: await moveLayerPixels(params) };
     case 'transform_layer':
       return { handled: true, data: await transformLayer(params) };
+    case 'source_bound_reflection':
+      return { handled: true, data: await createSourceBoundReflection(params) };
     case 'rotate_layer':
       return { handled: true, data: await rotateLayer(params) };
     case 'flatten_image':

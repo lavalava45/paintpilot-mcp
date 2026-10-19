@@ -32,11 +32,16 @@ const committedSpatial = () => ({
 
 describe('spatial perspective consistency is shared across painting profiles', () => {
   it.each(['simple_graphic', 'nontrivial_painting'] as const)(
-    'blocks committed world-space construction without geometry in %s',
+    'advises about absent artistic geometry without treating it as technical permission in %s',
     async profile => {
       const f = fixture(profile);
       const result = await compileGuardCycle({ next_pass: committedSpatial() }, f.store, f.registry);
-      expect(result.violations.map(v => v.code)).toContain('scene_geometry_model_required');
+      expect(result.violations.map(v => v.code)).not.toContain('scene_geometry_model_required');
+      expect(result.normalizations).toEqual(expect.arrayContaining([
+        expect.objectContaining({ code: 'artistic_review_advisory', message: expect.stringMatching(/geometry/i) }),
+      ]));
+      // Compilation must not dispatch a native mutation, even when geometry
+      // quality review is nonblocking. Owner/tool checks remain independent.
       expect(f.mutations()).toBe(0);
     },
   );
@@ -47,7 +52,10 @@ describe('spatial perspective consistency is shared across painting profiles', (
       ...pass.logical_layer, construction_tier: undefined,
     }, construction_role: 'mass' };
     const result = await compileGuardCycle({ next_pass: input }, f.store, f.registry);
-    expect(result.violations.map(v => v.code)).toContain('scene_geometry_model_required');
+    expect(result.violations.map(v => v.code)).not.toContain('scene_geometry_model_required');
+    expect(result.normalizations).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'artistic_review_advisory', message: expect.stringMatching(/geometry/i) }),
+    ]));
     expect(f.mutations()).toBe(0);
   });
   it.each(['simple_graphic', 'nontrivial_painting'] as const)(

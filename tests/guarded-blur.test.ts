@@ -23,8 +23,15 @@ async function compile(pass:Record<string,unknown>={}, ctx:Record<string,unknown
  return compileGuardCycle({next_pass:{request_key:'protected-blur',document_id:42,goal:'Selective owner softness',stage:'GLOBAL_BLOCK_IN',scale:'global',imaging_preflight:imaging,actions:[{tool:'photoshop_apply_gaussian_blur',args:{layer_id:7,radius:10}}],...pass}},
  {collectClosePreviousErrors:()=>[],collectPreflightErrors:()=>[],compactPassContext:()=>({painting_profile:'nontrivial_painting',stage:'GLOBAL_BLOCK_IN',scene_camera_imaging_model:camera,logical_layer_owners:[owner],...ctx})},registry);
 }
-it.each(['photoshop_apply_gaussian_blur','photoshop_apply_motion_blur','photoshop_apply_smart_blur'])('requires actual-tool imaging preflight for %s even with no declared method',async tool=>{
- const r=await compile({imaging_preflight:undefined,actions:[{tool,args:{layer_id:7,radius:10,angle:5,threshold:8}}]});expect(r.violations.some(v=>v.code==='imaging_preflight_required')).toBe(true);expect(r.rejection?.isError).toBe(true);
+it.each(['photoshop_apply_gaussian_blur','photoshop_apply_motion_blur','photoshop_apply_smart_blur'])('advises on missing artistic imaging review for %s while keeping an exact native owner target',async tool=>{
+ const r=await compile({imaging_preflight:undefined,actions:[{tool,args:{layer_id:7,radius:10,angle:5,threshold:8}}]});
+ expect(r.violations.map(v=>v.code)).not.toContain('imaging_preflight_required');
+ expect(r.normalizations).toEqual(expect.arrayContaining([
+  expect.objectContaining({code:'artistic_imaging_review_advisory'}),
+ ]));
+ expect(r.rejection,JSON.stringify(r.violations)).toBeUndefined();
+ expect(r.nextOperation?.logical_layer).toMatchObject({hypothesis_id:'road',layer_id:7});
+ expect((r.nextOperation?.args as any)?.layer_id).toBe(7);
 });
 it('retains validated owner and imaging metadata on a legal direct blur',async()=>{const r=await compile();expect(r.rejection,JSON.stringify(r.violations)).toBeUndefined();expect(r.nextOperation?.logical_layer).toMatchObject(owner);expect(r.nextOperation?.imaging_preflight).toMatchObject({owner_expectations:imaging.owner_expectations,revalidate_edge_detail:true});expect((r.nextOperation?.args as any).imaging_preflight).toBeUndefined();});
 it.each([

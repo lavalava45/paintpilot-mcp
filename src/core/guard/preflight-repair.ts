@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { bindUniqueNewLayerStepTarget } from './technical-step-targets.js';
+import { strokeExecutionBudget } from '../../tools/painting-tools.js';
 
 export const VIOLATION_REPAIR_CLASSES = [
   'AUTO_NORMALIZE',
@@ -108,6 +109,7 @@ const VISUAL_MUTATION_TOOLS = new Set([
 ]);
 
 const MODEL_DECISION_CODES = new Set([
+  'reflection_source_copy_required',
   'brush_role_ambiguous',
   'brush_preset_choice_required',
   'brush_material_role_required',
@@ -121,7 +123,6 @@ const MODEL_DECISION_CODES = new Set([
   'scene_editable_inventory_required',
   'scene_editable_scope_blocked',
   'scene_component_layer_conflict',
-  'stroke_batch_budget_exceeded',
   'construction_role_material_role_required',
   'painting_stage_reset_required',
   'compact_local_region_bounds_required',
@@ -141,11 +142,15 @@ const SYSTEMIC_CODES = new Set([
   'document_instance_probe_failed',
   'document_instance_witness_missing',
   'dynamic_preflight_failed',
+  // Multiple durable bindings are conflicting authority, not an invitation to
+  // choose another owner and conceal the corrupted state.
+  'painting_intent_owner_ambiguous',
 ]);
 
 const SPLIT_CODES = new Set([
   'compact_pass_visual_mutation_limit',
   'compact_pass_adaptive_mutation_budget_exceeded',
+  'stroke_batch_budget_exceeded',
 ]);
 
 const NORMALIZE_CODES = new Set([
@@ -193,7 +198,11 @@ export function fieldCorrectionPacket(violations: RepairableViolation[]) {
   // validator returns prose only. A missing path in that prose is not evidence
   // that the artist's choice is impossible to express in the command schema.
   const rulePaths: Record<string, string> = {
+    reflection_source_copy_required: 'next_pass.actions',
+    reflection_source_binding_invalid: 'next_pass.actions',
+    stroke_batch_budget_exceeded: 'next_pass.actions',
     semantic_layer_owner_missing: 'next_pass.logical_layer',
+    semantic_mutation_target_owner_mismatch: 'next_pass.logical_layer.layer_id',
     semantic_layer_isolation_required: 'next_pass.logical_layer.decision',
     construction_role_material_role_required: 'next_pass.material_role',
     artistic_method_execution_mismatch: 'next_pass.actions',
@@ -202,6 +211,8 @@ export function fieldCorrectionPacket(violations: RepairableViolation[]) {
     component_space_conflict: 'next_pass.logical_layer.component_space',
     component_space_owner_conflict: 'next_pass.logical_layer',
     geometry_binding_required: 'next_pass.logical_layer.geometry_binding',
+    scene_geometry_model_required: 'next_pass.scene_geometry_model',
+    scene_geometry_opt_out_unauthorized: 'next_pass.scene_geometry_model',
     construction_role_intent_mismatch: 'next_pass.visual_intent',
     color_gradient_preflight_required: 'next_pass.color_gradient_preflight',
     color_gradient_preflight_invalid: 'next_pass.color_gradient_preflight',
@@ -374,15 +385,13 @@ export function prepareTechnicalPassBindings(
       repairs.push({ kind: 'normalize', path, normalizer: 'canvas_field_execution',
         reason: 'Explicit canvas field with fill/gradient execution; remove spatial construction labels without changing pixels or ownership.' });
     };
-    update(pass, 'construction_role', 'continuous-field', 'next_pass.construction_role');
-    update(pass, 'visual_intent', 'continuous-field', 'next_pass.visual_intent');
-    update(pass, 'preferred_method_id', 'continuous-color-field', 'next_pass.preferred_method_id');
-    update(logical, 'construction_tier', undefined, 'next_pass.logical_layer.construction_tier');
-    update(logical, 'construction_change', undefined, 'next_pass.logical_layer.construction_change');
-    actions.forEach((a, i) => {
-      if (['photoshop_fill_layer', 'photoshop_paint_color_gradient'].includes(String(a.tool)) && a.method_id !== undefined)
-        update(a, 'method_id', 'continuous-color-field', `next_pass.actions[${i}].method_id`);
-    });
+    // Execution already specifies the Photoshop primitive. Fill only absent
+    // optional descriptions; never overwrite an artist's explicit material,
+    // method, style or construction intent to make it match a palette recipe.
+    if (pass.construction_role === undefined)
+      update(pass, 'construction_role', 'continuous-field', 'next_pass.construction_role');
+    if (pass.visual_intent === undefined)
+      update(pass, 'visual_intent', 'continuous-field', 'next_pass.visual_intent');
   }
   const continuing = ['continue-logical-layer', 'adjust'].includes(nonEmptyText(logical?.decision) ?? '');
   const targetId = Number(owner?.layer_id);
@@ -643,6 +652,53 @@ function allowedMutationCount(violations: RepairableViolation[]): number | undef
   return undefined;
 }
 
+/**
+ * Split an oversized native stroke action at ORIGINAL stroke boundaries, not
+ * expanded dynamic segments. The first pass remains a bounded atomic tool
+ * invocation; the suffix is held for a separate Guard-reviewed cycle.
+ * Do not change brush dynamics, mode, stroke order or layer ownership.
+ */
+function splitStrokeActionsAtBudget(
+  actions: Array<Record<string, unknown>>, maxBatches: number,
+): { first: Array<Record<string, unknown>>; deferred: Array<Record<string, unknown>> } | undefined {
+  let usedBatches = 0;
+  const first: Array<Record<string, unknown>> = [];
+  for (let index = 0; index < actions.length; index++) {
+    const action = actions[index]!;
+    const args = action.args as Record<string, unknown> | undefined;
+    const strokes = args?.strokes;
+    if (!Array.isArray(strokes) || !strokes.length || String(args?.batch_mode ?? 'AUTO').toUpperCase() !== 'AUTO')
+      return undefined;
+    let low = 1, high = strokes.length, fit = 0, fitBatches = 0;
+    while (low <= high) {
+      const middle = Math.floor((low + high) / 2);
+      try {
+        const budget = strokeExecutionBudget({ ...args, strokes: strokes.slice(0, middle) });
+        if (budget.allowed && usedBatches + budget.auto_batches <= maxBatches) {
+          fit = middle;
+          fitBatches = budget.auto_batches;
+          low = middle + 1;
+        } else high = middle - 1;
+      } catch { return undefined; }
+    }
+    if (fit === strokes.length) {
+      first.push(structuredClone(action));
+      usedBatches += fitBatches;
+      continue;
+    }
+    if (!first.length && !fit) return undefined;
+    const deferred = actions.slice(index).map(item => structuredClone(item));
+    if (fit > 0) {
+      const front = structuredClone(action);
+      (front.args as Record<string, unknown>).strokes = structuredClone(strokes.slice(0, fit));
+      first.push(front);
+      (deferred[0]!.args as Record<string, unknown>).strokes = structuredClone(strokes.slice(fit));
+    }
+    return { first, deferred };
+  }
+  return undefined;
+}
+
 export function splitPassForBudget(
   rawPass: Record<string, unknown>,
   violations: RepairableViolation[]
@@ -655,7 +711,6 @@ export function splitPassForBudget(
   const actions = Array.isArray(rawPass.actions)
     ? rawPass.actions.filter((item): item is Record<string, unknown> => !!item && typeof item === 'object' && !Array.isArray(item))
     : [];
-  if (!allowed || actions.length <= allowed) return undefined;
   if ((nonEmptyText(rawPass.action_class) ?? 'ADD').toUpperCase() !== 'ADD') return undefined;
   const logicalLayer = rawPass.logical_layer && typeof rawPass.logical_layer === 'object' && !Array.isArray(rawPass.logical_layer)
     ? rawPass.logical_layer as Record<string, unknown>
@@ -667,6 +722,33 @@ export function splitPassForBudget(
   if (actions.some(action => containsStepReference(action.args))) return undefined;
   const toolSet = new Set(actions.map(action => nonEmptyText(action.tool)).filter(Boolean));
   if (toolSet.size !== 1) return undefined;
+
+  // A single paint_strokes action can expand to more than eight native AUTO
+  // batches even though the visual mutation count is only one.
+  const strokeOverflow = violations.find(item => item.code === 'stroke_batch_budget_exceeded');
+  if (strokeOverflow && toolSet.has('photoshop_paint_strokes')) {
+    const maxBatches = Number(strokeOverflow.details?.max_auto_batches);
+    const ownerLayerId = logicalLayer?.layer_id;
+    if (!Number.isSafeInteger(maxBatches) || maxBatches < 1 || maxBatches > 8
+      || !['continue-logical-layer', 'adjust'].includes(nonEmptyText(logicalLayer?.decision) ?? '')
+      || !Number.isSafeInteger(ownerLayerId) || Number(ownerLayerId) <= 0
+      || actions.some(action => (action.args as Record<string, unknown> | undefined)?.layer_id !== ownerLayerId))
+      return undefined;
+    const split = splitStrokeActionsAtBudget(actions, maxBatches);
+    const requestKey = nonEmptyText(rawPass.request_key);
+    if (!split || !requestKey) return undefined;
+    const firstPass = structuredClone(rawPass);
+    firstPass.actions = split.first;
+    const deferredPass = structuredClone(rawPass);
+    deferredPass.request_key = deferredRequestKey(requestKey, split.deferred);
+    deferredPass.actions = split.deferred;
+    return { first_pass: firstPass, deferred_pass: deferredPass, repair: {
+      kind: 'split_defer', path: 'next_pass.actions',
+      source: `native_stroke_batch_budget:${maxBatches}`,
+      reason: 'Split at original stroke boundaries without changing brush parameters, dynamics or owner; retain the suffix for a separate pass after visual review.',
+    } };
+  }
+  if (!allowed || actions.length <= allowed) return undefined;
 
   const firstActions = actions.slice(0, allowed).map(action => structuredClone(action));
   const deferredActions = actions.slice(allowed).map(action => structuredClone(action));

@@ -53,9 +53,12 @@ export const SEMANTIC_EXECUTION_SPEC = {
     creationDecisions: ['create-new', 'temporary-hypothesis'],
   },
   method: {
-    requiredFields: ['visual_intent', 'pressure_policy'],
-    materialRequiredMethodClasses: ['preset-brush'],
-    materialRequiredWhenBrushBound: true,
+    // These are descriptive artistic metadata, not prerequisites for an
+    // executable Photoshop command. Concrete preset and dynamics validation
+    // belongs to the native step contract, never a material/style table.
+    requiredFields: [],
+    materialRequiredMethodClasses: [],
+    materialRequiredWhenBrushBound: false,
     materialSource: 'material_role',
     brushMaterialsSource: 'material_roles',
     artisticFields: ['construction_role', 'material_role', 'visual_intent'],
@@ -140,7 +143,9 @@ export function applySemanticPublicSchema(input: Record<string, unknown>, spec: 
     if (!node || !((node.properties as Record<string, unknown> | undefined)?.[field])) continue;
     if (Array.isArray(node.required)) node.required = node.required.filter(item => item !== field);
     const child = (node.properties as Record<string, Record<string, unknown>>)[field];
-    child.description = [child.description, 'Technical identity/pin: compiler-managed when unambiguous; explicit conflicting values are never overwritten.'].filter(Boolean).join(' ');
+    const note = 'compiler-managed if unambiguous; explicit conflicts rejected.';
+    const priorDescription = typeof child.description === 'string' ? child.description : undefined;
+    if (!priorDescription?.includes(note)) child.description = [priorDescription, note].filter(Boolean).join(' ');
   }
   for (const model of ['scene_lighting_color_model', 'scene_geometry_model', 'scene_camera_imaging_model']) {
     const node = properties[model] as Record<string, unknown> | undefined;

@@ -34,14 +34,13 @@ import {
   VISUAL_MICROPLAN_VERDICTS,
   VISUAL_MICROPLAN_MAX_MUTATIONS,
   VISUAL_MICROPLAN_MUTATION_TOOLS,
-  visualMicroPlanMethodClassForStep,
   type PreviousPreviewVerdict,
   type VisualMicroPlan,
   type VisualMicroPlanStep,
 } from '../core/visual-microplan.js';
 import type { ToolDefinition, ToolRegistry, ToolResult } from '../core/tool-registry.js';
 import { EDGE_CLASSES, selectEdgeMethod } from '../core/edge-control.js';
-import { PAINTING_CONSTRUCTION_ROLES, PAINTING_VISUAL_INTENTS, paintingMethodCapabilities } from '../core/painting-method-palette.js';
+import { PAINTING_CONSTRUCTION_ROLES, PAINTING_VISUAL_INTENTS } from '../core/painting-method-palette.js';
 import {
   MATERIAL_RESPONSE_COMPONENTS,
   MATERIAL_RESPONSE_MICROTEXTURE_POLICIES,
@@ -617,13 +616,6 @@ function rawMutationIndexes(steps: unknown[]): number[] {
     .filter(index => index >= 0);
 }
 
-function rawStrokeMethodClass(step: Record<string, unknown>): string | undefined {
-  const args = step.args && typeof step.args === 'object' && !Array.isArray(step.args)
-    ? step.args as Record<string, unknown>
-    : {};
-  return visualMicroPlanMethodClassForStep({ tool: String(step.tool ?? ''), args });
-}
-
 function collectSemanticEnvelopeErrors(args: Record<string, unknown>): string[] {
   const errors: string[] = collectVisualMicroPlanConstructionErrors(args);
   for (const field of ['plan_id', 'summary', 'stage', 'scale', 'region', 'intent', 'expected_visual_delta']) {
@@ -661,137 +653,18 @@ function collectSemanticEnvelopeErrors(args: Record<string, unknown>): string[] 
   }
 
   const rootRegion = normalizedString(args.region);
-  const rootMethodClass = normalizedString(args.method_class)?.toLowerCase();
   const rootRisk = normalizedString(args.risk)?.toLowerCase();
   const riskRank = (value: string | undefined) => ['low', 'moderate', 'high'].indexOf(value ?? '');
-  const hasPresetSelection = mutationIndexes.length > 0 && steps
-    .slice(0, mutationIndexes[0])
-    .some(step => !!step && typeof step === 'object' && !Array.isArray(step)
-      && (step as Record<string, unknown>).tool === 'photoshop_select_brush_preset');
-
   for (const index of mutationIndexes) {
     const step = steps[index] as Record<string, unknown>;
     const id = normalizedString(step.id) ?? `steps[${index}]`;
     const stepRegion = normalizedString(step.region);
-    const stepMethodClass = normalizedString(step.method_class)?.toLowerCase();
     const stepRisk = normalizedString(step.risk)?.toLowerCase();
     if (rootRegion && stepRegion && stepRegion !== rootRegion) {
       errors.push(`step "${id}" region must match micro-plan region "${rootRegion}"`);
     }
-    if (rootMethodClass && stepMethodClass && stepMethodClass !== rootMethodClass) {
-      errors.push(`step "${id}" method_class must match micro-plan method_class=${rootMethodClass}`);
-    }
-    const actualMethodClass = rawStrokeMethodClass(step);
-    const presetCompatible = rootMethodClass === 'preset-brush'
-      && hasPresetSelection
-      && step.tool === 'photoshop_paint_strokes'
-      && actualMethodClass === 'paint';
-    if (rootMethodClass && actualMethodClass && actualMethodClass !== rootMethodClass && !presetCompatible) {
-      errors.push(`step "${id}" method class is incompatible with micro-plan method_class=${rootMethodClass}`);
-    }
     if (rootRisk && stepRisk && riskRank(stepRisk) > riskRank(rootRisk)) {
       errors.push(`step "${id}" risk=${stepRisk} cannot be hidden inside micro-plan risk=${rootRisk}`);
-    }
-  }
-  return errors;
-}
-
-function collectMethodExecutionErrorsFromInput(
-  args: Record<string, unknown>,
-  registry: ToolRegistry
-): string[] {
-  if (!Array.isArray(args.steps)) return [];
-  const steps = args.steps as Array<Record<string, unknown>>;
-  const mutationIndexes = rawMutationIndexes(steps);
-  const firstMutationIndex = mutationIndexes[0] ?? steps.length;
-  const preparationSteps = steps.slice(0, firstMutationIndex);
-  const capabilities = new Map(
-    paintingMethodCapabilities(registry).map(capability => [capability.id, capability])
-  );
-  const rootMethodClass = normalizedString(args.method_class)?.toLowerCase();
-  const errors: string[] = [];
-
-  for (const mutationIndex of mutationIndexes) {
-    const step = steps[mutationIndex];
-    if (!step || typeof step !== 'object' || Array.isArray(step)) continue;
-    const methodId = normalizedString(step.method_id);
-    const id = normalizedString(step.id) ?? `steps[${mutationIndex}]`;
-    if (!methodId) {
-      if (rootMethodClass === 'preset-brush') {
-        errors.push(`step "${id}" must declare method_id for method_class=preset-brush`);
-      }
-      continue;
-    }
-    const capability = capabilities.get(methodId);
-    if (!capability) {
-      const known = paintingMethodCapabilities(registry)
-        .filter(method => method.primaryTool === step.tool)
-        .map(method => method.id);
-      errors.push(
-        `step "${id}" unknown method_id=${methodId}; available for this tool: ${known.join(', ') || 'none'}`
-      );
-      continue;
-    }
-    if (capability.availability === 'unavailable') {
-      errors.push(`step "${id}" method_id=${methodId} is unavailable: ${capability.availabilityReason}`);
-    }
-    const uniformContinuousField = capability.id === 'continuous-color-field'
-      && step.tool === 'photoshop_fill_layer' && rootMethodClass === 'fill';
-    if (rootMethodClass && capability.methodClass !== rootMethodClass && !uniformContinuousField) {
-      errors.push(
-        `step "${id}" method_id=${methodId} uses method_class=${capability.methodClass}, incompatible with micro-plan method_class=${rootMethodClass}`
-      );
-    }
-    if ((!capability.primaryTool || step.tool !== capability.primaryTool) && !uniformContinuousField) {
-      errors.push(
-        `step "${id}" method_id=${methodId} requires primary tool ${capability.primaryTool ?? 'none'}, got ${String(step.tool)}`
-      );
-    }
-    for (const requiredTool of capability.preparationTools ?? []) {
-      if (!preparationSteps.some(preparation => preparation?.tool === requiredTool)) {
-        errors.push(
-          `step "${id}" method_id=${methodId} requires preparation step ${requiredTool} before visual mutation`
-        );
-      }
-    }
-    if (capability.preparationAnyOf?.length
-      && !preparationSteps.some(preparation => capability.preparationAnyOf!.includes(String(preparation?.tool)))) {
-      errors.push(
-        `step "${id}" method_id=${methodId} requires one explicit preparation step from: ${capability.preparationAnyOf.join(', ')}`
-      );
-    }
-    const brushHints = capability.executionHints?.brush;
-    if (brushHints && typeof brushHints === 'object' && !Array.isArray(brushHints)) {
-      const setBrush = [...preparationSteps].reverse().find(preparation => preparation?.tool === 'photoshop_set_brush');
-      if (!setBrush) {
-        errors.push(`step "${id}" method_id=${methodId} requires photoshop_set_brush matching execution hints`);
-      } else {
-        const setBrushArgs = setBrush.args && typeof setBrush.args === 'object' && !Array.isArray(setBrush.args)
-          ? setBrush.args as Record<string, unknown>
-          : {};
-        for (const [key, expected] of Object.entries(brushHints as Record<string, unknown>)) {
-          if (setBrushArgs[key] !== expected) {
-            errors.push(
-              `step "${id}" method_id=${methodId} requires photoshop_set_brush.${key}=${String(expected)}, got ${String(setBrushArgs[key])}`
-            );
-          }
-        }
-      }
-    }
-    const strokeTool = capability.executionHints?.stroke_tool;
-    if (typeof strokeTool === 'string') {
-      const stepArgs = step.args && typeof step.args === 'object' && !Array.isArray(step.args)
-        ? step.args as Record<string, unknown>
-        : {};
-      const strokes = stepArgs.strokes;
-      if (!Array.isArray(strokes) || strokes.length === 0) {
-        errors.push(`step "${id}" method_id=${methodId} requires non-empty strokes using ${strokeTool}`);
-      } else if (strokes.some(stroke =>
-        !stroke || typeof stroke !== 'object' || Array.isArray(stroke)
-        || String((stroke as Record<string, unknown>).tool ?? 'BRUSH').toUpperCase() !== strokeTool
-      )) {
-        errors.push(`step "${id}" method_id=${methodId} requires every stroke.tool=${strokeTool}`);
-      }
     }
   }
   return errors;
@@ -898,11 +771,9 @@ function validateCompiledVisualMicroPlan(
       }
     }
   }
-  methodErrors.push(...collectMethodExecutionErrorsFromInput(args, registry));
+  // The catalog describes suggested techniques; Photoshop tool schemas decide executability.
   if (options.documentBounds) errors.push(...collectDocumentBoundsErrors(args, options.documentBounds));
   if (plan) {
-    const methodError = methodExecutionError(plan, registry);
-    if (methodError) methodErrors.push(methodError);
   }
   if (!errors.length && !methodErrors.length) return { plan };
   const uniqueErrors = [...new Set([...errors, ...methodErrors])];
@@ -1176,7 +1047,8 @@ function protectedMutationError(
     mutationStep.tool === 'photoshop_paint_dabs' ||
     mutationStep.tool === 'photoshop_paint_stamp_instances' ||
     mutationStep.tool === 'photoshop_fill_layer' ||
-    mutationStep.tool === 'photoshop_paint_color_gradient'
+    mutationStep.tool === 'photoshop_paint_color_gradient' ||
+    mutationStep.tool === 'photoshop_create_layer_mask'
   ) {
     const layerId = positiveLayerId(mutationArgs.layer_id);
     if (!layerId) {
@@ -1223,25 +1095,16 @@ function compileEdgeStrategies(
         .map(index => plan.steps[index]!)
         .filter(step => (step.edgeBoundaryIds ?? []).includes(edge.boundaryId));
       const executions = boundSteps.map(step => {
-        const selection = selectEdgeMethod(registry, edge.edgeClass, {
-          preferredMethodId: step.methodId ?? edge.preferredMethodId,
-        });
-        if (!step.methodId || selection.selected.id !== step.methodId) {
-          throw new Error(
-            `edge ${edge.boundaryId} step ${step.id} method_id=${step.methodId ?? 'missing'} is not executable for edge_class=${edge.edgeClass}; selected=${selection.selected.id}`
-          );
-        }
-        if (selection.selected.methodClass !== plan.methodClass) {
-          throw new Error(
-            `edge ${edge.boundaryId} method ${selection.selected.id} uses method_class=${selection.selected.methodClass}, incompatible with micro-plan method_class=${plan.methodClass}`
-          );
-        }
+        // Edge-class recipes offer suggestions; the dispatched primitive is authoritative.
+        let suggestion: ReturnType<typeof selectEdgeMethod> | undefined;
+        try { suggestion = selectEdgeMethod(registry, edge.edgeClass); }
+        catch { /* A missing artistic recipe never blocks a valid Photoshop step. */ }
         return {
           step_id: step.id,
-          method_id: selection.selected.id,
-          tool: selection.selected.primaryTool,
-          execution_hints: selection.selected.executionHints ?? {},
-          fallback_method_ids: selection.fallbacks.map(item => item.id),
+          method_id: step.methodId ?? suggestion?.selected.id,
+          tool: step.tool,
+          execution_hints: {},
+          fallback_method_ids: suggestion?.fallbacks.map(item => item.id) ?? [],
         };
       });
       strategies.push({
@@ -1319,80 +1182,6 @@ function preVisualDispatchFailureOutcome(priorSideEffectingPreparationCompleted:
       side_effects_possible: priorSideEffectingPreparationCompleted,
     },
   };
-}
-
-function methodExecutionError(plan: VisualMicroPlan, registry: ToolRegistry): string | null {
-  const capabilities = new Map(
-    paintingMethodCapabilities(registry).map(capability => [capability.id, capability])
-  );
-  const preparationSteps = plan.steps.slice(0, plan.mutationIndex);
-
-  for (const mutationIndex of plan.mutationIndexes) {
-    const step = plan.steps[mutationIndex]!;
-    if (!step.methodId) continue;
-    const capability = capabilities.get(step.methodId);
-    if (!capability) return `step "${step.id}" declares unknown method_id=${step.methodId}`;
-    if (capability.availability === 'unavailable') {
-      return `step "${step.id}" method_id=${step.methodId} is unavailable: ${capability.availabilityReason}`;
-    }
-    const uniformContinuousField = capability.id === 'continuous-color-field'
-      && step.tool === 'photoshop_fill_layer' && plan.methodClass === 'fill';
-    if (capability.methodClass !== plan.methodClass && !uniformContinuousField) {
-      return `step "${step.id}" method_id=${step.methodId} uses method_class=${capability.methodClass}, incompatible with micro-plan method_class=${plan.methodClass}`;
-    }
-    if ((!capability.primaryTool || step.tool !== capability.primaryTool) && !uniformContinuousField) {
-      return `step "${step.id}" method_id=${step.methodId} requires primary tool ${capability.primaryTool ?? 'none'}, got ${step.tool}`;
-    }
-    if (capability.preparationAnyOf?.length
-      && !preparationSteps.some(preparation => capability.preparationAnyOf!.includes(preparation.tool))) {
-      return `step "${step.id}" method_id=${step.methodId} requires one explicit preparation step from: ${capability.preparationAnyOf.join(', ')}`;
-    }
-
-    if (capability.methodClass === 'preset-brush' && plan.paintStrategy?.presetName) {
-      const selectedPreset = [...preparationSteps].reverse()
-        .find(preparation => preparation.tool === 'photoshop_select_brush_preset');
-      if (!selectedPreset || selectedPreset.args?.name !== plan.paintStrategy.presetName) {
-        return 'brush role ' + plan.paintStrategy.brushRole
-          + ' requires preset ' + plan.paintStrategy.presetName
-          + ' to be selected before mutation';
-      }
-    }
-
-    for (const requiredTool of capability.preparationTools ?? []) {
-      if (!preparationSteps.some(preparation => preparation.tool === requiredTool)) {
-        return `step "${step.id}" method_id=${step.methodId} requires preparation step ${requiredTool} before visual mutation`;
-      }
-    }
-
-    const brushHints = capability.executionHints?.brush;
-    if (brushHints && typeof brushHints === 'object' && !Array.isArray(brushHints)) {
-      const setBrush = [...preparationSteps].reverse().find(preparation => preparation.tool === 'photoshop_set_brush');
-      if (!setBrush) {
-        return `step "${step.id}" method_id=${step.methodId} requires photoshop_set_brush matching execution hints`;
-      }
-      for (const [key, expected] of Object.entries(brushHints as Record<string, unknown>)) {
-        if (setBrush.args?.[key] !== expected) {
-          return `step "${step.id}" method_id=${step.methodId} requires photoshop_set_brush.${key}=${String(expected)}, got ${String(setBrush.args?.[key])}`;
-        }
-      }
-    }
-
-    const strokeTool = capability.executionHints?.stroke_tool;
-    if (typeof strokeTool === 'string') {
-      const strokes = step.args?.strokes;
-      if (!Array.isArray(strokes) || strokes.length === 0) {
-        return `step "${step.id}" method_id=${step.methodId} requires non-empty strokes using ${strokeTool}`;
-      }
-      const mismatch = strokes.some(stroke =>
-        !stroke || typeof stroke !== 'object' || Array.isArray(stroke)
-        || String((stroke as Record<string, unknown>).tool ?? 'BRUSH').toUpperCase() !== strokeTool
-      );
-      if (mismatch) {
-        return `step "${step.id}" method_id=${step.methodId} requires every stroke.tool=${strokeTool}`;
-      }
-    }
-  }
-  return null;
 }
 
 function visualMicroPlanToolSchema(): Tool {
@@ -1519,7 +1308,7 @@ function visualMicroPlanToolSchema(): Tool {
         paint_strategy: {
           type: 'object',
           description:
-            'Construction-first execution contract. material_role is optional for non-brush gradient/fill methods, but required for preset-brush and when brush_role/brush_pack_id/stamp_profile_id is supplied. Never invent a material for a pure color field. construction_role is mandatory for broad/global softness-dominant or environmental work. continuous-field defaults to continuous-color-field. optical-veil may use a generic soft dab-chain only as an explicit justified fallback.',
+              'Optional artistic description of preferred brush/material/construction method. These classifications guide planning and review but never restrict which technically valid Photoshop primitive may execute. Actual selected brush, stamp identity, explicit pack restrictions and native stroke dynamics are validated separately.',
           properties: {
             construction_role: { type: 'string', enum: [...PAINTING_CONSTRUCTION_ROLES] },
             material_role: { type: 'string' },
@@ -1660,6 +1449,7 @@ function visualMicroPlanToolSchema(): Tool {
             expected_independent_rollback: { type: 'boolean' },
             separation_reasons: { type: 'array', items: { type: 'string' }, description: 'Optional audit/artistic guidance. Isolation authority comes from the structured Layer Separation Check plus rollback semantics.' },
             layer_id: { type: 'number', minimum: 1 },
+            binding_source_operation_id: { type: 'string', description: 'Guard-derived source of an existing empty layer; requires a native emptiness check before execution.' },
             layer_name: { type: 'string' },
             merge_target_layer_id: { type: 'number', minimum: 1 },
             physical_role: {
@@ -1970,7 +1760,7 @@ function visualMicroPlanToolSchema(): Tool {
           minItems: 2,
           maxItems: VISUAL_MICROPLAN_MAX_STEPS,
           description:
-            'Ordered preparation steps, optional BEFORE preview, 1-4 contiguous related visual mutations, and one mandatory final AFTER preview. The root intent is authoritative; optional step description/legacy intent is explanatory only. Structural region/method/risk constraints remain fail-closed.',
+            'Ordered preparation steps, optional BEFORE preview, 1-4 contiguous related native mutations, and one mandatory AFTER preview. Artistic method/style labels are optional recommendations. Technical document/layer ownership, protected targets, Undo, bounded transaction and native argument/risk constraints remain fail-closed. Mask creation in guarded plans must pin layer_id, explicit mask_mode and a same-plan selection with expected native bounds for revealSelection.',
           items: {
             type: 'object',
             properties: {
@@ -2115,18 +1905,6 @@ export function createVisualMicroPlanTools(registry: ToolRegistry, barrierDirect
         const preparationCache = preparationCacheForPlan(registry, plan);
         const preparationCacheEvents: PreparationCacheDiagnostic[] = [];
 
-        const methodContractError = prepared ? null : methodExecutionError(plan, registry);
-        if (methodContractError) {
-          return jsonResult({
-            ok: false,
-            code: 'method_execution_preflight_failed',
-            execution: 'not-executed',
-            message: methodContractError,
-            plan_id: plan.planId,
-            document_id: plan.documentId,
-            visual_mutation_started: false,
-          }, true);
-        }
 
         const staticProtectionError = staticMutationProtectionError(plan, registry);
         if (staticProtectionError) {
@@ -2162,6 +1940,32 @@ export function createVisualMicroPlanTools(registry: ToolRegistry, barrierDirect
         const edgeStrategies = edgePreflight.strategies;
 
         let sideEffectingPreparationCompleted = false;
+
+        if (plan.logicalLayer?.bindingSourceOperationId) {
+          // Read by numeric identity in the pinned document, without selecting a
+          // layer or trusting its display name. Metadata is still provisional.
+          let valid = false;
+          try {
+            const observed = await registry.execute('photoshop_get_layers', { document_id: plan.documentId });
+            for (const item of observed.content) {
+              if (item.type !== 'text') continue;
+              const body = JSON.parse(item.text);
+              const data = body.details ?? body;
+              const layers = Array.isArray(data.layers) ? data.layers : [];
+              const matches = layers.filter((layer: Record<string, any>) => layer.id === plan.logicalLayer?.layerId);
+              const layer = matches.length === 1 ? matches[0] : undefined;
+              const docId = body.document_target?.id ?? data.context?.document?.id;
+              valid = body.ok === true && docId === plan.documentId && layer?.isBackground === false
+                && layer.kind === 'LayerKind.NORMAL'
+                && !!layer.bounds && ['left', 'top', 'right', 'bottom'].every(key => layer.bounds[key] === 0);
+              if (valid) break;
+            }
+          } catch { /* Fail before any preparation or artistic mutation. */ }
+          if (!valid) return jsonResult({ ok: false, code: 'semantic_layer_binding_not_pristine',
+            execution: 'not-executed', visual_mutation_started: false,
+            message: 'The previously created layer is missing, nonempty or not verifiably blank in this document. No owner was registered. Preserve its pixels; use a new atomic create-and-paint owner or an explicit reviewed migration.',
+            plan_id: plan.planId, document_id: plan.documentId }, true);
+        }
 
         const executeStep = async (step: VisualMicroPlanStep): Promise<ToolResult> => {
           const definition = registry.get(step.tool);
@@ -2562,8 +2366,8 @@ export function createVisualMicroPlanTools(registry: ToolRegistry, barrierDirect
         });
 
         const continuationLayers = plan.steps
-          .slice(0, plan.mutationIndex)
-          .filter(step => step.tool === 'photoshop_create_layer')
+          .filter((step, index) => step.tool === 'photoshop_create_layer' && index < plan.mutationIndex
+            || step.tool === 'photoshop_source_bound_reflection' && index === plan.mutationIndex)
           .map(step => {
             const result = results[step.id];
             if (!result || typeof result !== 'object' || Array.isArray(result)) return null;

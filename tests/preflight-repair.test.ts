@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { NextPassCompilerError, NEXT_PASS_CORRECTION_PATHS } from '../src/core/guard/next-pass-compiler.js';
+import { strokeExecutionBudget } from '../src/tools/painting-tools.js';
+import { readFileSync } from 'node:fs';
 import {
   applyDeterministicPassRepairs,
   classifyViolation,
@@ -11,11 +14,32 @@ import {
   type RepairableViolation,
 } from '../src/core/guard/preflight-repair.js';
 
+it('every declared intent compiler failure carries an actionable public correction, with corrupt authority kept systemic', () => {
+  const source = readFileSync(new URL('../src/core/guard/next-pass-compiler.ts', import.meta.url), 'utf8');
+  const codes = [...source.matchAll(/new NextPassCompilerError\(\s*'(painting_intent_[a-z_]+)'/g)].map(match => match[1]!);
+  expect(codes.length).toBeGreaterThan(10);
+  for (const code of codes) {
+    expect(NEXT_PASS_CORRECTION_PATHS[code], code).toMatch(/^painting_intent\./);
+    const error = new NextPassCompilerError(code, 'An explicit structural decision is required.');
+    const v = { scope: 'next_operation' as const, code, message: error.message, details: error.details };
+    expect(fieldCorrectionPacket([v]).unaddressable_count, code).toBe(0);
+    expect(machineRepairRecipe([v]).systemic_failure, code).toBe(code === 'painting_intent_owner_ambiguous');
+  }
+});
+
 function violation(code: string, message = code, details?: Record<string, unknown>): RepairableViolation {
   return { scope: 'next_operation', code, message, ...(details ? { details } : {}) };
 }
 
 describe('preflight repair', () => {
+  it('delivers a valid field route for required scene geometry instead of a false systemic blocker', () => {
+    const packet = fieldCorrectionPacket([violation('scene_geometry_model_required',
+      'Committed spatial owner requires a scene geometry model.')]);
+    expect(packet).toMatchObject({ unaddressable_count: 0,
+      corrections: [{ path: 'next_pass.scene_geometry_model', artistic_decision_required: true }] });
+    expect(machineRepairRecipe([violation('scene_geometry_model_required')]))
+      .toMatchObject({ systemic_failure: false, diagnostic_contract_incomplete: false });
+  });
   it('drops a false duplicate sample only when the same named artistic choice and RGB are already retained', () => {
     const input: any = { scene_lighting_color_model: {
       ambient_environment: { id: 'sky', family: 'teal', provenance: 'artist-selected', sample: { rgb: [20, 40, 45], source: 'chosen by artist' } },
@@ -36,16 +60,16 @@ describe('preflight repair', () => {
     const measured = structuredClone(input); measured.scene_lighting_color_model.ambient_environment.provenance = 'reference-sample';
     expect((prepareTechnicalPassBindings(measured, {}).pass as any).scene_lighting_color_model.ambient_environment.sample).toBeDefined();
   });
-  it('normalizes obsolete canvas field labels without changing native commands, color or layer targets', () => {
+  it('preserves authored canvas field technique, physical targets and layer attributes without imposing a fill recipe', () => {
     const source: any = { construction_role: 'structured-mass', visual_intent: 'mass',
       preferred_method_id: 'region-block-in', material_role: 'paper',
       logical_layer: { hypothesis_id: 'paper', component_space: 'canvas', decision: 'create-new', construction_tier: 'primary', construction_change: true },
       actions: [{ tool: 'photoshop_fill_layer', method_id: 'region-block-in', args: { layer_id: 7, color: { red: 20, green: 30, blue: 40 } } }] };
     const fixed: any = prepareTechnicalPassBindings(source, {}).pass;
-    expect(fixed).toMatchObject({ construction_role: 'continuous-field', visual_intent: 'continuous-field', preferred_method_id: 'continuous-color-field' });
-    expect(fixed.logical_layer).not.toHaveProperty('construction_tier');
-    expect(fixed.logical_layer).not.toHaveProperty('construction_change');
-    expect(fixed.actions[0]).toMatchObject({ tool: source.actions[0].tool, args: source.actions[0].args, method_id: 'continuous-color-field' });
+    expect(fixed).toMatchObject({ construction_role: 'structured-mass', visual_intent: 'mass', preferred_method_id: 'region-block-in' });
+    expect(fixed.logical_layer).toHaveProperty('construction_tier', 'primary');
+    expect(fixed.logical_layer).toHaveProperty('construction_change', true);
+    expect(fixed.actions[0]).toMatchObject({ tool: source.actions[0].tool, args: source.actions[0].args, method_id: 'region-block-in' });
     expect(source.logical_layer.construction_tier).toBe('primary');
     for (const altered of [
       { ...source, logical_layer: { ...source.logical_layer, geometry_binding: { support_plane_id: 'floor' } } },
@@ -62,6 +86,12 @@ describe('preflight repair', () => {
     expect(packet.unaddressable_count).toBe(0);
     expect(machineRepairRecipe(codes.map(code => violation(code)))).toMatchObject({ systemic_failure: false, diagnostic_contract_incomplete: false });
     expect(machineRepairRecipe([violation('unmapped_internal_error')])).toMatchObject({ systemic_failure: true, diagnostic_contract_incomplete: true });
+  });
+  it('addresses the owner/physical-target conflict instead of declaring an unaddressable pipeline failure', () => {
+    const errors = [violation('semantic_mutation_target_owner_mismatch'), violation('invalid_visual_microplan')];
+    expect(fieldCorrectionPacket(errors)).toMatchObject({ unaddressable_count: 0,
+      corrections: [ { path: 'next_pass.logical_layer.layer_id' }, { path: 'next_pass.actions' } ] });
+    expect(machineRepairRecipe(errors)).toMatchObject({ systemic_failure: false, diagnostic_contract_incomplete: false });
   });
   it('addresses the entire background-owner/method rejection without mislabelling semantic choices as a pipeline blocker', () => {
     const codes = ['semantic_layer_owner_missing', 'semantic_layer_isolation_required',
@@ -259,6 +289,89 @@ describe('preflight repair', () => {
       path: 'next_pass.actions',
       source: 'adaptive_mutation_budget:2',
     });
+  });
+
+  it('splits 68 original strokes into bounded reviewed passes without dropping strokes or brush dynamics', () => {
+    const mark = (n: number) => ({ tool: 'BRUSH', size: 26, opacity: 66, flow: 46,
+      simulatePressure: n % 2 === 0, color: { red: 20, green: 50, blue: 70 },
+      points: [{ x: 10 + n, y: 10 }, { x: 20 + n, y: 20 }] });
+    const strokes = Array.from({ length: 68 }, (_, n) => mark(n));
+    const pass: any = { request_key: 'willow-68-strokes', action_class: 'ADD',
+      logical_layer: { decision: 'continue-logical-layer', hypothesis_id: 'willow', layer_id: 9 },
+      actions: [{ id: 'paint-willow', tool: 'photoshop_paint_strokes',
+        args: { layer_id: 9, batch_mode: 'AUTO', strokes } }] };
+    const source = JSON.stringify(pass);
+    let current = pass, collected: unknown[] = [];
+    const keys = new Set<string>();
+    for (let index = 0; index < 8; index++) {
+      const fullBudget = strokeExecutionBudget((current.actions as any[])[0].args);
+      if (fullBudget.allowed) {
+        collected.push(...(current.actions as any[]).flatMap(action => action.args.strokes));
+        break;
+      }
+      const violationRow = violation('stroke_batch_budget_exceeded', fullBudget.message, fullBudget);
+      expect(classifyViolation(violationRow)).toBe('SPLIT_DEFER');
+      expect(fieldCorrectionPacket([violationRow]).corrections[0]).toMatchObject({
+        path: 'next_pass.actions',
+      });
+      const split = splitPassForBudget(current, [violationRow])!;
+      expect(split, `split ${index}`).toBeDefined();
+      expect(split.first_pass.request_key).toBe(current.request_key);
+      expect(split.deferred_pass.request_key).toMatch(/-defer-[0-9a-f]{8}$/);
+      expect(keys.has(split.deferred_pass.request_key as string)).toBe(false);
+      keys.add(split.deferred_pass.request_key as string);
+      expect(split.repair.source).toBe('native_stroke_batch_budget:8');
+      for (const action of split.first_pass.actions as any[])
+        expect(strokeExecutionBudget(action.args).allowed).toBe(true);
+      expect((split.first_pass.actions as any[]).reduce((total, action) =>
+        total + strokeExecutionBudget(action.args).auto_batches, 0)).toBeLessThanOrEqual(8);
+      collected.push(...(split.first_pass.actions as any[]).flatMap(action => action.args.strokes));
+      current = split.deferred_pass;
+    }
+    expect(collected).toEqual(strokes);
+    expect(JSON.stringify(pass)).toBe(source);
+  });
+
+  it('splits cumulative native stroke batches across actions without changing their order', () => {
+    const stroke = (n: number) => ({ tool: 'BRUSH', size: 26,
+      points: [{ x: n, y: 10 }, { x: n + 10, y: 12 }] });
+    const actions = Array.from({ length: 3 }, (_, i) => ({
+      id: `stroke-action-${i}`, tool: 'photoshop_paint_strokes',
+      args: { layer_id: 19, strokes: Array.from({ length: 20 }, (_, n) => stroke(i * 20 + n)) },
+    }));
+    const pass: any = { request_key: 'cumulative', action_class: 'ADD',
+      logical_layer: { decision: 'continue-logical-layer', hypothesis_id: 'owner', layer_id: 19 }, actions };
+    const total = actions.reduce((sum, action) => sum + strokeExecutionBudget(action.args).auto_batches, 0);
+    expect(total).toBeGreaterThan(8);
+    const split = splitPassForBudget(pass, [violation('stroke_batch_budget_exceeded',
+      'typed budget only', { auto_batches: total, max_auto_batches: 8 })])!;
+    expect(split).toBeDefined();
+    const joined = [...split.first_pass.actions as any[], ...split.deferred_pass.actions as any[]]
+      .flatMap(action => action.args.strokes);
+    expect(joined).toEqual(actions.flatMap(action => action.args.strokes));
+    const admitted = (split.first_pass.actions as any[]).reduce((sum, action) =>
+      sum + strokeExecutionBudget(action.args).auto_batches, 0);
+    expect(admitted).toBeLessThanOrEqual(8);
+  });
+
+  it('refuses stroke splitting for foreign targets, new layers, destructive action, or untrusted budget', () => {
+    const strokes = Array.from({ length: 68 }, (_, n) => ({ tool: 'BRUSH', size: 26, opacity: 66, flow: 46,
+      points: [{ x: n, y: 10 }, { x: n + 10, y: 11 }] }));
+    const pass: any = { request_key: 'unsafe-stroke-split', action_class: 'ADD',
+      logical_layer: { decision: 'continue-logical-layer', hypothesis_id: 'tree', layer_id: 7 },
+      actions: [{ id: 'stroke', tool: 'photoshop_paint_strokes',
+        args: { layer_id: 7, strokes, batch_mode: 'AUTO' } }] };
+    const budget = strokeExecutionBudget(pass.actions[0].args);
+    expect(budget.allowed).toBe(false);
+    const row = violation('stroke_batch_budget_exceeded', budget.message, budget);
+    for (const changed of [
+      { ...pass, action_class: 'REPLACE' },
+      { ...pass, logical_layer: { ...pass.logical_layer, decision: 'create-new' } },
+      { ...pass, actions: [{ ...pass.actions[0], args: { ...pass.actions[0].args, layer_id: 8 } }] },
+      { ...pass, actions: [{ ...pass.actions[0], args: { ...pass.actions[0].args, batch_mode: 'SINGLE_HISTORY' } }] },
+      { ...pass, actions: [{ ...pass.actions[0], args: { ...pass.actions[0].args, source: '$steps.prev.id' } }] },
+    ]) expect(splitPassForBudget(changed, [row])).toBeUndefined();
+    expect(splitPassForBudget(pass, [violation('stroke_batch_budget_exceeded')])).toBeUndefined();
   });
 
   it('refuses to split causally inseparable actions that contain step references', () => {

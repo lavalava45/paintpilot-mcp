@@ -37,6 +37,48 @@ export async function runGuardedTransformLayer(router: PhotoshopBackendRouter, a
   } catch (error) { return atomicFailureFromError(error); }
 }
 
+export async function runSourceBoundReflection(router: PhotoshopBackendRouter, args: LayerArgs): Promise<ToolResult> {
+  try {
+    if (!currentToolExecutionContext()?.guardOperationId) throw new Error('reflection_guard_dispatch_required');
+    const id = documentId(args);
+    const sourceId = args.source_layer_id;
+    const receiverId = args.receiver_layer_id;
+    const waterline = args.waterline_y;
+    const xOffset = args.horizontal_offset ?? 0;
+    const opacity = args.opacity ?? 65;
+    const name = args.name;
+    const expected = args.expected_source_bounds;
+    const bounds = expected && typeof expected === 'object' && !Array.isArray(expected)
+      ? expected as Record<string, unknown> : undefined;
+    if (!id || !Number.isSafeInteger(sourceId) || !Number.isSafeInteger(receiverId)
+      || sourceId === receiverId || (sourceId as number) <= 0 || (receiverId as number) <= 0
+      || typeof waterline !== 'number' || !Number.isFinite(waterline)
+      || typeof xOffset !== 'number' || !Number.isFinite(xOffset) || Math.abs(xOffset) > 128
+      || typeof opacity !== 'number' || !Number.isFinite(opacity) || opacity < 5 || opacity > 90
+      || typeof name !== 'string' || !name.trim() || name.length > 120
+      || !bounds || !['left', 'top', 'right', 'bottom'].every(key => typeof bounds[key] === 'number' && Number.isFinite(bounds[key]))) {
+      throw new Error('reflection_manifest_invalid: pin source/receiver, exact source pixel bounds, waterline and new layer name');
+    }
+    const backend = await router.backendFor('layer.move_pixels');
+    if (backend.kind !== 'uxp') throw new Error('reflection_native_uxp_required');
+    const outcome = await invokeUxpOperation('source_bound_reflection', {
+      document_id: id, source_layer_id: sourceId, receiver_layer_id: receiverId,
+      expected_source_bounds: bounds, waterline_y: waterline,
+      horizontal_offset: xOffset, opacity, name,
+    }, 'uxp_source_bound_reflection_failed');
+    const result = outcome.data;
+    if (!outcome.ok || !result || result.reflected !== true || result.document_id !== id
+      || result.source_layer_id !== sourceId || result.receiver_layer_id !== receiverId
+      || !Number.isSafeInteger(result.layerId) || (result.layerId as number) <= 0
+      || result.layerId === sourceId || result.layerId === receiverId
+      || result.layerName !== name.trim() || result.history_steps !== 1
+      || result.transform !== 'native_vertical_flip_then_translation') {
+      throw new Error(outcome.error ?? 'reflection_native_receipt_unverified');
+    }
+    return atomicSuccess('Source-bound water reflection created from raster pixels', result);
+  } catch (error) { return atomicFailureFromError(error); }
+}
+
 async function executeTransform(
   router: PhotoshopBackendRouter,
   args: LayerArgs,

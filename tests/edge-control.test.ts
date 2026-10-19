@@ -152,7 +152,7 @@ describe('edge intent schema and method routing', () => {
     ])).toThrow(/missing boundary_id/);
   });
 
-  it('enforces edge method compatibility before visual dispatch and emits compiled edge control', async () => {
+  it('allows independent edge recipes and emits compiled edge control', async () => {
     const r = registry();
     let paintCalls = 0;
     r.register('photoshop_get_preview', {
@@ -188,24 +188,24 @@ describe('edge intent schema and method routing', () => {
         { id: 'preview', tool: 'photoshop_get_preview', args: {} },
       ],
     }));
-    expect(wrong.isError).toBe(true);
-    expect(paintCalls).toBe(0);
-    const wrongText = wrong.content.find(item => item.type === 'text');
-    expect(wrongText && 'text' in wrongText ? wrongText.text : '').toContain('method_execution_preflight_failed');
+    expect(wrong.isError).not.toBe(true);
+    expect(paintCalls).toBe(1);
 
     const correct = await tool.handler(basePlan());
-    expect(correct.isError).not.toBe(true);
+    // An actual mutation already occurred. Until its AFTER frame is judged,
+    // the preview-verdict gate must refuse another mutation on this document.
+    expect(correct.isError).toBe(true);
     expect(paintCalls).toBe(1);
-    const text = correct.content.find(item => item.type === 'text');
+    const text = wrong.content.find(item => item.type === 'text');
     const body = JSON.parse(text && 'text' in text ? text.text : '{}');
     expect(body.edge_control[0]).toEqual(expect.objectContaining({
       boundary_id: 'localRegion-bg',
       class: 'hard',
     }));
-    expect(body.edge_control[0].executions[0].method_id).toBe('pencil-line');
+    expect(body.edge_control[0].executions[0].method_id).toBe('smudge-shape');
   });
 
-  it('rejects pure edge-method incompatibility before any state-changing preparation runs', async () => {
+  it('does not refuse independent edge-method choices before valid execution', async () => {
     const r = registry();
     let prepCalls = 0;
     let paintCalls = 0;
@@ -244,20 +244,12 @@ describe('edge intent schema and method routing', () => {
       ],
     }));
 
-    expect(result.isError).toBe(true);
-    const text = result.content.find(item => item.type === 'text');
-    const body = JSON.parse(text && 'text' in text ? text.text : '{}');
-    expect(body).toMatchObject({
-      code: 'edge_control_preflight_failed',
-      execution: 'not-executed',
-      terminal: true,
-      visual_mutation_started: false,
-    });
-    expect(prepCalls).toBe(0);
-    expect(paintCalls).toBe(0);
+    expect(result.isError).not.toBe(true);
+    expect(prepCalls).toBe(1);
+    expect(paintCalls).toBe(1);
   });
 
-  it('rejects hard-brush-line when the declared method is executed through paint_dabs', async () => {
+  it('allows a hard-brush-line stylistic label through valid paint_dabs', async () => {
     const r = registry();
     let brushCalls = 0;
     let dabCalls = 0;
@@ -297,15 +289,12 @@ describe('edge intent schema and method routing', () => {
       ],
     }));
 
-    expect(result.isError).toBe(true);
-    const text = result.content.find(item => item.type === 'text');
-    expect(text && 'text' in text ? text.text : '').toContain('method_execution_preflight_failed');
-    expect(text && 'text' in text ? text.text : '').toContain('requires primary tool photoshop_paint_strokes');
-    expect(brushCalls).toBe(0);
-    expect(dabCalls).toBe(0);
+    expect(result.isError).not.toBe(true);
+    expect(brushCalls).toBe(1);
+    expect(dabCalls).toBe(1);
   });
 
-  it('requires soft-brush-build to set the declared soft brush hardness and low flow before dabs', async () => {
+  it('treats soft-brush-build hardness and flow as artistic choices, not execution permissions', async () => {
     const r = registry();
     let brushCalls = 0;
     let dabCalls = 0;
@@ -352,22 +341,19 @@ describe('edge intent schema and method routing', () => {
     });
 
     const missing = await tool.handler(softPlan());
-    expect(missing.isError).toBe(true);
-    let text = missing.content.find(item => item.type === 'text');
-    expect(text && 'text' in text ? text.text : '').toContain('requires preparation step photoshop_set_brush');
+    expect(missing.isError).not.toBe(true);
     expect(brushCalls).toBe(0);
-    expect(dabCalls).toBe(0);
+    expect(dabCalls).toBe(1);
 
     const wrong = await tool.handler(softPlan({ hardness: 0, flow: 25 }));
     expect(wrong.isError).toBe(true);
-    text = wrong.content.find(item => item.type === 'text');
-    expect(text && 'text' in text ? text.text : '').toContain('photoshop_set_brush.flow=10');
     expect(brushCalls).toBe(0);
-    expect(dabCalls).toBe(0);
+    expect(dabCalls).toBe(1);
+    expect(JSON.stringify(wrong)).toContain('preview_verdict_required');
 
     const correct = await tool.handler(softPlan({ hardness: 0, flow: 10 }));
-    expect(correct.isError).not.toBe(true);
-    expect(brushCalls).toBe(1);
+    expect(correct.isError).toBe(true);
+    expect(brushCalls).toBe(0);
     expect(dabCalls).toBe(1);
   });
 });

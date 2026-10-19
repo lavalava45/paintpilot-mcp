@@ -187,7 +187,8 @@ describe('NextPassCompiler', () => {
     }
     context.art_director.review_due=true;
     expect(compilePaintingIntentToNextPass(intent,{compactPassContext:()=>context}).next_pass.change_domains).toBeUndefined();
-    expect(()=>parsePaintingIntent({...intent,change_domains:['made-up-domain']})).toThrow(/change_domains/);
+    expect(parsePaintingIntent({...intent,change_domains:['made-up-domain']}).change_domains)
+      .toEqual(['made-up-domain']);
   });
   it('preserves localized artistic commentary independently of the technical goal', () => {
     const intent = parsePaintingIntent({ ...existingOwnerIntent(), artistic_commentary: '  Хочу связать шерсть с объёмом тела направленными мазками.  ' });
@@ -268,7 +269,7 @@ describe('NextPassCompiler', () => {
     ]));
   });
 
-  it('requires an explicit semantic construction role before creating a predeclared owner', () => {
+  it('creates a predeclared owner without forcing a construction role or artistic physical stack', () => {
     const context = {
       painting_profile: 'nontrivial_painting',
       stage: 'SHAPE',
@@ -298,13 +299,14 @@ describe('NextPassCompiler', () => {
       ],
     };
 
-    try {
-      compilePaintingIntentToNextPass(parsePaintingIntent(raw), { compactPassContext: () => context });
-      throw new Error('expected compiler to require construction_role');
-    } catch (error) {
-      expect(error).toBeInstanceOf(NextPassCompilerError);
-      expect((error as NextPassCompilerError).code).toBe('painting_intent_new_owner_role_required');
-    }
+    const withoutRole = compilePaintingIntentToNextPass(parsePaintingIntent(raw), { compactPassContext: () => context });
+    expect(withoutRole.next_pass.construction_role).toBeUndefined();
+    expect(withoutRole.next_pass.logical_layer).toMatchObject({
+      decision: 'create-new', hypothesis_id: 'tower-owner', layer_name: 'Tower',
+    });
+    expect((withoutRole.next_pass.logical_layer as any).physical_role).toBeUndefined();
+    expect((withoutRole.next_pass.actions as any[])[1].args.regions[0].layer_id)
+      .toBe('$steps.tower-layer.details.layerId');
 
     const accepted = compilePaintingIntentToNextPass(
       parsePaintingIntent({ ...raw, construction_role: 'structured-mass' }),
@@ -323,10 +325,24 @@ describe('NextPassCompiler', () => {
         hypothesis_id: 'tower-owner',
         hypothesis: 'Primary tower mass',
         layer_name: 'Tower',
-        physical_role: 'opaque-mass',
-        opacity_role: 'opaque',
       },
     });
+    expect((accepted.next_pass.logical_layer as any).physical_role).toBeUndefined();
+    const foreign = parsePaintingIntent({ ...raw, actions: [
+      raw.actions[0],
+      { ...raw.actions[1], args: { regions: [{
+        layer_id: 999,
+        contours: [{ points: [{ x: 10, y: 10 }, { x: 50, y: 10 }, { x: 40, y: 60 }] }],
+      }] } },
+    ] });
+    expect(() => compilePaintingIntentToNextPass(foreign, { compactPassContext: () => context }))
+      .toThrow(/created physical layer/);
+    const selected = compilePaintingIntentToNextPass(parsePaintingIntent({ ...raw,
+      preferred_method_id: 'my-own-brush-method',
+      actions: [raw.actions[0], { ...raw.actions[1], method_id: 'my-own-brush-method' }],
+    }), { compactPassContext: () => context }).next_pass;
+    expect(selected.preferred_method_id).toBe('my-own-brush-method');
+    expect((selected.actions as any[])[1].method_id).toBe('my-own-brush-method');
     expect((accepted.next_pass.actions as any[])[1].args.regions[0].layer_id)
       .toBe('$steps.tower-layer.details.layerId');
     const implicit = compilePaintingIntentToNextPass(

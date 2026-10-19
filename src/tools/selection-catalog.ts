@@ -40,6 +40,7 @@ function selectionTool(
 
 const none: Fields = {};
 const rectangleFields: Fields = {
+  document_id: { type: 'integer', minimum: 1, description: 'Optional exact active document pin; Guard VisualMicroPlan supplies this automatically.' },
   left: { type: 'number', description: 'Left edge in pixels' },
   top: { type: 'number', description: 'Top edge in pixels' },
   right: { type: 'number', description: 'Right edge in pixels' },
@@ -121,7 +122,18 @@ export function createSelectionTools(
     selectionTool('photoshop_select_all', 'Select the entire document', none, undefined, () => runSelectAll(router)),
     selectionTool('photoshop_deselect', 'Deselect all selections', none, undefined, () => runDeselect(router)),
     selectionTool('photoshop_invert_selection', 'Invert the current selection', none, undefined, () => runInvertSelection(router)),
-    selectionTool('photoshop_create_layer_mask', createMaskDescription, none, undefined, (args) => runCreateLayerMask(router, args)),
+    selectionTool('photoshop_create_layer_mask', createMaskDescription, {
+      document_id: { type: 'integer', minimum: 1 },
+      layer_id: { type: 'integer', minimum: 1, description: 'Optional pinned active layer owner; required for Guard mask creation.' },
+      mask_mode: { type: 'string', enum: ['revealSelection', 'revealAll'],
+        description: 'Explicit native mask semantics; required when layer_id is supplied.' },
+      expected_selection_bounds: {
+        type: 'object', additionalProperties: false,
+        properties: Object.fromEntries(['left', 'top', 'right', 'bottom'].map(key => [key, { type: 'number' }])),
+        required: ['left', 'top', 'right', 'bottom'],
+        description: 'Pinned selection bounds obtained from an authorized current-document selection observation.',
+      },
+    }, undefined, (args) => runCreateLayerMask(router, args)),
     selectionTool('photoshop_delete_layer_mask', 'Delete the layer mask from active layer', none, undefined, () => runDeleteLayerMask(router)),
     selectionTool('photoshop_apply_layer_mask', 'Apply (merge) the layer mask to the layer', none, undefined, () => runApplyLayerMask(router)),
     selectionTool(

@@ -1,4 +1,6 @@
 import { documentArtisticDebt } from './document-artistic-debt.js';
+import { provesEmptyLayerSetup } from './empty-layer-setup-recovery.js';
+import { nativeLayers, projectFileIdentity } from './project-checkpoint.js';
 import { deploymentHealth, RUNNING_DEPLOYMENT } from '../deployment-health.js';
 import { getUxpBridgeHealthSnapshot } from '../../platform/uxp-bridge-server.js';
 import fs from 'node:fs';
@@ -29,7 +31,9 @@ import {
   isRead as isGuardReadTool,
   isVisual as isGuardVisualTool,
   parseTexts,
+  fingerprint,
   previewOf,
+  bindPreviewDocument,
 } from './session-store.js';
 import { compactClosedPrevious, cycleEnvelope, executeLogicalOperation, preflightRejectionEnvelope } from './cycle.js';
 import {
@@ -145,6 +149,7 @@ const runLogicalOperation = executeLogicalOperation as unknown as (input: {
   onProgress?: ((state: string) => Promise<void> | void) | undefined;
   projectionContext?: GuardProjectionContext;
   compilerDeferredFromOperationId?: string;
+  authoredRequestFingerprint?: string;
   mutationLifecycle?: {
     beforeMutation?: (record: Record<string, unknown>) => Promise<unknown> | unknown;
     afterMutation?: (record: Record<string, unknown>, token: unknown, error?: unknown) => Promise<Record<string, number | null> | void> | void;
@@ -1004,6 +1009,17 @@ export class EmbeddedGuardRuntime {
 
   async resumeWithRecovery(input: Record<string, unknown>): Promise<Record<string, unknown>> {
     const documentId = Number(input.document_id);
+    if (positiveDocumentId(documentId)) {
+      const saved = this.store.paintingState().documents?.[String(documentId)];
+      const opened = saved?.document_instance?.bootstrap_operation_id
+        ? this.store.read(saved.document_instance.bootstrap_operation_id) : undefined;
+      if (opened?.tool === 'photoshop_open_image' && (!saved.project_checkpoint_restore || !saved.current_frame)
+        && this.store.projectCheckpointForFile(opened.args?.filePath)) {
+        const release = this.executionLease.acquire('photoshop_guard_resume_project');
+        const unlock = this.store.lock();
+        try { await this.finalizeProjectPersistence(opened); } finally { unlock(); release(); }
+      }
+    }
     const project = (result: Record<string, unknown>) => input.projection === undefined ? result : {
       ...guardResumeSubset(result, String(input.projection), typeof input.owner_id === 'string' ? input.owner_id : undefined),
       ...(result.identity_recovery ? { identity_recovery: result.identity_recovery } : {}),
@@ -1044,6 +1060,10 @@ export class EmbeddedGuardRuntime {
       }
       const state = await this.uxpStateProbe();
       const document = state.ok === true ? state.data?.document as Record<string, any> | undefined : undefined;
+      if (state.ok !== true || !positiveDocumentId(Number(document?.id))) {
+        throw new GuardContractError('document_identity_probe_unavailable',
+          'document_identity_probe_unavailable: no valid live document observation; restore the UXP connection and retry confirmation. Saved identity is unchanged.');
+      }
       if (Number(document?.id) !== documentId) throw new Error('document_identity_target_mismatch');
       const observation = this.store.observeDocumentInstance(documentId, document?.instanceWitness);
       if (observation.status !== 'identity_unverified') {
@@ -1056,12 +1076,13 @@ export class EmbeddedGuardRuntime {
       // exists to compare. Permit a narrowly proven *pristine* bootstrap only:
       // the user confirmed the same document, Guard recorded no visual work or
       // semantic owners, and Photoshop still reports its untouched new-document
-      // history and sole Background layer. Any missing/ambiguous evidence fails
+      // history and Background, optionally with receipt-proven empty layers.
+      // Any missing/ambiguous evidence fails
       // closed; painted documents still require their exact saved-frame SHA.
       if (!frame && !saved?.accepted_frame && !saved?.confirmed_goal_frame) {
-        const records = this.store.records().filter(record => Number(record.args?.document_id) === documentId);
-        const hasVisualHistory = records.some(record => record.visual === true
-          || (isGuardVisualTool(String(record.tool)) && record.execution !== 'not-executed'));
+        const records = this.store.currentDocumentRecords(documentId, undefined, undefined);
+        const hasVisualHistory = records.some((record: Record<string, unknown>) => record.execution !== 'not-executed'
+          && (record.visual === true || isGuardVisualTool(String(record.tool))));
         const owners = this.store.semanticLayerOwners(documentId);
         if (!hasVisualHistory && owners.length === 0) {
           const getHistory = async () => {
@@ -1091,18 +1112,26 @@ export class EmbeddedGuardRuntime {
             && Number.isSafeInteger(soleLayer.id) && Number(soleLayer.id) > 0
             && activeLayer.isBackground === true
             && recordOrEmpty(layerContext.document).id === documentId;
-          if (historyPristine && layerPristine) {
+          const emptyLayerSetup = !layersResult.isError && layerBodies.length === 1
+            && provesEmptyLayerSetup({ documentId, document: document!, saved, records, history, layerBody,
+              bootstrap: saved.document_instance?.bootstrap_operation_id
+                ? this.store.read(saved.document_instance.bootstrap_operation_id) : undefined });
+          if ((historyPristine && layerPristine) || emptyLayerSetup) {
             const after = await this.uxpStateProbe();
             const historyAfter = await getHistory();
+            const layersAfter = emptyLayerSetup
+              ? await this.invoke('photoshop_get_layers', { document_id: documentId }, 5_000) : undefined;
             if (after.ok === true && Number((after.data?.document as any)?.id) === documentId
               && JSON.stringify((after.data?.document as any)?.instanceWitness) === JSON.stringify(document?.instanceWitness)
-              && JSON.stringify(historyAfter) === JSON.stringify(history)) {
+              && JSON.stringify(historyAfter) === JSON.stringify(history)
+              && (!layersAfter || (!layersAfter.isError && JSON.stringify(parseTexts(layersAfter)) === JSON.stringify(parseTexts(layersResult))))) {
               // confirmDocumentSession also checks the pending witness and that
               // current_frame remains absent while holding the Guard state lock.
               this.store.confirmDocumentSession(documentId, document?.instanceWitness, undefined);
               this.capabilitySnapshotCache.delete(documentId);
               return project({ ...this.resume(documentId), identity_recovery: {
-                status: 'confirmed', state_preserved: true, recovery_mode: 'pristine_bootstrap', frame_sha256: null,
+                status: 'confirmed', state_preserved: true,
+                recovery_mode: emptyLayerSetup ? 'empty_layer_setup' : 'pristine_bootstrap', frame_sha256: null,
               } });
             }
           }
@@ -1328,6 +1357,62 @@ export class EmbeddedGuardRuntime {
     const layersResult = await this.invoke('photoshop_get_layers', { document_id: documentId }, 30_000);
     const selectionResult = await this.invoke('photoshop_get_selection_bounds', { document_id: documentId }, 30_000);
     return normalizedAnchorRestoreSnapshot(documentId, stateResult, layersResult, selectionResult);
+  }
+
+  private async captureProjectObservation(documentId: number, captureArgs: Record<string, unknown>, file: string): Promise<Record<string, any>> {
+    const fileBefore = projectFileIdentity(file);
+    const before = await this.uxpStateProbe();
+    const beforeDocument = before.data?.document as Record<string, any> | undefined;
+    if (before.ok !== true || Number(beforeDocument?.id) !== documentId) throw Error('project_checkpoint_document_unavailable');
+    const witness = beforeDocument?.instanceWitness;
+    const layersResult = await this.invoke('photoshop_get_layers', { document_id: documentId }, 30_000);
+    const previewResult = await this.invoke('photoshop_get_preview', this.materializeArguments('photoshop_get_preview',
+      { ...captureArgs, document_id: documentId, include_image: false }, `checkpoint-preview-${randomUUID()}`), 30_000);
+    const preview = bindPreviewDocument(previewOf(previewResult), documentId);
+    const after = await this.uxpStateProbe();
+    const afterDocument = after.data?.document as Record<string, any> | undefined;
+    if (!preview || after.ok !== true || Number(afterDocument?.id) !== documentId
+      || JSON.stringify(afterDocument?.instanceWitness) !== JSON.stringify(witness)) throw Error('project_checkpoint_observation_changed');
+    const fileAfter = projectFileIdentity(file);
+    if (fileAfter.sha256 !== fileBefore.sha256) throw Error('project_checkpoint_file_changed');
+    return { file: fileAfter, witness, preview, layers: nativeLayers(layersResult, documentId) };
+  }
+
+  private async finalizeProjectPersistence(record: Record<string, any>): Promise<Record<string, any>> {
+    if (record.phase !== 'completed' || record.failed) return record;
+    if (record.tool === 'photoshop_save_document' && record.checkpoint && !record.project_checkpoint) {
+      try {
+        const documentId = Number(record.args.document_id);
+        const frame = this.store.paintingState().documents?.[String(documentId)]?.current_frame;
+        const source = frame?.operation_id ? this.store.read(frame.operation_id) : undefined;
+        if (!source?.preview) return record; // Plain unconfigured PSD save remains legal.
+        const captureArgs = source.project_recovery?.checkpoint
+          ? this.store.loadProjectCheckpoint(source.project_recovery.checkpoint).capture_args
+          : this.store.anchorPreviewCaptureSpec(source)
+            ?? { max_dimension_px: Math.max(source.preview.width, source.preview.height), quality: 8 };
+        const observation = await this.captureProjectObservation(documentId, captureArgs, record.checkpoint);
+        this.store.writeProjectCheckpoint(record.id, observation, captureArgs);
+      } catch (error) {
+        this.store.write({ ...this.store.read(record.id), project_checkpoint_error: safeError(error) });
+      }
+      return this.store.read(record.id);
+    }
+    if (record.tool !== 'photoshop_open_image' || record.project_recovery?.status === 'verified') return record;
+    const known = this.store.projectCheckpointForFile(record.args?.filePath);
+    if (!known) return record; // An external image starts an explicit new run normally.
+    const documentId = Number(record.bootstrap_outcome?.document_id);
+    try {
+      if (!known.reference || !known.checkpoint) throw Error('project_checkpoint_missing: this older save has no verified project checkpoint; its old numeric bindings cannot be adopted');
+      const observation = await this.captureProjectObservation(documentId, known.checkpoint.capture_args, record.args.filePath);
+      return this.store.restoreProjectCheckpoint(record.id, known.reference, observation);
+    } catch (error) {
+      const recovery = { status: 'blocked', source_save_operation_id: known.save.id, reason: safeError(error),
+        next: 'Restore the unchanged checkpoint file/UXP connection and call photoshop_guard_resume for this document. An older save without a checkpoint requires the original document; never register owners by matching names.' };
+      const updated = { ...this.store.read(record.id), project_recovery: recovery };
+      this.store.write(updated);
+      if (positiveDocumentId(documentId)) this.store.updatePaintingState(documentId, (current: Record<string, unknown>) => ({ ...current, project_recovery: recovery }));
+      return updated;
+    }
   }
 
   async brushPackIngest(input: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -2236,6 +2321,7 @@ export class EmbeddedGuardRuntime {
         compilerTelemetry?: GuardCompilerTelemetry;
         compilerRepairAudit?: GuardCompilerRepairAudit;
         compilerDeferredFromOperationId?: string;
+        authoredRequestFingerprint?: string;
         automaticCheckpoint?: Record<string, unknown>;
       };
     } = {}
@@ -2245,6 +2331,9 @@ export class EmbeddedGuardRuntime {
     const requestJsonBytes = options.prepared?.requestJsonBytes
       ?? Buffer.byteLength(JSON.stringify(input), 'utf8');
     let cycleInput = structuredClone(input) as Record<string, unknown>;
+    const authoredMode = ['next_pass', 'painting_intent', 'next_operation'].find(key => input[key] && typeof input[key] === 'object');
+    const authoredRequest = authoredMode ? input[authoredMode] as Record<string, unknown> : undefined;
+    const authoredFingerprint = authoredRequest ? fingerprint({ mode: authoredMode, request: authoredRequest }) : undefined;
     let nextOperation = options.prepared?.operation;
     let guardPreflightMs = options.prepared?.guardPreflightMs ?? 0;
     let compilerNormalizations: Array<{ code: string; message: string }> = [];
@@ -2281,6 +2370,24 @@ export class EmbeddedGuardRuntime {
       let closedPrevious: Record<string, unknown> = options.prepared?.closedPrevious ?? { closed: false };
       let closureGuardMs = 0;
       if (!options.prepared) {
+        // Replaying a receipt is a read, not a new planning transaction. The
+        // original create request is no longer compilable after its owner exists.
+        // Match the authored payload before any context-dependent recompilation.
+        const authoredId = authoredRequest?.request_key ?? authoredRequest?.id;
+        const existing = typeof authoredId === 'string' && /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,79}$/.test(authoredId.trim())
+          ? this.store.read(authoredId.trim()) : undefined;
+        if (existing?.authored_request_fingerprint) {
+          if (existing.authored_request_fingerprint !== authoredFingerprint) {
+            const message = 'operation_request_identity_conflict: this request key belongs to a different request';
+            return { mode: 'photoshop-mcp-cycle', execution: { operation_id: authoredId, phase: 'completed',
+              failed: true, execution: 'not-executed' },
+              preflight_rejection: { errors: [message], violations: [{ scope: 'next_operation',
+                code: 'operation_request_identity_conflict', message }] }, preview: null,
+              next_state: 'terminal_not_executed', guard_transport: 'embedded_mcp' };
+          }
+          return { ...buildCycleEnvelope(this.store, existing, { replay: true, projectionContext: cycleProjection }),
+            guard_transport: 'embedded_mcp' };
+        }
         const preflightStartedAt = Date.now();
         const compilerOptions: GuardCycleCompilerOptions = {
           collectDynamicOperationViolations: (operation) => this.collectDynamicOperationViolations(
@@ -2696,6 +2803,7 @@ export class EmbeddedGuardRuntime {
           ...(compilerTelemetry ? { compilerTelemetry } : {}),
           ...(compilerRepairAudit ? { compilerRepairAudit } : {}),
           ...(compilerDeferredFromOperationId ? { compilerDeferredFromOperationId } : {}),
+          ...(authoredFingerprint ? { authoredRequestFingerprint: authoredFingerprint } : {}),
         }, this.store.presentationContext(Number((nextOperation.args as Record<string, unknown> | undefined)?.document_id), cycleProjection.paintingState));
       }
 
@@ -2717,6 +2825,7 @@ export class EmbeddedGuardRuntime {
         onProgress: undefined,
         projectionContext: cycleProjection,
         ...(compilerDeferredFromOperationId ? { compilerDeferredFromOperationId } : {}),
+        authoredRequestFingerprint: options.prepared?.authoredRequestFingerprint ?? authoredFingerprint,
         mutationLifecycle: traceProjectDirectory ? {
           beforeMutation: async (record) => {
             if (!record.visual) return undefined;
@@ -2778,6 +2887,7 @@ export class EmbeddedGuardRuntime {
         }
       }
       let refreshedRecord = run.record?.id ? this.store.read(run.record.id) : run.record;
+      if (refreshedRecord) refreshedRecord = await this.finalizeProjectPersistence(refreshedRecord);
       if (
         refreshedRecord?.id
         && refreshedRecord.visual
@@ -2869,11 +2979,26 @@ export class EmbeddedGuardRuntime {
         });
         envelope.cycle_latency = latency ?? envelope.cycle_latency ?? null;
       }
+      // The final admission may observe facts created by closing the prior
+      // operation in this SAME cycle (e.g. newly recorded representation debt).
+      // Never lose WARN diagnostics merely because compiler preflight ran on
+      // the projected earlier frame. Preserve the exact post-closure verdict.
+      const finalArtisticAdvisories = Array.isArray(run.record?.artistic_admission_warnings)
+        ? run.record.artistic_admission_warnings.map(String) : [];
+      const deliveredNormalizations = [...compilerNormalizations];
+      for (const message of finalArtisticAdvisories) {
+        if (!deliveredNormalizations.some(row => row.code === 'artistic_admission_warning'
+          && row.message.endsWith(message))) deliveredNormalizations.push({
+            code: 'artistic_admission_warning',
+            message: `WARN (artistic, not execution authority): ${message}`,
+          });
+      }
       return {
         ...envelope,
         ...(automaticCheckpoint ? { automatic_checkpoint: automaticCheckpoint } : {}),
         ...(acceptedAnchorRestoreResult ? { accepted_anchor_restore: acceptedAnchorRestoreResult } : {}),
-        ...(compilerNormalizations.length ? { compiler_normalizations: compilerNormalizations } : {}),
+        ...(deliveredNormalizations.length ? { compiler_normalizations: deliveredNormalizations } : {}),
+        ...(finalArtisticAdvisories.length ? { artistic_admission_warnings: finalArtisticAdvisories } : {}),
         ...(compilerRepairAudit ? { compiler_repair_audit: compilerRepairAudit } : {}),
         guard_transport: 'embedded_mcp',
       };
@@ -3053,6 +3178,7 @@ export class EmbeddedGuardRuntime {
       compilerTelemetry?: GuardCompilerTelemetry;
       compilerRepairAudit?: GuardCompilerRepairAudit;
       compilerDeferredFromOperationId?: string;
+      authoredRequestFingerprint?: string;
       automaticCheckpoint?: Record<string, unknown>;
     },
     presentationContext?: Record<string, unknown>

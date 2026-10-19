@@ -343,6 +343,10 @@ export function cycleEnvelope(store, record, { replay = false, closed_previous, 
       execution: record.execution,
     },
     confirmed_targets: confirmedTargets(record),
+    ...(record.project_checkpoint ? { project_checkpoint: record.project_checkpoint } : {}),
+    ...(record.project_checkpoint_error ? { project_checkpoint_error: record.project_checkpoint_error } : {}),
+    ...(record.project_recovery ? { project_recovery: record.project_recovery } : {}),
+    ...(record.post_execution_error ? { post_execution_error: record.post_execution_error } : {}),
     preview: record.preview,
     significance,
     ...(visualReview ? { visual_review: visualReview } : {}),
@@ -446,6 +450,7 @@ export async function executeLogicalOperation({
   preflight,
   projectionContext,
   compilerDeferredFromOperationId,
+  authoredRequestFingerprint,
   mutationLifecycle,
 }) {
   const timing = {
@@ -470,6 +475,7 @@ export async function executeLogicalOperation({
   if (rejection) return { preflightRejection: rejection, replay: false, timing };
   const { record, replay } = store.begin(input, {
     projectionContext,
+    ...(authoredRequestFingerprint ? { authoredRequestFingerprint } : {}),
     ...(compilerDeferredFromOperationId ? { compilerDeferredFromOperationId } : {}),
   });
   if (replay) return { record, replay: true, timing };

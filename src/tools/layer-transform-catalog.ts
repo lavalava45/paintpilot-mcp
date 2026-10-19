@@ -4,6 +4,7 @@ import { PhotoshopBackendRouter } from '../platform/photoshop-backend.js';
 import {
   runFitLayerToDocument,
   runMoveLayerPixels,
+  runSourceBoundReflection,
   runGuardedTransformLayer,
   runRotateLayer,
   runScaleLayer,
@@ -33,6 +34,25 @@ export function createLayerTransformTools(
   router = new PhotoshopBackendRouter(connection)
 ): ToolDefinition[] {
   return [
+    transformTool(
+      'photoshop_source_bound_reflection',
+      'Guard-only source-bound water reflection: duplicate pinned raster source pixels, native vertical flip at waterline, one atomic History action. Creates one independent layer and requires a semantic reflection owner plus a verified preview; never generates new imagery.',
+      {
+        document_id: { type: 'integer', minimum: 1 },
+        source_layer_id: { type: 'integer', minimum: 1 },
+        receiver_layer_id: { type: 'integer', minimum: 1 },
+        name: { type: 'string', minLength: 1, maxLength: 120 },
+        waterline_y: { type: 'number' },
+        expected_source_bounds: { type: 'object', properties: {
+          left: { type: 'number' }, top: { type: 'number' },
+          right: { type: 'number' }, bottom: { type: 'number' },
+        }, required: ['left', 'top', 'right', 'bottom'], additionalProperties: false },
+        horizontal_offset: { type: 'number', minimum: -128, maximum: 128, default: 0 },
+        opacity: { type: 'number', minimum: 5, maximum: 90, default: 65 },
+      },
+      ['document_id', 'source_layer_id', 'receiver_layer_id', 'name', 'waterline_y', 'expected_source_bounds'],
+      (args) => runSourceBoundReflection(router, args)
+    ),
     transformTool(
       'photoshop_transform_layer',
       'Guard-only native translation of an explicitly pinned Photoshop raster layer; never reorders layers',

@@ -151,6 +151,18 @@ it('accepts one component construction with separately planned face, hair and ga
   expect(compiled.nextOperation).toBeDefined();
   expect(f.dispatch).not.toHaveBeenCalled();
 });
+it('keeps world-space artistic geometry advisory in Simple without bypassing technical owner checks', async () => {
+  const f = fixture('simple_graphic');
+  const request = componentPass();
+  request.next_pass.logical_layer.component_space = 'world';
+  const compiled = await compileGuardCycle(request, f.store, f.registry);
+  expect(compiled.violations.map(v => v.code)).not.toContain('scene_geometry_model_required');
+  expect(compiled.nextOperation).toBeDefined();
+  expect(compiled.normalizations).toEqual(expect.arrayContaining([
+    expect.objectContaining({ code: 'artistic_review_advisory' }),
+  ]));
+  expect(f.dispatch).not.toHaveBeenCalled();
+});
 it('rejects distinct component labels that share a real physical layer', async () => {
   const f = fixture('simple_graphic', [{ hypothesis_id: 'hair', layer_id: 7 }, { hypothesis_id: 'garment', layer_id: 7 }]);
   const compiled = await compileGuardCycle(componentPass(), f.store, f.registry);

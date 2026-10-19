@@ -18,7 +18,7 @@ const { tryHandleP3LayerAdvancedOperation } = require('./p3-layer-advanced-ops')
 
 const BRIDGE_PORT = 38452;
 const BRIDGE_BASE = `http://127.0.0.1:${BRIDGE_PORT}`;
-const BRIDGE_REVISION = 'compact-v2-20261018-bounded-rebuild-v19';
+const BRIDGE_REVISION = 'compact-v2-20261019-owner-binding-v20';
 // Generated paired-build identity, captured once. A rebuild must not relabel loaded UXP code.
 const DEPLOYMENT_SOURCE_SHA256 = (() => {
   try {
@@ -1144,6 +1144,9 @@ function normalizeListedLayer(descriptor, depth, pathParts, isGroup) {
   if (blendMode) entry.blendMode = blendMode;
   const id = numericValue(descriptor?.layerID ?? descriptor?.layerId);
   if (id != null) entry.id = id;
+  const bounds = normalizedBounds(descriptor?.bounds);
+  if (bounds && Object.values(bounds).every(value => value != null)) entry.bounds = bounds;
+  entry.isBackground = Boolean(descriptor?.background);
   if (isGroup) {
     entry.kind = 'LayerSet';
   } else {
@@ -1855,8 +1858,39 @@ async function activeLayerHasUserMask(batchOptions = READ_BATCHPLAY_OPTIONS) {
   }
 }
 
-async function createLayerMaskInCurrentModal() {
+async function createLayerMaskInCurrentModal(params = {}) {
   const modalReadOptions = { synchronousExecution: true };
+  const pinned = params.layer_id !== undefined || params.mask_mode !== undefined || params.expected_selection_bounds !== undefined;
+  if (pinned) {
+    if (!Number.isSafeInteger(params.document_id) || params.document_id <= 0
+      || !Number.isSafeInteger(params.layer_id) || params.layer_id <= 0
+      || (params.mask_mode !== 'revealSelection' && params.mask_mode !== 'revealAll')) {
+      throw new Error('mask_owner_unverified: explicit document_id, numeric layer_id and mask_mode required');
+    }
+    const doc = app.activeDocument;
+    const active = Array.from(doc?.activeLayers ?? []);
+    if (active.length !== 1 || active[0]?.id !== params.layer_id) {
+      throw new Error('mask_owner_mismatch: native active layer differs from pinned layer_id');
+    }
+  }
+  const selection = await snapshotSelectionBounds(modalReadOptions);
+  if (pinned && selection?.ok !== true) {
+    throw new Error('mask_selection_unverified: native selection readback failed');
+  }
+  const hasSelection = selection?.has_selection === true;
+  if (pinned && params.mask_mode === 'revealSelection') {
+    const expected = params.expected_selection_bounds;
+    const expectedValid = expected && typeof expected === 'object'
+      && ['left', 'top', 'right', 'bottom'].every(key => Number.isFinite(expected[key]))
+      && expected.right > expected.left && expected.bottom > expected.top;
+    if (!expectedValid || !hasSelection
+      || !['left', 'top', 'right', 'bottom'].every(key => selection.bounds?.[key] === expected[key])) {
+      throw new Error('mask_selection_mismatch: native selection must match pinned bounds');
+    }
+  }
+  if (pinned && params.mask_mode === 'revealAll' && hasSelection) {
+    throw new Error('mask_selection_mismatch: revealAll requires no active native selection');
+  }
   if (await activeLayerHasUserMask(modalReadOptions)) {
     return {
       maskCreated: false,
@@ -1864,8 +1898,6 @@ async function createLayerMaskInCurrentModal() {
       message: 'Layer already has a mask',
     };
   }
-  const selection = await snapshotSelectionBounds(modalReadOptions);
-  const hasSelection = selection?.has_selection === true;
   await action.batchPlay(
     [{
       _obj: 'make',
@@ -1886,7 +1918,7 @@ async function createLayerMaskMutation(params = {}) {
   return core.executeAsModal(
     async () => {
       await prepareLayerMutation(params, 'create_layer_mask');
-      return createLayerMaskInCurrentModal();
+      return createLayerMaskInCurrentModal(params);
     },
     { commandName: 'MCP Create Layer Mask' }
   );
@@ -1982,6 +2014,12 @@ async function selectShapeMutation(params = {}, shape = 'rectangle') {
   }
   return core.executeAsModal(
     async () => {
+      // The active document is verified under the same modal lock that owns
+      // the selection mutation; never activate a different document implicitly.
+      if (params.document_id !== undefined &&
+        (!Number.isSafeInteger(params.document_id) || params.document_id <= 0)) {
+        throw new Error('selection_document_id_invalid: pinned document_id must be a positive integer');
+      }
       await prepareLayerMutation(params, `select_${shape}`);
       await action.batchPlay(
         [{

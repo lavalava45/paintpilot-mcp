@@ -12,6 +12,7 @@ import {
 } from '../src/core/scene-ownership-plan.js';
 import { collectSchemaErrors, compileGuardCycle } from '../src/core/guard/cycle-compiler.js';
 import { createGuardTools } from '../src/tools/guard-tools.js';
+import { applySemanticPublicSchema } from '../src/core/guard/semantic-contract-spec.js';
 import { ToolRegistry } from '../src/core/tool-registry.js';
 
 function unit(
@@ -263,6 +264,7 @@ it('publishes one scene ownership schema with required subject_kind across every
 
   for (const published of continuationPlans) {
     const continuation = sceneOwnershipContinuationSchema() as any;
+    applySemanticPublicSchema({ properties: { scene_ownership_plan: continuation } });
     expect(published.properties).toEqual(continuation.properties);
     expect(published.required).toEqual(continuation.required);
     expect(published.additionalProperties).toBe(false);

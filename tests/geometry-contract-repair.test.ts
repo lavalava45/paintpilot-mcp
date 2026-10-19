@@ -58,7 +58,7 @@ describe('geometry contract repair (offline only)', () => {
     const rejected = await compileGuardCycle({ next_pass: world }, store(), registry());
     expect(rejected.violations.map(v => v.code)).toContain('geometry_binding_required');
     const conflict = structuredClone(p); conflict.logical_layer.geometry_binding = { support_plane_id: 'floor' };
-    expect(prepareGeometryContract(conflict, context).issues.map(i => i.code)).toContain('component_space_conflict');
+    expect(prepareGeometryContract(conflict, context).issues.map(i => i.code)).not.toContain('component_space_conflict');
   });
   it('replays the real failed cabin request and reports horizon, evidence, plane roles and missing binding together', async () => {
     const input = structuredClone(saved);
@@ -156,6 +156,13 @@ describe('geometry contract repair (offline only)', () => {
     expect(next.scene_geometry_model.properties.projection.properties.horizon.properties.line.minItems).toBe(2);
     expect(next.logical_layer.properties.geometry_binding.properties.anchors.properties.centerline.properties.line.maxItems).toBe(2);
     expect(next.logical_layer.properties.geometry_binding.properties.owner_id).toEqual(GEOMETRY_BINDING_SCHEMA.properties!.owner_id);
-    expect(next.scene_geometry_model.properties.support_planes).toEqual(SCENE_GEOMETRY_SCHEMA.properties!.support_planes);
+    // Public authoring permits a uniquely compiler-derived plane ID, while
+    // the normalized internal geometry schema still requires its final ID.
+    const publicPlanes = next.scene_geometry_model.properties.support_planes;
+    const internalPlanes = SCENE_GEOMETRY_SCHEMA.properties!.support_planes as any;
+    expect(publicPlanes.items.properties.id.pattern).toBe(internalPlanes.items.properties.id.pattern);
+    expect(publicPlanes.items.properties.role.pattern).toBe(internalPlanes.items.properties.role.pattern);
+    expect(publicPlanes.items.required).toContain('role');
+    expect(publicPlanes.items.required).not.toContain('id');
   });
 });

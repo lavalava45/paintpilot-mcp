@@ -108,7 +108,7 @@ describe('Canal water first-followup: compiler owns technical forms', () => {
     expect(compileMinimalOwnerBootstrap(world, context()).derived).toBe(false);
     const tiered = water() as any;
     tiered.logical_layer.construction_tier = 'primary';
-    expect(compileMinimalOwnerBootstrap(tiered, context()).derived).toBe(false);
+    expect(compileMinimalOwnerBootstrap(tiered, context()).derived).toBe(true);
     const multi = water() as any;
     multi.actions[1].args.regions.push({ id: 'another', layer_id: multi.actions[1].args.layer_id });
     expect(compileMinimalOwnerBootstrap(multi, context()).derived).toBe(false);

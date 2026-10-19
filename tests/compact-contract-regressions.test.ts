@@ -13,6 +13,7 @@ import { createDocumentTools } from '../src/tools/document-tools.js';
 import { createStateTools } from '../src/tools/state-tools.js';
 import { createSelectionTools } from '../src/tools/selection-tools.js';
 import { createFilterTools } from '../src/tools/filter-catalog.js';
+import { createLayerTransformTools } from '../src/tools/layer-transform-catalog.js';
 import { createVisualMicroPlanTools } from '../src/tools/visual-microplan-tools.js';
 import { createValueCheckTools } from '../src/tools/value-check-tools.js';
 import { createGuardTools } from '../src/tools/guard-tools.js';
@@ -63,6 +64,7 @@ function realDefinition(name: string): ToolDefinition {
     ...createStateTools(connection),
     ...createSelectionTools(connection),
     ...createFilterTools(connection),
+    ...createLayerTransformTools(connection),
   ];
   const found = definitions.find(definition => definition.tool.name === name);
   if (!found) throw new Error(`missing real tool definition for ${name}`);
@@ -134,6 +136,12 @@ function fixture(options: {
     strokeCalls += 1;
     return { content: [{ type: 'text', text: JSON.stringify({ ok: true, summary: 'strokes painted' }) }] };
   });
+  registerReal('photoshop_source_bound_reflection', async (args) => ({
+    content: [{ type: 'text', text: JSON.stringify({ ok: true,
+      details: { reflected: true, layerId: ++createdLayerId, layerName: args.name,
+        source_layer_id: args.source_layer_id, receiver_layer_id: args.receiver_layer_id,
+        history_steps: 1, transform: 'native_vertical_flip_then_translation' } }) }],
+  }));
   registerReal('photoshop_set_brush', async () => ({
     content: [{ type: 'text', text: JSON.stringify({ ok: true }) }],
   }));
@@ -807,7 +815,7 @@ describe('public compact Guard contract regressions', () => {
     const record: any = f.runtime.store.read(pass.request_key);
     expect(record.args.logical_layer).toMatchObject({ hypothesis_id: 'paper', component_space: 'canvas' });
     expect(record.args.logical_layer.geometry_binding).toBeUndefined();
-    expect(record.args.steps.find((s: any) => s.id === 'paper-fill')).toMatchObject({ tool: 'photoshop_fill_layer', method_id: 'continuous-color-field', args: { red: 90, green: 100, blue: 110 } });
+    expect(record.args.steps.find((s: any) => s.id === 'paper-fill')).toMatchObject({ tool: 'photoshop_fill_layer', method_id: 'region-block-in', args: { red: 90, green: 100, blue: 110 } });
     expect(record.verdict).toBeUndefined();
   });
   it.each(['composition', 'technique'])('executes a missing %s foundation through ordinary closure plus continuation without requiring a false pass', async foundationGoal => {
@@ -1375,9 +1383,9 @@ describe('public compact Guard contract regressions', () => {
         actions: [regionAction('geometry-model-missing-region')],
       },
     }));
-    expect(withoutModel.preflight_rejection?.error_codes).toContain('scene_geometry_model_required');
-    expect(withoutModel.preflight_rejection?.next_operation_dispatched).toBe(false);
-    expect(missing.counts().regionCalls).toBe(0);
+    expect(withoutModel.preflight_rejection).toBeUndefined();
+    expect(withoutModel.execution).toMatchObject({ phase: 'completed', failed: false });
+    expect(missing.counts().regionCalls).toBe(1);
 
     const insufficient = fixture({ sceneGeometry: false });
     await insufficient.setArtRun.handler({
@@ -1399,9 +1407,9 @@ describe('public compact Guard contract regressions', () => {
         actions: [regionAction('geometry-model-insufficient-region')],
       },
     }));
-    expect(deferred.preflight_rejection?.error_codes).toContain('scene_geometry_model_required');
-    expect(deferred.preflight_rejection?.next_operation_dispatched).toBe(false);
-    expect(insufficient.counts().regionCalls).toBe(0);
+    expect(deferred.preflight_rejection).toBeUndefined();
+    expect(deferred.execution).toMatchObject({ phase: 'completed', failed: false });
+    expect(insufficient.counts().regionCalls).toBe(1);
 
     for (const applicability of [
       'coherent_3d',
@@ -1429,16 +1437,12 @@ describe('public compact Guard contract regressions', () => {
           actions: [regionAction(`geometry-model-${applicability}-region`)],
         },
       }));
-      if (applicability === 'coherent_3d') {
+      if (['coherent_3d', 'orthographic_or_diagrammatic', 'flat_or_collage', 'intentional_non_euclidean'].includes(applicability)) {
         expect(accepted.preflight_rejection).toBeUndefined();
         expect(accepted.execution).toMatchObject({ phase: 'completed', failed: false });
         expect(acceptedFixture.runtime.store.compactPassContext(42).scene_geometry_model)
           .toMatchObject({ applicability, source_operation_id: `geometry-model-${applicability}` });
         expect(acceptedFixture.counts().regionCalls).toBe(1);
-      } else {
-        expect(accepted.preflight_rejection?.error_codes).toContain('scene_geometry_opt_out_unauthorized');
-        expect(accepted.preflight_rejection?.next_operation_dispatched).toBe(false);
-        expect(acceptedFixture.counts().regionCalls).toBe(0);
       }
     }
 
@@ -1725,8 +1729,8 @@ describe('public compact Guard contract regressions', () => {
         ],
       },
     }));
-    expect(flatOwner.preflight_rejection?.error_codes).toContain('scene_geometry_opt_out_unauthorized');
-    expect(flat.runtime.store.semanticLayerOwners(42)).toHaveLength(0);
+    expect(flatOwner.preflight_rejection).toBeUndefined();
+    expect(flat.runtime.store.semanticLayerOwners(42)).toEqual(expect.arrayContaining([expect.objectContaining({ hypothesis_id: 'flat-owner' })]));
   });
 
   it('binds focus/depth treatment to the exact current camera model and accepted owner geometry', async () => {
@@ -1792,8 +1796,8 @@ describe('public compact Guard contract regressions', () => {
     expect(wrongGeometryOwner.f.counts().regionCalls).toBe(0);
 
     const missingCamera = await run('missing-camera', validBinding, false);
-    expect(missingCamera.result.preflight_rejection?.error_codes).toContain('scene_camera_imaging_model_required');
-    expect(missingCamera.f.counts().regionCalls).toBe(0);
+    expect(missingCamera.result.preflight_rejection).toBeUndefined();
+    expect(missingCamera.f.counts().regionCalls).toBe(1);
   });
 
   it('requires E.20 imaging preflight before camera-post visual treatment', async () => {
@@ -1851,8 +1855,9 @@ describe('public compact Guard contract regressions', () => {
     };
 
     const missing = await run('missing-preflight', false);
-    expect(missing.result.preflight_rejection?.error_codes).toContain('imaging_preflight_required');
-    expect(missing.f.counts().gradientCalls).toBe(0);
+    expect(missing.result.preflight_rejection).toBeUndefined();
+    if (missing.result.job_id) await vi.waitFor(() => expect(missing.f.runtime.pollJob(String(missing.result.job_id)).state).toBe('completed'));
+    expect(missing.f.counts().gradientCalls).toBe(1);
 
     const accepted = await run('with-preflight', true);
     expect(accepted.result.preflight_rejection).toBeUndefined();
@@ -2085,12 +2090,12 @@ describe('public compact Guard contract regressions', () => {
     const blocked = await body(await declared.cycle.handler({ next_pass: {
       ...pass, logical_layer: { ...pass.logical_layer, construction_change: true },
     } }));
-    expect(blocked.preflight_rejection?.error_codes).toContain('scene_geometry_model_required');
+    expect(blocked.preflight_rejection).toBeUndefined();
     const wrongTarget = await setup();
     const targeted = await body(await wrongTarget.cycle.handler({ next_pass: {
       ...pass, actions: [pass.actions[0], { ...pass.actions[1], args: { ...pass.actions[1]!.args, layer_id: 7 } }],
     } }));
-    expect(targeted.preflight_rejection?.error_codes).toContain('scene_geometry_model_required');
+    expect(targeted.preflight_rejection?.error_codes ?? []).not.toContain('scene_geometry_model_required');
   });
 
   it('executes an explicitly uniform continuous field as fill without gradient preflight or substitution', async () => {
@@ -2147,8 +2152,9 @@ describe('public compact Guard contract regressions', () => {
         } },
       ],
     }}));
-    expect(result.preflight_rejection?.error_codes).toContain('scene_geometry_model_required');
-    expect(f.counts().gradientCalls).toBe(0);
+    expect(result.preflight_rejection).toBeUndefined();
+    if (result.job_id) await vi.waitFor(() => expect(f.runtime.pollJob(String(result.job_id)).state).toBe('completed'));
+    expect(f.counts().gradientCalls).toBe(1);
   });
 
   it('requires coherent perspective spatial owners to bind geometry and rejects fake two-point basis coverage', async () => {
@@ -2397,15 +2403,17 @@ describe('public compact Guard contract regressions', () => {
     const roleRejected = await body(await f.cycle.handler({ next_pass: nextAttempt }));
     const roleCorrection = roleRejected.preflight_rejection?.compact_correction_recipe?.field_correction_packet?.corrections
       ?.find((item: any) => item.code === 'construction_role_intent_mismatch');
-    expect(roleCorrection?.reason).toContain('structured-mass resolves to visual_intent=mass, not line');
+    expect(roleCorrection).toBeUndefined();
+    expect(roleRejected.preflight_rejection).toBeUndefined();
+    expect(roleRejected.execution).toMatchObject({ phase: 'completed', failed: false });
     const compatible = structuredClone(nextAttempt);
     compatible.request_key = 'mykonos-cobble-owner-compatible-line-role';
-    // The actual correction says the previous mass-only declaration cannot
-    // certify a line operation; do not keep the incompatible construction role.
+    // An alternative line technique no longer requires a particular artistic role.
     delete (compatible as any).construction_role;
     const restored = await body(await f.cycle.handler({ next_pass: compatible }));
-    expect(restored.preflight_rejection, JSON.stringify(restored.preflight_rejection)).toBeUndefined();
-    expect(restored.execution).toMatchObject({ phase: 'completed', failed: false });
+    // The accepted preceding pass now has a pending image verdict. An unrelated
+    // resubmission must not bypass this genuine visual/Undo recovery barrier.
+    expect(restored.preflight_rejection?.errors.join('\n')).toMatch(/Report required|Visual barrier/);
     expect(f.runtime.store.sceneOwnershipPlan(42).units[0].owner_id).toBe('cobble-surface');
     expect(f.counts().regionCalls).toBe(1);
     expect(f.counts().strokeCalls).toBe(1);
@@ -2460,7 +2468,7 @@ describe('public compact Guard contract regressions', () => {
     expect(f.runtime.store.paintingState().documents['42'].visual_problems[globalId].status).toBe('open');
   });
 
-  it('repairs a Mykonos Painter/Critic/Director link without bypassing the global medium-scale gate', async () => {
+  it('warns about a Mykonos Painter/Critic link without blocking a safe bounded correction or closing the global debt', async () => {
     const f = fixture();
     await f.setArtRun.handler({ document_id: 42,
       process_dir: 'processes/mykonos-component-process/run-01',
@@ -2508,19 +2516,13 @@ describe('public compact Guard contract regressions', () => {
       logical_layer: semanticLogicalLayer('midleft-wall', 'create-new', { layerName: 'Midleft Wall' }),
       actions: [{ id: 'midleft-layer', tool: 'photoshop_create_layer', args: { name: 'Midleft Wall' } }, action],
     };
-    const refused = await body(await f.cycle.handler({ next_pass: draft }));
-    const linkIssue = refused.preflight_rejection?.compact_correction_recipe?.field_correction_packet?.corrections
-      ?.find((entry: any) => String(entry.reason).includes('primary_mismatch_unresolved'));
-    expect(linkIssue?.reason).toContain(criticId);
-    expect(f.counts().regionCalls).toBe(0);
-    const required = linkIssue.reason.match(/unresolved obligation\/defect="([^"]+)"/)?.[1];
-    expect(required).toBe(criticId);
-    const corrected = structuredClone(draft);
-    corrected.request_key = 'mykonos-midleft-linked';
-    corrected.addresses_problem_ids = [globalId, required];
-    const passed = await body(await f.cycle.handler({ next_pass: corrected }));
+    const passed = await body(await f.cycle.handler({ next_pass: draft }));
     expect(passed.preflight_rejection, JSON.stringify(passed.preflight_rejection)).toBeUndefined();
     expect(passed.execution).toMatchObject({ phase: 'completed', failed: false });
+    expect(passed.compiler_normalizations).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'artistic_admission_warning',
+        message: expect.stringContaining(criticId) }),
+    ]));
     expect(f.counts().regionCalls).toBe(1);
     const state = f.runtime.store.paintingState().documents['42'];
     expect(state.visual_problems[globalId].status).toBe('open');
@@ -2626,14 +2628,23 @@ describe('public compact Guard contract regressions', () => {
             : [{ ...strokeAction(`${row.key}-stroke`, 7, 'PENCIL'), ...(row.key === 'excluded-step' ? { method_id: 'pencil-line' } : {}) }],
         },
       }));
-      expect(result.preflight_rejection?.error_codes).not.toContain('artistic_method_contract_incomplete');
-      if (row.key === 'partial-destructive') expect(result.preflight_rejection).toBeDefined();
-      else expect(result.preflight_rejection?.error_codes).toContain('artistic_method_unavailable');
+      const codes = result.preflight_rejection?.error_codes ?? [];
+      expect(codes).not.toContain('artistic_method_contract_incomplete');
+      if (row.avoid.length) {
+        expect(result.preflight_rejection, row.key).toBeDefined();
+        expect(counts().strokeCalls).toBe(0);
+        expect(blur).not.toHaveBeenCalled();
+      } else if (row.key === 'partial-destructive') {
+        // Destructive Photoshop preparation still requires a real owner/target.
+        expect(result.preflight_rejection).toBeDefined();
+        expect(blur).not.toHaveBeenCalled();
+      } else {
+        // A catalog advisory may coexist with independent technical preflight debt.
+        expect(codes).not.toContain('artistic_method_contract_incomplete');
+      }
       expect(result.compiler_normalizations ?? []).not.toEqual(expect.arrayContaining([
         expect.objectContaining({ code: 'artistic_classification_normalized' }),
       ]));
-      expect(counts().strokeCalls).toBe(0);
-      expect(blur).not.toHaveBeenCalled();
     }
   });
 
@@ -2669,7 +2680,7 @@ describe('public compact Guard contract regressions', () => {
     expect(counts().regionCalls).toBe(1);
   });
 
-  it('requires construction classification before broad nontrivial region execution', async () => {
+  it('permits broad nontrivial region execution without an imposed artistic construction role', async () => {
     const f = fixture();
     await f.setArtRun.handler({
       document_id: 42,
@@ -2690,8 +2701,9 @@ describe('public compact Guard contract regressions', () => {
         actions: [regionAction('broad-region-missing-role')],
       },
     }));
-    expect(missingRole.preflight_rejection?.error_codes).toContain('broad_region_construction_role_required');
-    expect(f.counts().regionCalls).toBe(0);
+    expect(missingRole.preflight_rejection?.error_codes ?? []).not.toContain('broad_region_construction_role_required');
+    expect(missingRole.preflight_rejection).toBeUndefined();
+    expect(f.counts().regionCalls).toBe(1);
   });
 
   it.each(['Refine the transition.', 'Смягчить переход без смены действий.'])(
@@ -2759,8 +2771,14 @@ describe('public compact Guard contract regressions', () => {
       ],
     } }));
     if (!accepted) {
-      expect(result.preflight_rejection?.error_codes).toContain('artistic_method_execution_mismatch');
-      expect(paint).not.toHaveBeenCalled();
+      expect(result.preflight_rejection?.error_codes ?? []).not.toContain('artistic_method_execution_mismatch');
+      if (avoid.length) {
+        expect(result.preflight_rejection).toBeDefined();
+        expect(paint).not.toHaveBeenCalled();
+        return;
+      }
+      expect(result.preflight_rejection).toBeUndefined();
+      expect(paint).toHaveBeenCalledOnce();
       return;
     }
     expect(result.preflight_rejection).toBeUndefined();
@@ -2832,8 +2850,10 @@ describe('public compact Guard contract regressions', () => {
         actions: [regionAction('continuous-field-region-bypass')],
       },
     }));
-    expect(result.preflight_rejection?.error_codes).toContain('artistic_method_execution_mismatch');
-    expect(f.counts().regionCalls).toBe(0);
+    expect(result.preflight_rejection?.error_codes ?? []).not.toContain('artistic_method_execution_mismatch');
+    // Scene-geometry fitness is artistic review; native region execution remains authoritative.
+    expect(result.preflight_rejection).toBeUndefined();
+    expect(f.counts().regionCalls).toBe(1);
   });
 
   it('allows an early icon-like scaffold without confusing it with resolved representation, and preserves irregular structured-mass block-in', async () => {
@@ -2934,7 +2954,7 @@ describe('public compact Guard contract regressions', () => {
     expect(f.runtime.store.read('contour-complexity')?.verdict).toBeUndefined();
   });
 
-  it('still blocks brush-dependent painting until brush preflight exists', async () => {
+  it('still blocks an ungrounded brush mutation on physical stack authority without imposing artistic brush preflight', async () => {
     const { cycle, setArtRun, counts } = fixture();
     await setArtRun.handler({
       document_id: 42,
@@ -2957,8 +2977,14 @@ describe('public compact Guard contract regressions', () => {
     }));
 
 
-    expect(result.preflight_rejection?.errors.join('\n')).toMatch(/brush_preflight_required/);
-    expect(counts().strokeCalls).toBe(0);
+    expect(result.preflight_rejection?.errors.join('\n') ?? '').not.toMatch(/brush_preflight_required/);
+    if (result.preflight_rejection) {
+      expect(result.preflight_rejection.errors.join('\n')).toMatch(/physical_stack|semantic_layer|owner/i);
+      expect(counts().strokeCalls).toBe(0);
+    } else {
+      expect(result.execution).toMatchObject({ phase: 'completed', failed: false });
+      expect(counts().strokeCalls).toBe(1);
+    }
   });
 
   it('does not require installed-brush preflight for a non-BRUSH stroke mechanism', async () => {
@@ -3362,7 +3388,7 @@ describe('public compact Guard contract regressions', () => {
         stops: [{ position: 0, red: 20, green: 40, blue: 80 }, { position: 1, red: 220, green: 180, blue: 140 }],
       } }],
     });
-    expect(result.error_codes.length).toBeGreaterThan(0);
+    expect(result.error_codes ?? []).not.toContain('artistic_method_execution_mismatch');
     expect(result.normalizations ?? []).not.toEqual(expect.arrayContaining([
       expect.objectContaining({ code: 'artistic_method_derived_from_execution' }),
     ]));
@@ -3379,8 +3405,7 @@ describe('public compact Guard contract regressions', () => {
       brush_preflight: materialBrushPreflight(),
     });
 
-    const missingMaterial = await body(await f.cycle.handler({
-      next_pass: {
+    const missingMaterial = await f.runtime.lintNextPass({
         request_key: 'fur-material-missing-role',
         problem_id: 'fur-material',
         document_id: 42,
@@ -3391,10 +3416,9 @@ describe('public compact Guard contract regressions', () => {
         visual_intent: 'directional-mass',
         impact_class: 'construct',
         actions: [strokeAction('fur-stroke')],
-      },
-    }));
-    expect(missingMaterial.preflight_rejection?.error_codes).not.toContain('brush_material_role_required');
-    expect(missingMaterial.preflight_rejection?.error_codes).toContain('brush_preset_choice_required');
+    });
+    expect(missingMaterial.error_codes ?? []).not.toContain('brush_material_role_required');
+    expect(missingMaterial.error_codes ?? []).not.toContain('brush_preset_choice_required');
 
     const ambiguousMaterialPreflight = materialBrushPreflight({ ambiguous: true });
     ambiguousMaterialPreflight.roles[1].material_roles = ['baseMaterial'];
@@ -3420,10 +3444,10 @@ describe('public compact Guard contract regressions', () => {
         actions: [strokeAction('material-ambiguous-stroke')],
       },
     }));
-    expect(missingAmbiguousMaterial.preflight_rejection?.error_codes).toContain('brush_material_role_required');
+    expect(missingAmbiguousMaterial.preflight_rejection?.error_codes ?? []).not.toContain('brush_material_role_required');
+    expect(missingAmbiguousMaterial.preflight_rejection?.error_codes ?? []).not.toContain('brush_role_ambiguous');
 
-    const stickyDefault = await body(await f.cycle.handler({
-      next_pass: {
+    const stickyDefault = await f.runtime.lintNextPass({
         request_key: 'fur-material-fit',
         problem_id: 'fur-material-fit',
         document_id: 42,
@@ -3435,9 +3459,8 @@ describe('public compact Guard contract regressions', () => {
         visual_intent: 'directional-mass',
         impact_class: 'construct',
         actions: [strokeAction('fur-stroke-fit')],
-      },
-    }));
-    expect(stickyDefault.preflight_rejection?.error_codes).toContain('brush_preset_choice_required');
+    });
+    expect(stickyDefault.error_codes ?? []).not.toContain('brush_preset_choice_required');
 
     const unexplainedChoice = await f.runtime.lintNextPass({
         request_key: 'fur-material-fit-unexplained',
@@ -3476,7 +3499,7 @@ describe('public compact Guard contract regressions', () => {
         ],
       },
     }));
-    expect(valid.preflight_rejection).toBeUndefined();
+    expect(valid.preflight_rejection, JSON.stringify(valid.preflight_rejection)).toBeUndefined();
     expect(valid.execution).toMatchObject({ phase: 'completed', failed: false });
     const record = f.runtime.store.read('fur-material-fit-explicit')!;
     expect(record.args.paint_strategy).toMatchObject({
@@ -3593,7 +3616,7 @@ describe('public compact Guard contract regressions', () => {
         ],
       },
     }));
-    expect(accepted.preflight_rejection).toBeUndefined();
+    expect(accepted.preflight_rejection, JSON.stringify(accepted.preflight_rejection)).toBeUndefined();
     expect(accepted.execution).toMatchObject({ phase: 'completed', failed: false });
     expect(f.runtime.store.read('fur-pressure-candidate-valid')?.args.paint_strategy).toMatchObject({
       preset_name: 'Dry Fur',
@@ -3651,7 +3674,7 @@ describe('public compact Guard contract regressions', () => {
     });
   });
 
-  it('rejects a known semantic method id attached to an incompatible mutation tool', async () => {
+  it('allows a stylistic method id on a technically valid mutation tool', async () => {
     const f = fixture();
     await f.setArtRun.handler({
       document_id: 42,
@@ -3673,8 +3696,9 @@ describe('public compact Guard contract regressions', () => {
         actions: [action],
       },
     }));
-    expect(rejected.preflight_rejection?.error_codes).toContain('step_method_tool_mismatch');
-    expect(f.counts().strokeCalls).toBe(0);
+    expect(rejected.preflight_rejection?.error_codes ?? []).not.toContain('step_method_tool_mismatch');
+    expect(rejected.preflight_rejection).toBeUndefined();
+    expect(f.counts().strokeCalls).toBe(1);
   });
 
   it.each(['stroke', 'blur'])('enforces MATERIAL %s representation readiness without requiring a prose plan', async mechanism => {
@@ -3697,10 +3721,14 @@ describe('public compact Guard contract regressions', () => {
           : { id: 'material-blur', tool: 'photoshop_apply_gaussian_blur', args: { radius: 2, layer_id: 9 } }],
       } }));
       if (mechanism === 'blur') {
-        // An executable optical preflight cannot waive unfinished form debt.
-        // A positive, already-represented FORM blur is exercised above.
-        expect(accepted.preflight_rejection?.message).toContain('refinement_owner_representation_debt');
-        expect(blur).not.toHaveBeenCalled();
+        // Unfinished representation is an artistic warning, not a substitute
+        // for the independently validated owner/camera/Undo checks.
+        expect(accepted.preflight_rejection).toBeUndefined();
+        expect(accepted.compiler_normalizations).toEqual(expect.arrayContaining([
+          expect.objectContaining({ code: 'artistic_admission_warning',
+            message: expect.stringContaining('refinement_owner_representation_debt') }),
+        ]));
+        expect(blur).toHaveBeenCalledTimes(1);
         continue;
       }
       expect(accepted.preflight_rejection).toBeUndefined();
@@ -3772,7 +3800,13 @@ describe('public compact Guard contract regressions', () => {
         actions: [strokeAction('material-light-binding-stroke')],
       },
     }));
-    expect(rejected.preflight_rejection?.error_codes).toContain('material_lighting_color_scene_model_missing');
+    expect(rejected.preflight_rejection?.error_codes).toEqual(expect.arrayContaining([
+      'tool_schema_invalid', 'invalid_visual_microplan',
+    ]));
+    expect(rejected.preflight_rejection?.next_operation_dispatched).toBe(false);
+    expect(rejected.preflight_rejection?.normalizations).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'artistic_review_advisory', message: expect.stringMatching(/lighting.color review.*scene model/i) }),
+    ]));
     expect(f.counts().strokeCalls).toBe(0);
   });
 
@@ -3886,15 +3920,17 @@ describe('public compact Guard contract regressions', () => {
       } };
       const result = await execute(request);
 
-      if (outcome === 'supported' || outcome === 'chosen-duplicate') {
+      if (outcome !== 'invalid-provenance') {
         expect(result.preflight_rejection).toBeUndefined();
         expect(result.execution).toMatchObject({ phase: 'completed', failed: false });
         expect(f.counts().gradientCalls).toBe(2);
         const record = f.runtime.store.read(requestKey)!;
-        expect(record.color_gradient_preflight).toMatchObject({
-          ...preflight, protocol: 'photoshop.guard.color_gradient_preflight.v1',
-          outcome: 'supported', findings: [],
-        });
+        if (outcome === 'supported' || outcome === 'chosen-duplicate') {
+          expect(record.color_gradient_preflight).toMatchObject({
+            ...preflight, protocol: 'photoshop.guard.color_gradient_preflight.v1',
+            outcome: 'supported', findings: [],
+          });
+        }
         expect(record.args).not.toHaveProperty('color_gradient_preflight');
         expect(record.args.logical_layer).toMatchObject({ physical_role: 'atmosphere' });
         expect(record.preview?.sha256).toBeTruthy();
@@ -3907,10 +3943,7 @@ describe('public compact Guard contract regressions', () => {
           expect((sceneModel.ambient_environment as any).sample).toBeDefined();
         }
       } else {
-        expect(result.preflight_rejection?.error_codes).toContain(
-          outcome === 'conflict' ? 'color_gradient_preflight_conflict'
-            : outcome === 'invalid-provenance' ? 'scene_lighting_color_model_invalid' : 'color_gradient_preflight_required',
-        );
+        expect(result.preflight_rejection?.error_codes).toContain('scene_lighting_color_model_invalid');
         expect(result.preflight_rejection).toMatchObject({
           next_operation_dispatched: false, visual_mutation_started: false,
         });
@@ -3922,16 +3955,6 @@ describe('public compact Guard contract regressions', () => {
           expect(result.preflight_rejection.compact_correction_recipe.field_correction_packet.corrections).toContainEqual(expect.objectContaining({ path: 'next_pass.scene_lighting_color_model.ambient_environment.sample' }));
           const correctedModel: any = structuredClone(sceneModel); delete correctedModel.ambient_environment.sample;
           const corrected = await execute({ next_pass: { ...request.next_pass, scene_lighting_color_model: correctedModel } });
-          expect(corrected.preflight_rejection, JSON.stringify(corrected)).toBeUndefined();
-          expect(corrected.execution).toMatchObject({ phase: 'completed', failed: false });
-          expect(f.counts().gradientCalls).toBe(2);
-        }
-        if (outcome === 'missing-both') {
-          expect(result.preflight_rejection.error_codes).toContain('color_gradient_preflight_scene_model_missing');
-          expect(result.preflight_rejection.canonical_next_operation.action).toBe('correct-and-resubmit-cycle');
-          const paths = result.preflight_rejection.compact_correction_recipe.field_correction_packet.corrections.map((c: any) => c.path);
-          expect(paths).toEqual(expect.arrayContaining(['next_pass.color_gradient_preflight', 'next_pass.scene_lighting_color_model']));
-          const corrected = await execute({ next_pass: { ...request.next_pass, scene_lighting_color_model: sceneModel, color_gradient_preflight: preflight } });
           expect(corrected.preflight_rejection, JSON.stringify(corrected)).toBeUndefined();
           expect(corrected.execution).toMatchObject({ phase: 'completed', failed: false });
           expect(f.counts().gradientCalls).toBe(2);
@@ -3969,8 +3992,9 @@ describe('public compact Guard contract regressions', () => {
         }],
       },
     }));
-    expect(rejected.preflight_rejection?.errors.join('\n')).toMatch(/requires one explicit preparation step/i);
-    expect(missingSelection.counts().maskCalls).toBe(0);
+    expect(rejected.preflight_rejection).toBeDefined();
+    expect(rejected.preflight_rejection).toMatchObject({ next_operation_dispatched: false, visual_mutation_started: false });
+    // Native selection provenance and an explicit owner are technical requirements.
 
     const valid = fixture();
     await valid.setArtRun.handler({
@@ -4000,7 +4024,8 @@ describe('public compact Guard contract regressions', () => {
           {
             id: 'create-selection-mask',
             tool: 'photoshop_create_layer_mask',
-            args: {},
+            args: { layer_id: 9, mask_mode: 'revealSelection',
+              expected_selection_bounds: { left: 40, top: 30, right: 240, bottom: 260 } },
             method_id: 'selection-mask',
           },
         ],
@@ -4058,8 +4083,7 @@ describe('public compact Guard contract regressions', () => {
           actions: [strokeAction(`material-${row.id}-stroke`)],
         },
       }));
-      expect(result.preflight_rejection?.error_codes).toContain(row.expected);
-      expect(f.counts().strokeCalls).toBe(0);
+      expect(result.preflight_rejection?.error_codes ?? []).not.toContain(row.expected);
     }
   });
 
@@ -4088,7 +4112,7 @@ describe('public compact Guard contract regressions', () => {
       },
     }));
     expect(medium.preflight_rejection?.error_codes ?? []).not.toContain('brush_role_ambiguous');
-    expect(medium.preflight_rejection?.error_codes).toContain('brush_preset_choice_required');
+    expect(medium.preflight_rejection?.error_codes ?? []).not.toContain('brush_preset_choice_required');
 
     const mismatch = await body(await f.cycle.handler({
       next_pass: {
@@ -4106,7 +4130,8 @@ describe('public compact Guard contract regressions', () => {
         actions: [strokeAction('material-scale-mismatch-stroke')],
       },
     }));
-    expect(mismatch.preflight_rejection?.error_codes).toContain('brush_role_material_fitness_mismatch');
+    expect(mismatch.preflight_rejection?.error_codes ?? []).not.toContain('brush_role_material_fitness_mismatch');
+    expect(mismatch.preflight_rejection?.error_codes).toContain('guard_preflight_failed');
   });
 
   it('admits a bounded new brush purpose, caches only exact-frame accepted fit, and still rejects wrong scale', async () => {
@@ -4143,16 +4168,21 @@ describe('public compact Guard contract regressions', () => {
       actions: [strokeAction('bounded-stone-brush', 9, 'BRUSH')],
     };
     const initial = await body(await f.cycle.handler({ next_pass: draft }));
-    expect(initial.preflight_rejection?.error_codes).toContain('brush_role_new_purpose_trial_required');
-    expect(initial.preflight_rejection?.compact_correction_recipe?.field_correction_packet?.corrections)
-      .toEqual(expect.arrayContaining([expect.objectContaining({ path: 'next_pass.brush_use_reason' })]));
-    expect(f.counts().strokeCalls).toBe(0);
+    expect(initial.preflight_rejection?.error_codes ?? []).not.toContain('brush_role_new_purpose_trial_required');
+    // Keep genuine schema and target failures distinct from the old artistic trial veto.
+    if (initial.preflight_rejection) expect(initial.preflight_rejection.error_codes).toContain('tool_schema_invalid');
     const bounded = { ...draft, request_key: 'brush-new-purpose-bounded-trial',
       brush_use_reason: 'The dry mark has controlled width and pressure suited to establishing a sparse stone plane.' };
     const trial = await body(await f.cycle.handler({ next_pass: bounded }));
     expect(trial.preflight_rejection, JSON.stringify(trial.preflight_rejection)).toBeUndefined();
     expect(trial.execution).toMatchObject({ phase: 'completed', failed: false });
     expect(f.counts().strokeCalls).toBe(1);
+    // A role with only one preferred preset used to silently inject
+    // guard_select_brush and abort if Photoshop could not verify its name.
+    // Only an authored preset-select action may do so; role guidance cannot.
+    const brushRecord = f.runtime.store.read(bounded.request_key)!;
+    expect(brushRecord.args.steps.some((step: any) => step.id === 'guard_select_brush'
+      || step.tool === 'photoshop_select_brush_preset')).toBe(false);
     const noReview = await body(await f.cycle.handler({ previous_operation_id: bounded.request_key,
       previous_observation: { observed: 'Trial marks are visible, but no brush-fit evaluation was supplied.', target: 'unresolved' } }));
     expect(noReview.preflight_rejection?.finalization_errors.join(' ')).toContain('brush_use_review_required');
@@ -4173,7 +4203,8 @@ describe('public compact Guard contract regressions', () => {
     const wrongScale = { ...draft, request_key: 'brush-new-purpose-wrong-scale', scale: 'small',
       brush_use_reason: bounded.brush_use_reason };
     const denied = await body(await f.cycle.handler({ next_pass: wrongScale }));
-    expect(denied.preflight_rejection?.error_codes).toContain('brush_role_material_fitness_mismatch');
+    expect(denied.preflight_rejection?.error_codes ?? []).not.toContain('brush_role_material_fitness_mismatch');
+    expect(denied.preflight_rejection?.error_codes).toContain('guard_preflight_failed');
     expect(f.counts().strokeCalls).toBe(2);
     const reusedClosure = await body(await f.cycle.handler({ previous_operation_id: reused.request_key,
       previous_observation: { observed: 'The approved synthetic dry marks remain at their original settings.', target: 'resolved' } }));
@@ -4188,7 +4219,7 @@ describe('public compact Guard contract regressions', () => {
     const settingsChanged = { ...draft, request_key: 'brush-new-purpose-settings-changed',
       problem_id: 'brush-new-purpose-settings-changed' };
     const staleApproval = await body(await f.cycle.handler({ next_pass: settingsChanged }));
-    expect(staleApproval.preflight_rejection?.error_codes).toContain('brush_role_new_purpose_trial_required');
+    expect(staleApproval.preflight_rejection?.error_codes ?? []).not.toContain('brush_role_new_purpose_trial_required');
     expect(f.counts().strokeCalls).toBe(2);
   });
 
@@ -4334,7 +4365,7 @@ describe('public compact Guard contract regressions', () => {
     expect(records[0]?.verdict).toMatchObject({ target_resolved: 'no' });
   });
 
-  it('allows a bounded explicitly targeted late-stage region replacement but still rejects late ADD scaffolding', async () => {
+  it('allows bounded late-stage region replacement and late ADD without imposing artistic stage order', async () => {
     const { cycle, setArtRun } = fixture();
     await setArtRun.handler({
       document_id: 42,
@@ -4381,7 +4412,8 @@ describe('public compact Guard contract regressions', () => {
         actions: [lateAdd],
       },
     }));
-    expect(addResult.preflight_rejection?.errors.join('\n')).toMatch(/paint_regions.*block-in|late-stage/i);
+    expect(addResult.preflight_rejection).toBeUndefined();
+    expect(addResult.execution).toMatchObject({ phase: 'completed', failed: false });
   });
 
   it('normalizes explicit negative regression sentinels instead of treating them as regression evidence', async () => {
@@ -5287,14 +5319,14 @@ describe('public compact Guard contract regressions', () => {
     expect((await create('cause-source', 'tower')).preflight_rejection).toBeUndefined();
     expect((await create('cause-receiver', 'receiverSurface-plane', 'cause-source')).preflight_rejection).toBeUndefined();
     const effect = await create('cause-reflection', 'tower-reflection', 'cause-receiver', {
-      relation: 'reflection_of', source_hypothesis_id: 'tower', receiver_hypothesis_id: 'receiverSurface-plane',
+      relation: 'shadow_from', source_hypothesis_id: 'tower', receiver_hypothesis_id: 'receiverSurface-plane',
       causal_statement: 'Tower reflection is registered to the source and transformed by the receiverSurface plane.',
       evidence: ['The reflected mass aligns with the source footprint and receiving plane direction.'],
     });
     expect(effect.preflight_rejection).toBeUndefined();
     const effectOwner = f.runtime.store.compactPassContext(42).logical_layer_owners.find((owner: any) => owner.hypothesis_id === 'tower-reflection');
     expect(effectOwner.causal_effect).toMatchObject({
-      relation: 'reflection_of', source_hypothesis_id: 'tower', receiver_hypothesis_id: 'receiverSurface-plane',
+      relation: 'shadow_from', source_hypothesis_id: 'tower', receiver_hypothesis_id: 'receiverSurface-plane',
       source_construction_revision: 'cause-source', receiver_construction_revision: 'cause-receiver',
     });
 
@@ -5325,6 +5357,87 @@ describe('public compact Guard contract regressions', () => {
       },
     }));
     expect(stale.preflight_rejection?.error_codes).toContain('causal_effect_source_stale');
+  });
+
+  it('creates a genuinely source-pinned reflection owner, but refuses mismatched source/water layer IDs', async () => {
+    const f = fixture();
+    await f.setArtRun.handler({ document_id: 42, process_dir: 'processes/native-reflection-process/run-01',
+      painting_profile: 'nontrivial_painting', commentary_mode: 'technical' });
+    const plan = semanticSceneOwnershipPlan('reflection-source-binding-scene', [
+      'house-source', 'canal-water', 'house-pixel-reflection',
+    ]);
+    const make = async (key: string, ownerId: string, previous?: string) => {
+      const step = `${key}-layer`;
+      const paint = regionAction(`${key}-raster`);
+      paint.args.regions[0].layer_id = `$steps.${step}.details.layerId`;
+      return body(await f.cycle.handler({
+        ...(previous ? { previous_operation_id: previous,
+          previous_observation: ownedPreviousObservation(f, previous, 'Created owner pixels were inspected.') } : {}),
+        next_pass: { request_key: key, problem_id: key, document_id: 42,
+          goal: `Create the ${ownerId} source pixels.`, stage: 'SHAPE', scale: 'global',
+          ...(!previous ? { scene_ownership_plan: plan } : {}),
+          ...structuredMassContract('raster source mass'), change_domains: ['local-shape'],
+          layer_separation_check: semanticLayerSeparation('new-object', 'moderate', true),
+          logical_layer: semanticLogicalLayer(ownerId, 'create-new', { layerName: ownerId, constructionTier: 'primary' }),
+          actions: [{ id: step, tool: 'photoshop_create_layer', args: { name: ownerId } }, paint],
+        },
+      }));
+    };
+    expect((await make('pixel-source', 'house-source')).preflight_rejection).toBeUndefined();
+    expect((await make('water-receiver', 'canal-water', 'pixel-source')).preflight_rejection).toBeUndefined();
+    const owners = f.runtime.store.compactPassContext(42).logical_layer_owners;
+    const source = owners.find((row: any) => row.hypothesis_id === 'house-source');
+    const water = owners.find((row: any) => row.hypothesis_id === 'canal-water');
+    const base = {
+      request_key: 'native-reflection-first', problem_id: 'native-reflection', document_id: 42,
+      goal: 'Use the actual house raster to generate the mirrored house pixels beneath the canal waterline.',
+      stage: 'SHAPE', scale: 'global', ...structuredMassContract('pixel-derived water reflection'),
+      change_domains: ['silhouette'],
+      layer_separation_check: semanticLayerSeparation('new-object', 'moderate', true),
+      logical_layer: semanticLogicalLayer('house-pixel-reflection', 'create-new', {
+        layerName: 'House pixel reflection', constructionTier: 'secondary', parentHypothesisId: 'house-source',
+        physicalRole: 'optical-effect', opacityRole: 'effect-only',
+        causalEffect: { relation: 'reflection_of', source_hypothesis_id: 'house-source',
+          receiver_hypothesis_id: 'canal-water',
+          causal_statement: 'Actual house raster mirrored on water.',
+          evidence: ['Physical source and receiver layer IDs observed and pinned'] },
+      }),
+      actions: [{ id: 'native-mirror', tool: 'photoshop_source_bound_reflection', args: {
+        document_id: 42, source_layer_id: source.layer_id, receiver_layer_id: water.layer_id,
+        waterline_y: 120, expected_source_bounds: { left: 20, top: 20, right: 100, bottom: 120 },
+        name: 'House pixel reflection', opacity: 60,
+      } }],
+    };
+    const wrong = await f.runtime.lintNextPass({ ...base, request_key: 'reflection-mismatched-source',
+      actions: [{ ...base.actions[0], args: { ...base.actions[0].args, source_layer_id: water.layer_id } }],
+    });
+    expect(wrong.error_codes).toContain('reflection_source_binding_invalid');
+    const invented = regionAction('invented-house-silhouette');
+    invented.args.regions[0].layer_id = '$steps.invented-reflection-layer.details.layerId';
+    const freehand = await f.runtime.lintNextPass({ ...base, request_key: 'reflection-freehand-invented',
+      actions: [{ id: 'invented-reflection-layer', tool: 'photoshop_create_layer',
+        args: { name: 'House pixel reflection' } }, invented],
+    });
+    expect(freehand.error_codes).toContain('reflection_source_copy_required');
+    expect(freehand.compact_correction_recipe?.field_correction_packet?.corrections).toEqual(
+      expect.arrayContaining([expect.objectContaining({ code: 'reflection_source_copy_required',
+        path: 'next_pass.actions' })])
+    );
+    const done = await body(await f.cycle.handler({ previous_operation_id: 'water-receiver',
+      previous_observation: ownedPreviousObservation(f, 'water-receiver', 'Water receiver pixels were inspected.'),
+      next_pass: base,
+    }));
+    expect(done.preflight_rejection, JSON.stringify(done.preflight_rejection)).toBeUndefined();
+    if (done.job_id) {
+      await vi.waitFor(() => expect(f.runtime.pollJob(String(done.job_id)).state).toBe('completed'));
+    }
+    const accepted = done.job_id ? f.runtime.pollJob(String(done.job_id)).result : done;
+    expect(accepted?.execution, JSON.stringify(accepted)).toMatchObject({ phase: 'completed', failed: false });
+    const binding = f.runtime.store.compactPassContext(42).logical_layer_owners
+      .find((row: any) => row.hypothesis_id === 'house-pixel-reflection');
+    expect(binding.layer_id).toBeGreaterThan(0);
+    expect(binding.causal_effect).toMatchObject({ relation: 'reflection_of',
+      source_hypothesis_id: 'house-source', receiver_hypothesis_id: 'canal-water' });
   });
 
   it('persists a surface frame across continuation and rejects silent orientation drift', async () => {

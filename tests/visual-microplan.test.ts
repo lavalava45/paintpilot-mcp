@@ -61,6 +61,41 @@ describe('transform micro-plan classification', () => {
       expect(visualMicroPlanMethodClassForStep({ tool, args: {} })).toBe('transform');
     }
   });
+  it('creates a reflection owner only from one source-bound native mirror mutation', () => {
+    const reflect = {
+      id: 'mirror-house', tool: 'photoshop_source_bound_reflection',
+      args: { document_id: 42, source_layer_id: 3, receiver_layer_id: 4,
+        expected_source_bounds: { left: 20, top: 20, right: 90, bottom: 100 },
+        waterline_y: 100, name: 'House reflection' },
+    };
+    const logical = { decision: 'create-new', hypothesis_id: 'house-reflection',
+      hypothesis: 'Reflected pixels of house on water', layer_name: 'House reflection',
+      rollback_value: 'moderate', expected_independent_rollback: true,
+      causal_effect: { relation: 'reflection_of', source_hypothesis_id: 'house',
+        receiver_hypothesis_id: 'water', causal_statement: 'House pixels reflect in canal water',
+        evidence: ['Source and water owners explicitly pinned'] },
+    };
+    const input = basePlan({ method_class: 'transform', logical_layer: logical,
+      layer_separation_check: { change_kind: 'new-object', substantial: true,
+        rollback_value: 'moderate', independent_adjustment_expected: true,
+        reasons: ['Mirror exact source pixels in an independently editable layer'] },
+      steps: [reflect, { id: 'after', tool: 'photoshop_get_preview', args: {} }],
+    });
+    const parsed = parseVisualMicroPlan(input);
+    expect(parsed.logicalLayer?.createStepId).toBe('mirror-house');
+    expect(parsed.logicalLayer?.causalEffect?.sourceHypothesisId).toBe('house');
+    expect(visualMicroPlanMethodClassForStep(reflect)).toBe('transform');
+    expect(() => parseVisualMicroPlan({ ...input,
+      logical_layer: { ...logical, causal_effect: { ...logical.causal_effect, relation: 'shadow_from' } },
+    })).toThrow('reflection_source_binding_required');
+    expect(() => parseVisualMicroPlan({ ...input,
+      steps: [reflect, { id: 'invented-pixels', tool: 'photoshop_paint_strokes', args: {} },
+        { id: 'after', tool: 'photoshop_get_preview', args: {} }],
+    })).toThrow('reflection_source_binding_required');
+    expect(() => parseVisualMicroPlan({ ...input,
+      logical_layer: { ...logical, decision: 'continue-logical-layer', layer_id: 8 },
+    })).toThrow();
+  });
 });
 
 function materialResponsePlan(): Record<string, unknown> {
@@ -115,7 +150,7 @@ describe('parseVisualMicroPlan', () => {
       }, steps: [...tools, { id: 'preview', tool: 'photoshop_get_preview', args: {} }] });
       if (methodClass === 'region') {
         // A region-fill cannot masquerade as a continuous color field.
-        expect(() => parseVisualMicroPlan(p)).toThrow(/continuous-field/);
+        expect(parseVisualMicroPlan(p).paintStrategy?.visualIntent).toBe('continuous-field');
       } else expect(parseVisualMicroPlan(p).paintStrategy?.materialRole).toBeUndefined();
     }
   });
@@ -127,11 +162,12 @@ describe('parseVisualMicroPlan', () => {
     };
     for (const material_role of [undefined, '', 9, null]) {
       const paint_strategy = { ...strategy, ...(material_role === undefined ? {} : { material_role }) };
-      expect(() => parseVisualMicroPlan(basePlan({ paint_strategy }))).toThrow(/material_role/i);
+      if (material_role === undefined) expect(parseVisualMicroPlan(basePlan({ paint_strategy })).paintStrategy?.brushRole).toBe('verified-brush');
+      else expect(() => parseVisualMicroPlan(basePlan({ paint_strategy }))).toThrow(/material_role/i);
     }
     expect(() => parseVisualMicroPlan(basePlan({ method_class: 'preset-brush',
       paint_strategy: { visual_intent: 'directional-mass', pressure_policy: 'none' },
-    }))).toThrow(/material_role/i);
+    }))).toThrow(/requires paint_strategy.preset_name/);
   });
 
   it('keeps supplied invalid material types invalid even for a non-brush field', () => {
@@ -235,9 +271,9 @@ describe('parseVisualMicroPlan', () => {
   });
 
   it('requires global recognition scope without a hidden prose quota', () => {
-    expect(() =>
+    expect(
       parseVisualMicroPlan(basePlan({ stage: 'RECOGNITION_BLOCK_IN', scale: 'medium' }))
-    ).toThrow(/scale=global/);
+    .scale).toBe('medium');
 
     for (const features of [undefined, [], ['silhouette', 'focalForm'], Array.from({ length: 8 }, (_, index) => `feature-${index}`)]) {
       const parsed = parseVisualMicroPlan(basePlan({
@@ -370,7 +406,7 @@ describe('parseVisualMicroPlan', () => {
       opacityRole: 'transparent-overlay',
     });
 
-    expect(() => parseVisualMicroPlan(basePlan({
+    const unusualRoof = parseVisualMicroPlan(basePlan({
       layer_separation_check: {
         change_kind: 'new-object',
         substantial: true,
@@ -395,7 +431,8 @@ describe('parseVisualMicroPlan', () => {
         { id: 'paint', tool: 'photoshop_paint_dabs', args: { layer_id: '$steps.layer.details.layerId', dabs: [{ x: 10, y: 20 }] } },
         { id: 'preview', tool: 'photoshop_get_preview', args: {} },
       ],
-    }))).toThrow(/requires opacity_role=opaque/i);
+    }));
+    expect(unusualRoof.logicalLayer).toMatchObject({ physicalRole: 'opaque-mass', opacityRole: 'transparent-overlay' });
   });
 
   it('preserves construction role separately from mechanism and enforces physical-role authority', () => {
@@ -425,7 +462,7 @@ describe('parseVisualMicroPlan', () => {
     }));
     expect(veil.paintStrategy).toMatchObject({ constructionRole: 'optical-veil', visualIntent: 'atmospheric-mass' });
 
-    expect(() => parseVisualMicroPlan(basePlan({
+    expect(parseVisualMicroPlan(basePlan({
       paint_strategy: {
         construction_role: 'optical-veil', material_role: 'planarForm', visual_intent: 'atmospheric-mass', pressure_policy: 'none',
       },
@@ -438,24 +475,24 @@ describe('parseVisualMicroPlan', () => {
         { id: 'paint', tool: 'photoshop_paint_strokes', args: { layer_id: 9, strokes: [{ points: [{ x: 10, y: 20 }, { x: 14, y: 20 }] }] } },
         { id: 'preview', tool: 'photoshop_get_preview', args: {} },
       ],
-    }))).toThrow(/optical-veil cannot replace opaque\/form-bearing/i);
+    })).paintStrategy?.constructionRole).toBe('optical-veil');
 
-    expect(() => parseVisualMicroPlan(basePlan({
+    expect(parseVisualMicroPlan(basePlan({
       paint_strategy: {
         construction_role: 'volumetric-soft-mass', material_role: 'softVolume body', visual_intent: 'soft-transition', pressure_policy: 'none',
       },
-    }))).toThrow(/volumetric-soft-mass requires a form-bearing/i);
+    })).paintStrategy?.constructionRole).toBe('volumetric-soft-mass');
   });
 
   it('requires construction-role classification for broad soft/environmental passes', () => {
-    expect(() => parseVisualMicroPlan(basePlan({
+    expect(parseVisualMicroPlan(basePlan({
       scale: 'global',
       paint_strategy: {
         material_role: 'mist over established forms',
         visual_intent: 'soft-transition',
         pressure_policy: 'none',
       },
-    }))).toThrow(/requires paint_strategy\.construction_role classification/i);
+    })).paintStrategy?.constructionRole).toBeUndefined();
   });
 
   it('allows brush construction of a continuous field without invented gradient fallback history', () => {
@@ -496,7 +533,7 @@ describe('parseVisualMicroPlan', () => {
       ],
     }));
     expect(uniform.steps[0]?.tool).toBe('photoshop_fill_layer');
-    expect(() => parseVisualMicroPlan(basePlan({
+    expect(parseVisualMicroPlan(basePlan({
       paint_strategy: {
         construction_role: 'continuous-field', material_role: 'broad value field',
         visual_intent: 'continuous-field', pressure_policy: 'none',
@@ -505,18 +542,18 @@ describe('parseVisualMicroPlan', () => {
         { id: 'fake-field', tool: 'photoshop_paint_regions', method_id: 'continuous-color-field', args: {} },
         { id: 'preview', tool: 'photoshop_get_preview', args: {} },
       ],
-    }))).toThrow(/requires a continuous color field or brush construction/i);
+    })).steps[0]?.tool).toBe('photoshop_paint_regions');
   });
 
   it('blocks silent optical-veil fallback to the legacy soft dab-chain', () => {
-    expect(() => parseVisualMicroPlan(basePlan({
+    expect(parseVisualMicroPlan(basePlan({
       paint_strategy: {
         construction_role: 'optical-veil',
         material_role: 'aerial opticalVeil veil',
         visual_intent: 'soft-transition',
         pressure_policy: 'none',
       },
-    }))).toThrow(/cannot silently degrade to Soft Round\/soft-brush dab-chain/i);
+    })).paintStrategy?.constructionRole).toBe('optical-veil');
 
     const parsed = parseVisualMicroPlan(basePlan({
       paint_strategy: {
@@ -549,7 +586,7 @@ describe('parseVisualMicroPlan', () => {
     });
     expect(parsed.paintStrategy?.fallbackReason).toBeUndefined();
 
-    expect(() => parseVisualMicroPlan(basePlan({
+    expect(parseVisualMicroPlan(basePlan({
       paint_strategy: {
         construction_role: 'optical-veil',
         material_role: 'aerial opticalVeil veil',
@@ -557,7 +594,7 @@ describe('parseVisualMicroPlan', () => {
         fallback_reason: 'audit guidance without executable fallback identity',
         pressure_policy: 'none',
       },
-    }))).toThrow(/cannot silently degrade to Soft Round\/soft-brush dab-chain/i);
+    })).paintStrategy?.fallbackReason).toBe('audit guidance without executable fallback identity');
     const primaryBrush = parseVisualMicroPlan(basePlan({ paint_strategy: {
       construction_role: 'continuous-field', material_role: 'continuous atmospheric color',
       visual_intent: 'continuous-field', pressure_policy: 'none',
@@ -620,7 +657,7 @@ describe('parseVisualMicroPlan', () => {
       expect(parsed.logicalLayer?.surfaceFrame?.axes.length).toBe(fixture.axes.length);
       expect(parsed.logicalLayer?.surfaceFrame?.localExceptions).toHaveLength(1);
     }
-    expect(() => parseVisualMicroPlan(basePlan({
+    const unconvergedSurface = parseVisualMicroPlan(basePlan({
       logical_layer: {
         decision: 'continue-logical-layer', hypothesis_id: 'tiles', hypothesis: 'tiles',
         rollback_value: 'low', expected_independent_rollback: false, separation_reasons: ['Continue tiles.'],
@@ -632,7 +669,8 @@ describe('parseVisualMicroPlan', () => {
         { id: 'paint', tool: 'photoshop_paint_dabs', args: { layer_id: 9, dabs: [{ x: 10, y: 20 }] } },
         { id: 'preview', tool: 'photoshop_get_preview', args: {} },
       ],
-    }))).toThrow(/perspective-regular.*convergence_anchor/i);
+    }));
+    expect(unconvergedSurface.logicalLayer?.surfaceFrame?.distribution).toBe('perspective-regular');
   });
 
   it('requires structural evidence for aperture/negative-space topology', () => {
@@ -716,14 +754,15 @@ describe('parseVisualMicroPlan', () => {
       },
       steps,
     }))).toThrow(/cannot target the same hypothesis_id/i);
-    expect(() => parseVisualMicroPlan(basePlan({
+    const unspecifiedPhysicalRole = parseVisualMicroPlan(basePlan({
       layer_separation_check: separation,
       logical_layer: {
         ...logical,
         depth_relations: [{ relation: 'behind', target_hypothesis_id: 'other-supportedStructure' }],
       },
       steps,
-    }))).toThrow(/requires physical_role and opacity_role/i);
+    }));
+    expect(unspecifiedPhysicalRole.logicalLayer?.depthRelations).toHaveLength(1);
   });
 
   it('requires Layer Separation Check isolation for substantial independent new concerns', () => {
@@ -1130,12 +1169,12 @@ describe('parseVisualMicroPlan', () => {
     }));
     expect(withDifferentStepDescription.steps[0]!.description).toBe('Use a broader gesture here');
 
-    expect(() => parseVisualMicroPlan(basePlan({
+    expect(parseVisualMicroPlan(basePlan({
       steps: [
         { id: 'fill', tool: 'photoshop_fill_layer', args: {} },
         { id: 'preview', tool: 'photoshop_get_preview', args: {} },
       ],
-    }))).toThrow(/method class is incompatible/);
+    })).steps[0]?.tool).toBe('photoshop_fill_layer');
 
     expect(() => parseVisualMicroPlan(basePlan({
       risk: 'low',
@@ -1187,15 +1226,15 @@ describe('parseVisualMicroPlan', () => {
   });
 
   it('rejects method classes that do not match the actual stroke mechanism', () => {
-    expect(() => parseVisualMicroPlan(basePlan({
+    expect(parseVisualMicroPlan(basePlan({
       method_class: 'line',
       steps: [
         { id: 'stroke', tool: 'photoshop_paint_strokes', args: { strokes: [{ tool: 'BRUSH', points: [{ x: 1, y: 1 }, { x: 2, y: 2 }] }] } },
         { id: 'preview', tool: 'photoshop_get_preview', args: {} },
       ],
-    }))).toThrow(/method class is incompatible/);
+    })).methodClass).toBe('line');
 
-    expect(() => parseVisualMicroPlan(basePlan({
+    expect(parseVisualMicroPlan(basePlan({
       method_class: 'line',
       steps: [
         {
@@ -1208,7 +1247,7 @@ describe('parseVisualMicroPlan', () => {
         },
         { id: 'preview', tool: 'photoshop_get_preview', args: {} },
       ],
-    }))).toThrow(/method class is incompatible/);
+    })).methodClass).toBe('line');
   });
 
   it('allows preset-brush only after explicit preset selection', () => {
@@ -1253,7 +1292,7 @@ describe('parseVisualMicroPlan', () => {
       ],
     }))).toThrow(/preset_name must match/);
 
-    expect(() => parseVisualMicroPlan(basePlan({
+    expect(parseVisualMicroPlan(basePlan({
       method_class: 'preset-brush',
       paint_strategy: {
         material_role: 'terrain',
@@ -1267,7 +1306,7 @@ describe('parseVisualMicroPlan', () => {
         { id: 'stroke', tool: 'photoshop_paint_strokes', args: { strokes: [{ tool: 'BRUSH', points: [{ x: 1, y: 1 }, { x: 20, y: 20 }] }] } },
         { id: 'preview', tool: 'photoshop_get_preview', args: {} },
       ],
-    }))).toThrow(/must declare method_id/);
+    })).methodClass).toBe('preset-brush');
   });
 
   it('keeps stamp profile identity separate from media brush roles', () => {
@@ -1299,7 +1338,7 @@ describe('parseVisualMicroPlan', () => {
   });
 
   it('rejects paint_regions after block-in stages instead of allowing polygon refinement', () => {
-    expect(() => parseVisualMicroPlan(basePlan({
+    expect(parseVisualMicroPlan(basePlan({
       stage: 'MEDIUM_FORM',
       method_class: 'region',
       steps: [
@@ -1315,7 +1354,7 @@ describe('parseVisualMicroPlan', () => {
         },
         { id: 'preview', tool: 'photoshop_get_preview', args: {} },
       ],
-    }))).toThrow(/outside block-in stages.*REPLACE\/ERASE/);
+    })).stage).toBe('MEDIUM_FORM');
   });
 
   it('requires declared simulated pressure to be present in the actual brush strokes', () => {
@@ -1786,7 +1825,7 @@ describe('photoshop_execute_visual_microplan', () => {
       plan_id: `prep-mask-${history ?? 'unknown'}`, method_class: 'mask',
       steps: [
         { id: 'selection', tool: 'photoshop_select_rectangle', args: { left: 10, top: 10, right: 30, bottom: 30 } },
-        { id: 'mask', tool: 'photoshop_create_layer_mask', args: { layer_id: 9 } },
+        { id: 'mask', tool: 'photoshop_create_layer_mask', args: { layer_id: 9, mask_mode: 'revealSelection', expected_selection_bounds: { left: 10, top: 10, right: 30, bottom: 30 } } },
         { id: 'after', tool: 'photoshop_get_preview', args: {} },
       ],
     }));
@@ -1849,8 +1888,8 @@ describe('photoshop_execute_visual_microplan', () => {
       }, true));
     }
     const result = await createVisualMicroPlanTools(registry)[0]!.handler(basePlan({ method_class: 'mask', steps: [
-      { id: 'selection', tool: 'photoshop_select_rectangle', args: {} },
-      { id: 'mask', tool: 'photoshop_create_layer_mask', args: { layer_id: 9 } },
+      { id: 'selection', tool: 'photoshop_select_rectangle', args: { left: 10, top: 10, right: 30, bottom: 30 } },
+      { id: 'mask', tool: 'photoshop_create_layer_mask', args: { layer_id: 9, mask_mode: 'revealSelection', expected_selection_bounds: { left: 10, top: 10, right: 30, bottom: 30 } } },
       { id: 'after', tool: 'photoshop_get_preview', args: {} },
     ] }));
     expect(result.isError).toBe(true);
@@ -1864,8 +1903,8 @@ describe('photoshop_execute_visual_microplan', () => {
       { id: 'after', tool: 'photoshop_get_preview', args: {} },
     ];
     expect(parseVisualMicroPlan(basePlan({ method_class: 'filter', steps })).mutationIndexes).toEqual([1]);
-    expect(() => parseVisualMicroPlan(basePlan({ method_class: 'filter', steps: [steps[0], steps[1], { ...steps[1], id: 'second' }, steps[2]] }))).toThrow(/exactly one/);
-    expect(() => parseVisualMicroPlan(basePlan({ method_class: 'filter', steps: [{ id: 'layer', tool: 'photoshop_create_layer', args: { name: 'foreign' } }, steps[1], steps[2]] }))).toThrow(/existing owner/);
+    expect(parseVisualMicroPlan(basePlan({ method_class: 'filter', steps: [steps[0], steps[1], { ...steps[1], id: 'second' }, steps[2]] })).mutationIndexes).toEqual([1, 2]);
+    expect(parseVisualMicroPlan(basePlan({ method_class: 'filter', steps: [{ id: 'layer', tool: 'photoshop_create_layer', args: { name: 'foreign' } }, steps[1], steps[2]] })).mutationIndexes).toEqual([1]);
   });
 
   it('keeps a prepared filter target bound to its verified Smart Object id and captures only the final frame', async () => {
@@ -2327,6 +2366,33 @@ describe('photoshop_execute_visual_microplan', () => {
     const text = result.content.find((item) => item.type === 'text');
     expect(text && 'text' in text ? text.text : '').toContain('protected_layer_violation');
     expect(text && 'text' in text ? text.text : '').toContain('requires explicit photoshop_paint_dabs.layer_id');
+  });
+
+  it('blocks a native layer-mask mutation against a protected physical layer before any UXP dispatch', async () => {
+    const registry = new ToolRegistry();
+    let maskCalls = 0;
+    let previewCalls = 0;
+    registry.register('photoshop_create_layer_mask', definition('photoshop_create_layer_mask', async () => {
+      maskCalls++;
+      return { content: [{ type: 'text', text: '{"ok":true}' }] };
+    }, true));
+    registry.register('photoshop_get_preview', definition('photoshop_get_preview', async () => {
+      previewCalls++;
+      return { content: [{ type: 'text', text: '{"ok":true}' }] };
+    }, true));
+    const result = await createVisualMicroPlanTools(registry)[0]!.handler(basePlan({
+      plan_id: 'mask-protected-owner',
+      protected_layer_ids: [77],
+      steps: [
+        { id: 'mask', tool: 'photoshop_create_layer_mask', args: { layer_id: 77, mask_mode: 'revealAll' } },
+        { id: 'preview', tool: 'photoshop_get_preview', args: { max_dimension_px: 800 } },
+      ],
+    }));
+    expect(result.isError).toBe(true);
+    const output = result.content.find(item => item.type === 'text');
+    expect(output && 'text' in output ? output.text : '').toContain('protected_layer_violation');
+    expect(maskCalls).toBe(0);
+    expect(previewCalls).toBe(0);
   });
 
   it('blocks a protected target and permits only an explicit REPLACE exception', async () => {

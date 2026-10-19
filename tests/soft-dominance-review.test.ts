@@ -250,9 +250,12 @@ describe('soft-dominance / over-smoothing review', () => {
     expect(fixture.store.paintingState().documents['42'].visual_problems['review-soft_dominance']).toMatchObject({
       severity: 'must-fix', status: 'open', scale: 'global', evidence_sha256: sha,
     });
+    const advisories: string[] = [];
     expect(() => fixture.store.priorityGate(42, {
       tool: 'photoshop_execute_visual_microplan', args: { document_id: 42, scale: 'small' },
-    })).toThrow(/stage_priority_gate/i);
+    }, undefined, advisories)).not.toThrow();
+    expect(advisories.join('\n')).toMatch(/stage_priority_gate|soft.dominance|mass.separation|footprint/i);
+    expect(fixture.store.paintingState().documents['42'].visual_problems['review-soft_dominance'].status).toBe('open');
   });
 
   it('opens a global must-fix blocker on failed soft-dominance review and blocks finer work', () => {
@@ -289,10 +292,13 @@ describe('soft-dominance / over-smoothing review', () => {
       ]),
     });
 
+    const advisories: string[] = [];
     expect(() => fixture.store.priorityGate(42, {
       tool: 'photoshop_execute_visual_microplan',
       args: { document_id: 42, scale: 'small' },
-    })).toThrow(/stage_priority_gate.*soft-dominance/i);
+    }, undefined, advisories)).not.toThrow();
+    expect(advisories.join('\n')).toMatch(/soft-dominance/);
+    expect(fixture.store.paintingState().documents['42'].visual_problems['soft-dominance'].status).toBe('open');
   });
 
   it('requires primitive-footprint debt to feed the existing primitive footprint guard', () => {

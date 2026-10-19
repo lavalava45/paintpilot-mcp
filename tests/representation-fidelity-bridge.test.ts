@@ -229,7 +229,8 @@ describe('owner-local representation fidelity bridge', () => {
         painter_scope: 'local',
         change_domains: ['local-texture'],
       },
-    })).toThrow(/refinement_owner_representation_debt.*figures-owner/i);
+    })).not.toThrow();
+    expect(fixture.store.paintingState().documents['42'].owner_representation_state['figures-owner']).toBeDefined();
   });
 
   it('allows an intentional primitive final representation only through an exact style-contract basis', () => {
@@ -283,8 +284,9 @@ describe('representation assessment cannot disappear behind a resolved local ope
     } });
     expect(() => fixture.store.plannerGate(42, request('GLOBAL_BLOCK_IN'))).not.toThrow();
     expect(() => fixture.store.plannerGate(42, request('FORM'))).not.toThrow();
-    expect(() => fixture.store.plannerGate(42, request('TEXTURE'))).toThrow(/owner_representation_debt.*figures-owner/);
-    expect(() => fixture.store.plannerGate(42, request('DETAIL'))).toThrow(/owner_representation_debt.*figures-owner/);
+    expect(() => fixture.store.plannerGate(42, request('TEXTURE'))).not.toThrow();
+    expect(() => fixture.store.plannerGate(42, request('DETAIL'))).not.toThrow();
+    expect(fixture.store.paintingState().documents['42'].owner_representation_state['figures-owner'].state).toBe('assessment-pending');
     const nextSha = seedOwnerPass(fixture.store, fixture.dir, 'assessed-form', 2, 120, 180);
     fixture.store.verdict(verdictInput('assessed-form', nextSha, { primitive_footprint: 'acceptable' }));
     expect(fixture.store.paintingState().documents['42'].owner_representation_state['figures-owner'].state).toBe('structurally-faithful');

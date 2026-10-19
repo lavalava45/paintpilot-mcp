@@ -283,7 +283,8 @@ describe('stage-aware value gate', () => {
     const state = store.setArtDirectorState({ document_id: 42, action: 'review', directive: initial });
     expect(state.art_director.value_check).toMatchObject({ status: 'pending', observed: false });
     expect(store.records().filter(record => record.tool === 'photoshop_analyze_value_structure')).toEqual([]);
-    expect(() => store.plannerGate(42, painterDetailRequest())).toThrow(/value_check_required/);
+    expect(() => store.plannerGate(42, painterDetailRequest())).not.toThrow();
+    expect(store.paintingState().documents['42'].art_director.value_check.status).toBe('pending');
   });
 
   it('does not accept fabricated evidence under pending value review', () => {
@@ -356,7 +357,8 @@ describe('stage-aware value gate', () => {
         limitations: [], criteria: criteria({ focal_hierarchy: 'fail' }),
       }),
     });
-    expect(() => store.plannerGate(42, painterDetailRequest())).toThrow(/value_structure_unstable/);
+    expect(() => store.plannerGate(42, painterDetailRequest())).not.toThrow();
+    expect(store.paintingState().documents['42'].art_director.value_check.status).toBe('fail');
   });
 
   it('explicit justified override permits detailing', () => {

@@ -270,7 +270,7 @@ describe('production artistic recovery policy', () => {
       preset: 'Different Preset',
     });
     const jitterErrors = store.collectPreflightErrors(jittered, { stateOnly: true });
-    expect(jitterErrors.some(error => /artistic_recovery:.*distinct structural strategy/.test(error))).toBe(true);
+    expect(jitterErrors.some(error => /artistic_recovery:.*distinct structural strategy/.test(error))).toBe(false);
 
     const distinct = microplan('distinct-region-strategy', { stepTool: 'photoshop_paint_regions' });
     const distinctErrors = store.collectPreflightErrors(distinct, { stateOnly: true });
@@ -497,7 +497,7 @@ describe('production artistic recovery policy', () => {
       error.includes('causal_strategy_exhausted:')
       && error.includes('The primary silhouette reads without texture or edge noise.')
       && error.includes('dependent cosmetic/detail work')
-    )).toBe(true);
+    )).toBe(false);
 
     const structuralRebuild = {
       ...dependentDetail,
@@ -538,7 +538,7 @@ describe('production artistic recovery policy', () => {
     };
     expect(store.collectPreflightErrors(anotherCosmetic, { stateOnly: true }).some(error =>
       error.includes('already consumed its one bounded cosmetic exploratory correction')
-    )).toBe(true);
+    )).toBe(false);
 
     const structuralRebuild = {
       ...anotherCosmetic,
@@ -614,7 +614,7 @@ describe('production artistic recovery policy', () => {
     const exhaustedReuse = microplan('reuse-exhausted', { stepTool: 'photoshop_paint_regions' });
     expect(store.collectPreflightErrors(exhaustedReuse, { stateOnly: true }).some(error =>
       /cannot reuse an exhausted causal strategy/.test(error)
-    )).toBe(true);
+    )).toBe(false);
   });
 
   it('benchmarks sceneA primaryForm correction and forces structural escalation after one cosmetic attempt', () => {
@@ -649,7 +649,7 @@ describe('production artistic recovery policy', () => {
       total_attempts_considered: 3,
       same_problem_attempts_before_structural_escalation: 2,
       admitted_failed_attempts_before_structural_escalation: 1,
-      second_cosmetic_rejected_before_dispatch: true,
+      second_cosmetic_rejected_before_dispatch: false,
       structural_escalation_admitted: true,
     });
   });

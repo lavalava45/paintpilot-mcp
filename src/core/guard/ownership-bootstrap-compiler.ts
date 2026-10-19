@@ -4,6 +4,8 @@ import {
   type SceneOwnershipPlan,
 } from '../scene-ownership-plan.js';
 import { normalizeGuardActionIds } from './painting-intent.js';
+import { provisionalOwner } from './ownership-evidence.js';
+import { flatCanvasContour } from '../component-space.js';
 
 type Row = Record<string, unknown>;
 const row = (value: unknown): Row | undefined =>
@@ -37,9 +39,10 @@ export function compileMinimalOwnerBootstrap(passInput: Row, context: Row = {}):
     || pass.restore_anchor_operation_id !== undefined || pass.deferred_from_operation_id !== undefined)
     return { pass, derived: false };
   const logical = row(pass.logical_layer);
+  const pending = provisionalOwner(pass, context);
   const ownerId = text(logical?.hypothesis_id) ?? text(pass.target_owner_id);
   if (!stableId(ownerId)) return { pass, derived: false };
-  if (logical && (logical.decision !== 'create-new' || (logical.hypothesis_id && logical.hypothesis_id !== ownerId)))
+  if (logical && ((!pending && logical.decision !== 'create-new') || (logical.hypothesis_id && logical.hypothesis_id !== ownerId)))
     return { pass, derived: false };
   if (pass.target_owner_id !== undefined && pass.target_owner_id !== ownerId)
     return { pass, derived: false };
@@ -50,9 +53,9 @@ export function compileMinimalOwnerBootstrap(passInput: Row, context: Row = {}):
   const actions = Array.isArray(pass.actions) ? normalizeGuardActionIds(pass.actions as Row[]).map(row) : [];
   if (actions.some(item => !item)) return { pass, derived: false };
   const creates = actions.filter(item => item?.tool === 'photoshop_create_layer');
-  if (creates.length !== 1 || (pass.action_class !== undefined && pass.action_class !== 'ADD')
+  if (creates.length !== (pending ? 0 : 1) || (pass.action_class !== undefined && pass.action_class !== 'ADD')
     || (pass.action !== undefined && pass.action !== 'add')) return { pass, derived: false };
-  const createName = text(row(creates[0]?.args)?.name);
+  const createName = pending ? text(pending.layer_name) : text(row(creates[0]?.args)?.name);
   if (!createName || (logical?.layer_name !== undefined && logical.layer_name !== createName)) return { pass, derived: false };
   const mutations = actions.filter(item => item?.tool !== 'photoshop_create_layer'
     && item?.tool !== 'photoshop_get_preview');
@@ -61,14 +64,16 @@ export function compileMinimalOwnerBootstrap(passInput: Row, context: Row = {}):
     'photoshop_paint_strokes', 'photoshop_paint_dabs'].includes(String(mutations[0].tool))) return { pass, derived: false };
   // Guard's real VisualMicroPlan must still validate every deferred layer
   // target against this create step; never silently retarget raw numeric IDs.
-  if (!stableId(creates[0]?.id) || !stableId(mutations[0].id)) return { pass, derived: false };
-  const expectedTarget = `$steps.${creates[0].id}.details.layerId`;
+  if ((!pending && !stableId(creates[0]?.id)) || !stableId(mutations[0].id)) return { pass, derived: false };
+  const expectedTarget = pending ? pending.layer_id : `$steps.${creates[0]?.id}.details.layerId`;
   const mutationArgs = row(mutations[0].args);
-  if (!mutationArgs || mutationArgs.layer_id !== expectedTarget) return { pass, derived: false };
+  if (!mutationArgs) return { pass, derived: false };
   if (mutations[0].tool === 'photoshop_paint_regions') {
-    if (!Array.isArray(mutationArgs.regions) || mutationArgs.regions.some(item =>
+    // This native tool pins each region, not a fictitious root layer_id.
+    if ((mutationArgs.layer_id !== undefined && mutationArgs.layer_id !== expectedTarget)
+      || !Array.isArray(mutationArgs.regions) || mutationArgs.regions.length === 0 || mutationArgs.regions.some(item =>
       row(item)?.layer_id !== expectedTarget)) return { pass, derived: false };
-  }
+  } else if (mutationArgs.layer_id !== expectedTarget) return { pass, derived: false };
   const scope = row(pass.component_scope);
   if (scope && Object.keys(scope).some(key => !['subject_kind', 'role', 'edit_axes'].includes(key)))
     return { pass, derived: false };
@@ -84,19 +89,8 @@ export function compileMinimalOwnerBootstrap(passInput: Row, context: Row = {}):
   // owner represents one independently editable 2D shape, not an inferred
   // world-space water surface, building or multi-part subject. The artist has
   // already declared the flat component, its owner and its contours.
-  const singleCanvasShape = !scope
-    && logical?.component_space === 'canvas'
-    && logical.construction_tier === undefined
-    && logical.construction_change !== true
-    && logical.geometry_binding === undefined
-    && !pass.construction
-    && pass.visual_intent === 'mass'
-    && pass.construction_role === 'structured-mass'
-    && mutations[0].tool === 'photoshop_paint_regions'
-    && Array.isArray(mutationArgs.regions) && mutationArgs.regions.length === 1
-    && Array.isArray(row(mutationArgs.regions[0])?.contours)
-    && (row(mutationArgs.regions[0])?.contours as unknown[]).length > 0
-    && !!text(logical.hypothesis);
+  const singleCanvasShape = !scope && flatCanvasContour(pass)
+    && !!text(logical?.hypothesis);
   const kind: 'single-component' | 'continuous-field' | undefined =
     explicitKind === 'single-component' || explicitKind === 'continuous-field'
       ? explicitKind : provenCanvasField ? 'continuous-field'
@@ -147,7 +141,9 @@ export function compileMinimalOwnerBootstrap(passInput: Row, context: Row = {}):
     pass.scene_ownership_plan = normalized;
     return { pass, derived: true,
       source: scope ? 'authored-single-component' : 'proven-canvas-continuous-field',
-      reason: 'Single new semantic owner with exact create-layer reference and verified one-component artistic scope; no existing owner reassigned.' };
+      reason: pending
+        ? 'Single explicit semantic owner bound to its pristine prior creation receipt and verified one-component scope; native emptiness remains mandatory.'
+        : 'Single new semantic owner with exact create-layer reference and verified one-component artistic scope; no existing owner reassigned.' };
   } catch {
     return { pass, derived: false };
   }

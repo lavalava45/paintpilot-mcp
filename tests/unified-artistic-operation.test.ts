@@ -128,13 +128,15 @@ describe('unified artistic-operation planner contract', () => {
     ['photoshop_move_layer', { delta_x: 4, delta_y: -2 }],
     ['photoshop_scale_layer', { width_percent: 101, height_percent: 101 }],
     ['photoshop_rotate_layer', { angle: 2 }],
-  ])('admits directive-bound standalone %s and rejects the same unbound operation', (tool, args) => {
+  ])('admits standalone %s without treating Planner directive as execution authority', (tool, args) => {
     const s = store();
     s.setArtDirectorState({ document_id: 42, action: 'review', directive: directive() });
 
     expect(() => s.plannerGate(42, request(tool, args))).not.toThrow();
     const unbound = request(tool, args) as Record<string, unknown>;
     delete unbound.planner_directive_id;
-    expect(() => s.plannerGate(42, unbound)).toThrow(/painter_contract_gate/);
+    const artisticAdvisories: string[] = [];
+    expect(() => s.plannerGate(42, unbound, undefined, false, artisticAdvisories)).not.toThrow();
+    expect(s.paintingState().documents['42']?.art_director?.directive_id).toBe('unified-operation');
   });
 });

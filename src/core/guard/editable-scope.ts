@@ -55,6 +55,25 @@ export function validateEditableScopeReview(value: any, request: any, state: any
     if (completion?.criteria?.editable_parts === 'pass') throw new Error('editable_scope_plan_required: whole-scene editability requires an inventory bound to actual owners/layers and the exact image review');
     return undefined;
   }
+  // A previously VALIDATED review can be reused only for the identical
+  // retained frame, operation, inventory topology and request. Never reuse
+  // conclusions across painting, a layer move, a changed plan, or completion
+  // certification (which has its own explicit final proof obligation).
+  const retained = state?.editable_scope_review;
+  if (value === undefined && completion === undefined && retained
+    && retained.request_id === request.request_id
+    && retained.operation_id === request.operation_id
+    && retained.frame_sha256 === request.frame_sha256
+    && retained.topology_signature === request.topology_signature
+    && retained.scope === request.scope
+    && Array.isArray(retained.parts) && Array.isArray(retained.unmapped_parts)
+    && retained.parts.length === request.parts.length
+    && retained.parts.every((part: any, i: number) =>
+      part.semantic_id === request.parts[i]?.semantic_id
+      && part.layer_id === request.parts[i]?.layer_id
+      && part.owner_id === request.parts[i]?.owner_id)) {
+    return { review: retained, debt: { ...(state.editable_scope_debt ?? {}) } };
+  }
   if (value === undefined && !request.required && completion === undefined) return undefined;
   if (value && value.request_id !== request.request_id)
     throw new Error(`editable_scope_review_binding_mismatch: expected request_id=${request.request_id}, scope=${request.scope}; use the current exact-frame ownership request, preserving actual layer IDs and uncertainty. No new capture or source reads.`);

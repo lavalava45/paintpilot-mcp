@@ -1,5 +1,7 @@
 import { normalizeSceneOwnershipPlan, completeSceneOwnershipContinuation, extendSceneOwnershipPlan } from '../scene-ownership-plan.js';
 import { compileMinimalOwnerBootstrap } from './ownership-bootstrap-compiler.js';
+import { compileSemanticOwnership } from './semantic-execution-compiler.js';
+import { ownerContextForPass, provisionalOwner } from './ownership-evidence.js';
 import { normalizeProblemLinks } from './problem-links.js';
 import { brushRoleMatchesScale } from './brush-scale-fit.js';
 import { omitRedundantConstructionLayerAction } from './preflight-repair.js';
@@ -13,7 +15,7 @@ import {
 
 export interface NextPassCompilerStore {
   compactPassContext?(documentId: number, projectionContext?: unknown): Record<string, unknown>;
-  compilerDeferredNextPass?(operationId: string): Record<string, unknown> | undefined;
+  compilerDeferredNextPass?(operationId: string, documentId?: number): Record<string, unknown> | undefined;
 }
 
 export interface PaintingIntentSkeleton {
@@ -123,6 +125,30 @@ export const NEXT_PASS_DERIVATION_RULES = [
   },
 ] as const;
 
+// Public correction locations travel with compiler failures. Diagnostics must
+// not infer an infrastructure fault merely because prose lacks a field path.
+export const NEXT_PASS_CORRECTION_PATHS: Record<string, string> = {
+  painting_intent_foreign_layer_target: 'painting_intent.actions',
+  painting_intent_creation_layer_required: 'painting_intent.actions',
+  painting_intent_scale_ambiguous: 'painting_intent.scale',
+  painting_intent_owner_ambiguous: 'painting_intent.target_owner_id',
+  painting_intent_owner_unplanned: 'painting_intent.scene_ownership_plan',
+  painting_intent_new_owner_role_required: 'painting_intent.construction_role',
+  painting_intent_actions_required: 'painting_intent.actions',
+  painting_intent_ownership_plan_invalid: 'painting_intent.scene_ownership_plan',
+  painting_intent_deferred_actions_conflict: 'painting_intent.deferred_from_operation_id',
+  painting_intent_deferred_subpass_missing: 'painting_intent.deferred_from_operation_id',
+  painting_intent_deferred_lineage_mismatch: 'painting_intent.deferred_from_operation_id',
+  painting_intent_deferred_semantic_change: 'painting_intent.actions',
+  painting_intent_deferred_action_change: 'painting_intent.actions',
+  painting_intent_deferred_owner_change: 'painting_intent.target_owner_id',
+  painting_intent_deferred_actions_missing: 'painting_intent.actions',
+  painting_intent_execution_conflict: 'painting_intent.actions',
+  painting_intent_owner_conflict: 'painting_intent.target_owner_id',
+  painting_intent_owner_missing: 'painting_intent.scene_ownership_plan',
+  painting_intent_target_owner_required: 'painting_intent.target_owner_id',
+};
+
 export class NextPassCompilerError extends Error {
   constructor(
     readonly code: string,
@@ -131,6 +157,8 @@ export class NextPassCompilerError extends Error {
   ) {
     super(message);
     this.name = 'NextPassCompilerError';
+    const path = details?.path ?? NEXT_PASS_CORRECTION_PATHS[code];
+    if (path) this.details = { ...details, path };
   }
 }
 
@@ -247,13 +275,6 @@ export function resolveLayerSeparationContract(
     throw new NextPassCompilerError(
       'painting_intent_owner_unplanned',
       `Cannot create semantic owner ${intent.target_owner_id}: it is not present in the durable scene ownership plan.`,
-      { owner_id: intent.target_owner_id }
-    );
-  }
-  if (!intent.construction_role) {
-    throw new NextPassCompilerError(
-      'painting_intent_new_owner_role_required',
-      `Creating semantic owner ${intent.target_owner_id} requires construction_role; this is a structural artistic choice and is not inferred.`,
       { owner_id: intent.target_owner_id }
     );
   }
@@ -438,6 +459,10 @@ function bindActionToLayer(action: Record<string, unknown>, layerId: number | un
   const args = next.args && typeof next.args === 'object' && !Array.isArray(next.args)
     ? next.args as Record<string, unknown>
     : {};
+  if (tool && DIRECT_LAYER_TARGET_TOOLS.has(tool) && args.layer_id !== undefined && args.layer_id !== layerId) {
+    throw new NextPassCompilerError('painting_intent_foreign_layer_target',
+      `Action ${tool} targets layer ${String(args.layer_id)} instead of owner layer ${layerId}.`);
+  }
   if (tool && DIRECT_LAYER_TARGET_TOOLS.has(tool) && args.layer_id === undefined) {
     args.layer_id = layerId;
   }
@@ -445,6 +470,9 @@ function bindActionToLayer(action: Record<string, unknown>, layerId: number | un
     args.regions = args.regions.map(region => {
       if (!region || typeof region !== 'object' || Array.isArray(region)) return region;
       const nextRegion = { ...region as Record<string, unknown> };
+      if (nextRegion.layer_id !== undefined && nextRegion.layer_id !== layerId)
+        throw new NextPassCompilerError('painting_intent_foreign_layer_target',
+          `Paint region targets layer ${String(nextRegion.layer_id)} instead of owner layer ${layerId}.`);
       nextRegion.layer_id ??= layerId;
       return nextRegion;
     });
@@ -470,7 +498,12 @@ export function compileIntentActions(
     return consolidateCompatibleActions(actions.map(action => bindActionToLayer(action, layerId)));
   }
 
-  const createLayer = actions.find(action => text(action.tool) === 'photoshop_create_layer');
+  const createLayers = actions.filter(action => ['photoshop_create_layer', 'photoshop_source_bound_reflection'].includes(text(action.tool) ?? ''));
+  if (createLayers.length !== 1) {
+    throw new NextPassCompilerError('painting_intent_creation_layer_required',
+      'A new semantic owner requires exactly one physical layer creation in its bounded actions.');
+  }
+  const createLayer = createLayers[0];
   const createLayerId = text(createLayer?.id);
   if (!createLayerId) return consolidateCompatibleActions(actions.map(action => structuredClone(action)));
   const stepRef = `$steps.${createLayerId}.details.layerId`;
@@ -481,12 +514,19 @@ export function compileIntentActions(
     const args = next.args && typeof next.args === 'object' && !Array.isArray(next.args)
       ? next.args as Record<string, unknown>
       : {};
-    if (tool && DIRECT_LAYER_TARGET_TOOLS.has(tool) && args.layer_id === undefined) args.layer_id = stepRef;
-    if (tool === 'photoshop_paint_color_gradient' && args.layer_id === undefined) args.layer_id = stepRef;
+    if (tool && (DIRECT_LAYER_TARGET_TOOLS.has(tool) || tool === 'photoshop_paint_color_gradient')) {
+      if (args.layer_id !== undefined && args.layer_id !== stepRef)
+        throw new NextPassCompilerError('painting_intent_foreign_layer_target',
+          `New owner action ${tool} must target its created physical layer.`);
+      args.layer_id = stepRef;
+    }
     if (tool === 'photoshop_paint_regions' && Array.isArray(args.regions)) {
       args.regions = args.regions.map(region => {
         if (!region || typeof region !== 'object' || Array.isArray(region)) return region;
         const nextRegion = { ...region as Record<string, unknown> };
+        if (nextRegion.layer_id !== undefined && nextRegion.layer_id !== stepRef)
+          throw new NextPassCompilerError('painting_intent_foreign_layer_target',
+            'New owner paint region must target its created physical layer.');
         nextRegion.layer_id ??= stepRef;
         return nextRegion;
       });
@@ -528,19 +568,16 @@ function logicalLayerForIntent(
       'layer_name', 'physical_role', 'opacity_role', 'construction_tier',
       'parent_hypothesis_id', 'parent_construction_revision', 'negative_space',
       'causal_effect', 'surface_frame', 'geometry_binding', 'camera_binding',
-      'attention_binding', 'depth_relations',
+      'attention_binding', 'depth_relations', 'binding_source_operation_id',
     ] as const) {
       if (owner[field] !== undefined) result[field] = structuredClone(owner[field]);
     }
     return result;
   }
-  const layerAction = intent.actions?.find(action => text(action.tool) === 'photoshop_create_layer');
+  const layerAction = intent.actions?.find(action => ['photoshop_create_layer', 'photoshop_source_bound_reflection'].includes(text(action.tool) ?? ''));
   const layerArgs = layerAction?.args && typeof layerAction.args === 'object' && !Array.isArray(layerAction.args)
     ? layerAction.args as Record<string, unknown>
     : undefined;
-  const deterministicPhysicalStack = intent.construction_role === 'structured-mass'
-    ? { physical_role: 'opaque-mass', opacity_role: 'opaque' }
-    : {};
   return {
     decision: 'create-new',
     hypothesis_id: intent.target_owner_id,
@@ -548,7 +585,6 @@ function logicalLayerForIntent(
     rollback_value: 'moderate',
     expected_independent_rollback: true,
     separation_reasons: ['PaintingIntent creates a predeclared independently editable semantic owner.'],
-    ...deterministicPhysicalStack,
     ...(text(layerArgs?.name) ? { layer_name: text(layerArgs?.name) } : {}),
   };
 }
@@ -585,7 +621,7 @@ export function compilePaintingIntentToNextPass(
         'Choose the compiler-owned deferred sub-pass or provide replacement actions, not both.'
       );
     }
-    const deferred = store.compilerDeferredNextPass?.(intent.deferred_from_operation_id);
+    const deferred = store.compilerDeferredNextPass?.(intent.deferred_from_operation_id, intent.document_id);
     if (!deferred) {
       throw new NextPassCompilerError(
         'painting_intent_deferred_subpass_missing',
@@ -657,6 +693,13 @@ export function compilePaintingIntentToNextPass(
       message: `Reused compiler-owned deferred actions from ${intent.deferred_from_operation_id} after explicit post-review selection.`,
       source: `operation:${intent.deferred_from_operation_id}.compiler_repair_audit.deferred_next_pass`,
     });
+  }
+  if (provisionalOwner(effectiveIntent, context) || effectiveIntent.logical_layer?.binding_source_operation_id !== undefined) {
+    const binding = compileSemanticOwnership(effectiveIntent as unknown as Record<string, unknown>, context);
+    if (binding.issues.length) throw new NextPassCompilerError(binding.issues[0].code,
+      binding.issues[0].message, { path: `painting_intent.${binding.issues[0].path}` });
+    effectiveIntent = binding.pass as unknown as PaintingIntent;
+    context = ownerContextForPass(binding.pass, context);
   }
   const constructionLayer = omitRedundantConstructionLayerAction(effectiveIntent);
   if (constructionLayer.repair) {

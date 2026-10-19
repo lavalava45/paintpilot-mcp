@@ -128,7 +128,7 @@ document_closed_confirmed=true and reason; omit documents_id so Guard collects a
 evidence internally. Do not review historical pixels to dispose of that closed document.
 
 The first meaningful painting pass contains the requested main subject and recognition cues.
-Before local component development, establish the WHOLE requested composition and demonstrate
+As the first artistic priority, establish the WHOLE requested composition and demonstrate
 the requested medium on one representative visible area. Required surroundings/background,
 ground/space and major value/color relationships must be present at block-in fidelity; they need
 not be finished. Pencil/ink line character and paper belong at the start, not after architecture.
@@ -136,14 +136,18 @@ On the EXISTING delivered whole-frame review return previous_observation.scene_f
 the exact request_id from artistic_review.scene_foundation, composition and technique assessments
 (status=pass|fail|unknown, visible, next_change for fail/unknown; technique pass needs sample_region).
 This is an early foundation, not whole-image completion; a tool name, palette or intention is not proof.
-While either assessment is missing/fail/unknown, use next_pass.foundation_goal=composition|technique
+While either assessment is missing/fail/unknown, prefer next_pass.foundation_goal=composition|technique
 for actual missing scene establishment (change_domains composition/background-scope) or a bounded
-representative medium sample (region_bounds). These tasks preempt local-detail/Director ordering;
-they never waive document identity, ownership, geometry, uncertainty, exact review or user Stop.
+representative medium sample (region_bounds). Missing artistic foundation or
+an unfinished Director/Critic task is a WARN recommendation, not an independent
+execution BLOCK. Avoid disguising local detail as foundation; continue safe bounded
+painting if that is the selected artistic choice. Neither recommendation nor its
+omission waives document identity, ownership, geometry, uncertainty, exact review or user Stop.
 Do not hide local detail under GLOBAL_BLOCK_IN or call filled polygons a pencil sample.
 The same rule applies when resuming an unfinished run. No extra preview or separate evaluator call.
-Establish the setting/path/large masses in the following bounded passes before refinement;
-do not begin with an independent atmosphere-only/gradient task. Preserve editable owner layers
+Prefer setting/path/large masses in the following bounded passes before refinement;
+an independent atmosphere-only/gradient task is discouraged artistically, not prohibited
+by an extra technical gate. Preserve editable owner layers
 and the bounded pass contract. Director is optional; its first task should cover whole-scene
 recognition/composition with global/medium scope and the relevant subject/context zones.
 

@@ -1,4 +1,5 @@
 import { SEMANTIC_EXECUTION_SPEC } from './semantic-contract-spec.js';
+import { provisionalOwner } from './ownership-evidence.js';
 import { VISUAL_MICROPLAN_MUTATION_TOOLS } from '../visual-microplan.js';
 import { compileVisualMicroPlan } from '../visual-microplan-compiler.js';
 import type { StructuredRepairOperation } from './preflight-repair.js';
@@ -34,8 +35,26 @@ export function compileSemanticOwnership(
   const issues: SemanticExecutionIssue[] = [];
   const repairs: StructuredRepairOperation[] = [];
   const spec = SEMANTIC_EXECUTION_SPEC.owner;
-  const requested = nonempty(pass[spec.selector]);
   const logical = record(pass[spec.declaration]);
+  const pending = provisionalOwner(pass, context);
+  if (logical?.binding_source_operation_id !== undefined && !pending) {
+    issues.push({ code: 'semantic_execution_owner_conflict', path: 'logical_layer.binding_source_operation_id',
+      message: 'The source is not an available pristine layer creation in this document incarnation. Use the current durable owner or create a new layer atomically.' });
+    return { pass, issues, repairs };
+  }
+  if (pending && logical) {
+    if (logical.decision === 'create-new') {
+      logical.decision = pending.decision;
+      repairs.push({ kind: 'normalize', path: 'next_pass.logical_layer.decision',
+        normalizer: 'bind_completed_layer_creation',
+        reason: 'The explicitly pinned layer was already created by this document receipt; retain its owner and target, normalize only the already-completed creation lifecycle.' });
+    }
+    logical.binding_source_operation_id = pending.binding_source_operation_id;
+    repairs.push({ kind: 'inject_from_context', path: 'next_pass.logical_layer.binding_source_operation_id',
+      source: `operation:${pending.binding_source_operation_id}`,
+      reason: 'Bind the explicitly selected unowned layer from its pristine native creation receipt; executor must recheck emptiness before painting.' });
+  }
+  const requested = nonempty(pass[spec.selector]);
   if (requested && logical && nonempty(logical.hypothesis_id) && logical.hypothesis_id !== requested) {
     issues.push({ code: 'semantic_execution_owner_conflict',
       path: 'logical_layer.hypothesis_id',
@@ -46,7 +65,7 @@ export function compileSemanticOwnership(
   const durableOwnerRows: unknown = context[spec.durableOwners];
   const owners: RecordValue[] = Array.isArray(durableOwnerRows)
     ? durableOwnerRows.filter((entry: unknown): entry is RecordValue => !!record(entry)) : [];
-  const matches = owners.filter(entry => entry.temporary !== true && entry[spec.durableId] === requested);
+  const matches = owners.filter(entry => entry[spec.durableId] === requested);
   if (matches.length > 1) {
     issues.push({ code: 'semantic_execution_owner_ambiguous', path: 'target_owner_id',
       message: `More than one durable owner matches ${requested}; there is no single authorized layer.` });
@@ -56,8 +75,15 @@ export function compileSemanticOwnership(
   const owner = matches[0]!;
   const layer = validLayer(owner[spec.physicalTarget]);
   if (!layer) return { pass, issues, repairs };
+  if (owners.some(entry => entry[spec.durableId] !== requested
+    && (Array.isArray(entry.physical_layer_ids) ? entry.physical_layer_ids : [entry[spec.physicalTarget]]).includes(layer))) {
+    issues.push({ code: 'semantic_execution_owner_ambiguous', path: 'target_owner_id',
+      message: `Physical layer ${layer} has conflicting durable semantic owners. Resolve the binding conflict before painting; no owner was selected implicitly.` });
+    return { pass, issues, repairs };
+  }
   const actions = Array.isArray(pass.actions) ? pass.actions.filter(record) as RecordValue[] : [];
-  const creates = actions.some(step => step.tool === 'photoshop_create_layer');
+  const creates = actions.some(step => step.tool === 'photoshop_create_layer'
+    || step.tool === 'photoshop_source_bound_reflection');
   const mutations = actions.filter(step => VISUAL_MICROPLAN_MUTATION_TOOLS.has(String(step.tool)));
   if (!mutations.length) return { pass, issues, repairs };
   const explicitTargets: number[] = [];
@@ -76,7 +102,7 @@ export function compileSemanticOwnership(
       for (const region of args.regions) target(record(region)?.layer_id);
     }
   }
-  if (explicitTargets.some(target => target !== layer)) {
+  if (pass.cross_layer_correction === undefined && explicitTargets.some(target => target !== layer)) {
     issues.push({ code: 'semantic_execution_owner_conflict', path: 'actions',
       message: `An authored mutation target conflicts with the durable layer ${layer} of owner ${requested}. No owner or target was changed.` });
     return { pass, issues, repairs };
@@ -127,17 +153,14 @@ export function compileSemanticMethod(
   const issues: SemanticExecutionIssue[] = [];
   const repairs: StructuredRepairOperation[] = [];
   const spec = SEMANTIC_EXECUTION_SPEC.method;
-  const materialRequired = spec.materialRequiredMethodClasses.includes(input.methodClass as 'preset-brush')
+  const materialRequired = (spec.materialRequiredMethodClasses as readonly string[]).includes(input.methodClass ?? '')
     || (spec.materialRequiredWhenBrushBound
       && !!(nonempty(strategy.brush_role) || nonempty(strategy.brush_pack_id) || nonempty(strategy.stamp_profile_id)));
   const material = nonempty(strategy.material_role);
   const explicit = nonempty(input.authoredMaterial);
   const choices = [...new Set((Array.isArray(input.brushMaterialRoles) ? input.brushMaterialRoles : [])
     .map(nonempty).filter((value): value is string => !!value))];
-  if (material && explicit && material !== explicit) {
-    issues.push({ code: 'semantic_method_contract_conflict', path: 'paint_strategy.material_role',
-      message: `Executor material ${material} contradicts the authored material ${explicit}.` });
-  } else if (!material) {
+  if (!material) {
     const uniquelyProven = explicit ?? (choices.length === 1 ? choices[0] : undefined);
     if (uniquelyProven) {
       strategy.material_role = uniquelyProven;
@@ -153,11 +176,9 @@ export function compileSemanticMethod(
         reason: 'This execution method needs no brush material. Removed an absent compiler-only field instead of inventing an artistic material.' });
     }
   }
-  if (nonempty(input.authoredVisualIntent) && nonempty(strategy.visual_intent)
-      && input.authoredVisualIntent !== strategy.visual_intent) {
-    issues.push({ code: 'semantic_method_contract_conflict', path: 'paint_strategy.visual_intent',
-      message: 'Executor visual intent differs from the supplied artistic intent.' });
-  }
+  // An intentionally experimental combination of visual intent, paint medium
+  // and executable Photoshop method remains valid. Retain the authored data
+  // for Critic rather than converting artistic disagreement into admission.
   for (const field of [...spec.requiredFields, ...(materialRequired ? ['material_role'] : [])]) {
     if (!nonempty(strategy[field])) issues.push({
       code: 'semantic_method_contract_required',

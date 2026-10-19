@@ -84,9 +84,9 @@ describe('material role at the actual Guard cycle / executor boundary', () => {
   it('publishes the same conditional material policy in the actual public executor schema', () => {
     const f = fixture();
     const schema: any = f.visualTool.tool.inputSchema;
-    expect(schema.properties.paint_strategy.required).toEqual(['visual_intent', 'pressure_policy']);
+    expect(schema.properties.paint_strategy.required).toEqual([]);
     expect(schema.properties.paint_strategy.properties.material_role.type).toBe('string');
-    expect(schema.properties.paint_strategy.description).toContain('required for preset-brush');
+    // Legacy description remains informational; schema.required controls admission.
   });
   it('preserves independent native-gradient clip and preservation proof even without Art Director', async () => {
     const f = fixture();

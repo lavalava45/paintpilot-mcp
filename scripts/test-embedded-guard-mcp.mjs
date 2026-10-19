@@ -51,11 +51,16 @@ try {
   // A continuation may identify an already saved object by object_id alone.
   // Guard enforces complete subject kind on the initial declaration; forcing
   // it on every public continuation would make safe reuse unnecessarily fail.
-  assert.deepEqual(continuationObjects?.required, ['object_id'],
-    'continuation must support an object-id-only reference to the retained scene plan');
+  assert.deepEqual(continuationObjects?.required, [],
+    'continuation identities are compiler-managed; object-id-only references must remain accepted');
+  assert.equal(continuationObjects?.properties?.object_id?.type, 'string');
+  assert.match(continuationObjects?.properties?.object_id?.description ?? '', /compiler-managed/,
+    'optional technical identity must advertise compiler resolution rather than silently dropping binding authority');
   assert.ok(firstDeclarationObjects?.required?.includes('subject_kind'),
     'a fresh scene ownership declaration must require subject_kind');
   const nextPass = published('photoshop_guard_cycle_auto').properties?.next_pass?.properties;
+  assert.ok(nextPass?.logical_layer?.properties?.binding_source_operation_id,
+    'source receipt for an existing empty layer binding must be publicly expressible');
   assert.ok(nextPass?.scene_camera_imaging_model, 'camera imaging model required by Guard must be publicly expressible');
   assert.ok(nextPass?.imaging_preflight, 'blur imaging preflight required by Guard must be publicly expressible');
   assert.ok(nextPass?.change_domains, 'change domains used by Guard must be publicly expressible');

@@ -184,9 +184,16 @@ export async function runSelectRectangle(router: PhotoshopBackendRouter, args: S
   const top = args.top as number;
   const right = args.right as number;
   const bottom = args.bottom as number;
+  const pinnedDocumentId = selectionDocumentId(args);
+  if (args.document_id !== undefined && pinnedDocumentId === undefined) {
+    return atomicFailure({ ok: false, code: 'invalid_arguments', message: 'select_rectangle document_id must be a positive integer' });
+  }
   try {
     await router.backendFor('selection.rectangle');
-    const outcome = await invokeUxpSelectRectangle({ left, top, right, bottom });
+    const outcome = await invokeUxpSelectRectangle({
+      ...(pinnedDocumentId === undefined ? {} : { document_id: pinnedDocumentId }),
+      left, top, right, bottom,
+    });
     if (!outcome.ok) throw new Error(outcome.error ?? 'uxp_select_rectangle_failed');
     return plainSelectionResult(`Rectangular selection created: (${left}, ${top}) to (${right}, ${bottom})`);
   } catch (error) {
@@ -222,10 +229,33 @@ export const runInvertSelection = (router: PhotoshopBackendRouter) =>
   simpleSelectionCommand(router, 'selection.invert', 'invert_selection', 'uxp_invert_selection_failed', 'Selection inverted', 'Error inverting selection');
 
 export async function runCreateLayerMask(router: PhotoshopBackendRouter, args: SelectionArgs): Promise<ToolResult> {
+  const pinned = args.layer_id !== undefined || args.mask_mode !== undefined || args.expected_selection_bounds !== undefined;
+  const id = selectionDocumentId(args);
+  const layerId = args.layer_id;
+  const mode = args.mask_mode;
+  if (pinned && (!id || !Number.isSafeInteger(layerId) || Number(layerId) <= 0
+    || (mode !== 'revealSelection' && mode !== 'revealAll'))) {
+    return atomicFailure({ ok: false, code: 'invalid_arguments',
+      message: 'Pinned mask requires document_id, positive numeric layer_id and explicit mask_mode' });
+  }
+  if (mode === 'revealSelection') {
+    const bounds = args.expected_selection_bounds;
+    if (!bounds || typeof bounds !== 'object' || Array.isArray(bounds)
+      || !['left', 'top', 'right', 'bottom'].every(key => Number.isFinite((bounds as Record<string, unknown>)[key]))
+      || Number((bounds as Record<string, unknown>).right) <= Number((bounds as Record<string, unknown>).left)
+      || Number((bounds as Record<string, unknown>).bottom) <= Number((bounds as Record<string, unknown>).top)) {
+      return atomicFailure({ ok: false, code: 'invalid_arguments',
+        message: 'Pinned revealSelection requires exact expected_selection_bounds from a verified selection observation' });
+    }
+  }
   try {
     await router.backendFor('layer.mask.create');
-    const id = selectionDocumentId(args);
-    const outcome = await invokeUxpCreateLayerMask(id === undefined ? {} : { document_id: id });
+    const params: Record<string, unknown> = {
+      ...(id === undefined ? {} : { document_id: id }),
+      ...(pinned ? { layer_id: layerId, mask_mode: mode } : {}),
+      ...(args.expected_selection_bounds === undefined ? {} : { expected_selection_bounds: args.expected_selection_bounds }),
+    };
+    const outcome = await invokeUxpCreateLayerMask(params as { document_id?: number });
     if (!outcome.ok || !outcome.data) throw new Error(outcome.error ?? 'uxp_create_layer_mask_failed');
     return plainSelectionResult('Layer mask created from selection');
   } catch (error) {

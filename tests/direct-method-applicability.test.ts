@@ -62,7 +62,8 @@ describe('method applicability is an executor property, not a generic mutation r
       preferred_method_id: 'pencil-line',
       actions: [{ tool: 'photoshop_apply_gaussian_blur', args: { layer_id: 16, radius: 3 } }],
     } }, store, registry);
-    expect(result.violations.map(item => item.code)).toContain('artistic_method_unavailable');
+    expect(result.violations.map(item => item.code)).not.toContain('artistic_method_unavailable');
+    expect(result.normalizations.some(item => item.code === 'artistic_method_advisory')).toBe(true);
     expect(result.violations.map(item => item.code)).not.toContain('artistic_method_not_applicable_to_native_operation');
   });
 });
