@@ -142,7 +142,9 @@ State before action
   \`photoshop_guard_capabilities({tool_names:['photoshop_set_active_document']})\`.
   With previously granted explicit user permission to switch Photoshop focus, use ONE
   nonvisual \`photoshop_guard_cycle_auto\` action with tool=photoshop_set_active_document
-  and args={document_id:<intended id>}, then verify \`photoshop_get_state.document.id\`
+  and args={document_id:<intended id>,user_authorized_focus_switch:true} ONLY after
+  the user explicitly approved this target; never infer consent from the goal.
+  Verify \`photoshop_get_state.document.id\`
   matches before any paint. Navigation may foreground Photoshop. Without permission,
   ask to activate the tab THROUGH MCP, not for the user to click the tab manually.
   On failed/mismatched activation stop safely; never draw in the active foreign tab or

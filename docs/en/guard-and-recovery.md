@@ -107,6 +107,16 @@ incarnation. A reused numeric document id or a changed active
 tab is not permission to paint somewhere else. Recovery also
 checks physical layers and semantic owners.
 
+**Explicit tab navigation is different from painting.** If the user approves
+switching to a specific open but inactive document, one nonvisual
+`photoshop_guard_cycle_auto` pass may call `photoshop_set_active_document` with
+its exact `document_id` and `user_authorized_focus_switch: true` in action
+`args`. Do not infer permission from a painting goal or substitute an ambiguous
+tab name. Guard checks permission and UXP readiness; UXP confirms the activated
+ID. Read `photoshop_get_state` before painting. Without explicit permission
+the navigation is blocked; every paint command still requires the active
+document's verified identity and incarnation witness.
+
 ## 7. Accepted anchors and bounded undo
 
 An accepted anchor is a registered, reviewable restoration point.

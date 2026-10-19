@@ -1,5 +1,17 @@
 # Changelog
 
+- 2026-10-19 — **Guard document activation permission and target identity.**
+  Fixed the false preflight rejection of `photoshop_set_active_document` when
+  its intended open target is not the current Photoshop tab. Navigation now
+  distinguishes destination identity from painting-target identity, requires
+  the explicit `user_authorized_focus_switch=true` marker for a tab change,
+  and fails closed if UXP is unready or native active-document readback does
+  not confirm the requested ID. All subsequent drawing still requires the
+  active document's original pinned ID and live incarnation evidence. Added
+  Simple/Nontrivial Guard regression tests and paired RU/EN recovery docs;
+  no artwork was modified during this change.
+
+
 - 2026-10-19 — **Document the real Simple vs Nontrivial Guard differences (documentation only).**
   Added paired English/Russian guard-by-guard profile matrices showing shared
   document/owner/recovery safety, conditional scene and geometry obligations,

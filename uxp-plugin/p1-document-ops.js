@@ -157,6 +157,11 @@ async function setActiveDocument(params = {}) {
   );
 
   const context = await readActiveDocumentContext();
+  if (context.document?.id !== target.id) {
+    throw new Error(
+      `document_activation_unverified: requested id ${target.id}, active id ${context.document?.id ?? 'none'}`
+    );
+  }
   return {
     handled: true,
     data: {

@@ -2097,6 +2097,13 @@ export class EmbeddedGuardRuntime {
       }
     }
     if (!(readiness.ready && readiness.revision_match && readiness.plugin_connected)) {
+      if (tool === 'photoshop_set_active_document') {
+        return [{
+          scope: 'next_operation' as const,
+          code: 'document_navigation_uxp_unavailable',
+          message: 'Explicit document activation requires a connected UXP companion with matching revision. No navigation was dispatched.',
+        }];
+      }
       if (sceneGeometryModel) {
         return [{
           scope: 'next_operation' as const,
@@ -2121,6 +2128,21 @@ export class EmbeddedGuardRuntime {
     const document = stateProbe.data?.document as Record<string, unknown> | undefined;
     const activeLayer = stateProbe.data?.activeLayer;
     const activeDocumentId = Number(document?.id);
+    // A navigation document_id is the DESTINATION, not the current document.
+    // It must not be subjected to the pixel-mutation active-id/witness gate.
+    if (tool === 'photoshop_set_active_document') {
+      if (activeDocumentId === documentId) return [];
+      if (args.user_authorized_focus_switch !== true) {
+        return [{
+          scope: 'next_operation' as const,
+          code: 'document_focus_switch_permission_required',
+          message: `Changing the active document to document_id=${documentId} requires prior explicit user permission and user_authorized_focus_switch=true on that exact navigation action. No document was switched.`,
+        }];
+      }
+      // Native UXP checks open-document membership and reports not-executed
+      // if absent. Subsequent paint still needs the target's active witness.
+      return [];
+    }
     if (!positiveDocumentId(activeDocumentId) || activeDocumentId !== documentId) {
       return [{
         scope: 'next_operation' as const,

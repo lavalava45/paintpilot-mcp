@@ -182,6 +182,12 @@ export async function runSetActiveDocument(
     }
 
     const activated = outcome.data.activated as { id?: number; name?: string } | undefined;
+    const reported = outcome.data.context as { document?: { id?: number } } | undefined;
+    if (!activated || !Number.isSafeInteger(activated.id)
+      || !reported?.document || reported.document.id !== activated.id
+      || ('document_id' in target && target.document_id !== activated.id)) {
+      throw new Error('document_activation_unverified: UXP must confirm the exact activated document in fresh active-document readback');
+    }
     return atomicSuccess(
       activated?.name ? `Active document set to "${activated.name}"` : 'Active document switched',
       {

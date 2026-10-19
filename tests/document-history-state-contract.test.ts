@@ -116,7 +116,7 @@ describe('document/history/state public contract', () => {
 
     bridge.operation.mockResolvedValueOnce({
       ok: true,
-      data: { ok: true, activated: { id: 84, name: 'Other.psd' } },
+      data: { ok: true, activated: { id: 84, name: 'Other.psd' }, context: { document: { id: 84 } } },
     });
     const activated = await byName('photoshop_set_active_document').handler({ document_id: 84 });
     expect(JSON.parse(textOf(activated))).toMatchObject({
@@ -136,6 +136,13 @@ describe('document/history/state public contract', () => {
       { document_id: 84 },
       'uxp_set_active_document_failed'
     );
+    bridge.operation.mockResolvedValueOnce({
+      ok: true,
+      data: { ok: true, activated: { id: 84 }, context: { document: { id: 42 } } },
+    });
+    const staleActivation = JSON.parse(textOf(await byName('photoshop_set_active_document').handler({ document_id: 84 })));
+    expect(staleActivation).toMatchObject({ ok: false });
+    expect(staleActivation.message).toContain('document_activation_unverified');
 
     bridge.operation.mockResolvedValueOnce({ ok: true, data: { ok: true } });
     const closed = await byName('photoshop_close_document').handler({ document_id: 84, save: false });
@@ -147,6 +154,7 @@ describe('document/history/state public contract', () => {
     );
     expect(backendFor.mock.calls.map(([primitive]) => primitive)).toEqual([
       'document.create',
+      'document.activate',
       'document.activate',
       'document.close',
     ]);

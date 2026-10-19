@@ -57,11 +57,12 @@ export function createDocumentTools(
     ),
     documentTool(
       'photoshop_set_active_document',
-      'Explicit UI navigation: activate one open Photoshop document by id, zero-based tab index, or unambiguous document name. This operation may foreground Photoshop and is excluded from no-focus acceptance traces; use pinned document_id on ordinary document-bound operations instead.',
+      'Explicit UI navigation: activate one open Photoshop document by id, zero-based tab index, or unambiguous document name. In Painting Guard, switching away from the active document requires user_authorized_focus_switch=true only after the user explicitly approves navigation. This operation may foreground Photoshop and is excluded from no-focus acceptance traces; use pinned document_id on ordinary document-bound operations instead.',
       argsSchema({
         document_id: { type: 'number', description: 'Unique internal document id from photoshop_list_documents (preferred)' },
         index: { type: 'number', description: 'Zero-based tab order index (leftmost tab is 0)', minimum: 0 },
         document_name: { type: 'string', description: 'Document name/title (ambiguous if multiple tabs share the same name)' },
+        user_authorized_focus_switch: { type: 'boolean', description: 'Guard only: true only after the user explicitly approved switching to this target document. Never infer consent from a painting goal.' },
       }),
       (args) => runSetActiveDocument(router, args)
     ),
