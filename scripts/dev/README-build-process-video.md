@@ -2,6 +2,8 @@
 
 Короткая инструкция по сборке общего process-video из записанных PaintPilot-фрагментов.
 
+**English:** [README-build-process-video.en.md](README-build-process-video.en.md).
+
 ## Где лежит скрипт
 
 ```text
@@ -124,4 +126,6 @@ ffmpeg
 ffprobe
 ```
 
-На текущей рабочей машине `ffmpeg` и `ffprobe` уже установлены и доступны в `PATH`.
+Проверьте установку командами `ffmpeg -version` и `ffprobe -version` на своей машине. Файл `.srt` сохраняется отдельно, титры не вшиты в MP4. Исходные записи в `processes/` не публикуются на GitHub автоматически.
+
+Для примера монтажа длинной записи в динамичный минутный ролик скрипачки см. [отдельную русскую инструкцию по Python/FFmpeg](README-build-reddit-violinist-demo.ru.md).

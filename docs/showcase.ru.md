@@ -1,5 +1,7 @@
 # Демонстрации PaintPilot — реальное рисование в Photoshop
 
+**English:** [PaintPilot showcase](showcase.md).
+
 ## Скрипачка возле окна — минутный ролик для Reddit
 
 [![Кадр из записи рисования в Photoshop](../assets/showcase/violinist-demo-preview.jpg)](../assets/showcase/paintpilot-reddit-violinist-60s.mp4)
@@ -10,7 +12,7 @@
 
 ### Как мы его получили
 
-PaintPilot сначала сохранял короткие видеозаписи выполняемых операций вместе с текстовыми комментариями. Штатный скрипт [`build-process-video.mjs`](../scripts/dev/build-process-video.mjs) ([инструкция](../scripts/dev/README-build-process-video.md)) составил из них полную запись `process-video.mp4` продолжительностью **913,6 секунды** (15 минут 13,6 секунды). При сборке длинного видео исходные фрагменты были замедлены в 4 раза, а для комментариев подготовлен отдельный `.srt`.
+PaintPilot сначала сохранял короткие видеозаписи выполняемых операций вместе с текстовыми комментариями. Штатный скрипт [`build-process-video.mjs`](../scripts/dev/build-process-video.mjs) ([инструкция на русском](../scripts/dev/README-build-process-video.md), [на английском](../scripts/dev/README-build-process-video.en.md)) составил из них полную запись `process-video.mp4` продолжительностью **913,6 секунды** (15 минут 13,6 секунды). При сборке длинного видео исходные фрагменты были замедлены в 4 раза, а для комментариев подготовлен отдельный `.srt` (не вшитый в MP4).
 
 Затем **собственный Python-скрипт с FFmpeg** выбрал из длинного видео десять хронологических эпизодов:
 
@@ -18,7 +20,7 @@ PaintPilot сначала сохранял короткие видеозапис
 
 Каждый эпизод был ускорен в 4 раза относительно длинного видео (`setpts=(PTS-STARTPTS)/4`), приведён к 30 кадрам/с, обрезан до рабочей области Photoshop (`crop=1440:810:170:80`) и масштабирован до 1280 × 720 фильтром Lanczos. Кодирование — H.264, `libx264`, CRF 20. В конце добавлен примерно секундный стоп-кадр, извлечённый из длинной записи около отметки 903 секунды. Одиннадцать частей объединены без повторного кодирования.
 
-Сохранился [оригинальный скрипт монтажа](../scripts/dev/build-reddit-violinist-demo.py). Для повторения нужна исходная запись `processes/window-violinist-process/study-01/export/final/process-video.mp4` (локальная папка `processes/` игнорируется Git), Python и FFmpeg. Из корня репозитория:
+Сохранился [оригинальный скрипт монтажа](../scripts/dev/build-reddit-violinist-demo.py) ([подробная инструкция на русском](../scripts/dev/README-build-reddit-violinist-demo.ru.md), [на английском](../scripts/dev/README-build-reddit-violinist-demo.md)). Для повторения нужна исходная запись `processes/window-violinist-process/study-01/export/final/process-video.mp4` (локальная папка `processes/` игнорируется Git), Python и FFmpeg. Из корня репозитория:
 
 ```bash
 python scripts/dev/build-reddit-violinist-demo.py

@@ -47,6 +47,8 @@ A curated recording of **actual agent-driven Photoshop painting operations**: co
 
 The [showcase and editing notes](docs/showcase.md) explain the source process, the selected segments and the reproducible [FFmpeg/Python montage script](scripts/dev/build-reddit-violinist-demo.py). No generative-video model was used to synthesize the clip.
 
+Both video-processing scripts are published: [assemble recorded clips into a long video with SRT captions](scripts/dev/README-build-process-video.en.md), then [edit the violinist session into a faster 60-second montage](scripts/dev/README-build-reddit-violinist-demo.md). The guides have [Russian](scripts/dev/README-build-process-video.md) [counterparts](scripts/dev/README-build-reddit-violinist-demo.ru.md); the original ignored run recordings are not included in GitHub.
+
 ## What the project provides
 
 Digital Painting Edition combines broad Photoshop automation with a focused painting and visual-control layer for brush-driven work:

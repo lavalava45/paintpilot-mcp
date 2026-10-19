@@ -72,9 +72,39 @@ for (const name of ['README.md', 'README.ru.md']) {
   if (!text.includes('docs/en/README.md') || !text.includes('docs/ru/README.md'))
     errors.push(`Missing bilingual documentation entry in ${name}`);
 }
+
+// Video guides and showcases are public bilingual documentation too, even
+// though they are not part of the historical docs/{ru,en} chapter sequence.
+const videoDocPairs = [
+  ['docs/showcase.md', 'docs/showcase.ru.md'],
+  ['scripts/dev/README-build-process-video.en.md', 'scripts/dev/README-build-process-video.md'],
+  ['scripts/dev/README-build-reddit-violinist-demo.md', 'scripts/dev/README-build-reddit-violinist-demo.ru.md'],
+];
+for (const [english, russian] of videoDocPairs) {
+  for (const [path, counterpart] of [[english, russian], [russian, english]]) {
+    const absolute = join(root, path);
+    if (!existsSync(absolute)) {
+      errors.push(`Missing bilingual video document: ${path}`);
+      continue;
+    }
+    const contents = readFileSync(absolute, 'utf8');
+    if (contents.length < 800) errors.push(`Suspiciously short video document: ${path}`);
+    const relativeLinks = [...contents.matchAll(linkRe)]
+      .map(match => match[1].trim().split(/[?#]/)[0])
+      .filter(target => target && !/^(?:https?:|mailto:|data:|#)/i.test(target));
+    if (!relativeLinks.some(target => resolve(dirname(absolute), decodeURIComponent(target)) === join(root, counterpart))) {
+      errors.push(`Missing reciprocal language link: ${path} -> ${counterpart}`);
+    }
+    for (const target of relativeLinks) {
+      if (!existsSync(resolve(dirname(absolute), decodeURIComponent(target)))) {
+        errors.push(`Broken video documentation link: ${path} -> ${target}`);
+      }
+    }
+  }
+}
 if (errors.length) {
   console.error(errors.join('\n'));
   process.exitCode = 1;
 } else {
-  console.log(`Bilingual docs PASS: ${chapters.length} paired chapters, ${images.length} shared historical images, no broken relative links`);
+  console.log(`Bilingual docs PASS: ${chapters.length} paired chapters, ${videoDocPairs.length} paired video documents, ${images.length} shared historical images, no broken relative links`);
 }

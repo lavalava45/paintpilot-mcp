@@ -61,6 +61,8 @@ Digital Painting Edition строится вокруг **замкнутого к
 
 В [разделе демонстраций](docs/showcase.ru.md) рассказано, как ролик был собран из фрагментов; сохранён также [оригинальный скрипт монтажа Python/FFmpeg](scripts/dev/build-reddit-violinist-demo.py). Генеративное видео для создания кадров не применялось.
 
+Оба видеоскрипта опубликованы: [сборка коротких записей в длинный ролик с субтитрами SRT](scripts/dev/README-build-process-video.md) и [создание динамичного минутного монтажа скрипачки](scripts/dev/README-build-reddit-violinist-demo.ru.md). Доступны также [английская инструкция сборки](scripts/dev/README-build-process-video.en.md) и [английская инструкция монтажа](scripts/dev/README-build-reddit-violinist-demo.md). Исходные локальные записи в `processes/` в GitHub не включены.
+
 ```mermaid
 flowchart LR
     U[Замысел пользователя] --> AD[Художественный руководитель]

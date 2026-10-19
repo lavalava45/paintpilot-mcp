@@ -1,5 +1,7 @@
 # PaintPilot showcase — recorded Photoshop work
 
+**Русский:** [Демонстрации PaintPilot](showcase.ru.md).
+
 ## Seated violinist by a window — 60-second Reddit demo
 
 [![Still frame from the original agent-driven Photoshop process](../assets/showcase/violinist-demo-preview.jpg)](../assets/showcase/paintpilot-reddit-violinist-60s.mp4)
@@ -10,9 +12,9 @@ This is a chronological **edited selection of real Photoshop screen-capture foot
 
 ### Where the recording came from
 
-The PaintPilot process export contains per-operation captured video fragments and commentary sidecars. The repository's own [`build-process-video.mjs`](../scripts/dev/build-process-video.mjs) ([instructions](../scripts/dev/README-build-process-video.md)) assembled the session into a 913.6-second `process-video.mp4`, slowing its source clips by a factor of four and preparing a corresponding `.srt` file. Those complete local recordings and process journals are ignored by Git and are **not** in this public repository.
+The PaintPilot process export contains per-operation captured video fragments and commentary sidecars. The repository's own [`build-process-video.mjs`](../scripts/dev/build-process-video.mjs) ([English instructions](../scripts/dev/README-build-process-video.en.md), [Russian instructions](../scripts/dev/README-build-process-video.md)) assembled the session into a 913.6-second `process-video.mp4`, slowing its source clips by a factor of four and preparing a corresponding separate `.srt` file. Those complete local recordings and process journals are ignored by Git and are **not** in this public repository.
 
-The Reddit edit was built from that 913.6-second file using **Python calling FFmpeg**, not a named video-generation or automatic-editing skill. The original editing script has been preserved at [`scripts/dev/build-reddit-violinist-demo.py`](../scripts/dev/build-reddit-violinist-demo.py). It uses the following 10 chronological source intervals (seconds):
+The Reddit edit was built from that 913.6-second file using **Python calling FFmpeg**, not a named video-generation or automatic-editing skill. The original editing script has been preserved at [`scripts/dev/build-reddit-violinist-demo.py`](../scripts/dev/build-reddit-violinist-demo.py) ([English guide](../scripts/dev/README-build-reddit-violinist-demo.md), [Russian guide](../scripts/dev/README-build-reddit-violinist-demo.ru.md)). It uses the following 10 chronological source intervals (seconds):
 
 `0–28`, `56–91`, `114–134`, `176–196`, `212–232`, `266–282`, `520–540`, `597–627`, `669–691`, `722–745`.
 

@@ -1,5 +1,16 @@
 # Changelog
 
+- 2026-10-19 — **Bilingual documentation for published video tools.**
+  Confirmed that both `scripts/dev/build-process-video.mjs` (captured-clip
+  assembly, SRT and timeline) and `scripts/dev/build-reddit-violinist-demo.py`
+  (historical faster one-minute montage) are tracked in the public branch.
+  Added an English guide for the assembler and paired Russian/English guides
+  for the montage; updated both already-published README/showcase languages
+  to link the correct guides. Clarified that the one-minute edit is
+  session-specific, SRT subtitles are external and original process recordings
+  are local/ignored, not shipped with the GitHub repository. The published
+  video and painting code were not modified.
+
 - 2026-10-17 — **Restore stock Chat On Steroids compatibility without editing COS (source-only).**
   The canonical `dist/cos-plugin.js` no longer forces the experimental
   `PHOTOSHOP_COS_HOST_STOP_REQUIRED` setting on every invocation; ordinary COS
