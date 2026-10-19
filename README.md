@@ -14,6 +14,8 @@ These are scoped pilot workflows, not guarantees of unattended professional-qual
 
 **Before selecting a painting profile:** `simple_graphic` is the more direct starting point for flat/marker-style work. **`nontrivial_painting` is an experimental, human-in-the-loop research workflow**, not a “higher quality” or reliably unattended mode. Complex runs may repeatedly stop at Guard checks and may not reach a finished picture. Users can help diagnose constraints and guide supported alternatives, but this does **not** automatically teach the model new permanent skills or authorize bypassing safeguards. `Auto` may also select the experimental profile. See [Painting profiles: expectations and limitations](docs/en/painting-profiles.md).
 
+**Which Guards apply to each profile?** See the [guard-by-guard comparison](docs/en/painting-profiles.md#guard-by-guard-comparison) for shared technical safety, conditional artistic contracts, stricter Nontrivial requirements and plans to qualify Guards individually. Neither painting profile is the separate direct Photoshop Tools mode.
+
 Independently maintained MCP system for AI-driven digital painting and evidence-bound Photoshop automation on Windows.
 
 **Project:** [lavalava45/photoshop-mcp-digital-painting](https://github.com/lavalava45/paintpilot-mcp)<br>

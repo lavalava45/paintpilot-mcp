@@ -75,6 +75,12 @@ override Guard's safety gates or automatically train persistent new capabilities
 See the reader-facing [English](en/painting-profiles.md) and
 [Russian](ru/painting-profiles.md) profile guides.
 
+For an explicit **Guard-by-Guard applicability matrix** (required, conditional,
+advisory and profile-specific), see the [English comparison](en/painting-profiles.md#guard-by-guard-comparison)
+or [Russian comparison](ru/painting-profiles.md#сравнение-guard-по-профилям).
+The matrix documents the committed public implementation, not experimental
+local changes or a guarantee that a new build has been loaded by COS/UXP.
+
 The selector is stored in the existing versioned controller user configuration
 and travels through `/settings/user-config`. Guard status exposes
 `presentation_context.painting_profile_selection`. At new-run setup an

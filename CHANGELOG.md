@@ -1,5 +1,17 @@
 # Changelog
 
+- 2026-10-19 — **Document the real Simple vs Nontrivial Guard differences (documentation only).**
+  Added paired English/Russian guard-by-guard profile matrices showing shared
+  document/owner/recovery safety, conditional scene and geometry obligations,
+  brush preflight, Critic checkpoints and the additional experimental gates.
+  Clarified the supported in-place Simple-to-Nontrivial upgrade, its preflight
+  requirements and the difference between painting profiles and direct
+  Photoshop Tools. Recorded a deferred plan to qualify individual Guards
+  against false blockers, technical regressions and actual Photoshop images,
+  without promising a finite style catalog or weakening runtime safety.
+  This entry describes the committed implementation; it does not release
+  any uncommitted experimental Guard refactor or change Photoshop pixels.
+
 - 2026-10-19 — **Bilingual documentation for published video tools.**
   Confirmed that both `scripts/dev/build-process-video.mjs` (captured-clip
   assembly, SRT and timeline) and `scripts/dev/build-reddit-violinist-demo.py`

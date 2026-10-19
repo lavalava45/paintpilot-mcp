@@ -1,6 +1,6 @@
 # Painting Quality Roadmap
 
-Last updated: 2026-10-17
+Last updated: 2026-10-19
 
 **Scope:** ONLY pending work, decisions, acceptance criteria and preservation
 rules. Implemented changes, completed cleanups and dated engineering evidence
@@ -50,6 +50,24 @@ constitute active development branches.
 refactors, UI expansion, broad multi-scene benchmarking and COS source patches
 are deferred beyond the Developer Preview unless the user's one-image test
 uncovers a concrete release-blocking regression.
+
+## Deferred per-Guard qualification program
+
+**Decision (2026-10-19): keep the two painting profiles and their shared technical safety, but separately evaluate each Guard for utility, false blocks and real Photoshop reliability.** This is a **future maintenance/research workstream**, not part of the scope-frozen Developer Preview. A reproducible document-corruption or wrong-owner safety defect remains an immediate release-blocking bug, not a reason to defer its repair. See the paired [English](en/painting-profiles.md#guard-by-guard-comparison) / [Russian](ru/painting-profiles.md#сравнение-guard-по-профилям) matrices for the behavior **currently committed** in `digital-painting`.
+
+Rather than enumerate every artistic style, qualify guards by **the invariant they are supposed to enforce** and their observed effects in both profiles:
+
+| Guard family | Future investigation | Acceptance evidence (still pending) |
+| --- | --- | --- |
+| UXP readiness, document incarnation, exact target and protected layers | Are refusals tied to genuine wrong-document or wrong-layer danger? | Negative cross-document/owner tests; disposable Photoshop mutation and same-document proof. |
+| Operation receipts, Undo, Recovery, Stop/no-replay | Are applied/not-applied/unknown outcomes distinguished without accidental retries or dropped History? | Injected timeout/crash/missing-ack tests, then live History and PSD parity. |
+| Semantic ownership, component scope, scene layers and physical stack | Does the checker preserve independent editing without imposing arbitrary one-style layer organization? | Valid shared/independent owner counterexamples; cross-layer negative tests; layered PSD readback. |
+| Brush inventory, preset identity, dynamics and method palette | Does a chosen preset actually execute, and do technique recommendations ever block an otherwise valid brush stroke? | Stock brush and supplied-pack smokes, unavailable preset, wrong native settings, and previously blocked but valid techniques. |
+| Perspective, camera, geometry, support/contact and optical effects | Does it detect a reproducible mismatch with a user-specified scene rather than mandate a single perspective or reflection recipe? | Intentional flat/distorted-perspective controls, source-bound reflection checks, real same-frame geometry comparison. |
+| Lighting, color, material, softness and value structure | Can it recognize a visibly poor result without requiring one particular brush, lighting model or rendering order? | Brief/style-grounded positive/negative image pairs and blinded independent visual review. |
+| Foundation, Art Director, stage priority, Critic and completion | Do feedback and checkpoints improve the image rather than create endless paperwork/stalls? | Controlled same-brief runs; progress/stall counts, false-block rate, actual quality, and evidence-bound completion. |
+
+**One Guard at a time:** identify every caller and blocking producer; classify it as **execution integrity**, **explicit user constraint**, **artistic observation** or **unsupported conjecture**. Preserve mandatory technical protections; make open-ended artistic advice non-blocking unless the user explicitly requested a measurable constraint. Build at least one true-positive/false-positive and recovery test, validate Simple and Nontrivial independently, then run a disposable Photoshop E2E before calling that Guard reliable. Record the exact source commit, loaded MCP/UXP hashes, test fixture, failure-to-progress ratio and human image evaluation. **No broad switch-off, no ever-growing catalog of approved styles, and no automatic claim that existing Guards have passed this qualification.**
 
 ## Release boundary — user Stop with stock COS (decision 2026-10-17)
 
