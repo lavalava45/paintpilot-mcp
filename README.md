@@ -10,6 +10,8 @@
 **Ideas for real projects:** [album artwork, music-release campaigns, posters, game art, and iterative PSD editing](docs/en/use-cases.md).
 These are scoped pilot workflows, not guarantees of unattended professional-quality delivery.
 
+**Two connection options:** [Guarded painting or direct Photoshop tools](#two-ways-to-connect-to-photoshop).
+
 **Before selecting a painting profile:** `simple_graphic` is the more direct starting point for flat/marker-style work. **`nontrivial_painting` is an experimental, human-in-the-loop research workflow**, not a “higher quality” or reliably unattended mode. Complex runs may repeatedly stop at Guard checks and may not reach a finished picture. Users can help diagnose constraints and guide supported alternatives, but this does **not** automatically teach the model new permanent skills or authorize bypassing safeguards. `Auto` may also select the experimental profile. See [Painting profiles: expectations and limitations](docs/en/painting-profiles.md).
 
 Independently maintained MCP system for AI-driven digital painting and evidence-bound Photoshop automation on Windows.
@@ -225,29 +227,43 @@ pnpm install --frozen-lockfile
 npm run build:server
 ```
 
-The MCP server entry point is:
+### Two ways to connect to Photoshop
 
-```text
-<repo>/dist/index.js
-```
+Both options use the **same build** and Photoshop UXP companion. In Chat On Steroids, add a custom MCP plugin with `node` as the command and the absolute script path below as its argument.
 
-Point your MCP host directly at that file over stdio. Example:
+**1. Painting with Guard — the existing COS workflow.** Choose this for AI-driven painting with Art Director, Painter, Critic, visual reviews, journaling and Guard-controlled changes. Mutating operations go through `photoshop_guard_cycle_auto`.
 
 ```json
 {
   "mcpServers": {
-    "photoshop-painting": {
+    "paintpilot-painting": {
       "command": "node",
-      "args": ["/absolute/path/to/photoshop-mcp-digital-painting/dist/index.js"],
-      "env": {
-        "PHOTOSHOP_PATH": "/absolute/path/to/Photoshop"
-      }
+      "args": ["C:/path/to/paintpilot-mcp/dist/cos-plugin.js"],
+      "env": { "PHOTOSHOP_GUARD_MODE": "required" }
     }
   }
 }
 ```
 
-`PHOTOSHOP_PATH` is only required when Photoshop is not detected automatically.
+**2. Direct Photoshop tools — without Guard.** Choose this for ordinary edits such as moving layers up/down, changing opacity, renaming a layer or undoing an action. Registered Photoshop tools are called **directly via MCP → UXP**, with no Art Director, Critic, artistic Guard gate or mandatory `cycle_auto`. Photoshop History and the `photoshop_get_history`, `photoshop_undo` and `photoshop_redo` tools remain available.
+
+Direct-mode connection example:
+
+```json
+{
+  "mcpServers": {
+    "paintpilot-direct": {
+      "command": "node",
+      "args": ["C:/path/to/paintpilot-mcp/dist/index.js"],
+      "env": { "PHOTOSHOP_GUARD_MODE": "off" }
+    }
+  }
+}
+```
+
+Replace `C:/path/to/paintpilot-mcp` with the absolute path to **your checkout**. These are **alternative entry points**, not two scripts launched together in one connection. To switch in COS, change the plugin's script path (`cos-plugin.js` ↔ `index.js`) and **Restart** that MCP plugin to refresh the available commands. You can also save two named plugin configurations and enable only the one you want to use. The Photoshop UXP companion stays loaded in either mode.
+
+This is a **connection setting**, not the `simple_graphic` / `nontrivial_painting` painting-profile selector. Direct commands bypass the painting Guard, but the native Photoshop tool may still return its own errors; not every Photoshop feature has an MCP implementation. Photoshop History/Undo works as it does for ordinary document editing. Direct changes are not automatically added to the existing Guard painting journal; inspect the document state before resuming an interrupted guarded run. `PHOTOSHOP_PATH` is only required when Photoshop is not detected automatically.
 
 ### Windows: background-safe Photoshop control
 
