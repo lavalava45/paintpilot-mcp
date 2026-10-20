@@ -1,5 +1,16 @@
 # Changelog
 
+- 2026-10-20 — **Developer Preview release preparation (documentation only).**
+  Record the user's acceptance of the layered fairy-tale forest cottage as
+  the one-image Developer Preview art trial without claiming an independently
+  audited PSD save/reopen. Confirm a stock COS MCP/UXP deployment matching the
+  candidate and a clean-checkout frozen-lockfile build/package verification.
+  Update INSTALL's stale 130/14 inventory to 135/16, replace the incompatible
+  `npm ci` update instruction with the tracked pnpm lockfile workflow and
+  distinguish guarded COS from direct MCP entry points. Draft bounded release
+  notes and list remaining versioned-asset and public-install gates; no tag,
+  public release or Photoshop pixel mutation was performed.
+
 - 2026-10-20 — **Prepare the Developer Preview candidate for a frozen release review.**
   In `simple_graphic`, missing comparable BEFORE evidence now downgrades
   unsupported directional/global assessment to an explicitly uncertain neutral

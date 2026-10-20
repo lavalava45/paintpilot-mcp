@@ -111,7 +111,7 @@ Pass `PHOTOSHOP_PATH` in the stdio transport environment when automatic detectio
 ```
 
 After rebuilding/updating the project, refresh the Chat On Steroids Plugins schema through
-the normal host UI. The accepted native catalog is **130 tools total / 14 Guard tools**.
+the normal host UI. The accepted native catalog is **135 tools total / 16 Guard tools**.
 A stale legacy 64-tool snapshot is not a limitation of this server.
 
 For local development, distinguish **schema refresh** from **process restart**:
@@ -196,7 +196,7 @@ npm run test:measurement-tools
 npm run test:landmark-ergonomics
 ```
 
-The MCP server should expose the **130-tool / 14-Guard-tool** Digital Painting Edition catalog, including:
+The MCP server should expose the **135-tool / 16-Guard-tool** Digital Painting Edition catalog, including:
 
 ```text
 photoshop_list_brush_presets
@@ -228,11 +228,13 @@ For a normal release checkout:
 
 ```bash
 git pull --ff-only
-npm ci
+pnpm install --frozen-lockfile
 npm run build:server
 ```
 
-Then restart the direct stdio MCP process in your client so it reloads the rebuilt `dist/index.js` and refreshes the tool/prompt catalog.
+Then restart the configured MCP process in your client so it reloads the rebuilt
+entry point and refreshes the tool/prompt catalog. For the guarded Chat On Steroids
+workflow, this is the `dist/cos-plugin.js` process, not the generic `dist/index.js`.
 
 ## Developer setup
 
@@ -250,6 +252,7 @@ See [`docs/development.md`](docs/development.md#8-troubleshooting). In particula
 
 - confirm Photoshop is running;
 - confirm `PHOTOSHOP_PATH` points to the correct executable when needed;
-- confirm your MCP client launches this repository's `dist/index.js`;
+- confirm your MCP client launches the correct entry point (`dist/cos-plugin.js`
+  for guarded Chat On Steroids, `dist/index.js` for a deliberately direct MCP connection);
 - rebuild after pulling source changes;
 - restart the direct stdio MCP process after a build so the host refreshes its tool schema.

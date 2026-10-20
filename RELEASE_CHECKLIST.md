@@ -23,12 +23,17 @@ but they are not evidence for this Plugins-only Beta qualification.
 
 **Latest pre-release result (2026-10-20):** `verify:canonical` **PASS**
 (2408/2408 tests; 223/223 files), including tool-count, policy, contract,
-documentation, and packaging checks. These are machine checks, not completed
-release gates: the Git tree must still be frozen at the candidate commit,
-the active CoS MCP process must be refreshed and matched to that build,
-and fresh-install/live Photoshop acceptance remains open. The independent
-six-scene qualification remains a **Beta** gate. Do not publish or tag on
-source-only evidence.
+documentation, and packaging checks, on clean commit `018b7358c317825eff12e6d375cb680eb5db2041`.
+The running COS MCP/UXP deployment reported `current`; an independent checkout
+passed frozen-lockfile installation, server build, packaging verifier and
+offline health. The user has **accepted the layered fairy-tale cottage** as the
+single-image Developer Preview art trial; that user acceptance is not an
+independent PSD reopen or pixel-quality audit. **Still open:** version/tag
+reconciliation, versioned MCPB build and final public-asset install/smoke.
+Six-scene qualification remains a separate **Beta** gate. Any release-preparation
+source changes create a new candidate SHA that must be checked again.
+The draft public notes are in
+[`docs/DEVELOPER-PREVIEW-RELEASE-NOTES.md`](docs/DEVELOPER-PREVIEW-RELEASE-NOTES.md).
 
 ## Repository
 

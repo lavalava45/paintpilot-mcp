@@ -1,6 +1,6 @@
 # Painting Quality Roadmap
 
-Last updated: 2026-10-19
+Last updated: 2026-10-20
 
 **Scope:** ONLY pending work, decisions, acceptance criteria and preservation
 rules. Implemented changes, completed cleanups and dated engineering evidence
@@ -31,10 +31,12 @@ constitute active development branches.
       checkout LF/CRLF normalization causes different byte-hash build IDs;
       compiled entry points compare identically. Do not mistake distinct
       source-byte fingerprints for distinct executable functionality.
-- [ ] **User's one real image:** user chooses the subject, initiates a fresh
-      painting, assesses visible fidelity, editable PSD, ability to correct
-      errors and whether the experience is usable. Fix only reproducible
-      ship-blocking issues, never weaken Guard or pretend COS Stop cancels MCP.
+- [x] **User's one real image (user acceptance, 2026-10-20):** the user confirms
+      the fairy-tale forest cottage was completed and its elements remain on
+      separate layers. This closes the one-image Developer Preview artistic
+      acceptance by the user's decision. A separate tool-based PSD save/reopen,
+      layer-tree audit and independent quality review have **not** been claimed
+      for this image. Keep Guard and COS Stop safety caveats unchanged.
 - [ ] **Developer Preview release:** publish from a clean, reviewed
       `digital-painting` commit and tag (no auxiliary branch), with one
       versioned MCPB, matching source and UXP, concise installation steps,
