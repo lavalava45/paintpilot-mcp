@@ -1,5 +1,6 @@
 import { canvasComponent } from '../component-space.js';
 import { validatePainterlySoftening } from './painterly-softening.js';
+import { sceneModelCheckpoint } from './scene-model-checkpoint.js';
 import { createHash } from 'node:crypto';
 import type { FrameReviewIssue } from './review-validation.js';
 import { contradictoryTransitionRequirements, transitionRequirementSchemaErrors, type TransitionRequirement } from '../transition-requirements.js';
@@ -1349,6 +1350,21 @@ function compileCompactPass(
           violations.push(violation('next_operation', 'imaging_preflight_conflict', error instanceof Error ? error.message : String(error)));
         }
       }
+    }
+    // Non-visual PSD saves cannot create model authority from their summary.
+    // An explicitly supplied, exact-frame model may instead be committed on
+    // successful save. Camera registration must follow a *durable* geometry
+    // checkpoint; the final journal record, not the plan, is authoritative.
+    if (onlyTool === 'photoshop_save_document') {
+      const checkpoint = sceneModelCheckpoint(raw, context, Number(documentId), actionArgs);
+      if (checkpoint.error) violations.push(violation('next_operation',
+        checkpoint.error.split(':')[0], checkpoint.error));
+      if (checkpoint.geometry) directOperation.scene_geometry_model = checkpoint.geometry;
+      if (checkpoint.camera) directOperation.scene_camera_imaging_model = checkpoint.camera;
+    } else if (!DIRECT_BLUR_TOOLS.has(onlyTool)
+      && (raw.scene_geometry_model !== undefined || raw.scene_camera_imaging_model !== undefined)) {
+      violations.push(violation('next_operation', 'scene_model_checkpoint_wrong_tool',
+        'Non-visual direct model registration is supported only on an exact PSD save checkpoint; visual construction models use their normal guarded scene route.'));
     }
     return { operation: directOperation, violations, normalizations };
   }

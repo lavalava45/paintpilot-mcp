@@ -217,6 +217,15 @@ describe('Contract Preservation Audit – final compiler boundary / no Photoshop
     expect(criticalPreservationFailures(source,{...compiled,painterly_softening:{...contract,owner_id:'different'}}).map(row=>row.path))
       .toContain('next_pass.painterly_softening');
   });
+  it('requires an explicit scene model to survive into an actual PSD checkpoint', () => {
+    const model = {model_id:'exact-scene',revision:1,source_frame:{document_id:625,
+      document_incarnation:'incarnation:625',operation_id:'source-frame',preview_sha256:'a'.repeat(64)}};
+    const authored = {document_id:625,scene_geometry_model:model};
+    const compiled = {tool:'photoshop_save_document',args:{document_id:625,path:'scene.psd'},scene_geometry_model:model};
+    expect(criticalPreservationFailures(authored,compiled)).toEqual([]);
+    expect(criticalPreservationFailures(authored,{...compiled,scene_geometry_model:undefined}).map(row=>row.path))
+      .toContain('next_pass.scene_geometry_model');
+  });
 
   it('does not grant a ROLLBACK exemption to native delete or change artistic meaning', () => {
     const input = direct('ROLLBACK');

@@ -114,6 +114,7 @@ import { normalizeSceneGeometryModel } from '../scene-geometry-model.js';
 import { lightingColorBindingStaleness, normalizeSceneLightingColorModel } from '../scene-lighting-color-model.js';
 import { normalizeImagingPreflight } from '../imaging-preflight.js';
 import { validatePainterlySoftening } from './painterly-softening.js';
+import { sceneModelCheckpoint } from './scene-model-checkpoint.js';
 import { cameraBindingStaleness, normalizeCameraBinding, normalizeSceneCameraImagingModel } from '../scene-camera-imaging-model.js';
 import { changedSceneGeometryDependencyIds, geometryBindingStaleness, normalizeGeometryBinding, transformGeometryBinding } from '../geometry-binding.js';
 import { generatedGeometryProvenanceState } from '../executable-geometry-validation.js';
@@ -6447,6 +6448,13 @@ export class SessionStore {
           logical_layer: request.args.logical_layer };
         for (const error of this.collectPreflightErrors(nested, { ...options, stateOnly: true })) add(error);
       }
+    }
+    if (request?.tool === 'photoshop_save_document'
+      && (request.scene_geometry_model !== undefined || request.scene_camera_imaging_model !== undefined)) {
+      const documentId = request?.args?.document_id;
+      const checkpoint = sceneModelCheckpoint(request,
+        this.compactPassContext(documentId, projectionContext), documentId, request.args);
+      if (checkpoint.error) add(checkpoint.error);
     }
     if (request?.painterly_softening !== undefined
       && request?.tool !== 'photoshop_apply_gaussian_blur'

@@ -796,6 +796,71 @@ function physicalStackObservation() {
 }
 
 describe('public compact Guard contract regressions', () => {
+  it('durably activates separately validated geometry and camera on exact PSD save checkpoints, without mutating owner identities', async () => {
+    const f = fixture({ sceneGeometry: false });
+    const base = await createHotLoopOwner(f, 'scene-checkpoint-base');
+    expect(base.execution).toMatchObject({ phase: 'completed', failed: false });
+    await closeHotLoopOwner(f, 'scene-checkpoint-base');
+    const context = f.runtime.store.compactPassContext(42);
+    const frame = context.painterly_frame;
+    expect(frame?.operation_id).toBe('scene-checkpoint-base');
+    expect(frame?.sha256).toMatch(/^[a-f0-9]{64}$/);
+    const beforeOwners = f.runtime.store.semanticLayerOwners(42);
+    const geometry = { ...sceneGeometryModel(), source_frame: {
+      ...sceneGeometryModel().source_frame, operation_id: frame.operation_id, preview_sha256: frame.sha256,
+    } };
+    const camera = { ...sceneCameraModel(), source_frame: {
+      ...sceneCameraModel().source_frame, operation_id: frame.operation_id, preview_sha256: frame.sha256,
+    } };
+    const checkpoint = (id: string, fields: Record<string, unknown>) => ({
+      request_key: id, problem_id: 'scene-model-checkpoint', document_id: 42,
+      goal: 'Save a verified PSD checkpoint with explicitly authored scene model provenance.',
+      actions: [{ tool: 'photoshop_save_document', args: { path: path.join(f.dir, 'processes', 'hot-loop-process', 'benchmark-01', `${id}.psd`), format: 'PSD' } }],
+      ...fields,
+    });
+    // A successful PSD save with a registration-sounding goal is not a scene
+    // model registration when the typed payload is absent (the live defect).
+    const namedOnly = await body(await f.cycle.handler({next_pass: checkpoint('registration-wording-only', {})}));
+    expect(namedOnly.preflight_rejection).toBeUndefined();
+    expect(f.runtime.store.sceneGeometryModel(42)).toBeNull();
+    expect(f.runtime.store.sceneCameraImagingModel(42)).toBeNull();
+    const wrongFrame = await body(await f.cycle.handler({next_pass: checkpoint('checkpoint-geometry-wrong-frame', {
+      scene_geometry_model: { ...geometry, source_frame: { ...geometry.source_frame, preview_sha256: 'a'.repeat(64) } },
+    })}));
+    expect(wrongFrame.preflight_rejection?.error_codes).toContain('scene_geometry_model_source_frame_mismatch');
+    const notPsd = await body(await f.cycle.handler({next_pass: {
+      ...checkpoint('checkpoint-geometry-jpeg', {scene_geometry_model:geometry}),
+      actions:[{tool:'photoshop_save_document',args:{path:path.join(f.dir,'processes','hot-loop-process','benchmark-01','not-psd.jpg'),format:'JPEG'}}],
+    }}));
+    expect(notPsd.preflight_rejection?.error_codes).toContain('scene_model_checkpoint_psd_required');
+    const cameraTooEarly = await body(await f.cycle.handler({next_pass: checkpoint('camera-before-geometry', {
+      scene_camera_imaging_model: camera,
+    })}));
+    expect(cameraTooEarly.preflight_rejection?.error_codes).toContain('scene_camera_imaging_geometry_missing');
+    expect(f.runtime.store.sceneCameraImagingModel(42)).toBeNull();
+    const combined = await body(await f.cycle.handler({next_pass: checkpoint('combined-uncommitted-models', {
+      scene_geometry_model: geometry, scene_camera_imaging_model: camera,
+    })}));
+    expect(combined.preflight_rejection?.error_codes).toContain('scene_model_checkpoint_separate_revisions_required');
+    const geometrySave = await body(await f.cycle.handler({next_pass: checkpoint('checkpoint-geometry', {
+      scene_geometry_model: geometry,
+    })}));
+    expect(geometrySave.preflight_rejection, JSON.stringify(geometrySave)).toBeUndefined();
+    expect(geometrySave.execution).toMatchObject({ phase:'completed', failed:false });
+    expect(f.runtime.store.read('checkpoint-geometry')?.scene_geometry_model).toMatchObject({model_id:geometry.model_id,revision:1});
+    expect(f.runtime.store.sceneGeometryModel(42)).toMatchObject({model_id:geometry.model_id,revision:1,source_operation_id:'checkpoint-geometry'});
+    const wrongCamera = await body(await f.cycle.handler({next_pass: checkpoint('checkpoint-camera-stale', {
+      scene_camera_imaging_model: { ...camera, geometry_model_revision:2 },
+    })}));
+    expect(wrongCamera.preflight_rejection?.error_codes).toContain('scene_camera_imaging_geometry_mismatch');
+    const cameraSave = await body(await f.cycle.handler({next_pass: checkpoint('checkpoint-camera', {
+      scene_camera_imaging_model: camera,
+    })}));
+    expect(cameraSave.preflight_rejection, JSON.stringify(cameraSave)).toBeUndefined();
+    expect(cameraSave.execution).toMatchObject({ phase:'completed', failed:false });
+    expect(f.runtime.store.sceneCameraImagingModel(42)).toMatchObject({model_id:camera.model_id,revision:1,source_operation_id:'checkpoint-camera'});
+    expect(f.runtime.store.semanticLayerOwners(42)).toEqual(beforeOwners);
+  });
   it('executes an explicit canvas field after reconciling stale spatial/method labels without geometric bindings', async () => {
     const f = fixture({ sceneGeometry: false });
     await f.setArtRun.handler({ document_id: 42, process_dir: 'processes/canvas-field-process/run', painting_profile: 'nontrivial_painting' });

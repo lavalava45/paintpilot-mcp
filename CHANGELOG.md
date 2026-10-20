@@ -1,5 +1,15 @@
 # Changelog
 
+- 2026-10-20 — **Scene model checkpoint activation hardening (pre-release).**
+  Forensic inspection of the live fairy-cottage Guard journal found that two
+  reported "scene-model registrations" were successful PSD saves with no
+  model metadata. Add explicit exact-image, incarnation-bound PSD checkpoint
+  registration for scene geometry and then camera, with durable-model and
+  revision verification at compiler and final Guard preflight. Preserve
+  existing light-layer owner and coordinate space; a text summary of saving
+  cannot activate a scene model. Camera-free local-glow and full imaging
+  paths remain separate. Await COS reload and live Photoshop acceptance.
+
 - 2026-10-20 — **Developer Preview release preparation (documentation only).**
   Record the user's acceptance of the layered fairy-tale forest cottage as
   the one-image Developer Preview art trial without claiming an independently

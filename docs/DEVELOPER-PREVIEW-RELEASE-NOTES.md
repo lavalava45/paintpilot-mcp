@@ -86,6 +86,13 @@ acceptance. Release-asset labeling must preserve this distinction.
   `optical-effect` owner, with native Smart Filter/Undo protection and
   exact-image review. This is not permission to defocus opaque scene geometry.
   The new route still requires a fresh COS load and live acceptance (RH-05).
+- Scene geometry/camera data is not registered by including the word
+  "register" in a save description. To register without changing pixels,
+  explicitly supply `next_pass.scene_geometry_model` on an exact-frame PSD
+  save, then `next_pass.scene_camera_imaging_model` on a subsequent PSD save
+  bound to the durable geometry revision. Read back the Guard models after
+  each completed checkpoint; ordinary successful PSD exports provide no
+  model authority. This workflow has offline contract validation only.
 - Direct Photoshop Tools operations are intentionally distinct from the
   guarded artistic session. A direct edit to the same PSD is not automatically
   incorporated into Painting Mode's journal.

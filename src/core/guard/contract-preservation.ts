@@ -188,6 +188,17 @@ export function criticalPreservationFailures(
   if (source.painterly_softening !== undefined
     && JSON.stringify(operation.painterly_softening) !== JSON.stringify(source.painterly_softening))
     missing('painterly_softening', 'the expressly authorized optical-effect owner and local-glow review contract were lost or changed');
+  if (operation.tool === 'photoshop_save_document') {
+    for (const field of ['scene_geometry_model', 'scene_camera_imaging_model'] as const) {
+      const authored = record(source[field]);
+      if (!authored) continue;
+      const accepted = record(operation[field]);
+      if (!accepted || accepted.model_id !== authored.model_id || accepted.revision !== authored.revision
+        || JSON.stringify(accepted.source_frame) !== JSON.stringify(authored.source_frame)) {
+        missing(field, `explicitly authored ${field} disappeared or changed before the successful PSD checkpoint`);
+      }
+    }
+  }
   if (typeof source.action_class === 'string' && operation.tool === 'photoshop_execute_visual_microplan'
     && source.action_class !== args.action_class)
     missing('action_class', 'VisualMicroPlan action class differs from the authored action');

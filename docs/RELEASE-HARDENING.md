@@ -103,6 +103,36 @@ firefly-glow pass in Photoshop, verifying actual target ownership, pixel
 effect, edge review, layer preservation and Undo. Offline regressions alone
 are not end-to-end RH-05 acceptance; do not claim it fully resolved yet.
 
+**Scene model registration follow-up (2026-10-20, same document):** inspection
+of the authoritative journal identified two successful saves, sequences 1497
+and 1498 (`fairytale_geometry_registration_psd_checkpoint_20261020_v2` and
+`fairytale_camera_registration_psd_checkpoint_20261020_v1`), both with
+`tool=photoshop_save_document` but **without** root
+`scene_geometry_model`/`scene_camera_imaging_model` metadata. Their summaries
+mentioned registration, but saved PSD bytes and prose cannot establish Guard
+model authority. Read-only `SessionStore` interrogation returned both active
+models `null`. The existing `forest-fireflies` owner is layer 15 with
+`physical_role=optical-effect`, `opacity_role=transparent-overlay`, and no
+explicit `component_space`; its effective world coordinate choice may not be
+silently relabelled canvas.
+
+A new bounded checkpoint pathway permits **explicit typed** scene geometry
+and, in a subsequent operation, camera data to be recorded with successful
+guarded `photoshop_save_document` PSD saves. Compiler and final SessionStore
+preflight require the current exact-frame operation ID, SHA-256, document
+incarnation, PSD path/format, model/revision continuity, supported style
+basis for diagrammatic opt-out, and a *previously durable* exact geometry
+revision for the camera. Same-call geometry+camera, stale frames, invalid
+models and JPEG/PNG are rejected before saving. The record acquires authority
+only on a completed, nonfailed native save; saving without explicit metadata
+still saves PSD **without registering any model**. Owner identities and
+component coordinate spaces are not edited by registration.
+
+The already-implemented `painterly_softening` path remains the more direct
+solution for the firefly halo: existing `forest-fireflies` owner, exact layer
+15, no new component-space or camera model claims. The independent live
+Photoshop glow acceptance remains open after a COS plugin restart.
+
 ### Triage order (dependencies, not a growing priority hierarchy)
 
 1. **Stop unsafe or wasteful continuation:** RH-02 and RH-01. Preserve strict
