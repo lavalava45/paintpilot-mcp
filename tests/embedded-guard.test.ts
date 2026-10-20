@@ -3506,7 +3506,7 @@ describe('embedded Photoshop Guard', () => {
     );
   });
 
-  it('derives a preflighted brush role and inserts preset selection for compact paint passes', async () => {
+  it('derives a preflighted brush role without silently selecting a recommended preset', async () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'embedded-guard-auto-brush-'));
     dirs.push(dir);
     const { registry } = fakeRegistry(dir);
@@ -3601,15 +3601,15 @@ describe('embedded Photoshop Guard', () => {
     expect(result.preflight_rejection).toBeUndefined();
     const stored = runtime.store.read('auto-brush-pass')!;
     expect(stored.args.steps[0]).toMatchObject({
-      tool: 'photoshop_select_brush_preset',
-      args: { name: 'Round Form Brush' },
+      tool: 'photoshop_paint_strokes',
     });
-    expect(selected).toEqual(['Round Form Brush']);
+    expect(stored.args.steps.some((step: any) => step.tool === 'photoshop_select_brush_preset')).toBe(false);
+    expect(selected).toEqual([]);
     expect(stored.args.paint_strategy).toMatchObject({
       brush_role: 'medium-form',
-      preset_name: 'Round Form Brush',
       pressure_policy: 'none',
     });
+    expect(stored.args.paint_strategy.preset_name).toBeUndefined();
   });
 
   it('reproduces the 13a.1B setter recovery -> profile upgrade -> one paint -> compact close-only sequence', async () => {
@@ -3965,6 +3965,100 @@ describe('embedded Photoshop Guard', () => {
     expect(unchanged.operation_ack).toBeUndefined();
     expect(unchanged.verdict).toBeUndefined();
     expect(runtime.store.visualBarrier(42)?.sha256).toBe(after.sha256);
+  });
+
+  it('in simple_graphic closes an exact AFTER without BEFORE as a neutral, explicitly uncertain comparison', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'embedded-guard-simple-comparison-advisory-'));
+    dirs.push(dir);
+    const { registry, after } = fakeRegistry(dir);
+    const runtime = runtimeFor(registry, dir);
+    runtime.artRun({
+      document_id: 42,
+      process_dir: 'processes/simple-comparison-process/run-01',
+      painting_profile: 'simple_graphic',
+      commentary_mode: 'technical',
+    });
+    await runtime.cycleAuto({
+      next_pass: compactPassFromOperation({
+        id: 'simple-comparison-advisory',
+        tool: 'photoshop_set_layer_opacity',
+        args: { document_id: 42, opacity: 52 },
+        summary: 'Paint a bounded example while preserving its exact after image',
+        purpose: 'Missing baseline is not a systemic blocker in simple mode',
+        problem_id: 'simple-comparison',
+        scale: 'global',
+      }),
+    });
+    const record = runtime.store.read('simple-comparison-advisory')!;
+    delete record.before_preview;
+    delete record.baseline_preview;
+    delete record.baseline_preview_source_operation_id;
+    runtime.store.write(record);
+    const submitted = compactObservationFromVerdict(critic());
+    const closed = await runtime.cycleAuto({
+      previous_operation_id: 'simple-comparison-advisory',
+      previous_observation: submitted,
+    }) as any;
+    expect(closed.finalization_rejection).toBeUndefined();
+    expect(closed.closed_previous).toMatchObject({
+      closed: true,
+      verdict_recorded: true,
+      execution_claim_correction: {
+        code: 'simple_graphic_comparison_unavailable',
+      },
+    });
+    const verdict = runtime.store.read('simple-comparison-advisory')?.verdict;
+    expect(verdict).toMatchObject({
+      verdict: 'neutral',
+      disposition: 'accept',
+      global_readability: 'unknown',
+      goal_assessment: { status: 'unconfirmed' },
+      execution_claim_correction: {
+        code: 'simple_graphic_comparison_unavailable',
+        original_claim: { verdict: 'improvement', global_readability: 'improved' },
+      },
+    });
+    expect(verdict?.observed_change).toMatch(/no comparable BEFORE image/);
+    expect(verdict?.comparison_metric?.status).toBe('unavailable');
+    expect(runtime.store.visualBarrier(42)).toBeFalsy();
+    expect(runtime.store.read('simple-comparison-advisory')?.operation_ack).toBeDefined();
+    expect(runtime.store.read('simple-comparison-advisory')?.report).toBeDefined();
+    expect(runtime.store.read('simple-comparison-advisory')?.preview?.sha256).toBe(after.sha256);
+    expect(submitted.global_readability).toBe('improved'); // Do not mutate caller input.
+  });
+
+  it('keeps a foreign BEFORE prohibited even in simple_graphic; closure remains atomic', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'embedded-guard-simple-foreign-before-'));
+    dirs.push(dir);
+    const { registry } = fakeRegistry(dir);
+    const runtime = runtimeFor(registry, dir);
+    runtime.artRun({
+      document_id: 42,
+      process_dir: 'processes/simple-foreign-before-process/run-01',
+      painting_profile: 'simple_graphic',
+      commentary_mode: 'technical',
+    });
+    await runtime.cycleAuto({
+      next_pass: compactPassFromOperation({
+        id: 'simple-foreign-before',
+        tool: 'photoshop_set_layer_opacity',
+        args: { document_id: 42, opacity: 60 },
+        scale: 'global',
+      }),
+    });
+    const record = runtime.store.read('simple-foreign-before')!;
+    expect(record.before_preview ?? record.baseline_preview).toBeDefined();
+    record.before_preview = { ...(record.before_preview ?? record.baseline_preview), document_id: 99 };
+    delete record.baseline_preview;
+    runtime.store.write(record);
+    const result = await runtime.cycleAuto({
+      previous_operation_id: 'simple-foreign-before',
+      previous_observation: compactObservationFromVerdict(critic()),
+    }) as any;
+    expect(result.finalization_rejection.errors.join('\n')).toMatch(/visual_comparison_gate/);
+    expect(runtime.store.read('simple-foreign-before')?.verdict).toBeUndefined();
+    expect(runtime.store.read('simple-foreign-before')?.report).toBeUndefined();
+    expect(runtime.store.read('simple-foreign-before')?.operation_ack).toBeUndefined();
   });
 
   it('rolls back close-only report and acknowledgement if a late closure write fails after prevalidation', async () => {

@@ -21,13 +21,14 @@ Production semantic Photoshop mutation is UXP-only/fail-closed and must pass thr
 the embedded Guard. Other local stdio host configurations remain project entry points,
 but they are not evidence for this Plugins-only Beta qualification.
 
-**Latest pre-release result (2026-10-13):** `verify:canonical` **PASS**
-(1826/1826 tests; 160/160 files) and `test:embedded-guard-mcp` **PASS**
-(38 public tools, 15 Guard, 228,409/250,000 bytes). These are machine
-checks, not completed checklist gates: the Git tree has not been frozen, the
-loaded CoS child is from another checkout, the new build has not been
-activated there, and the live/independent six-scene qualification remains
-**open**. Do not publish or tag on this evidence alone.
+**Latest pre-release result (2026-10-20):** `verify:canonical` **PASS**
+(2408/2408 tests; 223/223 files), including tool-count, policy, contract,
+documentation, and packaging checks. These are machine checks, not completed
+release gates: the Git tree must still be frozen at the candidate commit,
+the active CoS MCP process must be refreshed and matched to that build,
+and fresh-install/live Photoshop acceptance remains open. The independent
+six-scene qualification remains a **Beta** gate. Do not publish or tag on
+source-only evidence.
 
 ## Repository
 
@@ -77,7 +78,7 @@ activated there, and the live/independent six-scene qualification remains
 - [ ] Chat On Steroids instructions use the canonical Plugins → `dist/cos-plugin.js` → embedded Guard route; the retired external Core/controller/daemon provider chain is not presented as a supported or recoverable route.
 - [ ] Local-development docs distinguish ChatGPT Plugins **Refresh** from CoS plugin-process **Restart**, document that only the custom Photoshop MCP plugin should be restarted after a server rebuild, and do not recommend whole-CoS restarts or obsolete restart-helper scripts.
 - [ ] UXP docs describe localhost long-poll, `Reload` for `main.js`, `Unload → Load` for manifest changes, and health verification via `plugin_connected` / `transport: "long-poll"`.
-- [ ] Native catalog/required-mode documentation matches the current **134 tools / 16 public Guard tools** surface and raw mutations fail closed with `guard_required`.
+- [ ] Native catalog/required-mode documentation matches the current **135 tools / 16 public Guard tools** surface and raw mutations fail closed with `guard_required`.
 - [ ] `PHOTOSHOP_PATH` guidance covers current Photoshop versions.
 - [ ] `NOTICE` is included and current; it records historical origin, major architectural divergence,
       selective-port attribution policy, and the retained upstream MIT notice path.

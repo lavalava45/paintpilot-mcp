@@ -1,5 +1,23 @@
 # Changelog
 
+- 2026-10-20 — **Prepare the Developer Preview candidate for a frozen release review.**
+  In `simple_graphic`, missing comparable BEFORE evidence now downgrades
+  unsupported directional/global assessment to an explicitly uncertain neutral
+  claim while preserving exact AFTER, document identity, owner, Undo and
+  preview-delivery checks; a foreign BEFORE still fails closed. Align the
+  embedded-Guard brush-role test with the no-silent-preset-selection contract,
+  correct compact rejection assertions, and remove a dead VisualMicroPlan
+  conditional. Reconcile the native catalog and generated backend inventory to
+  **135 tools / 16 public Guard tools**, including the guarded UXP
+  `photoshop_source_bound_reflection` capability. Replace three conceptual
+  README figures with diagrams using real PaintPilot artwork, document their
+  hashes/source limits, and retain the historical imagegen prompts as superseded
+  metadata. Refresh the release checklist and current bridge revision guidance.
+  `verify:canonical` passed on 2026-10-20 (223 files, 2408 tests); this does
+  **not** establish fresh-install/runtime parity, real-image acceptance, or a
+  published release. Historical live-evidence ledger structural verification
+  passed with 21 locally verified entries and 2 unavailable historical files.
+
 - 2026-10-19 — **Guard document activation permission and target identity.**
   Fixed the false preflight rejection of `photoshop_set_active_document` when
   its intended open target is not the current Photoshop tab. Navigation now

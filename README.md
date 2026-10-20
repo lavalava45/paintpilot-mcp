@@ -77,7 +77,7 @@ Digital Painting Edition combines broad Photoshop automation with a focused pain
 - a Photoshop-side UXP companion on localhost long-poll for Neural Filters, foreground-safe `asCopy` PSD/JPEG/PNG persistence, and low-latency fast-lane development/diagnostics;
 - an agent visual-control workflow with semantic passes, previews, measurement checkpoints, occlusion reasoning, cleanup, sticky Photoshop routing, and a state-based Definition of Done.
 
-The current build exposes **134 tools** (**134 atomic/non-recipe**) and **5 prompts**.
+The current build exposes **135 tools** (**135 atomic/non-recipe**) and **5 prompts**.
 
 The dedicated Chat On Steroids entry point is `dist/cos-plugin.js`. It starts the same MCP server with `PHOTOSHOP_GUARD_MODE=required`, so read-only tools remain directly callable while raw mutating tools fail closed and must be dispatched through `photoshop_guard_cycle_auto`. This native Plugins route has passed dedicated live acceptance and is the canonical Chat On Steroids path. The retired external Core/controller/daemon provider chain has been removed from the repository.
 
@@ -85,7 +85,7 @@ The dedicated Chat On Steroids entry point is `dist/cos-plugin.js`. It starts th
 
 ![Authored geometry, numerical solving and separately editable paint components](assets/engineering/geometry-and-editable-components.png)
 
-*Conceptual diagram: authored constraints support construction; actual rendered pixels still need visual review.*
+*The violinist is real PaintPilot Photoshop artwork. Landmarks and component ownership are schematic overlays, not a claim that this historical run executed IK or a screenshot of its layer panel. [Source and hashes](assets/engineering/README.md).*
 
 - **[IK.ts](https://github.com/goldst/IK.ts) / FABRIK** — articulated joints, fixed limb lengths and contact targets.
 - **[Clipper2](https://github.com/AngusJohnson/Clipper2)** (via the [TypeScript port](https://github.com/countertype/clipper2-ts)) — contour clipping, exclusions and brush-safe offsets.
@@ -136,7 +136,7 @@ documented in [`docs/visual-evaluation.md`](docs/visual-evaluation.md).
 
 ![Same-chat Director, Painter and Critic roles with the Guard to UXP to Photoshop execution lane](assets/engineering/bounded-artistic-autonomy.png)
 
-*Conceptual diagram: same-conversation artistic roles use one guarded execution lane; tool completion does not certify artistic success.*
+*The illustration uses our real Pink City painting. Role arrows explain the Guard/UXP contract, not a captured live trace; tool completion does not certify artistic success. [Source](assets/engineering/README.md).*
 
 Useful painting requires more than safe atomic tool calls, but unconstrained multi-step autonomy can
 drift, compound errors, or hide regressions. The project therefore explores a middle regime:
@@ -158,7 +158,7 @@ the forward-looking roadmap.
 
 ![Lost-reply recovery through durable journal, fresh state and preview, and original-operation reconciliation](assets/engineering/evidence-bound-recovery.png)
 
-*Conceptual diagram: reconcile the original operation before a new action; partial or uncertain execution stays on the recovery path.*
+*The homestead is a historical PaintPilot artistic-rollback illustration; it is **not** evidence of a lost MCP reply. The no-replay decision flow is schematic. [Source](assets/engineering/README.md).*
 
 In a stateful editor, repeating an uncertain mutation is not a harmless retry: a brush stroke,
 transform, erase, fill, or composite may be applied twice and permanently diverge from the state that
@@ -336,7 +336,7 @@ npm run test:document-targeting-live
 The current verified tool-count result is:
 
 ```text
-catalog counts consistent: 134 = 134 atomic + 0 recipes; 16 Guard tools; 5 MCP prompt templates
+catalog counts consistent: 135 = 135 atomic + 0 recipes; 16 Guard tools; 5 MCP prompt templates
 ```
 
 The project has been live-tested primarily on **Photoshop 2026 for Windows**. During the current validation, 123 installed brush presets were enumerated and the painting smoke test completed with `PAINTING_TEST_OK`.

@@ -773,8 +773,6 @@ function validateCompiledVisualMicroPlan(
   }
   // The catalog describes suggested techniques; Photoshop tool schemas decide executability.
   if (options.documentBounds) errors.push(...collectDocumentBoundsErrors(args, options.documentBounds));
-  if (plan) {
-  }
   if (!errors.length && !methodErrors.length) return { plan };
   const uniqueErrors = [...new Set([...errors, ...methodErrors])];
   const planFingerprint = visualMicroPlanFingerprint(args);

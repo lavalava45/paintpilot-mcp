@@ -73,6 +73,10 @@ flowchart LR
 
 ## Historical illustrations
 
+The [documentation illustration audit](../ILLUSTRATION-AUDIT.md) identifies
+project-produced frames, former generated conceptual diagrams, replacements
+and the limits of source-frame verification.
+
 All ten JPEGs in [the Russian image folder](../ru/images/) are **historical
 visual records**, not newly rendered demonstrations of the current code.
 We reuse their exact pixels rather than silently retouching evidence. Some

@@ -5419,7 +5419,7 @@ describe('public compact Guard contract regressions', () => {
         args: { name: 'House pixel reflection' } }, invented],
     });
     expect(freehand.error_codes).toContain('reflection_source_copy_required');
-    expect(freehand.compact_correction_recipe?.field_correction_packet?.corrections).toEqual(
+    expect(freehand.rejection?.compact_correction_recipe?.field_correction_packet?.corrections).toEqual(
       expect.arrayContaining([expect.objectContaining({ code: 'reflection_source_copy_required',
         path: 'next_pass.actions' })])
     );

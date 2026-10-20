@@ -31,7 +31,6 @@ import { reportText } from '../report-locales.js';
 import { criticObligationState } from './critic-obligations.js';
 import { editableScopeRequest, validateEditableScopeReview, persistEditableScopeReview, editableOwnerScopeIssue } from './editable-scope.js';
 import { normalizeBrushAllowedScales } from './brush-scale-fit.js';
-import { brushUseKey, boundedBrushTrial } from './brush-role-extension.js';
 import { artisticContinuation, documentArtisticDebt, bindPaintingCompletion, wholeBriefCompletionContract } from './document-artistic-debt.js';
 import fs from 'node:fs';
 import { undoProofForPendingVerdict } from './undo-proof-projection.js';
@@ -10565,6 +10564,40 @@ export class SessionStore {
       significance,
       specification: record.comparison_specification ?? comparisonSpecificationForOperation(record),
     });
+    // Simple is finish-first: missing comparison evidence is an artistic
+    // uncertainty, not a systemic Photoshop/Guard failure. Downgrade only the
+    // comparison *claim*. The exact AFTER, document identity, owner authority,
+    // delivery barrier and Undo proof remain mandatory. A present but foreign
+    // BEFORE is not "missing" and must still fail closed.
+    const unsupportedGlobalComparison = input.global_readability !== 'unknown'
+      && !(comparisonProvenanceMatched && significance.global);
+    const unsupportedDirectionalComparison = !comparisonProvenanceMatched
+      && (input.verdict === 'improvement' || input.verdict === 'regression');
+    const simpleComparisonCanDegrade = documentState.painting_profile === 'simple_graphic'
+      && preview.document_id === record.args?.document_id
+      && (!comparisonBefore || comparisonProvenanceMatched);
+    if (simpleComparisonCanDegrade && (unsupportedGlobalComparison || unsupportedDirectionalComparison)) {
+      const reason = !comparisonBefore
+        ? 'Simple profile: no comparable BEFORE frame was retained. The exact AFTER can be reviewed, but global readability or directional improvement cannot be certified.'
+        : 'Simple profile: comparable whole-frame BEFORE evidence is unavailable. Global readability cannot be certified from this pair.';
+      input = {
+        ...input,
+        ...(unsupportedGlobalComparison ? { global_readability: 'unknown' } : {}),
+        ...(unsupportedDirectionalComparison ? {
+          verdict: 'neutral',
+          observed_change: 'The exact AFTER frame is available, but no comparable BEFORE image proves a directional change. Review the visible AFTER observations before the next bounded pass.',
+        } : {}),
+        execution_claim_correction: {
+          code: 'simple_graphic_comparison_unavailable',
+          reason,
+          original_claim: {
+            verdict: input.verdict,
+            global_readability: input.global_readability,
+            observed_change: input.observed_change,
+          },
+        },
+      };
+    }
     if (input.global_readability !== 'unknown' && !(comparisonProvenanceMatched && significance.global)) {
       throw new Error('visual_comparison_gate: global_readability comparison requires a comparable whole-frame before preview; use global_readability=unknown otherwise');
     }

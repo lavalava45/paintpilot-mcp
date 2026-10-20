@@ -90,6 +90,8 @@ const ALREADY_UXP = new Set([
   'photoshop_move_layer',
   // Native UXP layer.translate with pinned id and verified post-bounds.
   'photoshop_transform_layer',
+  // Guard-pinned source raster duplication and native UXP flip/translation.
+  'photoshop_source_bound_reflection',
   'photoshop_release_clipping_mask',
   'photoshop_rotate_layer',
   'photoshop_save_selection',
@@ -331,6 +333,7 @@ function noteFor(source, name) {
   if (name === 'photoshop_neural_filter') return 'Already UXP bridge; separate feature, not migration driver.';
   if (name === 'photoshop_ingest_brush_pack') return 'P0-E.1 Guard-routed ABR ingestion; UXP-only with durable command receipts and fail-closed capability reporting.';
   if (name === 'photoshop_set_active_document') return 'Explicit UI-activating document navigation; may foreground Photoshop and is excluded from no-focus acceptance traces. Never use implicit switching to satisfy document_id.';
+  if (name === 'photoshop_source_bound_reflection') return 'Guard-only UXP source-pixel duplicate, vertical flip and translation; pinned source/receiver and single History receipt.';
   if (ALREADY_UXP.has(name)) return 'UXP-only production capability; preserve fail-closed semantics.';
   if (name.startsWith('photoshop_guard_')) return 'Guard remains transport-agnostic above backend routing.';
   if (name.startsWith('photoshop_recipe_')) {
