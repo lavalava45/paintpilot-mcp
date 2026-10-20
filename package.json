@@ -34,6 +34,7 @@
     "generate:tool-backend-inventory": "node scripts/dev/generate-tool-backend-inventory.mjs",
     "verify:painting-policy": "node scripts/verify-digital-painting-policy.mjs",
     "verify:pack": "node scripts/verify-pack.mjs",
+    "verify:release-modes": "node scripts/verify-release-modes.mjs",
     "test:mcp-local": "tsx scripts/test-mcp-local.ts",
     "test:measurement-tools": "node scripts/test-measurement-tools.mjs",
     "test:landmark-ergonomics": "node scripts/test-landmark-ergonomics.mjs",

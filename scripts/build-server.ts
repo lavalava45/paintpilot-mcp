@@ -50,7 +50,7 @@ try {
   }
   if (hadPrevious) fs.rmSync(previous, { recursive: true, force: true });
   console.error(`[build-server] Published ${manifest.build_id.slice(0, 12)}; bridge ${manifest.expected_uxp_revision}.`);
-  console.error('[build-server] Running components were not restarted. Next: CoS plugin Restart -> UXP Reload if changed -> npm run deployment:health.');
+  console.error('[build-server] Running components were not restarted. Next: restart the selected PaintPilot MCP connection -> reload UXP if changed -> npm run deployment:health.');
   exitCode = 0;
 } catch (error) {
   const detail = (error as NodeJS.ErrnoException)?.code === 'EEXIST'

@@ -18,6 +18,7 @@ import {
 } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { assertDeploymentLaunchReady, captureBuildOutputs, createBuildManifest, readBuildManifest, DEPLOYMENT_MANIFEST } from '../src/core/deployment-health.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const STAGING = join(ROOT, '.mcpb-staging');
@@ -93,6 +94,19 @@ function main(): void {
   for (const extension of ['.js', '.js.map', '.d.ts', '.d.ts.map']) {
     rmSync(join(SERVER_DIR, 'dist', `cos-plugin${extension}`), { force: true });
   }
+  // Production boot is fail-closed on the exact compiled-output fingerprint.
+  // Pruning a legacy internal alias changes dist: re-sign *the distributed*
+  // output set rather than carrying the original checkout's stale manifest.
+  const sourceManifest = readBuildManifest(ROOT);
+  if (!sourceManifest) throw new Error('Cannot package without a verified source build manifest');
+  const { protocol: _protocol, build_id: _buildId, built_at: _builtAt,
+    outputs: _outputs, ...verifiedInputs } = sourceManifest;
+  const distributedBuild = createBuildManifest(
+    verifiedInputs,
+    captureBuildOutputs(join(SERVER_DIR, 'dist')),
+  );
+  writeFileSync(join(SERVER_DIR, 'dist', DEPLOYMENT_MANIFEST),
+    `${JSON.stringify(distributedBuild, null, 2)}\n`);
   cpSync(join(ROOT, 'uxp-plugin'), join(SERVER_DIR, 'uxp-plugin'), { recursive: true });
   copyFileSync(join(ROOT, 'LICENSE'), join(SERVER_DIR, 'LICENSE'));
   copyFileSync(join(ROOT, 'NOTICE'), join(SERVER_DIR, 'NOTICE'));
@@ -115,6 +129,9 @@ function main(): void {
 
   console.log('Installing production dependencies into bundle…');
   run('npm install --omit=dev --no-audit --no-fund', SERVER_DIR);
+  // This is the exact runtime directory customers will extract. Refuse to
+  // ship a bundle that its own startup integrity gate would reject.
+  assertDeploymentLaunchReady(STAGING);
 
   const outFile = join(RELEASE_DIR, `photoshop-mcp-digital-painting-${pkg.version}.mcpb`);
   const windowsZip = join(RELEASE_DIR, `paintpilot-windows-${pkg.version}.zip`);
