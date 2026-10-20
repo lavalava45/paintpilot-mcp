@@ -80,6 +80,11 @@ acceptance. Release-asset labeling must preserve this distinction.
   `SINGLE_HISTORY` timeout behavior, remains conditional on the specific
   operation and verified Photoshop host behavior. There is no blanket
   claim of arbitrary brush parity.
+- Camera-dependent optical blur requires a durable scene geometry/camera
+  binding even for an otherwise flat illustration. It is not a generic
+  painterly edge-softening fallback; follow an owner-bounded mask/smudge
+  route where supported. The exact local firefly-glow fallback remains a
+  tracked live-art acceptance item (RH-05).
 - Direct Photoshop Tools operations are intentionally distinct from the
   guarded artistic session. A direct edit to the same PSD is not automatically
   incorporated into Painting Mode's journal.

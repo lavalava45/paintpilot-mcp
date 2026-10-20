@@ -1287,9 +1287,12 @@ function compileCompactPass(
           const suppliedCamera = normalizeSceneCameraImagingModel(raw.scene_camera_imaging_model);
           const geometry = context.scene_geometry_model ? normalizeSceneGeometryModel(context.scene_geometry_model) : undefined;
           const lighting = context.scene_lighting_color_model ? normalizeSceneLightingColorModel(context.scene_lighting_color_model) : undefined;
+          if (!geometry) {
+            throw new Error('No durable Scene Geometry Model is present. Direct optical blur cannot create an authoritative camera/geometry binding by itself; establish and accept a scene geometry model first, or choose a non-camera painterly transition method.');
+          }
           if (suppliedCamera.source_frame.document_id !== documentId
             || suppliedCamera.source_frame.document_incarnation !== context.document_incarnation_id
-            || !geometry || suppliedCamera.geometry_model_id !== geometry.model_id || suppliedCamera.geometry_model_revision !== geometry.revision
+            || suppliedCamera.geometry_model_id !== geometry.model_id || suppliedCamera.geometry_model_revision !== geometry.revision
             || (suppliedCamera.lighting_color_model_id && (!lighting || suppliedCamera.lighting_color_model_id !== lighting.model_id || suppliedCamera.lighting_color_model_revision !== lighting.revision))) {
             throw new Error('Supplied camera model must match the current document incarnation and durable geometry/light revisions.');
           }

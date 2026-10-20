@@ -2029,9 +2029,28 @@ export class EmbeddedGuardRuntime {
           : [];
         const currentMethodClass = typeof args.method_class === 'string' ? args.method_class : undefined;
         if (currentMethodClass && exhaustedMethodClasses.includes(currentMethodClass)) {
+          // A tool being registered is not sufficient to offer it as an
+          // executable recovery strategy. Native optical blur cannot pass the
+          // SessionStore gate without a durable camera model; offering it as
+          // "currently available" caused repeated no-dispatch recovery loops.
+          const cameraReady = !!this.store.compactPassContext(documentId).scene_camera_imaging_model;
+          const requiresCamera = (tool?: string) => tool === 'photoshop_apply_gaussian_blur'
+            || tool === 'photoshop_apply_smart_blur' || tool === 'photoshop_apply_motion_blur';
+          const blockedAlternatives: Array<{method_id: string; method_class: string; primary_tool: string | null;
+            prerequisite: string}> = [];
           const alternatives = paintingMethodCapabilities(this.registry)
             .filter(capability => capability.availability !== 'unavailable')
             .filter(capability => !exhaustedMethodClasses.includes(capability.methodClass))
+            .filter(capability => {
+              if (cameraReady || !requiresCamera(capability.primaryTool)) return true;
+              blockedAlternatives.push({
+                method_id: capability.id,
+                method_class: capability.methodClass,
+                primary_tool: capability.primaryTool ?? null,
+                prerequisite: 'No durable Scene Camera & Imaging Model: an optical blur requires an accepted camera model bound to the exact active scene geometry revision. For painterly softness instead use an available non-camera method (for example an owner-bound mask gradient or a smudge pass).',
+              });
+              return false;
+            })
             .map(capability => ({
               method_id: capability.id,
               method_class: capability.methodClass,
@@ -2059,6 +2078,7 @@ export class EmbeddedGuardRuntime {
                 problem_id: problemId,
                 exhausted_method_classes: exhaustedMethodClasses,
                 available_causal_alternatives: alternatives,
+                 ...(blockedAlternatives.length ? { blocked_camera_methods: blockedAlternatives } : {}),
                 dispatch_performed: false,
               },
             }];
@@ -2071,6 +2091,7 @@ export class EmbeddedGuardRuntime {
               problem_id: problemId,
               exhausted_method_classes: exhaustedMethodClasses,
               available_causal_alternatives: [],
+               ...(blockedAlternatives.length ? { blocked_camera_methods: blockedAlternatives } : {}),
               next_owner: 'art-director-or-human',
               dispatch_performed: false,
             },

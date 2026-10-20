@@ -34,6 +34,13 @@ it.each(['photoshop_apply_gaussian_blur','photoshop_apply_motion_blur','photosho
  expect((r.nextOperation?.args as any)?.layer_id).toBe(7);
 });
 it('retains validated owner and imaging metadata on a legal direct blur',async()=>{const r=await compile();expect(r.rejection,JSON.stringify(r.violations)).toBeUndefined();expect(r.nextOperation?.logical_layer).toMatchObject(owner);expect(r.nextOperation?.imaging_preflight).toMatchObject({owner_expectations:imaging.owner_expectations,revalidate_edge_detail:true});expect((r.nextOperation?.args as any).imaging_preflight).toBeUndefined();});
+it('explains missing durable geometry rather than suggesting a camera model by itself',async()=>{
+ const r=await compile({scene_camera_imaging_model:camera},{scene_geometry_model:undefined,scene_camera_imaging_model:undefined});
+ expect(r.violations).toEqual(expect.arrayContaining([
+   expect.objectContaining({code:'scene_camera_imaging_model_invalid',message:expect.stringContaining('No durable Scene Geometry Model')}),
+ ]));
+ expect(r.rejection?.isError).toBe(true);
+});
 it.each([
  [{actions:[{tool:'photoshop_apply_gaussian_blur',args:{radius:10}}]}, {},'blur_target_layer_required'],
  [{logical_layer:{decision:'adjust',hypothesis_id:'figure',layer_id:7}}, {},'semantic_mutation_target_owner_mismatch'],

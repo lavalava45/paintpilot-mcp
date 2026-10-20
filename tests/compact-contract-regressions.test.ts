@@ -2208,6 +2208,16 @@ describe('public compact Guard contract regressions', () => {
   it('surfaces machine-readable causal alternatives for an exhausted method class without dispatch', async () => {
     const f = fixture();
     const { cycle, runtime, counts } = f;
+    // Optical blur is installed, but this fresh fixture intentionally has no
+    // authoritative camera. A registered tool is not a ready recovery route.
+    f.registry.register('photoshop_apply_gaussian_blur', {
+      ...realDefinition('photoshop_apply_gaussian_blur'),
+      handler: async () => ({ content: [{ type: 'text', text: '{"ok":true}' }] }),
+    });
+    f.registry.register('photoshop_apply_gradient_mask', {
+      tool: { name: 'photoshop_apply_gradient_mask', inputSchema: { type: 'object', properties: {} } },
+      handler: async () => ({ content: [{ type: 'text', text: '{"ok":true}' }] }),
+    });
     runtime.store.setArtRunState({
       document_id: 42,
       process_dir: 'processes/strategy-alternative-process/run-01',
@@ -2271,6 +2281,16 @@ describe('public compact Guard contract regressions', () => {
     });
     expect(alternativeViolation.details.available_causal_alternatives).toEqual(expect.arrayContaining([
       expect.objectContaining({ method_class: 'region', primary_tool: 'photoshop_paint_regions' }),
+      expect.objectContaining({ method_class: 'mask-gradient', primary_tool: 'photoshop_apply_gradient_mask' }),
+    ]));
+    // Registered Gaussian/Smart Blur tools cannot pass native admission when
+    // this document has no durable camera. Do not offer them as ready methods.
+    expect(alternativeViolation.details.available_causal_alternatives).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ primary_tool: 'photoshop_apply_gaussian_blur' }),
+    ]));
+    expect(alternativeViolation.details.blocked_camera_methods).toEqual(expect.arrayContaining([
+      expect.objectContaining({ method_class: 'filter', primary_tool: 'photoshop_apply_gaussian_blur',
+        prerequisite: expect.stringContaining('durable Scene Camera') }),
     ]));
     const late = await body(await cycle.handler({ next_pass: {
       request_key: 'repeat-line-late-stage', problem_id: 'edge-strategy-problem', document_id: 42,
