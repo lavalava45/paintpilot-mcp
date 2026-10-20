@@ -131,7 +131,7 @@ function main(): void {
   run('npm install --omit=dev --no-audit --no-fund', SERVER_DIR);
   // This is the exact runtime directory customers will extract. Refuse to
   // ship a bundle that its own startup integrity gate would reject.
-  assertDeploymentLaunchReady(STAGING);
+  assertDeploymentLaunchReady(SERVER_DIR);
 
   const outFile = join(RELEASE_DIR, `photoshop-mcp-digital-painting-${pkg.version}.mcpb`);
   const windowsZip = join(RELEASE_DIR, `paintpilot-windows-${pkg.version}.zip`);
