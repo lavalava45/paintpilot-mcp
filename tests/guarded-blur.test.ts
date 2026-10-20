@@ -34,6 +34,33 @@ it.each(['photoshop_apply_gaussian_blur','photoshop_apply_motion_blur','photosho
  expect((r.nextOperation?.args as any)?.layer_id).toBe(7);
 });
 it('retains validated owner and imaging metadata on a legal direct blur',async()=>{const r=await compile();expect(r.rejection,JSON.stringify(r.violations)).toBeUndefined();expect(r.nextOperation?.logical_layer).toMatchObject(owner);expect(r.nextOperation?.imaging_preflight).toMatchObject({owner_expectations:imaging.owner_expectations,revalidate_edge_detail:true});expect((r.nextOperation?.args as any).imaging_preflight).toBeUndefined();});
+const glowOwner = { hypothesis_id:'firefly-halos', layer_id:7, physical_role:'optical-effect', opacity_role:'effect-only' };
+const painterly = { purpose:'local-glow', owner_id:'firefly-halos', revalidate_edges:true };
+it('compiles a local illustrative glow without geometry or camera, preserving the actual optical-effect owner',async()=>{
+ const r=await compile({ painterly_softening:painterly, imaging_preflight:undefined,
+   actions:[{tool:'photoshop_apply_gaussian_blur',args:{layer_id:7,radius:12}}] },
+   {scene_camera_imaging_model:undefined,scene_geometry_model:undefined,logical_layer_owners:[glowOwner]});
+ expect(r.rejection,JSON.stringify(r.violations)).toBeUndefined();
+ expect(r.nextOperation).toMatchObject({tool:'photoshop_apply_gaussian_blur',painterly_softening:painterly,
+   logical_layer:{hypothesis_id:'firefly-halos',layer_id:7,physical_role:'optical-effect',opacity_role:'effect-only'}});
+ expect(r.nextOperation?.scene_camera_imaging_model).toBeUndefined();
+ expect(r.nextOperation?.imaging_preflight).toBeUndefined();
+});
+it.each([
+ [{...glowOwner,physical_role:'opaque-mass'},painterly,12,undefined,'painterly_softening_owner_invalid'],
+ [{...glowOwner,opacity_role:'opaque'},painterly,12,undefined,'painterly_softening_owner_invalid'],
+ [{...glowOwner,camera_binding:{scene_camera_model_id:'camera',scene_camera_revision:1}},painterly,12,undefined,'painterly_softening_camera_binding_conflict'],
+ [glowOwner,{...painterly,owner_id:'different'},12,undefined,'painterly_softening_owner_invalid'],
+ [glowOwner,{...painterly,revalidate_edges:false},12,undefined,'painterly_softening_invalid'],
+ [glowOwner,painterly,25,undefined,'painterly_softening_radius_invalid'],
+ [glowOwner,painterly,12,imaging,'painterly_softening_camera_conflict'],
+] as const)('rejects malformed or unsafe local glow before dispatch %#',async(target,spec,radius,imagingClaim,code)=>{
+ const r=await compile({painterly_softening:spec,imaging_preflight:imagingClaim,
+   actions:[{tool:'photoshop_apply_gaussian_blur',args:{layer_id:7,radius}}]},
+   {scene_camera_imaging_model:undefined,scene_geometry_model:undefined,logical_layer_owners:[target]});
+ expect(r.violations.map(v=>v.code)).toContain(code);
+ expect(r.rejection?.isError).toBe(true);
+});
 it('explains missing durable geometry rather than suggesting a camera model by itself',async()=>{
  const r=await compile({scene_camera_imaging_model:camera},{scene_geometry_model:undefined,scene_camera_imaging_model:undefined});
  expect(r.violations).toEqual(expect.arrayContaining([
@@ -92,6 +119,47 @@ it('revalidates the direct blur owner and focus through real SessionStore admiss
  expect(store.collectPreflightErrors(request,{stateOnly:true})).toEqual([]);
  expect(store.collectPreflightErrors({...request,logical_layer:{...request.logical_layer,hypothesis_id:'figure'}},{stateOnly:true}).join(' ')).toContain('semantic_mutation_target_owner_mismatch');
  expect(store.collectPreflightErrors({...request,imaging_preflight:{...imaging,revalidate_edge_detail:false}},{stateOnly:true}).join(' ')).toContain('imaging_preflight_conflict');
+});
+
+it('admits only the exact transparent glow owner at the final SessionStore dispatch gate without a camera',()=>{
+ const dir=mkdtempSync(path.join(tmpdir(),'painterly-glow-admission-'));dirs.push(dir);
+ const store=new SessionStore(dir);
+ store.write({id:'glow-owner',sequence:1,created_at:new Date(1000).toISOString(),phase:'completed',failed:false,
+   report:{assistant_text:'The independent optical glow owner has been established and reviewed.'},
+   tool:'photoshop_execute_visual_microplan',args:{document_id:42},result:{content:[{type:'text',text:JSON.stringify({
+     continuation_layers:[{...glowOwner,decision:'create-new',hypothesis:'Firefly light on its own transparent optical overlay'}],
+   })}]}});
+ expect(store.sceneCameraImagingModel(42)).toBeNull();
+ const request={id:'glow-blur',problem_id:'firefly-light',tool:'photoshop_apply_gaussian_blur',
+   summary:'Locally soften light halos',purpose:'Preserve independent layer and edges',stage:'FORM',scale:'small',
+   args:{document_id:42,layer_id:7,radius:12},
+   logical_layer:{...glowOwner,decision:'continue-logical-layer'},painterly_softening:painterly};
+ expect(store.collectPreflightErrors(request,{stateOnly:true})).toEqual([]);
+ expect(store.collectPreflightErrors({...request,painterly_softening:undefined},{stateOnly:true}).join(' '))
+   .toContain('imaging_preflight_camera_model_missing');
+ expect(store.collectPreflightErrors({...request,args:{...request.args,radius:60}},{stateOnly:true}).join(' '))
+   .toContain('painterly_softening_radius_invalid');
+ expect(store.collectPreflightErrors({...request,logical_layer:{...request.logical_layer,hypothesis_id:'other'}},{stateOnly:true}).join(' '))
+   .toContain('semantic_mutation_target_owner_mismatch');
+ expect(store.collectPreflightErrors({...request,args:{...request.args,layer_id:8}},{stateOnly:true}).join(' '))
+   .toContain('painterly_softening_owner_invalid');
+ expect(store.collectPreflightErrors({...request,tool:'photoshop_apply_motion_blur'},{stateOnly:true}).join(' '))
+   .toContain('painterly_softening_tool_invalid');
+ const prepared={...request,id:'prepared-glow',tool:'photoshop_execute_visual_microplan',
+   logical_layer:undefined,args:{document_id:42,method_class:'filter',logical_layer:{...glowOwner,decision:'continue-logical-layer'},
+     steps:[{id:'blur',tool:'photoshop_apply_gaussian_blur',args:{layer_id:7,radius:12}}]}};
+ expect(store.collectPreflightErrors(prepared,{stateOnly:true})).toEqual([]);
+});
+
+it('compiles a prepared Gaussian glow with the same explicit camera-free owner contract',async()=>{
+ const logical={...glowOwner,decision:'continue-logical-layer',hypothesis:'Firefly glow overlay',rollback_value:'moderate'};
+ const r=await compile({painterly_softening:painterly,imaging_preflight:undefined,logical_layer:logical,
+   layer_separation_check:{change_kind:'continuation',substantial:false,rollback_value:'moderate',independent_adjustment_expected:false,reasons:['Continue one optical owner']},
+   actions:[{id:'select',tool:'photoshop_select_rectangle',args:{left:10,top:10,right:60,bottom:60}},
+     {id:'blur',tool:'photoshop_apply_gaussian_blur',method_id:'gaussian-blur',args:{layer_id:7,radius:12}}]},
+   {scene_camera_imaging_model:undefined,scene_geometry_model:undefined,logical_layer_owners:[logical]});
+ expect(r.rejection,JSON.stringify(r.violations)).toBeUndefined();
+ expect(r.nextOperation).toMatchObject({tool:'photoshop_execute_visual_microplan',painterly_softening:painterly});
 });
 
 it('compiles selection preparation and one Gaussian filter with existing owner/imaging authority into one final-review pass',async()=>{

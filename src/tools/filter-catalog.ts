@@ -38,7 +38,7 @@ export function createFilterTools(
   return [
     filterTool(
       'photoshop_apply_gaussian_blur',
-      'Apply editable Gaussian Smart Filter to one explicit layer, preserving embedded source pixels. Raster input is converted to Smart Object atomically. For selective softening prepare a selection for the Smart Filter mask. Requires Guard imaging preflight; never substitute whole-layer blur for rebuilding a defective shape.',
+      'Apply editable Gaussian Smart Filter to one exact layer, preserving original pixels and an Undo unit. Camera/depth-of-field use requires Guard imaging preflight. A distinct bounded illustrative local-glow contract (next_pass.painterly_softening) is permitted only for an existing transparent optical-effect owner, with radius <=24px and mandatory exact-image review. Never use blur to conceal a structural defect.',
       { layer_id: { type: 'integer', minimum: 1, description: 'Exact current owner layer. Must be the sole selected layer. Original pixels are preserved in a Smart Object; blur remains a Smart Filter with its Photoshop filter mask.' }, radius: { type: 'number', description: 'Blur radius in pixels (0.1-250)', minimum: 0.1, maximum: 250 } },
       ['radius', 'layer_id'],
       (args) => runGaussianBlur(router, args)

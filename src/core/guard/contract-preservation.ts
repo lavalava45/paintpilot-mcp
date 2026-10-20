@@ -32,6 +32,7 @@ const groups: Record<PreservationSurface, readonly PolicyGroup[]> = {
     { disposition: 'durable', contract: 'Authenticated owner/frame/scene model must be validated against durable Guard authority.', fields: [
       'scene_ownership_plan', 'component_scope', 'logical_layer', 'cross_layer_correction',
       'scene_geometry_model', 'scene_lighting_color_model', 'scene_camera_imaging_model',
+      'painterly_softening',
     ] },
     { disposition: 'validated', contract: 'Guard-only preflight or evidence; never masquerades as native tool arguments.', fields: [
       'imaging_preflight', 'color_gradient_preflight', 'structural_correction',
@@ -184,6 +185,9 @@ export function criticalPreservationFailures(
   }
   if (Number.isSafeInteger(source.document_id) && source.document_id !== args.document_id)
     missing('document_id', 'the pinned source document differs from executable document_id');
+  if (source.painterly_softening !== undefined
+    && JSON.stringify(operation.painterly_softening) !== JSON.stringify(source.painterly_softening))
+    missing('painterly_softening', 'the expressly authorized optical-effect owner and local-glow review contract were lost or changed');
   if (typeof source.action_class === 'string' && operation.tool === 'photoshop_execute_visual_microplan'
     && source.action_class !== args.action_class)
     missing('action_class', 'VisualMicroPlan action class differs from the authored action');

@@ -85,6 +85,7 @@ import { PAINTERLY_PASS_SCHEMA } from '../core/painterly-strokes.js';
 import { PAINTING_COMPLETION_SCHEMA } from '../core/guard/document-artistic-debt.js';
 import { SCENE_CAMERA_IMAGING_MODEL_SCHEMA } from '../core/scene-camera-imaging-model.js';
 import { IMAGING_PREFLIGHT_SCHEMA } from '../core/imaging-preflight.js';
+import { PAINTERLY_SOFTENING_SCHEMA } from '../core/guard/painterly-softening.js';
 import {
   PAINTING_INTENT_CONTRACT_FIELDS,
   PAINTING_INTENT_ACTIONS,
@@ -674,6 +675,7 @@ function compactPassSchema(): Record<string, unknown> {
       painterly: PAINTERLY_PASS_SCHEMA,
       scene_camera_imaging_model: structuredClone(SCENE_CAMERA_IMAGING_MODEL_SCHEMA),
       imaging_preflight: IMAGING_PREFLIGHT_SCHEMA,
+      painterly_softening: PAINTERLY_SOFTENING_SCHEMA,
       scene_lighting_color_model: {
         type: 'object',
         description: 'Incarnation-bound light/color for broad color, atmosphere, relighting and materials; updates keep model_id and increase revision.',

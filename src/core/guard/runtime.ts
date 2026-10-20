@@ -2030,9 +2030,10 @@ export class EmbeddedGuardRuntime {
         const currentMethodClass = typeof args.method_class === 'string' ? args.method_class : undefined;
         if (currentMethodClass && exhaustedMethodClasses.includes(currentMethodClass)) {
           // A tool being registered is not sufficient to offer it as an
-          // executable recovery strategy. Native optical blur cannot pass the
-          // SessionStore gate without a durable camera model; offering it as
-          // "currently available" caused repeated no-dispatch recovery loops.
+          // executable recovery strategy. Camera/depth blur cannot pass the
+          // SessionStore gate without a durable camera model. A separate
+          // opt-in local illustrative glow contract is conditional on an
+          // existing transparent optical-effect owner, not generally ready.
           const cameraReady = !!this.store.compactPassContext(documentId).scene_camera_imaging_model;
           const requiresCamera = (tool?: string) => tool === 'photoshop_apply_gaussian_blur'
             || tool === 'photoshop_apply_smart_blur' || tool === 'photoshop_apply_motion_blur';
@@ -2047,7 +2048,7 @@ export class EmbeddedGuardRuntime {
                 method_id: capability.id,
                 method_class: capability.methodClass,
                 primary_tool: capability.primaryTool ?? null,
-                prerequisite: 'No durable Scene Camera & Imaging Model: an optical blur requires an accepted camera model bound to the exact active scene geometry revision. For painterly softness instead use an available non-camera method (for example an owner-bound mask gradient or a smudge pass).',
+                prerequisite: 'No durable Scene Camera & Imaging Model: optical/depth blur requires an accepted camera bound to the exact scene geometry revision. For a distinct local glow only, use next_pass.painterly_softening={purpose:"local-glow",owner_id:"<exact transparent optical-effect owner>",revalidate_edges:true} with one existing owner layer and Gaussian radius 0.1..24px. Otherwise use a non-camera mask gradient or smudge. No method is ready until its own preflight passes.',
               });
               return false;
             })

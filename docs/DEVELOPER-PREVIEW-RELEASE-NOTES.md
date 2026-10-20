@@ -80,11 +80,12 @@ acceptance. Release-asset labeling must preserve this distinction.
   `SINGLE_HISTORY` timeout behavior, remains conditional on the specific
   operation and verified Photoshop host behavior. There is no blanket
   claim of arbitrary brush parity.
-- Camera-dependent optical blur requires a durable scene geometry/camera
-  binding even for an otherwise flat illustration. It is not a generic
-  painterly edge-softening fallback; follow an owner-bounded mask/smudge
-  route where supported. The exact local firefly-glow fallback remains a
-  tracked live-art acceptance item (RH-05).
+- Camera/depth-of-field blur requires an accepted scene geometry/camera
+  binding. A new explicit `painterly_softening` contract allows **only bounded
+  local Gaussian glow** (0.1–24 px) on a unique existing transparent
+  `optical-effect` owner, with native Smart Filter/Undo protection and
+  exact-image review. This is not permission to defocus opaque scene geometry.
+  The new route still requires a fresh COS load and live acceptance (RH-05).
 - Direct Photoshop Tools operations are intentionally distinct from the
   guarded artistic session. A direct edit to the same PSD is not automatically
   incorporated into Painting Mode's journal.

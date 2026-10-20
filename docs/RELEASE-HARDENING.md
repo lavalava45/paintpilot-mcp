@@ -74,29 +74,34 @@ defect is often the missing **recoverable route** after a technically valid refu
 | RH-03 — new installed-brush purpose | ~01:53 `Round Fan Stiff Thin Bristles`, ~06:51 `Round Curve Low Bristle Percent` rejected for role `plane`; first request also produced six distinct validation codes including owner-role, gradient preflight and intent conflicts | Keep rejection for real unsafe combinations; provide one complete, coherent correction packet and a bounded, reversible compatible-brush trial when the *new use* is unproven, rather than treating missing allowlist membership as physical incompatibility. Repair independently derivable technical fields only | Compatible novel use reaches a bounded trial with exact-image validation and safe owner/History handling; incompatible preset receives a reason and viable alternative without manual schema rewriting |
 | RH-04 — executable artistic method | ~04:58 `construction_role_method_unavailable` for `smudge-shape` + `painted-mass/transition`, followed by `invalid_visual_microplan` | Resolve method/role/intent against **actual registered capabilities**, offer one valid replacement method, and aggregate remaining independent preflight errors. Do not invent a method or alter visual intent silently | Valid artistic edge-softening request compiles into an available technique; invalid combination reports an executable correction in one round, not an endless incompatible-method chain |
 | RH-05 — edge treatment vs optical blur | Artistic cloud edge softening was reportedly routed through imaging preflight demanding camera model (`imaging_preflight_camera_model_missing`) | Distinguish painterly edge transition/feathering from simulated optical defocus. Only camera-model-dependent operations require optical preflight; keep clipping, owner and reversibility safeguards for both | Ordinary edge correction works without invented camera metadata; optical blur remains gated by its justified imaging preflight |
-
-**RH-05 follow-up (2026-10-20, forest cottage):** after user acceptance of
-an editable multi-layer cottage, a further soft-brush firefly-halo correction
-was preflight-blocked because its `paint` method class had been exhausted for
-the current artistic problem. A proposed reversible Gaussian blur on the glow
-layer then failed `imaging_preflight_camera_model_missing`; supplying a camera
-model without the exact durable geometry binding produced
-`scene_camera_imaging_model_invalid`. The public Guard recovery projection
-reported no pending uncertain mutation; these were pre-dispatch refusals.
-Source review confirms two independent gates: per-problem method-class
-exhaustion and a mandatory camera model for native blur. A narrow source fix
-now excludes camera-blocked native blur tools from **ready** recovery-method
-suggestions, reports their missing prerequisite, and distinguishes absent
-durable geometry from malformed camera input; it **does not** bypass camera,
-owner or History checks. Focused preflight/Guard tests passed 147/147.
-**Still open for RH-05 acceptance:** demonstrate a genuine bounded painterly
-softening method (e.g. mask or smudge, not simulated camera defocus), with
-exact target-layer readback and before/after review, in real Photoshop. Do
-not mark the full edge-treatment route fixed based on unit tests alone.
 | RH-06 — bounded status projection | `photoshop_guard_status` returned `guard_state_projection_requires_public_resume` above a 24,576-byte response budget; `resume(projection=recovery)` succeeded | Return a bounded **useful** status with active document, safety/recovery state, blocking reason, next authorized action, and explicit indication that details require `resume`. Do not truncate away authoritative safety facts or send a success-looking partial state | Status stays within budget even after long sessions and always gives a valid recovery route; expanded resume remains exact and agrees with status |
 | RH-07 — refusal diagnostics / event boundaries | Counts reported: 123 model-visible Guard calls, 59 pre-execution rejections, 44 semantic-dispatch calls, 32 artistic actions, `deterministic_violations_encountered_count=10`, sum of per-code encounters=120 | Audit definitions, sampling window, event ownership, unique-request vs per-code incidence and denominator semantics. Different scopes are **not automatically contradictory**. Inspect whether the latest telemetry is loaded before relying on it | A documented per-run funnel reconciles by explicit set relationships and labels partial coverage; counts are reproducible from authoritative events, with no fictional attribution or silent extrapolation |
 | RH-08 — global artistic completion | `global_brief_outcome=not-evaluated` after roughly 30 visible passes; recognizable scene but reported geometrical clouds, foliage, paving, architecture | Ensure whole-brief evaluation checkpoints cannot disappear in local execution; distinguish technical pass, local artistic improvement, whole-frame brief evaluation and independent human judgment. No claim of quality from a correct command or pixel delta | Whole-brief evaluation is issued at predetermined checkpoints, recorded against the exact image and original prompt, and leaves unresolved substantive deficits open; independent image review determines artistic acceptance |
 | RH-09 — optional notification observability | Notifications reportedly missing for skip/error outcomes | Verify whether notification delivery is part of the beta-supported product contract. If yes, cover completed, skipped and failed runs with correct outcome labels and delivery failure reporting; do not misreport sent alerts | Supported notification modes surface each terminal outcome or disclose a delivery failure. If outside beta scope, explicitly document the limitation instead of blocking artistic release |
+
+**RH-05 follow-up (2026-10-20, forest cottage):** after user acceptance of
+the editable layered cottage, a soft-brush firefly-halo correction was blocked
+because `paint` had been exhausted for this problem. Reversible Gaussian blur
+then failed `imaging_preflight_camera_model_missing`; proposing a camera
+without durable scene geometry produced `scene_camera_imaging_model_invalid`.
+These were pre-dispatch refusals with no uncertain pending Photoshop action.
+
+First, recovery suggestions stopped presenting camera-blocked blur as a ready
+alternative (147/147 targeted tests). Next, a distinct, **explicitly opted-in**
+`next_pass.painterly_softening` path was implemented for local illustrative
+glow. It requires `{purpose:"local-glow",owner_id:"...",revalidate_edges:true}`;
+the actual single persistent owner must be `optical-effect` with `effect-only`
+or `transparent-overlay` opacity, have no camera binding, and match the exact
+layer ID. Gaussian radius is limited to 0.1–24 px; no mixed camera claims or
+other blur tools are admitted. Prepared selection/blur uses the same gate.
+Native UXP still preserves source pixels with an editable Smart Filter and
+one History unit, while Guard retains its normal before/after image review.
+The normal camera/depth blur path and wrong/opaque layer rejections are unchanged.
+
+**Still open:** restart the updated COS server and demonstrate one bounded
+firefly-glow pass in Photoshop, verifying actual target ownership, pixel
+effect, edge review, layer preservation and Undo. Offline regressions alone
+are not end-to-end RH-05 acceptance; do not claim it fully resolved yet.
 
 ### Triage order (dependencies, not a growing priority hierarchy)
 

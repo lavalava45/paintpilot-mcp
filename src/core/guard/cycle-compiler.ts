@@ -1,4 +1,5 @@
 import { canvasComponent } from '../component-space.js';
+import { validatePainterlySoftening } from './painterly-softening.js';
 import { createHash } from 'node:crypto';
 import type { FrameReviewIssue } from './review-validation.js';
 import { contradictoryTransitionRequirements, transitionRequirementSchemaErrors, type TransitionRequirement } from '../transition-requirements.js';
@@ -1048,6 +1049,11 @@ function compileCompactPass(
 
   const onlyAction = actions.length === 1 ? actions[0] : undefined;
   const onlyTool = onlyAction ? text(onlyAction.tool) : undefined;
+  if (raw.painterly_softening !== undefined
+    && !actions.some(action => text(action.tool) === 'photoshop_apply_gaussian_blur')) {
+    violations.push(violation('next_operation', 'painterly_softening_tool_invalid',
+      'The painterly_softening contract can accompany only a Gaussian blur operation.'));
+  }
   const bootstrap = !!onlyTool && COMPACT_DOCUMENT_BOOTSTRAP_TOOLS.has(onlyTool);
   const documentGateViolations = collectCompactDocumentGateViolations(documentId, bootstrap);
   violations.push(...documentGateViolations);
@@ -1280,6 +1286,20 @@ function compileCompactPass(
         decision: 'continue-logical-layer', hypothesis_id: owner.hypothesis_id, layer_id: layerId,
         physical_role: owner.physical_role, opacity_role: owner.opacity_role,
       };
+      const painterly = validatePainterlySoftening(raw.painterly_softening, onlyTool,
+        layerId, actionArgs.radius, owners, {
+          scene_camera_imaging_model: raw.scene_camera_imaging_model,
+          imaging_preflight: raw.imaging_preflight,
+        });
+      if (raw.painterly_softening !== undefined) {
+        if (painterly.error) violations.push(violation('next_operation', painterly.error.split(':')[0], painterly.error));
+        else {
+          directOperation.painterly_softening = painterly.contract;
+          normalizations.push({ code: 'painterly_softening_local_glow',
+            message: 'Existing transparent optical-effect owner: bounded reversible illustrative glow, not depth-of-field or camera defocus. Review exact edges in AFTER.' });
+        }
+        return { operation: directOperation, violations, normalizations };
+      }
       let camera: SceneCameraImagingModel | undefined;
       try {
         if (context.scene_camera_imaging_model) camera = normalizeSceneCameraImagingModel(context.scene_camera_imaging_model);
@@ -3479,6 +3499,7 @@ function compileCompactPass(
       // Color preflight is Guard evidence; VisualMicroPlan accepts executable fields only.
       ...(colorGradientPreflight ? { color_gradient_preflight: colorGradientPreflight } : {}),
       ...(imagingPreflight ? { imaging_preflight: imagingPreflight } : {}),
+      ...(raw.painterly_softening !== undefined ? { painterly_softening: structuredClone(raw.painterly_softening) } : {}),
       ...(geometryPreflight ? { geometry_preflight: geometryPreflight } : {}),
       ...(correctionScope ? { correction_scope: correctionScope } : {}),
       ...(crossLayerCorrection ? { cross_layer_correction: crossLayerCorrection } : {}),

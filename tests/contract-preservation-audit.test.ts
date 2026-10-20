@@ -206,6 +206,18 @@ describe('Contract Preservation Audit – final compiler boundary / no Photoshop
     expect(fieldCorrectionPacket([lost]).corrections[0].path).toBe('next_pass.foundation_goal');
   });
 
+  it('never drops or substitutes local-glow owner authorization between compiler and Guard', () => {
+    const contract = {purpose:'local-glow',owner_id:'firefly-halos',revalidate_edges:true};
+    const source = {document_id:625,painterly_softening:contract};
+    const compiled = {tool:'photoshop_apply_gaussian_blur',args:{document_id:625,layer_id:12,radius:10},
+      painterly_softening:contract};
+    expect(criticalPreservationFailures(source,compiled)).toEqual([]);
+    expect(criticalPreservationFailures(source,{...compiled,painterly_softening:undefined}).map(row=>row.path))
+      .toContain('next_pass.painterly_softening');
+    expect(criticalPreservationFailures(source,{...compiled,painterly_softening:{...contract,owner_id:'different'}}).map(row=>row.path))
+      .toContain('next_pass.painterly_softening');
+  });
+
   it('does not grant a ROLLBACK exemption to native delete or change artistic meaning', () => {
     const input = direct('ROLLBACK');
     const compiled = { tool: 'photoshop_delete_layer', args: { layer_id: 16, document_id: 625 },

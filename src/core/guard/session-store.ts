@@ -113,6 +113,7 @@ import { normalizeSceneOwnershipPlan, extendSceneOwnershipPlan, sceneOwnershipOw
 import { normalizeSceneGeometryModel } from '../scene-geometry-model.js';
 import { lightingColorBindingStaleness, normalizeSceneLightingColorModel } from '../scene-lighting-color-model.js';
 import { normalizeImagingPreflight } from '../imaging-preflight.js';
+import { validatePainterlySoftening } from './painterly-softening.js';
 import { cameraBindingStaleness, normalizeCameraBinding, normalizeSceneCameraImagingModel } from '../scene-camera-imaging-model.js';
 import { changedSceneGeometryDependencyIds, geometryBindingStaleness, normalizeGeometryBinding, transformGeometryBinding } from '../geometry-binding.js';
 import { generatedGeometryProvenanceState } from '../executable-geometry-validation.js';
@@ -6410,7 +6411,7 @@ export class SessionStore {
       'material_response', 'logical_layer',
       'root_cause_classification', 'root_cause_reason', 'causal_level_change', 'correction_scope',
       'causal_strategy_id', 'strategy_family', 'causal_escalation_level',
-      'scene_ownership_plan', 'scene_geometry_model', 'scene_lighting_color_model', 'scene_camera_imaging_model', 'color_gradient_preflight', 'imaging_preflight', 'geometry_preflight', 'cross_layer_correction',
+      'scene_ownership_plan', 'scene_geometry_model', 'scene_lighting_color_model', 'scene_camera_imaging_model', 'color_gradient_preflight', 'imaging_preflight', 'painterly_softening', 'geometry_preflight', 'cross_layer_correction',
       'object_construction_model', 'construction_provenance',
       'painterly_provenance',
     ]);
@@ -6447,6 +6448,11 @@ export class SessionStore {
         for (const error of this.collectPreflightErrors(nested, { ...options, stateOnly: true })) add(error);
       }
     }
+    if (request?.painterly_softening !== undefined
+      && request?.tool !== 'photoshop_apply_gaussian_blur'
+      && !(request?.tool === 'photoshop_execute_visual_microplan' && request?.args?.method_class === 'filter')) {
+      add('painterly_softening_tool_invalid: local-glow contract only permits a guarded Gaussian filter');
+    }
     if (request?.logical_layer !== undefined && !/^photoshop_apply_(?:gaussian|motion|smart)_blur$/.test(request?.tool ?? '')) add('logical_layer is only supported at the root for guarded direct blur');
     if (/^photoshop_apply_(?:gaussian|motion|smart)_blur$/.test(request?.tool ?? '')) {
       const documentId = request?.args?.document_id;
@@ -6456,7 +6462,13 @@ export class SessionStore {
       if (logical && (owners.length !== 1 || logical.hypothesis_id !== owners[0].hypothesis_id || logical.layer_id !== layerId || logical.physical_role !== owners[0].physical_role)) add('semantic_mutation_target_owner_mismatch: direct blur owner must match the current physical binding');
       const state = (projectionContext?.paintingState ?? this.paintingState()).documents?.[String(documentId)];
       if (state?.painting_profile === 'nontrivial_painting' && !logical) add('semantic_layer_owner_missing: direct blur must preserve current owner authority');
-      capture(() => {
+       const painterly = validatePainterlySoftening(request.painterly_softening, request.tool,
+         layerId, request.args?.radius, owners, {
+           scene_camera_imaging_model: request.scene_camera_imaging_model,
+           imaging_preflight: request.imaging_preflight,
+         });
+       if (painterly.error) add(painterly.error);
+       if (request.painterly_softening === undefined) capture(() => {
         const camera = request.scene_camera_imaging_model ?? this.sceneCameraImagingModel(documentId, undefined, projectionContext);
         if (!camera) throw new Error('imaging_preflight_camera_model_missing: direct blur requires the active camera model');
         const model = normalizeSceneCameraImagingModel(camera);
