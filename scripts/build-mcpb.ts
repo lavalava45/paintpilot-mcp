@@ -1,8 +1,9 @@
 /**
- * Build a Smithery / Claude Desktop MCPB bundle from the compiled server.
+ * Build one PaintPilot Windows release with two independent operation modes,
+ * plus an optional direct-tools MCPB for compatible clients.
  *
  * Output: release/photoshop-mcp-digital-painting-<version>.mcpb
- * (zip archive with manifest.json + server/)
+ * (MCPB: manifest.json + server/; Windows ZIP: server/ + installation notes)
  * Run: npm run build:mcpb
  */
 import { execFileSync, execSync } from 'node:child_process';
@@ -45,7 +46,7 @@ function assertExists(path: string, label: string): void {
   }
 }
 
-function packMcpb(outFile: string): void {
+function packArchive(outFile: string, entries: string[]): void {
   if (process.platform !== 'win32') {
     throw new Error(`Windows-only build: unsupported host platform ${process.platform}`);
   }
@@ -58,7 +59,7 @@ function packMcpb(outFile: string): void {
       '-NoProfile',
       '-NonInteractive',
       '-Command',
-      `Compress-Archive -LiteralPath manifest.json,server -DestinationPath '${psZipFile}' -CompressionLevel Optimal`,
+      `Compress-Archive -LiteralPath ${entries.map(entry => `'${entry.replaceAll("'", "''")}'`).join(',')} -DestinationPath '${psZipFile}' -CompressionLevel Optimal`,
     ],
     { cwd: STAGING, stdio: 'inherit' },
   );
@@ -70,7 +71,8 @@ function main(): void {
   console.log('Building server…');
   run('npm run build');
 
-  assertExists(join(ROOT, 'dist', 'index.js'), 'dist/index.js');
+  for (const entry of ['dist/index.js', 'dist/painting-mode.js', 'dist/photoshop-tools.js'])
+    assertExists(join(ROOT, entry), entry);
 
   const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')) as Pkg;
   const attribution = JSON.parse(readFileSync(join(ROOT, 'third-party-components.json'), 'utf8')) as {
@@ -86,6 +88,11 @@ function main(): void {
   writeFileSync(join(STAGING, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
 
   cpSync(join(ROOT, 'dist'), join(SERVER_DIR, 'dist'), { recursive: true });
+  // Retain the previous local integration alias in the source repository for
+  // existing deployments, but publish only neutral PaintPilot mode names.
+  for (const extension of ['.js', '.js.map', '.d.ts', '.d.ts.map']) {
+    rmSync(join(SERVER_DIR, 'dist', `cos-plugin${extension}`), { force: true });
+  }
   cpSync(join(ROOT, 'uxp-plugin'), join(SERVER_DIR, 'uxp-plugin'), { recursive: true });
   copyFileSync(join(ROOT, 'LICENSE'), join(SERVER_DIR, 'LICENSE'));
   copyFileSync(join(ROOT, 'NOTICE'), join(SERVER_DIR, 'NOTICE'));
@@ -110,16 +117,24 @@ function main(): void {
   run('npm install --omit=dev --no-audit --no-fund', SERVER_DIR);
 
   const outFile = join(RELEASE_DIR, `photoshop-mcp-digital-painting-${pkg.version}.mcpb`);
+  const windowsZip = join(RELEASE_DIR, `paintpilot-windows-${pkg.version}.zip`);
   const stableFile = join(RELEASE_DIR, 'photoshop-mcp-digital-painting.mcpb');
   rmSync(outFile, { force: true });
   rmSync(stableFile, { force: true });
+  rmSync(windowsZip, { force: true });
 
   console.log(`Packing ${outFile}…`);
-  packMcpb(outFile);
+  packArchive(outFile, ['manifest.json', 'server']);
   copyFileSync(outFile, stableFile);
 
+  copyFileSync(join(ROOT, 'docs', 'RELEASE-INSTALL.md'), join(STAGING, 'INSTALL.md'));
+  copyFileSync(join(ROOT, 'docs', 'DEVELOPER-PREVIEW-RELEASE-NOTES.md'), join(STAGING, 'RELEASE-NOTES.md'));
+  console.log(`Packing both-mode Windows ZIP ${windowsZip}…`);
+  packArchive(windowsZip, ['server', 'INSTALL.md', 'RELEASE-NOTES.md']);
+
   rmSync(STAGING, { recursive: true, force: true });
-  console.log(`MCPB ready: ${outFile} (+ ${stableFile})`);
+  console.log(`PaintPilot Windows ZIP ready (Painting Mode + Photoshop Tools): ${windowsZip}`);
+  console.log(`Optional direct-tools MCPB ready: ${outFile} (+ ${stableFile})`);
   console.log('Independent Digital Painting Edition bundle built for local/source distribution.');
 }
 

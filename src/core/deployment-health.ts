@@ -99,7 +99,7 @@ export function deploymentHealth(root = DEPLOYMENT_ROOT, running?: RunningDeploy
     catch { /* A partial or concurrent build is not a valid deployment. */ }
     if (!outputMatch) issue('deployment_build_incomplete', 'Run npm run build:server; compiled files differ from the successful build manifest.');
     if (source && source.source_sha256 !== build.source_sha256)
-      issue('deployment_build_outdated', 'Run npm run build:server; restarting CoS alone runs the old dist.');
+      issue('deployment_build_outdated', 'Run npm run build:server; restarting the MCP client alone runs the old compiled server.');
     if (source && source.uxp_sha256 !== build.uxp_sha256)
       issue('deployment_uxp_source_changed', 'Build the current paired sources before reloading UXP.');
     try {
@@ -115,9 +115,9 @@ export function deploymentHealth(root = DEPLOYMENT_ROOT, running?: RunningDeploy
     && path.resolve(observed.project_root).toLowerCase() === path.resolve(root).toLowerCase();
   if (!sameProject || !observed?.build_id) {
     issue(observed && !sameProject ? 'deployment_foreign_runtime' : 'deployment_running_identity_unknown',
-      'After a successful build, restart only this CoS Photoshop MCP plugin; verify the health endpoint for that process.');
+      'After a successful build, restart only this PaintPilot MCP server connection; verify the health endpoint for that process.');
   } else if (build && observed.build_id !== build.build_id) {
-    issue('deployment_mcp_restart_required', 'Restart only this Photoshop MCP plugin in CoS; its loaded build differs from dist.');
+    issue('deployment_mcp_restart_required', 'Restart only this PaintPilot MCP server connection; its loaded build differs from dist.');
   }
   const expected = source?.expected_uxp_revision ?? build?.expected_uxp_revision;
   const revisionMatch = bridge?.plugin_connected === true && !!expected && bridge.bridge_revision === expected;

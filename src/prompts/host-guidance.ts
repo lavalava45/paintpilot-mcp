@@ -1,11 +1,11 @@
 /**
- * Server-level guidance for MCP host LLMs (Chat On Steroids, Cursor, Claude Desktop, and peers).
+ * Server-level guidance for MCP-compatible host LLMs.
  * Advertised on MCP `initialize` via ServerOptions.instructions.
  */
 import { DEPICTION_DETAIL_GUIDANCE } from '../core/depiction-detail.js';
 import { SCENE_FOUNDATION_GUIDANCE } from '../core/guard/scene-foundation.js';
 /** Visible in tools/list as well as initialize: hosts may omit server instructions. */
-export const PHOTOSHOP_DRAWING_ROUTE = 'When the user requests Photoshop/COS/MCP drawing or forbids imagegen/image_gen, use only the Chat On Steroids Plugins Photoshop tools for that task. Start with photoshop_get_state to establish the document, or photoshop_guard_resume for an interrupted run; reuse an already confirmed target. Draw through photoshop_guard_cycle_auto. If the intended open document is inactive, discover photoshop_set_active_document via photoshop_guard_capabilities(tool_names) even when no standalone tool appears. With explicit authorization to switch focus, activate its exact document_id through photoshop_guard_cycle_auto, then verify photoshop_get_state before painting. Without focus permission ask permission to activate through MCP, not for a manual tab click. Never switch silently or remove document_id pinning. A decision-loop stall is advisory, not a mutation blocker: dispatch the next meaningful visual pass or one bounded diagnostic. Do not call built-in/external image generation, even for a reference, preview or fallback. If the selected tools are unavailable, report the exact blocker and stop; only an explicit later user change authorizes another execution mode.';
+export const PHOTOSHOP_DRAWING_ROUTE = 'When the user requests PaintPilot Photoshop/MCP drawing or forbids imagegen/image_gen, use only the connected PaintPilot Photoshop MCP tools for that task. Start with photoshop_get_state to establish the document, or photoshop_guard_resume for an interrupted run; reuse an already confirmed target. Draw through photoshop_guard_cycle_auto. If the intended open document is inactive, discover photoshop_set_active_document via photoshop_guard_capabilities(tool_names) even when no standalone tool appears. With explicit authorization to switch focus, activate its exact document_id through photoshop_guard_cycle_auto, then verify photoshop_get_state before painting. Without focus permission ask permission to activate through MCP, not for a manual tab click. Never switch silently or remove document_id pinning. A decision-loop stall is advisory, not a mutation blocker: dispatch the next meaningful visual pass or one bounded diagnostic. Do not call built-in/external image generation, even for a reference, preview or fallback. If the selected tools are unavailable, report the exact blocker and stop; only an explicit later user change authorizes another execution mode.';
 
 export const PHOTOSHOP_MCP_INSTRUCTIONS = `
 EXECUTION ROUTE — apply before choosing any image tool:
@@ -16,7 +16,7 @@ A scene description, the words draw/render/image, repeated technical refusal, or
 availability does not override the user's selected execution method.
 
 - Fresh enforced art runs finish only after the existing exact whole-frame review supplies painting_completion against original_brief (brief_fidelity, form_proportions, light_material, composition_context, editable_parts, contact_and_protection: pass|fail|unknown). Guard binds that assessment to the frame SHA and original brief; all criteria must pass and other debts must be closed. Saves preserve it, later pixels/brief invalidate it. This is Painter self-assessment, not independent quality certification; explicit user pause/stop remains valid. No extra review call or compulsory painting when only final review metadata is missing.
-- FINAL RESPONSE BOUNDARY: before saying the entire painting is finished, use the existing read-only photoshop_guard_status and select the exact document_id under documents; read its whole_brief_completion (paintpilot.whole-brief-completion.v1). Say "finished" ONLY when completion_allowed=true and status=completed. A closed local cycle, saved PSD, accepted component, completed directive or the artist's own final prose cannot replace this proof. When incomplete, take the stated next_required_action with one safe bounded pass/review; when blocked, explain the exact blocker without replay. A user Stop/pause always takes precedence: stop immediately and describe work as paused, not completed. COS Goal may continue a later host turn only if the user has enabled it; MCP does not self-schedule.
+- FINAL RESPONSE BOUNDARY: before saying the entire painting is finished, use the existing read-only photoshop_guard_status and select the exact document_id under documents; read its whole_brief_completion (paintpilot.whole-brief-completion.v1). Say "finished" ONLY when completion_allowed=true and status=completed. A closed local cycle, saved PSD, accepted component, completed directive or the artist's own final prose cannot replace this proof. When incomplete, take the stated next_required_action with one safe bounded pass/review; when blocked, explain the exact blocker without replay. A user Stop/pause always takes precedence: stop immediately and describe work as paused, not completed. A host-specific agent-continuation feature may schedule a later host turn only if the user has enabled it; MCP does not self-schedule.
 - Timing discipline (2026-10-10): inspect the exact inline images once, then combine previous_operation_id + previous_observation + next_pass in ONE cycle_auto call. Lint is optional for a new risky draft; include the same previous observation when linting a continuation, then reuse the complete validated request without a separate closure or repeated successful lint. Do not use lint as a mandatory ritual for ordinary model_id/part_id continuation. First construction declares all editable parts once plus selected part, chosen proportions/IK lengths, material role, authorized scene projection and owner geometry relation; declared support/contact requires numeric boundary witnesses. Reuse model_id/part_id and stable scene/ownership ids afterwards. Capabilities/methods/brush inventory/settings are setup reads once per art run; batch missing exact contracts (tool_names), retain discovery_revision and use if_revision only for an actual recheck. Successful inline delivery needs no review_image follow-up; request missing roles only. force_redelivery requires images-unavailable|delivery-failed, never routine confirmation; an availability blocker is not permission to invent review or read source.
 - Record the ORIGINAL user task once as original_brief in photoshop_guard_set_art_run; never replace it with a success summary. Existing runs may add it without a new run or Photoshop mutation.
 - CAPABILITY-BOUNDED BRIEF TRANSLATION: preserve original_brief VERBATIM as the independent final-quality criterion. Before the first visual pass, separately track subject inventory, composition/perspective, palette/light, style cues and deliverable constraints. Translate only the execution technique into currently registered Photoshop tools and proven installed methods; NEVER silently drop required subjects, alter aspect ratio, reinterpret watercolor as photorealism, or claim a simple graphic fully meets an unattainable finish. Aspirational words (photoreal, watercolor texture, cinematic illumination, 4K detail) are not Photoshop method_ids or verified presets. If a necessary technique is unavailable, disclose the limitation. Execute a short sequence of single-owner passes; each pass uses one consistent visual_intent / construction_role / allowedExecutionTools combination. Region-block-in needs a region-compatible method; installed-brush-preset uses photoshop_paint_strokes, NOT photoshop_paint_regions. Never pack independent subject owners into one initial rollback unit.
@@ -44,24 +44,24 @@ Session bootstrap
   \`photoshop_guard_reconcile\` with id, outcome=abandoned, document_closed_confirmed=true
   and the factual reason. Omit documents_id: Guard performs the fresh read and evidence closure.
   Never inspect/review historical pixels merely to dispose of a confirmed closed document.
-- STICKY PHOTOSHOP ROUTE: once the user is working through this Photoshop/CoS MCP
+- STICKY PHOTOSHOP ROUTE: once the user is working through this PaintPilot MCP
   workflow, ordinary requests to draw, paint, edit, improve, continue, modify or render
   an image/picture/artwork (including рисунок / изображение / нарисуй / дорисуй /
   улучши картинку / дальше) mean operate the current local Adobe Photoshop document
   through this MCP/Guard route. Those words alone never authorize switching to built-in
   or external image generation. Change execution mode only when the user explicitly asks.
-- After a host/tool interruption, first verify the existing CoS Photoshop surface and use
+- After a host/tool interruption, first verify the existing PaintPilot Photoshop connection and use
   \`photoshop_guard_status\` / \`photoshop_guard_resume\` to recover durable state. If
-  the Photoshop/CoS tools are genuinely unavailable, report the concrete connector or
+  the Photoshop MCP tools are genuinely unavailable, report the concrete connector or
   availability failure and stop Photoshop mutations; do not silently substitute another
   image engine.
 - This project contains an embedded durable Photoshop Guard. When the MCP catalog exposes
   \`photoshop_guard_*\`, prefer that native MCP surface instead of shelling through a
-  separate controller. In Chat On Steroids the dedicated \`dist/cos-plugin.js\` entry
+  separate controller. The dedicated \`dist/painting-mode.js\` entry
   enables \`PHOTOSHOP_GUARD_MODE=required\`: read-only tools remain directly callable,
   while raw mutating tools fail closed with \`guard_required\` and must be dispatched
   through \`photoshop_guard_cycle_auto\`.
-- ChatGPT/CoS host routing: \`photoshop_guard_cycle_auto\` has a large orchestration schema. When
+- MCP host routing: \`photoshop_guard_cycle_auto\` has a large orchestration schema. When
   Code Mode tool discovery is available, resolve and invoke the exact
   \`Chat_On_Steroids_Plugins\` Guard tool there by default instead of first attempting a
   direct-catalog call that may exceed host schema limits. Small reads such as
@@ -77,11 +77,10 @@ Session bootstrap
   attribution or recovery state.
 - The retired external Core/controller/daemon provider chain has been removed. Recovery remains on
   the embedded Guard status/resume/reconcile surfaces; do not recreate a parallel controller CLI.
-- In the current Chat On Steroids development setup, after rebuilding \`dist/cos-plugin.js\`
-  restart only this custom Photoshop MCP entry from CoS Plugins → the Digital Painting
-  Edition plugin → … → Restart. Do not restart all of CoS or use old restart-helper scripts.
-  ChatGPT Settings → Plugins → Refresh refreshes the host schema but does not guarantee a
-  running child process has reloaded new code. After changing \`uxp-plugin/main.js\`, reload
+- After rebuilding \`dist/painting-mode.js\`, restart only the selected
+  PaintPilot MCP server process, not the entire host or any unrelated services.
+  A host-side schema refresh does not guarantee a running server has reloaded
+  new code. After changing \`uxp-plugin/main.js\`, reload
   only Photoshop MCP UXP Bridge in Adobe UXP Developer Tool; after manifest changes use
   Unload → Load.
 - Call \`photoshop_ping\` exactly once at the start of a session to verify the

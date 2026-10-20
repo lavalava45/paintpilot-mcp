@@ -95,7 +95,7 @@ export const digitalPaintingControlTemplate: PhotoshopPromptTemplate = {
       finishText,
       ``,
       `HARD EXECUTION INVARIANTS:`,
-      `- Photoshop/COS/MCP is sticky: Chat_On_Steroids_Plugins → dist/cos-plugin.js → embedded Guard. No retired Core/controller recovery. image_gen requires user-requested mode change.`,
+      `- PaintPilot Painting Mode is sticky: MCP client → dist/painting-mode.js → embedded Guard → UXP. No retired external controller recovery. Other image-generation modes require an explicit user-requested change.`,
       `- Pin document.id as document_id; invalid/closed ids fail closed. Never silently retarget tabs.`,
       ``,
       `- CYCLE: next_pass={request_key,problem_id?,document_id,goal,region/protection,action_class?,actions}. request_key=idempotent; problem_id=stable. Send previous_operation_id + actual previous_observation + next_pass once; omit next_pass to close. Guard acknowledges the exact stored receipt internally. After save, re-review a closed frame with review_operation_id + previous_observation.critic_review (optional next_pass), never previous_operation_id or historical frames.`,

@@ -1,5 +1,15 @@
 # Changelog
 
+- 2026-10-20 — **PaintPilot 1.8.0-preview.1 (release packaging candidate; not tagged).**
+  Synchronize product version in package metadata, server metadata and MCPB
+  manifest. Ship one Windows ZIP with two first-class product modes:
+  **Painting Mode** (`painting-mode.js`, Guard required) and **Photoshop Tools**
+  (`photoshop-tools.js`, direct UXP tools). Keep the optional MCPB in direct
+  mode, distinctly labeled as a host-specific alternative format, not a
+  separate product. Remove third-party host branding from release-facing copy,
+  include standalone installation/release notes, and require archive hashes
+  and real installation acceptance before tagging or publishing.
+
 - 2026-10-20 — **Scene model checkpoint activation hardening (pre-release).**
   Forensic inspection of the live fairy-cottage Guard journal found that two
   reported "scene-model registrations" were successful PSD saves with no

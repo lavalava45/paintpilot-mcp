@@ -1,6 +1,6 @@
-# PaintPilot — Developer Preview (draft release notes)
+# PaintPilot 1.8.0-preview.1 — Developer Preview (draft release notes)
 
-> **Not yet published or tagged.** Release version, final asset checksum and
+> **Not yet published or tagged.** Final asset checksums and
 > public-install result will be filled in only after the final candidate is
 > frozen and its distributed artifact is tested. This is a **Developer Preview**,
 > not a qualified PaintPilot Beta or a guarantee of unattended finished art.
@@ -21,10 +21,10 @@
 
 ## Scope and current evidence
 
-- **Windows 10/11 only.** Primarily tested with Photoshop 2026 and the stock
-  Chat On Steroids custom Plugins route on Windows. No macOS/Linux or other
-  Photoshop-version compatibility guarantee is made.
-- `verify:canonical` passed on 2026-10-20: **2408/2408 acceptance tests** in
+- **Windows 10/11 only.** Primarily tested with Photoshop 2026 and a local
+  stdio MCP client on Windows. No macOS/Linux or other Photoshop-version
+  compatibility guarantee is made.
+- `verify:canonical` passed on 2026-10-20: **2422/2422 acceptance tests** in
   **223 files**. This is automated contract validation, not a measurement of
   finished-image quality.
 - A disposable Photoshop create/layer/pixel/save/close/reopen smoke was
@@ -32,7 +32,7 @@
   fairy-tale forest cottage and accepted it as the one-image Developer Preview
   art trial on 2026-10-20. The exact PSD save/reopen and independent visual
   quality of **that cottage** were not separately audited here.
-- On 2026-10-20 the installed COS MCP build matched the checkout, and the UXP
+- On 2026-10-20 the installed MCP build matched the checkout, and the UXP
   Bridge was connected at revision
   `compact-v2-20261019-owner-binding-v20`. A separate clean checkout passed
   `pnpm install --frozen-lockfile`, `npm run build:server`, `verify:pack` and
@@ -40,27 +40,28 @@
 - The six-scene independent qualification, stronger autonomous quality claims,
   and full restart/recovery drills are **future Beta gates**.
 
-## Installation (guarded COS workflow)
+## Installation (both PaintPilot modes)
 
-1. Download the **tagged** source or release archive to a stable Windows path
-   and follow [INSTALL.md](../INSTALL.md) for exact prerequisites.
-2. Run `pnpm install --frozen-lockfile` and `npm run build:server` from the
-   extracted repository. Do **not** install an old similarly named upstream
-   npm package.
-3. Load `uxp-plugin/manifest.json` using Adobe UXP Developer Tool and start
-   Photoshop.
-4. In Chat On Steroids, configure the custom Photoshop MCP plugin entry to
-   launch **`dist/cos-plugin.js`**, not `dist/index.js`. Restart **that plugin**
-   after builds or upgrades; reload the UXP companion if its code changed.
-5. Confirm `npm run deployment:health` reports `current` for the installed
-   MCP/UXP pair before starting a fresh painting. Choose `simple_graphic`
-   explicitly for the initial bounded painting trial.
+1. Extract `paintpilot-windows-1.8.0-preview.1.zip` to a stable Windows
+   directory and follow [RELEASE-INSTALL.md](RELEASE-INSTALL.md).
+   Runtime dependencies and compiled JavaScript are already included.
+2. Load `server/uxp-plugin/manifest.json` using Adobe UXP Developer Tool and
+   start Photoshop.
+3. For **Painting Mode**, connect the MCP client to
+   **`server/dist/painting-mode.js`**. For **Photoshop Tools**, connect to
+   **`server/dist/photoshop-tools.js`**. Both share one UXP companion.
+4. Reconnect the selected MCP server, then verify that the MCP/UXP versions
+   agree. For Painting Mode choose `simple_graphic` initially.
 
-**Packaging distinction:** the `.mcpb` manifest currently launches the generic
-`dist/index.js` entry point for compatible generic hosts. It is **not** the
-same connection as the validated guarded COS `dist/cos-plugin.js` route.
-Installing an MCPB in another host does not constitute COS Painting Mode live
-acceptance. Release-asset labeling must preserve this distinction.
+Alternatively, install the GitHub **source** release/tag and build using
+`pnpm install --frozen-lockfile` and `npm run build:server` as described in
+[INSTALL.md](../INSTALL.md).
+
+**Packaging distinction:** the main Windows ZIP includes **both** PaintPilot
+product modes. The optional `photoshop-mcp-digital-painting-1.8.0-preview.1.mcpb`
+uses `server/dist/photoshop-tools.js` and defaults to **direct Photoshop
+Tools** in MCPB-compatible hosts. Installing an MCPB does not constitute
+Painting Mode live acceptance. Release labeling preserves the distinction.
 
 ## Known limitations
 
@@ -70,7 +71,7 @@ acceptance. Release-asset labeling must preserve this distinction.
 - `simple_graphic` is the recommended starting point, not a guarantee of
   accurate, autonomous or fully finished artwork. Both profiles retain Guard
   safety and evidence requirements.
-- The stock COS **Stop** button is not verified to cancel an already-issued
+- A client **Stop** button is not verified to cancel an already-issued
   Photoshop operation. PaintPilot's own stop/recovery mechanisms are separate;
   uncertain execution must be reconciled rather than blindly retried.
 - Photoshop may not provide reliable readback of a selected **named brush
@@ -85,7 +86,7 @@ acceptance. Release-asset labeling must preserve this distinction.
   local Gaussian glow** (0.1–24 px) on a unique existing transparent
   `optical-effect` owner, with native Smart Filter/Undo protection and
   exact-image review. This is not permission to defocus opaque scene geometry.
-  The new route still requires a fresh COS load and live acceptance (RH-05).
+  The new route still requires a fresh MCP load and live acceptance (RH-05).
 - Scene geometry/camera data is not registered by including the word
   "register" in a save description. To register without changing pixels,
   explicitly supply `next_pass.scene_geometry_model` on an exact-frame PSD
@@ -99,11 +100,12 @@ acceptance. Release-asset labeling must preserve this distinction.
 
 ## Before publishing
 
-- Select and synchronize the independent PaintPilot release version with
-  package/server/MCPB metadata; avoid confusing inherited historical `v1.7.*`
+- Freeze the independent PaintPilot version `1.8.0-preview.1` and planned tag
+  `paintpilot-v1.8.0-preview.1`; avoid confusing inherited historical `v1.7.*`
   Git tags with PaintPilot releases.
-- Build the **versioned** release package from the reviewed commit, record its
-  SHA-256, and verify the actual archive entry point, licenses and UXP files.
+- Build the **versioned** Windows ZIP (both modes) and optional MCPB from the
+  reviewed commit, record their SHA-256 values, and verify the actual archive
+  entry points, licenses and UXP files.
 - Validate installation and a disposable guarded Photoshop smoke **using
   exactly the distributed files**, not the development checkout.
 - Publish the reviewed branch commit/tag and GitHub Release only after those

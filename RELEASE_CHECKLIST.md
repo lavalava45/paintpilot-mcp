@@ -15,21 +15,22 @@ Use this checklist before publishing a tagged GitHub release. For the current
 [`docs/RELEASE-HARDENING.md`](docs/RELEASE-HARDENING.md) and the coordinated
 [`deployment-health`](docs/deployment-health.md) activation gate.
 
-The Beta qualification scope is the canonical Windows Chat On Steroids route:
-**Plugins → this repository's `dist/cos-plugin.js` → embedded Guard → UXP bridge → Photoshop**.
+The Beta qualification scope is the Windows **Painting Mode** route:
+**MCP client → this repository's `dist/painting-mode.js` → embedded Guard → UXP bridge → Photoshop**.
 Production semantic Photoshop mutation is UXP-only/fail-closed and must pass through
 the embedded Guard. Other local stdio host configurations remain project entry points,
 but they are not evidence for this Plugins-only Beta qualification.
 
-**Latest pre-release result (2026-10-20):** `verify:canonical` **PASS**
-(2408/2408 tests; 223/223 files), including tool-count, policy, contract,
-documentation, and packaging checks, on clean commit `018b7358c317825eff12e6d375cb680eb5db2041`.
-The running COS MCP/UXP deployment reported `current`; an independent checkout
+**Latest pre-release regression baseline (2026-10-20):** `verify:canonical`
+**PASS** (2422/2422 tests; 223/223 files) before the version/mode-entrypoint
+packaging changes. Tool counts, policies, contract preservation, documentation
+and source packaging passed on commit `d2cae92`.
+The running MCP/UXP deployment reported `current`; an independent checkout
 passed frozen-lockfile installation, server build, packaging verifier and
 offline health. The user has **accepted the layered fairy-tale cottage** as the
 single-image Developer Preview art trial; that user acceptance is not an
-independent PSD reopen or pixel-quality audit. **Still open:** version/tag
-reconciliation, versioned MCPB build and final public-asset install/smoke.
+independent PSD reopen or pixel-quality audit. **Still open:** versioned
+Windows ZIP/MCPB verification, tagged source and public-install/live smoke.
 Six-scene qualification remains a separate **Beta** gate. Any release-preparation
 source changes create a new candidate SHA that must be checked again.
 The draft public notes are in
@@ -71,7 +72,7 @@ The draft public notes are in
 ## Plugins runtime activation
 
 - [ ] Run `npm run deployment:health -- --offline` after the final build. Treat exit code 0 as source/`dist` consistency only; it does not certify the running MCP child or loaded UXP companion.
-- [ ] At an authorized artist pause, restart **only** this Digital Painting Edition entry in Chat On Steroids → Plugins after rebuilding `dist/cos-plugin.js`. Do not restart all of CoS merely to activate the build.
+- [ ] At an authorized artist pause, restart **only** the PaintPilot MCP server connection after rebuilding `dist/painting-mode.js`. Do not restart the whole host merely to activate the build.
 - [ ] Reload **only** Photoshop MCP UXP Bridge in Adobe UXP Developer Tool when UXP code changed; use **Unload → Load** when `uxp-plugin/manifest.json` changed. Do not restart Photoshop for ordinary plugin activation.
 - [ ] Run `npm run deployment:health` against the endpoint used by this installed plugin and continue only when it reports `status: "current"`.
 - [ ] Confirm fingerprint/runtime parity: `running_mcp.project_root` is the frozen release checkout, the running MCP `build_id` matches the built manifest, source and `dist` fingerprints agree, and loaded UXP reports `connected: true`, matching revision, and the matching UXP source fingerprint. A foreign runtime, missing identity, stale build, or revision-only match is a release blocker.
@@ -80,8 +81,8 @@ The draft public notes are in
 ## Documentation
 
 - [ ] Installation from a fresh clone/ZIP has been tested on a clean directory.
-- [ ] Chat On Steroids instructions use the canonical Plugins → `dist/cos-plugin.js` → embedded Guard route; the retired external Core/controller/daemon provider chain is not presented as a supported or recoverable route.
-- [ ] Local-development docs distinguish ChatGPT Plugins **Refresh** from CoS plugin-process **Restart**, document that only the custom Photoshop MCP plugin should be restarted after a server rebuild, and do not recommend whole-CoS restarts or obsolete restart-helper scripts.
+- [ ] Product instructions present **Painting Mode** (`dist/painting-mode.js`) and **Photoshop Tools** (`dist/photoshop-tools.js`) as two modes of one independent PaintPilot product. The external controller/daemon provider chain is not a supported route.
+- [ ] Local-development docs distinguish schema refresh from restarting the actual MCP server process and do not recommend whole-host restarts or obsolete restart-helper scripts.
 - [ ] UXP docs describe localhost long-poll, `Reload` for `main.js`, `Unload → Load` for manifest changes, and health verification via `plugin_connected` / `transport: "long-poll"`.
 - [ ] Native catalog/required-mode documentation matches the current **135 tools / 16 public Guard tools** surface and raw mutations fail closed with `guard_required`.
 - [ ] `PHOTOSHOP_PATH` guidance covers current Photoshop versions.

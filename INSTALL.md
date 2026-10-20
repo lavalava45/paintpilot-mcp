@@ -86,18 +86,20 @@ PHOTOSHOP_PATH=C:\Program Files\Adobe\Adobe Photoshop 2026\Photoshop.exe
 This is especially important on versions newer than the common paths known by
 the upstream detector.
 
-## 5. Connect from Chat On Steroids
+## 5. Connect with an MCP-compatible client
 
-For ordinary Photoshop work in Chat On Steroids, use the live-accepted **Plugins →
-`dist/cos-plugin.js` → embedded Guard → Photoshop** route. The dedicated entry point
-enables `PHOTOSHOP_GUARD_MODE=required`: known read-only Photoshop tools stay directly
-callable, while public raw mutating tools fail closed with `guard_required` and must be
-dispatched through `photoshop_guard_cycle_auto`.
+PaintPilot has **two product modes**. Painting Mode launches
+`dist/painting-mode.js` with `PHOTOSHOP_GUARD_MODE=required`: read-only tools
+remain callable while raw mutating tools fail closed with `guard_required`
+unless dispatched through `photoshop_guard_cycle_auto`. Photoshop Tools
+launches `dist/photoshop-tools.js` for direct MCP → UXP commands without the
+artistic Guard workflow. Both use one Photoshop UXP companion.
 
-Configure the Chat On Steroids custom plugin to launch the built entry point:
+Configure your MCP client's local stdio server to run **one** entry point:
 
 ```text
-<repo>\dist\cos-plugin.js
+<repo>\dist\painting-mode.js     (Painting Mode)
+<repo>\dist\photoshop-tools.js   (Photoshop Tools)
 ```
 
 Replace the example repository path with your actual checkout location.
@@ -110,16 +112,17 @@ Pass `PHOTOSHOP_PATH` in the stdio transport environment when automatic detectio
 }
 ```
 
-After rebuilding/updating the project, refresh the Chat On Steroids Plugins schema through
-the normal host UI. The accepted native catalog is **135 tools total / 16 Guard tools**.
+After rebuilding/updating the project, reconnect the server and refresh its
+tool catalog through the client UI. The accepted native catalog is **135 tools
+total / 16 Guard tools**.
 A stale legacy 64-tool snapshot is not a limitation of this server.
 
 For local development, distinguish **schema refresh** from **process restart**:
 
-- ChatGPT **Settings → Plugins → Refresh** refreshes the connector/schema view.
-- To make a rebuilt `dist/cos-plugin.js` take effect, in the **Chat On Steroids app** use
-  **Plugins → this Digital Painting Edition entry → … → Restart**. This restarts only the
-  custom MCP child process; restarting the whole Chat On Steroids application is unnecessary.
+- Refresh the MCP tool catalog in your client as supported by that client.
+- To make rebuilt `dist/painting-mode.js` or `dist/photoshop-tools.js` take
+  effect, restart **only the configured MCP server process**. Restarting the
+  entire client application is normally unnecessary.
 - Do not use old restart-helper scripts for this workflow.
 - If `uxp-plugin/main.js` changed, use **Reload** for Photoshop MCP UXP Bridge in Adobe UXP
   Developer Tool. If `manifest.json` changed, use **Unload → Load** instead.
@@ -232,9 +235,8 @@ pnpm install --frozen-lockfile
 npm run build:server
 ```
 
-Then restart the configured MCP process in your client so it reloads the rebuilt
-entry point and refreshes the tool/prompt catalog. For the guarded Chat On Steroids
-workflow, this is the `dist/cos-plugin.js` process, not the generic `dist/index.js`.
+Then restart the configured MCP process so it reloads the rebuilt mode entry
+point and refreshes the tool/prompt catalog.
 
 ## Developer setup
 
@@ -252,7 +254,8 @@ See [`docs/development.md`](docs/development.md#8-troubleshooting). In particula
 
 - confirm Photoshop is running;
 - confirm `PHOTOSHOP_PATH` points to the correct executable when needed;
-- confirm your MCP client launches the correct entry point (`dist/cos-plugin.js`
-  for guarded Chat On Steroids, `dist/index.js` for a deliberately direct MCP connection);
+- confirm your MCP client launches the correct mode entry point
+  (`dist/painting-mode.js` for guarded painting or `dist/photoshop-tools.js`
+  for direct Photoshop commands);
 - rebuild after pulling source changes;
 - restart the direct stdio MCP process after a build so the host refreshes its tool schema.

@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 const ROOT = resolve(import.meta.dirname, '..');
 const PROJECT_REPOSITORY = 'https://github.com/lavalava45/paintpilot-mcp';
 const PRODUCT_NAME = 'photoshop-mcp-digital-painting';
-const DISPLAY_NAME = 'Photoshop MCP — Digital Painting Edition';
+const DISPLAY_NAME = 'PaintPilot — Photoshop Tools';
 
 function read(path) {
   return readFileSync(resolve(ROOT, path), 'utf8');

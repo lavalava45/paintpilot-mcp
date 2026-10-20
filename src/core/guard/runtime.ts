@@ -1936,7 +1936,7 @@ export class EmbeddedGuardRuntime {
       }
       const decision = assessHostStop(observation);
       if (!decision.may_mutate) {
-        throw new Error(`${decision.reason}: COS host Stop must be authoritatively cleared before ${name}`);
+        throw new Error(`${decision.reason}: host Stop must be authoritatively cleared before ${name}`);
       }
     }
     if (guardExecutionClass(name) !== 'read-only' && context.guardOperationId) {

@@ -2185,7 +2185,7 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
     {
       tool: {
         name: 'photoshop_guard_request_stop',
-        description: 'Explicit PaintPilot Stop for one known Guard execution operation_id. Blocks subsequent Photoshop mutations in that execution, including queued work. This does not detect or replace the Chat On Steroids chat Stop button, and cannot undo an already dispatched command.',
+        description: 'Explicit PaintPilot Stop for one known Guard execution operation_id. Blocks subsequent Photoshop mutations in that execution, including queued work. This does not detect or replace the MCP host chat Stop button, and cannot undo an already dispatched command.',
         inputSchema: {
           type: 'object',
           properties: { operation_id: { type: 'string', minLength: 1 } },

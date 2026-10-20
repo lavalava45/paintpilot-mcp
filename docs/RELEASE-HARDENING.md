@@ -22,7 +22,7 @@ passed. The independent `npm run test:embedded-guard-mcp` **PASS** exercised
 the built stdio child and its published schemas: 38 public tools (15 Guard),
 228,409/250,000 catalog bytes; direct raw mutations returned `guard_required`.
 This passes **offline/isolated machine qualification only**, not release
-approval. Loaded CoS Photoshop MCP remains a **foreign checkout** according to
+approval. The loaded Photoshop MCP remained a **foreign checkout** according to
 `deployment:health` (`running_mcp=null` for this workspace) even though the
 UXP bridge is connected and its revision matches. The working tree is not a
 frozen commit. Clean-install proof, activated-runtime identity, disposable
@@ -98,7 +98,7 @@ Native UXP still preserves source pixels with an editable Smart Filter and
 one History unit, while Guard retains its normal before/after image review.
 The normal camera/depth blur path and wrong/opaque layer rejections are unchanged.
 
-**Still open:** restart the updated COS server and demonstrate one bounded
+**Still open:** restart the updated MCP server and demonstrate one bounded
 firefly-glow pass in Photoshop, verifying actual target ownership, pixel
 effect, edge review, layer preservation and Undo. Offline regressions alone
 are not end-to-end RH-05 acceptance; do not claim it fully resolved yet.
@@ -131,7 +131,7 @@ component coordinate spaces are not edited by registration.
 The already-implemented `painterly_softening` path remains the more direct
 solution for the firefly halo: existing `forest-fireflies` owner, exact layer
 15, no new component-space or camera model claims. The independent live
-Photoshop glow acceptance remains open after a COS plugin restart.
+Photoshop glow acceptance remains open after the MCP server restart.
 
 ### Triage order (dependencies, not a growing priority hierarchy)
 

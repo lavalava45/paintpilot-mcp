@@ -68,7 +68,7 @@ Digital Painting Edition combines broad Photoshop automation with a focused pain
 - point and local-average composite color sampling for reference-based painting;
 - explicit measurement, landmark, and guide tools for reference/proportion work;
 - reusable landmark-frame transforms and normalized landmark-set comparison;
-- a materialized preview pipeline for direct stdio/COS workflows without a second Photoshop export;
+- a materialized preview pipeline for local MCP workflows without a second Photoshop export;
 - Windows-only host support with UXP-only / fail-closed production semantic execution; legacy COM/AppleScript execution transports have been removed rather than retained as fallback;
 - more reliable nested-layer targeting and ordering with recursive lookup and stable layer IDs;
 - strict optional `document_id` pinning for document-bound tools, with fail-closed validation, no automatic active-tab switching, and returned target metadata;
@@ -79,7 +79,7 @@ Digital Painting Edition combines broad Photoshop automation with a focused pain
 
 The current build exposes **135 tools** (**135 atomic/non-recipe**) and **5 prompts**.
 
-The dedicated Chat On Steroids entry point is `dist/cos-plugin.js`. It starts the same MCP server with `PHOTOSHOP_GUARD_MODE=required`, so read-only tools remain directly callable while raw mutating tools fail closed and must be dispatched through `photoshop_guard_cycle_auto`. This native Plugins route has passed dedicated live acceptance and is the canonical Chat On Steroids path. The retired external Core/controller/daemon provider chain has been removed from the repository.
+The PaintPilot Painting Mode entry point is `dist/painting-mode.js`. It starts the MCP server with `PHOTOSHOP_GUARD_MODE=required`, so read-only tools remain callable while raw mutating tools fail closed and must be dispatched through `photoshop_guard_cycle_auto`. The direct Photoshop Tools entry point is `dist/photoshop-tools.js` and routes registered individual commands through UXP without the painting workflow. The retired external controller/daemon chain is no longer a production route.
 
 ## Geometry, kinematics and painterly algorithms
 
@@ -233,23 +233,23 @@ npm run build:server
 
 ### Two ways to connect to Photoshop
 
-Both options use the **same build** and Photoshop UXP companion. In Chat On Steroids, add a custom MCP plugin with `node` as the command and the absolute script path below as its argument.
+Both modes use the **same build** and Photoshop UXP companion. Add a local stdio server in an MCP-compatible client with `node` as the command and the absolute script path below as its argument.
 
-**1. Painting with Guard — the existing COS workflow.** Choose this for AI-driven painting with Art Director, Painter, Critic, visual reviews, journaling and Guard-controlled changes. Mutating operations go through `photoshop_guard_cycle_auto`.
+**1. PaintPilot Painting Mode.** Choose this for AI-driven painting with Art Director, Painter, Critic, visual reviews, journaling and Guard-controlled changes. Mutating operations go through `photoshop_guard_cycle_auto`.
 
 ```json
 {
   "mcpServers": {
     "paintpilot-painting": {
       "command": "node",
-      "args": ["C:/path/to/paintpilot-mcp/dist/cos-plugin.js"],
+      "args": ["C:/path/to/paintpilot-mcp/dist/painting-mode.js"],
       "env": { "PHOTOSHOP_GUARD_MODE": "required" }
     }
   }
 }
 ```
 
-**2. Direct Photoshop tools — without Guard.** Choose this for ordinary edits such as moving layers up/down, changing opacity, renaming a layer or undoing an action. Registered Photoshop tools are called **directly via MCP → UXP**, with no Art Director, Critic, artistic Guard gate or mandatory `cycle_auto`. Photoshop History and the `photoshop_get_history`, `photoshop_undo` and `photoshop_redo` tools remain available.
+**2. PaintPilot Photoshop Tools — direct commands.** Choose this for ordinary edits such as moving layers up/down, changing opacity, renaming a layer or undoing an action. Registered Photoshop tools are called **directly via MCP → UXP**, with no Art Director, Critic, artistic Guard gate or mandatory `cycle_auto`. Photoshop History and the `photoshop_get_history`, `photoshop_undo` and `photoshop_redo` tools remain available.
 
 Direct-mode connection example:
 
@@ -258,14 +258,14 @@ Direct-mode connection example:
   "mcpServers": {
     "paintpilot-direct": {
       "command": "node",
-      "args": ["C:/path/to/paintpilot-mcp/dist/index.js"],
+      "args": ["C:/path/to/paintpilot-mcp/dist/photoshop-tools.js"],
       "env": { "PHOTOSHOP_GUARD_MODE": "off" }
     }
   }
 }
 ```
 
-Replace `C:/path/to/paintpilot-mcp` with the absolute path to **your checkout**. These are **alternative entry points**, not two scripts launched together in one connection. To switch in COS, change the plugin's script path (`cos-plugin.js` ↔ `index.js`) and **Restart** that MCP plugin to refresh the available commands. You can also save two named plugin configurations and enable only the one you want to use. The Photoshop UXP companion stays loaded in either mode.
+Replace `C:/path/to/paintpilot-mcp` with the absolute path to **your checkout**. These are **alternative modes**, not two scripts launched together in one connection. To switch, change the server script path (`painting-mode.js` ↔ `photoshop-tools.js`) and restart the selected MCP connection. The Photoshop UXP companion stays loaded in either mode.
 
 This is a **connection setting**, not the `simple_graphic` / `nontrivial_painting` painting-profile selector. Direct commands bypass the painting Guard, but the native Photoshop tool may still return its own errors; not every Photoshop feature has an MCP implementation. Photoshop History/Undo works as it does for ordinary document editing. Direct changes are not automatically added to the existing Guard painting journal; inspect the document state before resuming an interrupted guarded run. `PHOTOSHOP_PATH` is only required when Photoshop is not detected automatically.
 
@@ -288,22 +288,21 @@ Leave that variable unset for normal background workflows.
 
 This transport behavior is separate from document targeting. `document_id` is now a fail-closed guard, not an automatic tab switch: a pinned call proceeds only when that document is already active; if another Photoshop document is active, the call stops instead of changing the user's tab.
 
-For Chat On Steroids, the canonical production path is **Plugins → `dist/cos-plugin.js` → embedded Guard → Photoshop**. It has passed the dedicated live acceptance sequence. The former Core/controller/daemon route has been physically removed; recovery stays on Guard status/resume/reconcile surfaces.
+The guarded painting path is **MCP client → `dist/painting-mode.js` → embedded Guard → UXP → Photoshop**. The former external controller/daemon route has been removed; recovery stays on Guard status/resume/reconcile surfaces.
 
-**Stop limitation with unmodified COS:** the COS chat Stop button has not been
+**Stop limitation:** a client chat Stop button has not been
 shown to cancel an in-flight Photoshop MCP call. PaintPilot supports an
 independent `photoshop_guard_request_stop` for one known `operation_id`, which
 prevents subsequent guarded mutation dispatch for that operation; it neither
-observes the COS button nor undoes commands already dispatched to Photoshop.
+ observes a host-specific button nor undoes commands already dispatched to Photoshop.
 When an MCP host actually delivers a cancellation signal, PaintPilot blocks
 new UXP commands from that cancelled request. In-flight results still require
-Guard receipt/History reconciliation. No patched COS installation is required.
+Guard receipt/History reconciliation. No custom host modifications are required.
 
-For local development after `npm run build:server`, restart only the custom MCP child with
-**Chat On Steroids app → Plugins → this Digital Painting Edition entry → … → Restart**.
-ChatGPT-side Plugins **Refresh** updates the schema/connector view but does not guarantee
-that a running `cos-plugin.js` process has reloaded new code. Do not restart the entire CoS
-application or use legacy restart-helper scripts. The UXP companion is reloaded separately
+For local development after `npm run build:server`, restart only the configured
+PaintPilot MCP child. A tool-catalog refresh does not guarantee the server has
+reloaded compiled code; do not restart the entire host application or use
+legacy restart-helper scripts. The UXP companion is reloaded separately
 in Adobe UXP Developer Tool (`Reload` for `main.js`; `Unload → Load` for manifest changes).
 `photoshop_save_document` is intentionally UXP-only: it verifies that document/layer/tool/
 selection state remains unchanged and never falls back to COM persistence if the companion
