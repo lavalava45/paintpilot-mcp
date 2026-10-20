@@ -146,6 +146,12 @@ function main(): void {
 
   copyFileSync(join(ROOT, 'docs', 'RELEASE-INSTALL.md'), join(STAGING, 'INSTALL.md'));
   copyFileSync(join(ROOT, 'docs', 'DEVELOPER-PREVIEW-RELEASE-NOTES.md'), join(STAGING, 'RELEASE-NOTES.md'));
+  const packagedNotesPath = join(STAGING, 'RELEASE-NOTES.md');
+  const packagedNotes = readFileSync(packagedNotesPath, 'utf8')
+    .replace('[RELEASE-INSTALL.md](RELEASE-INSTALL.md)', '[INSTALL.md](INSTALL.md)')
+    .replace('[INSTALL.md](../INSTALL.md)',
+      `[source installation guide](https://github.com/lavalava45/paintpilot-mcp/blob/paintpilot-v${pkg.version}/INSTALL.md)`);
+  writeFileSync(packagedNotesPath, packagedNotes, 'utf8');
   console.log(`Packing both-mode Windows ZIP ${windowsZip}…`);
   packArchive(windowsZip, ['server', 'INSTALL.md', 'RELEASE-NOTES.md']);
 

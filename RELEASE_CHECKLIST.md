@@ -21,16 +21,15 @@ Production semantic Photoshop mutation is UXP-only/fail-closed and must pass thr
 the embedded Guard. Other local stdio host configurations remain project entry points,
 but they are not evidence for this Plugins-only Beta qualification.
 
-**Latest pre-release regression baseline (2026-10-20):** `verify:canonical`
-**PASS** (2422/2422 tests; 223/223 files) before the version/mode-entrypoint
-packaging changes. Tool counts, policies, contract preservation, documentation
-and source packaging passed on commit `d2cae92`.
-The running MCP/UXP deployment reported `current`; an independent checkout
-passed frozen-lockfile installation, server build, packaging verifier and
-offline health. The user has **accepted the layered fairy-tale cottage** as the
-single-image Developer Preview art trial; that user acceptance is not an
-independent PSD reopen or pixel-quality audit. **Still open:** versioned
-Windows ZIP/MCPB verification, tagged source and public-install/live smoke.
+**Developer Preview packaging acceptance (2026-10-20):** `verify:canonical`
+**PASS** (2422/2422 tests; 223/223 files), extracted Windows ZIP and MCPB
+both-mode MCP protocol smoke PASS, release build-integrity checks PASS. The
+live guarded Photoshop/UXP create-and-close test PASS; pixel-fill admission
+was blocked before dispatch because the disposable document had no art-run.
+The running MCP was older than the independently tested release ZIP. No live
+pixel edit **from that ZIP** was accepted. The user has accepted the layered
+forest cottage as the one-image trial; no independent pixel-quality audit is
+claimed. Explicitly disclose these limits for Developer Preview only.
 Six-scene qualification remains a separate **Beta** gate. Any release-preparation
 source changes create a new candidate SHA that must be checked again.
 The draft public notes are in

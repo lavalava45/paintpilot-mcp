@@ -1,9 +1,8 @@
-# PaintPilot 1.8.0-preview.1 — Developer Preview (draft release notes)
+# PaintPilot 1.8.0-preview.1 — Developer Preview
 
-> **Not yet published or tagged.** Final asset checksums and
-> public-install result will be filled in only after the final candidate is
-> frozen and its distributed artifact is tested. This is a **Developer Preview**,
-> not a qualified PaintPilot Beta or a guarantee of unattended finished art.
+> **Experimental Developer Preview**, not a qualified PaintPilot Beta or a
+> guarantee of unattended finished art. See the specific testing limits below
+> before using it on important Photoshop documents.
 
 ## What is included
 
@@ -32,11 +31,20 @@
   fairy-tale forest cottage and accepted it as the one-image Developer Preview
   art trial on 2026-10-20. The exact PSD save/reopen and independent visual
   quality of **that cottage** were not separately audited here.
-- On 2026-10-20 the installed MCP build matched the checkout, and the UXP
-  Bridge was connected at revision
-  `compact-v2-20261019-owner-binding-v20`. A separate clean checkout passed
-  `pnpm install --frozen-lockfile`, `npm run build:server`, `verify:pack` and
-  offline deployment health. Public release-asset installation remains open.
+- Both ZIP and MCPB were independently extracted on Windows and tested with
+  a real stdio MCP client: **Painting Mode** published 39 safe tools (including
+  16 Guard tools) with raw mutations rejected, while **Photoshop Tools**
+  published 135 direct tools; both published 5 prompts. Dependencies, UXP,
+  license, exact build-integrity manifest and archive SHA-256 were checked.
+- A connected Photoshop/UXP Bridge at revision
+  `compact-v2-20261019-owner-binding-v20` successfully created and closed a
+  disposable 256×256 document through the guarded live UXP path on 2026-10-20.
+  A subsequent pixel-fill trial was **blocked before execution** because
+  a new painting art-run was not configured; no pixel-fill success is claimed.
+  The running live MCP process was an older build than this release candidate.
+  **Live Photoshop mutations from the separately extracted release ZIP were
+  not tested**. This specific limitation is accepted only for this labeled
+  experimental preview, not a Beta or production-readiness claim.
 - The six-scene independent qualification, stronger autonomous quality claims,
   and full restart/recovery drills are **future Beta gates**.
 
@@ -98,15 +106,11 @@ Painting Mode live acceptance. Release labeling preserves the distinction.
   guarded artistic session. A direct edit to the same PSD is not automatically
   incorporated into Painting Mode's journal.
 
-## Before publishing
+## Package acceptance and remaining limitations
 
-- Freeze the independent PaintPilot version `1.8.0-preview.1` and planned tag
-  `paintpilot-v1.8.0-preview.1`; avoid confusing inherited historical `v1.7.*`
-  Git tags with PaintPilot releases.
-- Build the **versioned** Windows ZIP (both modes) and optional MCPB from the
-  reviewed commit, record their SHA-256 values, and verify the actual archive
-  entry points, licenses and UXP files.
-- Validate installation and a disposable guarded Photoshop smoke **using
-  exactly the distributed files**, not the development checkout.
-- Publish the reviewed branch commit/tag and GitHub Release only after those
-  gates are green. Keep the six-scene Beta qualification separate.
+- Git release tag: `paintpilot-v1.8.0-preview.1`; release assets include
+  the versioned Windows ZIP, optional MCPB and `SHA256SUMS.txt`.
+- Frozen automated suites and both-mode extracted-package protocol smoke
+  passed. End-to-end pixel editing from the installed ZIP, extended native
+  undo/recovery drills and six-scene quality qualification remain future
+  acceptance work. Do not represent these unrun checks as passing.
