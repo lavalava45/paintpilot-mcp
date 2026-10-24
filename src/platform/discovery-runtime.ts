@@ -62,11 +62,11 @@ export class PhotoshopDetector implements DetectorPort {
   constructor(
     private readonly windows = new WindowsDetector(),
     private readonly log = new Logger('PhotoshopDetector')
-  ) {
-    enforceWindowsPlatform();
-  }
+  ) {}
 
   async detect(forceRefresh = false): Promise<PhotoshopInfo> {
+    // Catalog introspection can run without Photoshop; native discovery cannot.
+    enforceWindowsPlatform();
     if (!forceRefresh && this.snapshot !== undefined) return { ...this.snapshot };
     this.log.info('Detecting Photoshop on Windows...');
     const detected = await this.windows.detect();
