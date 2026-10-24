@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { resolve } from 'node:path';
 import type { PhotoshopConnection } from '../src/platform/connection.js';
 import type { PhotoshopBackendRouter, PhotoshopPrimitive } from '../src/platform/photoshop-backend.js';
 
@@ -162,6 +163,7 @@ describe('image placement + smart object public contract', () => {
   });
 
   it('preserves smart-object payloads, trimming, document pinning and atomic result projections', async () => {
+    const replacementPath = resolve('replacement.png');
     const { connection, router, executeScript, backendFor } = fixture();
     const tools = createSmartObjectTools(connection, router);
     const byName = (name: string) => tools.find((item) => item.tool.name === name)!;
@@ -178,13 +180,13 @@ describe('image placement + smart object public contract', () => {
     }, 'uxp_convert_to_smart_object_failed');
 
     expect(jsonOf(await byName('photoshop_replace_smart_object_contents').handler({
-      file_path: ' C:\\Assets\\replacement.png ', layer_name: ' Mockup ', document_id: 42,
+      file_path: ' ' + replacementPath + ' ', layer_name: ' Mockup ', document_id: 42,
     }))).toMatchObject({
       ok: true,
-      summary: 'Smart Object contents replaced from C:\\Assets\\replacement.png',
-      details: { layer_name: 'Mockup', file_path: 'C:\\Assets\\replacement.png' },
+      summary: 'Smart Object contents replaced from ' + replacementPath,
+      details: { layer_name: 'Mockup', file_path: replacementPath },
     });
-    expect(bridge.stat).toHaveBeenCalledWith('C:\\Assets\\replacement.png');
+    expect(bridge.stat).toHaveBeenCalledWith(replacementPath);
 
     expect(jsonOf(await byName('photoshop_edit_smart_object_contents').handler({
       layer_name: ' Mockup ', document_id: 42,
@@ -215,7 +217,7 @@ describe('image placement + smart object public contract', () => {
     expect(jsonOf(await replace.handler({ file_path: '   ' }))).toMatchObject({ ok: false });
     expect(jsonOf(await replace.handler({ file_path: 'relative.png' }))).toMatchObject({ ok: false });
     bridge.stat.mockRejectedValueOnce(new Error('ENOENT'));
-    expect(jsonOf(await replace.handler({ file_path: 'C:\\Assets\\missing.png' }))).toMatchObject({ ok: false });
+    expect(jsonOf(await replace.handler({ file_path: resolve('missing.png') }))).toMatchObject({ ok: false });
     expect(backendFor).not.toHaveBeenCalled();
     expect(bridge.operation).not.toHaveBeenCalled();
   });
