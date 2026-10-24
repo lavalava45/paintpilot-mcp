@@ -17,7 +17,7 @@
         },
         {
           "path": "licenses/clipper2-ts-NOTICE.txt",
-          "sha256": "47868818fc98fab132a6f3f7e3edbb1824ccd67476946a69d9dab02267ea3e30"
+          "sha256": "3e1ca90f3a72bd017338bfb985d61f4551d93a4abf6c1f359268d670f7948337"
         }
       ],
       "upstream_evidence": [
@@ -46,7 +46,7 @@
       "notice_files": [
         {
           "path": "licenses/bezier-js-NOTICE.txt",
-          "sha256": "694f9b6ac296d59458f57eddef16695b96bf6676e718385d4d2a07271370e584"
+          "sha256": "4e40729336f17267927ca9cc97e65343378b428f26238488bbf4359ebc2a4135"
         }
       ],
       "upstream_evidence": [
@@ -104,7 +104,7 @@
         },
         {
           "path": "licenses/jpeg-js-NOTICE.txt",
-          "sha256": "cb00f7ef96b554e01b7c5c9dee985043e41695437fbbeaa7d37e4269c83e9e87"
+          "sha256": "ca7675e2c45f785b99ec04972ab109648dc54d95ce6581386459dd774b139a7e"
         },
         {
           "path": "licenses/Apache-2.0.txt",
@@ -144,7 +144,7 @@
         },
         {
           "path": "licenses/ikts-NOTICE.txt",
-          "sha256": "f4eee1d978e5e3d3ecb28b872d1ebaee57524aab065b85e2d43b36f3a8ed8c9e"
+          "sha256": "23be28e0be2bc1dcd886701ee4ed9b0ed5178a2f372aa0ab8b94c66693571c9d"
         }
       ],
       "upstream_evidence": [
