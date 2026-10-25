@@ -1599,22 +1599,25 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
       tool: {
         name: 'photoshop_guard_brush_pack_profile',
         description:
-          'Plan/probe a brush pack, record observed media or stamp behavior, or build its preflight role map; probe_media draws a disposable sheet.',
+          'Profile an already imported brush pack; use photoshop_guard_brush_pack_ingest to import first. plan compares cached profiles to preset_states and returns role coverage and probe candidates. probe_media requires Photoshop/UXP, draws a disposable sheet and saves preview evidence plus a receipt when preset identity is verified; it may also return a JPEG. record_media/record_stamp save observed classifications to local profile records. build_preflight reads profiles against preset_states and returns complete with brush_preflight or missing_role_coverage; ok=true alone does not mean complete. Rejections return ok=false, code and message.',
         inputSchema: {
           type: 'object',
           properties: {
-            action: { type: 'string', enum: ['plan', 'probe_media', 'record_media', 'record_stamp', 'build_preflight'] },
-            brush_pack_id: { type: 'string' },
-            preset_name: { type: 'string' },
-            occurrence_index: { type: 'number', minimum: 0 },
-            inventory_total: { type: 'number', minimum: 1 },
-            candidate_limit: { type: 'number', minimum: 1, maximum: 8 },
+            action: { type: 'string', enum: ['plan', 'probe_media', 'record_media', 'record_stamp', 'build_preflight'],
+              description: 'plan: choose unprofiled candidates; probe_media: obtain real brush evidence; record_media/record_stamp: persist its classification; build_preflight: assemble evidence-supported scene roles.' },
+            brush_pack_id: { type: 'string', description: 'Imported pack identifier returned by brush_pack_ingest; required for plan, probe_media and build_preflight.' },
+            preset_name: { type: 'string', description: 'Exact attributed preset name; required with occurrence_index for probe_media.' },
+            occurrence_index: { type: 'number', minimum: 0, description: 'Zero-based occurrence of the exact preset name in the attributed inventory; required for probe_media, including occurrence 0.' },
+            inventory_total: { type: 'number', minimum: 1, description: 'Positive integer from the observed installed brush inventory; required for build_preflight.' },
+            candidate_limit: { type: 'number', minimum: 1, maximum: 8, description: 'Maximum probe candidates returned by plan, default 4; no candidates are needed when all requested roles are already covered.' },
             required_roles: {
               type: 'array',
+              description: 'Scene roles to cover in plan/build_preflight; omitted or empty uses the default scene-role set.',
               items: { type: 'string', enum: [...DEFAULT_BRUSH_SCENE_ROLES] },
             },
             preset_states: {
               type: 'array',
+              description: 'Required for plan/build_preflight. Supply observed preset identity, effective settings and runtime provenance; only profiles matching these states count toward coverage.',
               items: {
                 type: 'object',
                 properties: {
@@ -1631,8 +1634,9 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
             },
             profile: {
               type: 'object',
+              description: 'Required for record_media/record_stamp. Supply observed classification fields below. probe_operation_id is mandatory for stamps and lets media inherit identity/settings/evidence from the saved probe receipt; media without it must supply full provenance and evidence.',
               properties: {
-                probe_operation_id: { type: 'string' },
+                probe_operation_id: { type: 'string', description: 'Verified probe receipt identifier from probe_media evidence.operation_id / stable_command_id; an unverified probe is not eligible for recording.' },
                 brush_pack_id: { type: 'string' },
                 preset_name: { type: 'string' },
                 occurrence_index: { type: 'number', minimum: 0 },
@@ -1891,16 +1895,17 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
     {
       tool: {
         name: 'photoshop_guard_status',
-        description: 'Read state/readiness, lint next_pass, or solve construction_model / construction_ref without painting. Keep the established local Photoshop workflow unless its route is unavailable; never replay uncertain mutations. Construction is a geometric target, not image proof; diagnostic_timing_marker is benchmark-only.',
+        description: 'Inspect Guard readiness, pending review/ack debts, active jobs and uncertain work. Use photoshop_get_state for Photoshop/UI state or photoshop_guard_lint_next_pass for lint alone. No arguments returns global status; document_id scopes readiness, next_pass adds candidate lint, and construction_model or construction_ref selects a geometry solve instead. Returns readiness/next_required_action or solved geometry; geometry is not image proof. Does not paint or replay uncertain mutations. Status may reconcile missing-document journal state; diagnostic_timing_marker writes benchmark metadata. Keep the established local Photoshop workflow unless its route is unavailable.',
         inputSchema: {
           type: 'object',
           properties: {
-            document_id: { type: 'integer', minimum: 1, description: 'Optional read-only document scope. Unrelated invalid scene geometry remains validated by its own document operations; global status stays unchanged.' },
+            document_id: { type: 'integer', minimum: 1, description: 'Optional document scope for readiness. With next_pass, must match its document_id; otherwise the candidate supplies the scope. Does not switch the active Photoshop document or authorize a mutation.' },
             next_pass: compactPassSchema(),
             construction_model: CONSTRUCTION_MODEL_SCHEMA,
-            construction_ref: { type: 'object', properties: { document_id: { type: 'integer', minimum: 1 }, model_id: { type: 'string' } }, required: ['document_id', 'model_id'], additionalProperties: false },
+            construction_ref: { type: 'object', description: 'Solve a completed durable model by document_id/model_id and include retained geometry review state. Choose this or construction_model; neither can be combined with next_pass or diagnostic_timing_marker.', properties: { document_id: { type: 'integer', minimum: 1 }, model_id: { type: 'string' } }, required: ['document_id', 'model_id'], additionalProperties: false },
             diagnostic_timing_marker: {
               type: 'object',
+              description: 'Benchmark-only: append a continuation timing marker for operation_id/phase and return the recorded marker; may also include next_pass lint. Omit for ordinary readiness checks.',
               properties: {
                 operation_id: { type: 'string' },
                 phase: { type: 'string', enum: ['review_finished', 'critic_complete', 'next_pass_ready'] },
