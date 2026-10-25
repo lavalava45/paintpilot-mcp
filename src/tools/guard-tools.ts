@@ -2158,14 +2158,14 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
       tool: {
         name: 'photoshop_guard_review_image',
         description:
-          'Deliver exact review images for operation_id without painting; inspect them before submitting previous_observation.',
+          'Deliver stored exact-image evidence for a completed visual Guard operation; use photoshop_get_preview for a fresh document preview instead. Obtain operation_id from photoshop_guard_cycle_auto or its completed job result. Returns JSON review instructions, operation_id and per-role delivery/omission metadata, plus MCP image blocks with recorded MIME types (normally JPEG); roles and image count depend on the stored review package. Omit roles for all required images, or request only missing roles. Already delivered exact images may be reused as confirmed same-chat references without resending bytes. Does not paint or capture a replacement frame, but records delivery receipts/timing and updates the review cache; delivery is not proof of visual observation. Inspect the actual images before submitting previous_observation through cycle_auto. review_scope=whole-scene requests whole-scene review metadata using the same images. Force redelivery only for unavailable/failed images with redelivery_reason; repeated forced delivery is rejected. Missing previews or invalid roles return isError=true with an error code; incomplete delivery lists undelivered_roles and next_required_action, not successful visual review.',
         inputSchema: {
           type: 'object',
           properties: {
-            operation_id: { type: 'string' },
+            operation_id: { type: 'string', description: 'Exact visual operation_id from photoshop_guard_cycle_auto or its completed job result, with a stored durable review preview. Not a job_id; historical images do not authorize current-frame continuation.' },
             review_scope: { type: 'string', enum: ['whole-scene'], description: 'Request whole-scene Critic/editable-scope metadata for retained-frame re-evaluation, final completion or replacement confirmation using the same exact images; cached deliveries are reused.' },
             force_redelivery: { type: 'boolean', description: 'Only for unavailable/failed images; requires redelivery_reason. Same-operation exact delivered images in a host-proven chat are reused without claiming visual observation.' },
-            redelivery_reason: { type: 'string', enum: ['images-unavailable', 'delivery-failed'] },
+            redelivery_reason: { type: 'string', enum: ['images-unavailable', 'delivery-failed'], description: 'Required when force_redelivery=true: images-unavailable means the client cannot access the images; delivery-failed means image delivery failed. Never use for routine confirmation.' },
             roles: {
               type: 'array',
               minItems: 1,
@@ -2254,24 +2254,25 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
     {
       tool: {
         name: 'photoshop_guard_set_priorities',
-        description: 'Record whole-frame problem priorities; open larger must-fix problems block finer work.',
+        description: 'Persist the document\'s whole-frame problem priorities after visual assessment; use photoshop_guard_status to inspect readiness and photoshop_guard_lint_next_pass to validate a proposed pass. Writes Guard state without painting. problems supplies the ordinary problem set for this update, matched by stable problem_id; omitted ordinary problems are removed, while unresolved structural defects are retained. Open larger must-fix problems block finer work, and dependencies constrain blocker selection. Each problem needs scale and severity; status defaults to open. Changing an existing open problem\'s status/scale/severity requires evidence_operation_id from an exact-current visual operation with a verdict. Structural defects require an exact-current Critic finding and cannot be resolved by a priority label. current_stage cannot override the durable painting stage. Returns ok=true, updated document state and next guidance; rejected updates return isError=true with ok=false, code=guard_priority_rejected and message. Recording priorities does not certify image quality.',
         inputSchema: {
           type: 'object',
           properties: {
-            document_id: { type: 'number', minimum: 1 },
-            current_stage: { type: 'string' },
+            document_id: { type: 'number', minimum: 1, description: 'Positive Photoshop document id whose durable Guard priorities are updated; does not activate a document or paint.' },
+            current_stage: { type: 'string', description: 'Optional stage context. Must agree with an existing durable painting stage; stage transitions belong to guarded visual passes, not priority edits.' },
             evidence_operation_id: { type: 'string', description: 'Exact-current visual operation with a completed verdict. Required when changing the status, scale, or severity of an existing open perceptual problem; prevents arbitrary blocker dismissal/reclassification.' },
             problems: {
               type: 'array',
+              description: 'Problem set to persist by stable problem_id. Include ordinary problems to retain; omitted ordinary problems are removed, but unresolved structural defects remain protected.',
               items: {
                 type: 'object',
                 properties: {
-                  problem_id: { type: 'string' },
-                  scale: { type: 'string', enum: ['global', 'medium', 'small', 'detail', 'local', 'micro'] },
-                  severity: { type: 'string', enum: ['must-fix', 'should-fix', 'optional'] },
-                  status: { type: 'string', enum: ['open', 'resolved'] },
-                  region: { type: 'string' },
-                  hypothesis: { type: 'string' },
+                  problem_id: { type: 'string', description: 'Stable non-empty problem identifier, reused when updating the same observed defect.' },
+                  scale: { type: 'string', enum: ['global', 'medium', 'small', 'detail', 'local', 'micro'], description: 'Visual scale of the defect. Open larger must-fix defects take priority over finer work; do not relabel scale to bypass a blocker.' },
+                  severity: { type: 'string', enum: ['must-fix', 'should-fix', 'optional'], description: 'Correction urgency: must-fix participates in blocking finer work; should-fix and optional retain advisory priorities.' },
+                  status: { type: 'string', enum: ['open', 'resolved'], description: 'Problem state; defaults to open. Resolving an existing open perceptual problem requires exact-current verdict evidence; structural defects need Critic review.' },
+                  region: { type: 'string', description: 'Optional human-readable location of the observed problem in the image; does not select or modify Photoshop pixels.' },
+                  hypothesis: { type: 'string', description: 'Optional explanation or proposed correction for this visual problem; a hypothesis is not evidence that it is resolved.' },
                   depends_on_problem_ids: {
                     type: 'array',
                     uniqueItems: true,

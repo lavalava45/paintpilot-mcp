@@ -37,7 +37,7 @@ export function createMethodPaletteTools(registry: ToolRegistry): ToolDefinition
       tool: {
         name: 'photoshop_select_painting_method',
         description:
-          'Select an executable Photoshop painting method from the actual runtime capability map. This is a planning/read-only tool; it does not mutate Photoshop.',
+          'Choose an executable painting method from registered runtime capabilities without contacting or mutating Photoshop. Use photoshop_get_painting_method_capabilities to inspect the full map; use this tool for a specific construction_role or visual_intent plus required impact_class. construction_role takes precedence and derives the intent when both are supplied. Excludes avoid_method_ids, then uses the ordered intent preferences unless a valid preferred_method_id is supplied; an unavailable, avoided or incompatible preference is rejected rather than silently replaced. With edge_class, returns a separate edge_selection and tries preferred_method_id first for that edge choice; incompatible edge preferences are listed as rejected and may fall back. Returns ok=true, selection (selected method, fallbacks and rejected candidates), execution_contract with registered commands/input schemas and fallback_commands. This is planning guidance, not execution or pixel verification; required preparation and state still apply. Missing role/intent or no compatible method returns isError=true with ok=false, code=no_painting_method_available and message.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -45,15 +45,15 @@ export function createMethodPaletteTools(registry: ToolRegistry): ToolDefinition
               type: 'string', enum: [...PAINTING_CONSTRUCTION_ROLES],
               description: 'Subject-agnostic construction role. In broad nontrivial construction this classification must precede concrete Photoshop method selection.',
             },
-            visual_intent: { type: 'string', enum: [...PAINTING_VISUAL_INTENTS] },
-            impact_class: { type: 'string', enum: [...PAINTING_IMPACT_CLASSES] },
-            avoid_method_ids: { type: 'array', items: { type: 'string' } },
+            visual_intent: { type: 'string', enum: [...PAINTING_VISUAL_INTENTS], description: 'Desired visual effect. Required when construction_role is absent; when both are given, the construction role determines the intent.' },
+            impact_class: { type: 'string', enum: [...PAINTING_IMPACT_CLASSES], description: 'Required operation-impact category (for example construct, subtract or tone); filters methods compatible with the chosen intent.' },
+            avoid_method_ids: { type: 'array', items: { type: 'string' }, description: 'Method ids from the capability map to exclude from main and optional edge selection, including fallback candidates.' },
             stage: {
               type: 'string',
-              description: 'Optional painting stage. Early block-in stages may intentionally prefer the temporary closed-region scaffold for generic mass construction.',
+              description: 'Optional painting-stage context passed to method selection. Does not change the durable Guard stage or authorize painting.',
             },
-            edge_class: { type: 'string', enum: [...EDGE_CLASSES] },
-            preferred_method_id: { type: 'string' },
+            edge_class: { type: 'string', enum: [...EDGE_CLASSES], description: 'Optional boundary appearance: hard, soft, lost, firm or broken. Adds an independent edge_selection alongside the main construction/intent selection.' },
+            preferred_method_id: { type: 'string', description: 'Exact capability-map method id. Without edge_class, requires this method for the main selection and rejects invalid/avoided/incompatible preferences. With edge_class, tries it first only for edge_selection and may fall back, recording the rejection.' },
           },
           required: ['impact_class'],
           additionalProperties: false,
