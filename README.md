@@ -24,6 +24,7 @@ Independently maintained MCP system for AI-driven digital painting and evidence-
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.7-blue.svg)](https://www.typescriptlang.org/)
 [![Platform](https://img.shields.io/badge/Platform-Windows-lightgrey.svg)]()
+[![PaintPilot on Glama](https://glama.ai/mcp/servers/lavalava45/paintpilot-mcp/badges/score.svg)](https://glama.ai/mcp/servers/lavalava45/paintpilot-mcp)
 
 > Independently maintained project. Not affiliated with or endorsed by Adobe Inc.
 
