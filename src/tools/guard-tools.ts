@@ -1895,7 +1895,7 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
     {
       tool: {
         name: 'photoshop_guard_status',
-        description: 'Inspect Guard readiness, pending review/ack debts, active jobs and uncertain work. Use photoshop_get_state for Photoshop/UI state or photoshop_guard_lint_next_pass for lint alone. No arguments returns global status; document_id scopes readiness, next_pass adds candidate lint, and construction_model or construction_ref selects a geometry solve instead. Returns readiness/next_required_action or solved geometry; geometry is not image proof. Does not paint or replay uncertain mutations. Status may reconcile missing-document journal state; diagnostic_timing_marker writes benchmark metadata. Keep the established local Photoshop workflow unless its route is unavailable.',
+        description: 'Inspect Guard readiness, pending review/ack debts, active jobs and uncertain work. Use photoshop_get_state for Photoshop/UI state or photoshop_guard_lint_next_pass for lint alone. No arguments returns global status; document_id scopes readiness, next_pass adds candidate lint, and construction_model or construction_ref selects a geometry solve instead. Returns readiness/next_required_action or solved geometry; geometry is not image proof. Does not paint; never replay uncertain mutations. Status may reconcile missing-document journal state; diagnostic_timing_marker writes benchmark metadata. Keep the established local Photoshop workflow unless its route is unavailable.',
         inputSchema: {
           type: 'object',
           properties: {
