@@ -61,7 +61,7 @@ export function createStateTools(
     ),
     stateTool(
       'photoshop_get_capabilities',
-      'Report version-derived Photoshop feature flags plus current UXP bridge availability.',
+      'Report version-derived Photoshop feature flags plus current UXP bridge availability. Use for installation/version compatibility and whether the UXP bridge is reachable; use photoshop_get_version for version alone, photoshop_guard_capabilities for Guard rules/exact command schemas, and photoshop_get_painting_method_capabilities for registered painting methods. Takes no arguments. Reads the detected Photoshop version and probes bridge reachability without painting or changing document state. Returns JSON with version and features, including uxp_bridge_reachable; neural_filters is gated by bridge reachability and the version-derived UXP flag. Feature flags are not proof that a particular document operation will succeed or that Guard permits direct mutation. Detection/probe failures return the structured error response.',
       EMPTY_INPUT,
       () => runCapabilities(connection)
     ),

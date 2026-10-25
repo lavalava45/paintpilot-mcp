@@ -21,7 +21,7 @@ export function createValueCheckTools(registry: ToolRegistry, hooks?: ValueEvide
       tool: {
         name: 'photoshop_analyze_value_structure',
         description:
-          'Analyze the exact delivered Guard frame and automatically register materialized grayscale/luminance evidence. Returns a real evidence_operation_id and SHA for Director updates without source or journal inspection. Standalone preview-only catalogs capture a non-destructive preview. Returns a full grayscale JPEG, a low-frequency downsampled grayscale thumbnail, and descriptive luminance summaries for Art Director review. The low-frequency view suppresses small texture/noise so major-form claims can be checked independently of surface activity. It never declares artistic PASS automatically and does not modify the PSD.',
+          'Analyze large-form light/dark structure when Director value/refinement review needs grayscale evidence; use photoshop_get_preview for ordinary color inspection and photoshop_guard_review_image for stored operation review images. Requires pinned document_id. In Guard, analyzes the exact delivered current frame and automatically registers materialized grayscale/luminance evidence; standalone preview-only catalogs capture a non-destructive preview instead. Returns two MCP JPEG images (full grayscale and low-frequency thumbnail), source/derived SHAs, dimensions and descriptive luminance summaries; Guard also returns a real evidence_operation_id and director_evidence_fields for Director updates. The thumbnail suppresses small texture/noise so major-form claims can be checked independently of surface activity. Writes derived JPEG files when a materialization path is available and registers Guard evidence, but does not modify the PSD or declare artistic PASS. Inspect both images before making an observed claim. materialize_path must be absolute; invalid paths or unavailable preview images fail, and overwriting the source frame is forbidden.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -30,7 +30,7 @@ export function createValueCheckTools(registry: ToolRegistry, hooks?: ValueEvide
               minimum: 1,
               description: 'Required pinned Photoshop document id whose current preview is analyzed.',
             },
-            max_dimension_px: { type: 'number', minimum: 128, maximum: 2048, default: 1000 },
+            max_dimension_px: { type: 'number', minimum: 128, maximum: 2048, default: 1000, description: 'Maximum long edge for a standalone preview capture, default 1000. With a Guard current-frame hook, analyzes those exact stored bytes instead of recapturing/resizing the source.' },
             materialize_path: {
               type: 'string',
               description: 'Optional absolute path where the derived grayscale JPEG should be written for external visual inspection.',

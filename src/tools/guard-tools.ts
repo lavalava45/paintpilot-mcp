@@ -1540,7 +1540,7 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
     {
       tool: {
         name: 'photoshop_guard_capabilities',
-        description: 'Read Guard capabilities and recovery contract; tool_name returns one exact executable argument schema without source inspection.',
+        description: 'Discover Guard workflow/recovery rules and exact registered command contracts without source inspection. With no arguments returns Guard mode, protocol/runtime revisions, running deployment and command_sets; this is not document readiness (photoshop_guard_status) or Photoshop version-derived feature flags (photoshop_get_capabilities). tool_name returns one exact executable argument schema and dispatch route; tool_names batches up to 8. Mutating commands discovered here still run through photoshop_guard_cycle_auto, never a raw bypass. Returns discovery_revision; cache contracts once per art run and use if_revision only for a deliberate recheck (a match returns unchanged=true). deployment_health=true is a separate source/dist/running-MCP/loaded-UXP comparison after activation or a freshness blocker; omit tool names and if_revision. Does not paint, restart components or reconcile operations. Unknown names return guard_tool_contract_unknown with supported alternatives; incompatible argument modes are rejected.',
         inputSchema: { type: 'object', properties: { deployment_health: { type: 'boolean', description: 'Explicit read-only source/dist/running-MCP/loaded-UXP comparison. Use after activation or a freshness blocker, not before every paint pass. Does not restart or paint.' }, if_revision: { type: 'string', description: 'Echo the prior discovery_revision when deliberately checking for changes; matching revision returns a compact unchanged receipt. Keep schemas from the earlier response.' }, tool_name: { type: 'string', description: 'One exact Photoshop command.' }, tool_names: { type: 'array', minItems: 1, maxItems: 8, uniqueItems: true, items: { type: 'string' }, description: 'Batch of exact command_sets names; avoids serial contract queries. Choose this OR tool_name.' } }, additionalProperties: false },
       },
       handler: async (args) => {
@@ -1720,11 +1720,11 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
       tool: {
         name: 'photoshop_guard_set_art_run',
         description:
-          'Bind document and immutable process_dir. Honor presentation_context.painting_profile_selection from the Photoshop panel for NEW art runs; auto allows an explicit choice based on the brief and defaults to nontrivial_painting if omitted. Brush preflight is required before dependent brush operations.',
+          'Create or update durable art-run settings for a verified document; use photoshop_guard_resume to retrieve an existing run rather than registering it again. Requires document_id and process_dir; bind document and immutable process_dir, and preserve the original user request verbatim as original_brief, never a success summary. Probes Photoshop/UXP readiness and document identity, creates the process directory and persists Guard settings without painting. Honor presentation_context.painting_profile_selection from the Photoshop panel for NEW art runs; auto allows an explicit choice based on the brief and defaults to nontrivial_painting if omitted. Existing profile locks and transition gates remain enforced. Brush preflight is required before dependent brush operations; supply observed evidence or the brush_pack_profile preflight, not invented preset claims. Commentary settings control presentation, not execution permission. Returns ok, art_run, capability context and next guidance; invalid identity/path/profile/preflight returns isError=true with guard_art_run_rejected and message. Changing original_brief invalidates its evaluation binding; settings alone do not prove painting completion.',
         inputSchema: {
           type: 'object',
           properties: {
-            document_id: { type: 'number', minimum: 1 },
+            document_id: { type: 'number', minimum: 1, description: 'Positive Photoshop document id for the verified live document whose art-run settings are bound; never substitute another tab to bypass identity checks.' },
             process_dir: {
               type: 'string',
               description: 'Repository-relative path exactly processes/<subject>-process/<run-name> using lowercase kebab-case.',
@@ -1735,6 +1735,7 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
             },
             commentary_mode: {
               type: 'string',
+              description: 'Presentation style: technical audit text, artistic commentary or mixed. Omission retains existing/user settings; this does not authorize or block painting.',
               enum: ['technical', 'artistic', 'mixed'],
               default: 'mixed',
             },
@@ -2113,10 +2114,10 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
     {
       tool: {
         name: 'photoshop_guard_lint_next_pass',
-        description: 'Optional read-only validation of a complete continuation, including previous observation. cycle_auto already validates; do not lint each normal component or separately close a reviewed previous pass.',
+        description: 'Optionally validate a complete proposed Guard continuation before execution, including its previous observation. Use for a new risky draft; cycle_auto already validates, so do not lint each normal component or separately close a reviewed previous pass. Requires next_pass; retain its pinned document_id and complete construction/ownership fields. Include previous_operation_id plus previous_observation when continuing an operation, or review_operation_id for retained-frame re-evaluation, following the existing review instructions. Reads Guard state under a temporary controller lock and compiles the proposal without painting, persisting a review or closing an operation. Returns ok, execution=not-executed, visual_mutation_started=false, violations, error_codes, normalizations, compiled_operation and rejection. ok=false means correct the listed fields; success is not execution or artistic approval. Submit the same validated continuation once to photoshop_guard_cycle_auto, without another lint or close-only call. Runtime failures return isError=true with guard_next_pass_lint_failed.',
         inputSchema: {
           type: 'object',
-          properties: { next_pass: compactPassSchema(), previous_operation_id: { type: 'string' }, review_operation_id: { type: 'string' }, previous_observation: compactObservationSchema() },
+          properties: { next_pass: compactPassSchema(), previous_operation_id: { type: 'string', description: 'Prior operation to continue using previous_observation; lint validates this closure without committing it.' }, review_operation_id: { type: 'string', description: 'Existing exact-frame operation for retained-frame re-evaluation; follow review instructions rather than re-closing its old pass.' }, previous_observation: compactObservationSchema() },
           required: ['next_pass'],
           additionalProperties: false,
         },
@@ -2297,14 +2298,15 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
     {
       tool: {
         name: 'photoshop_guard_art_director',
-        description: 'Manage Director plans: review issues tasks, interrupt returns to planning, complete closes a satisfied directive; does not certify painted quality.',
+        description: 'Persist Director plans and evidence-bound assessments for a verified art-run document; use photoshop_guard_resume(document_id, director_fields) to read saved fields and photoshop_guard_status for readiness. review requires directive and issues/updates tasks; interrupt requires an allowed reason and marks an active directive for replanning; complete requires final_comparison and pre_final_hostile_review against the exact current frame and rejects outstanding completion blockers. This closes a satisfied directive, not the whole painting, and does not certify painted quality. directive carries style/strategy and observed value/refinement assessments; observed claims need current registered image evidence. anchor_decision explicitly manages classified whole-frame anchors; capture_restore_state additionally reads pinned layer/selection state. incomplete_hypothesis records a bounded experiment with rollback and review horizon; its resolution is explicit. whole_image_glance supplies due whole-frame/relationship review, never an invented pass. Writes Guard state without painting; optional anchor capture reads Photoshop. Returns ok, bounded document/Director state and next guidance. Payload errors return guard_art_director_contract_invalid with issues; state/evidence failures return guard_art_director_rejected. Retrieve saved fields and correct the request; do not replay painting or bypass evidence gates.',
         inputSchema: {
           type: 'object',
           properties: {
-            document_id: { type: 'number', minimum: 1 },
-            action: { type: 'string', enum: ['review', 'interrupt', 'complete'] },
+            document_id: { type: 'number', minimum: 1, description: 'Positive id of the verified document with the art run and Director state being updated.' },
+            action: { type: 'string', enum: ['review', 'interrupt', 'complete'], description: 'review: requires directive and updates plans/tasks; interrupt: requires reason for an active directive; complete: requires final_comparison and pre_final_hostile_review and passing completion gates.' },
             reason: {
               type: 'string',
+              description: 'Required enumerated structural reason for action=interrupt; explanatory detail alone does not authorize an interrupt.',
               enum: [
                 'serious_visual_error',
                 'unexpected_global_composition_value_shift',
@@ -2339,6 +2341,7 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
             },
             directive: {
               type: 'object',
+              description: 'Required for action=review: durable goal, style/strategy, hypotheses/tasks and value/refinement assessments. Follow nested contracts; observed verdicts need exact-current registered evidence, while pending checks must remain unobserved.',
               properties: {
                 directive_id: { type: 'string' },
                 goal: { type: 'string' },
@@ -2886,6 +2889,7 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
             },
             incomplete_hypothesis_resolution: {
               type: 'string',
+              description: 'Explicit outcome for the existing bounded hypothesis: resolved, accepted or reversed. Does not itself restore pixels or waive current review requirements.',
               enum: ['resolved', 'accepted', 'reversed'],
             },
             whole_image_glance: {
