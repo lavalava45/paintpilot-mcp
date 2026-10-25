@@ -45,7 +45,7 @@ export function createDocumentTools(
     ),
     documentTool(
       'photoshop_get_document_info',
-      'Read information about the active Photoshop document.',
+      'Read the active Photoshop document and active-layer metadata through Photoshop/UXP without painting or switching tabs. Use this when an open document is required; photoshop_get_state also supports checking whether a document exists, while photoshop_list_documents lists all open tabs. Returns a text response headed "Document info:" containing the JSON state snapshot (hasDocument, document and activeLayer metadata). Requires a working Photoshop/UXP connection and an active document; no active document returns isError=true with "Error getting document info: No active document". Optional document_id verifies that the expected document is already active and fails closed on a mismatch; it never activates that document.',
       NO_ARGS,
       () => runDocumentInfo(router)
     ),

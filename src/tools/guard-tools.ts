@@ -2206,10 +2206,10 @@ export function createGuardTools(runtime: EmbeddedGuardRuntime): ToolDefinition[
     {
       tool: {
         name: 'photoshop_guard_job_poll',
-        description: 'Poll job_id; fetch completed visual review via photoshop_guard_review_image; never replace running/uncertain work with another mutation.',
+        description: 'Inspect one asynchronous Guard job using the job_id returned by photoshop_guard_cycle_auto; use photoshop_guard_status for document/global readiness instead. Returns immediately without waiting for completion, starting replacement work or painting; polling may record a bookkeeping event in the Guard journal. Returns ok, job_id, state, process_state, timing/heartbeat fields, next and result when available. starting/running means poll the same job again; completed means inspect result and fetch missing completed visual review via photoshop_guard_review_image before submitting previous_observation. A completed process can still have state=uncertain and ok=false when its operation is partial or uncertain: process_state is not proof of successful execution. For uncertain/stalled/failed jobs follow next and the recovery guidance from photoshop_guard_resume and photoshop_guard_reconcile; never replace running/uncertain work with another mutation and never replay uncertain execution. Unknown or unreadable job ids return isError=true with code=guard_job_not_found.',
         inputSchema: {
           type: 'object',
-          properties: { job_id: { type: 'string' } },
+          properties: { job_id: { type: 'string', description: 'Exact opaque job_id returned by an asynchronous photoshop_guard_cycle_auto response. Reuse it unchanged for later polls; this is not an operation_id or document_id.' } },
           required: ['job_id'],
           additionalProperties: false,
         },
