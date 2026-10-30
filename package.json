@@ -48,6 +48,7 @@
     "prepare": "node scripts/prepare.mjs",
     "sync:server-version": "tsx scripts/sync-server-version.ts",
     "build:mcpb": "tsx scripts/build-mcpb.ts",
+    "test:mcpb-upgrade": "node --test tests/mcpb-upgrade.test.cjs",
     "prepublishOnly": "npm run build && npm run verify:guard-public-contract && npm run verify:contract-preservation && npm run sync:server-version && npm run verify:third-party-notices && npm run verify:pack",
     "test:unit": "vitest run",
     "verify:tool-counts": "tsx scripts/verify-tool-counts.ts",

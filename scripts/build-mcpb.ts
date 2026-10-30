@@ -1,12 +1,13 @@
 /**
  * Build one PaintPilot Windows release with two independent operation modes,
- * plus an optional direct-tools MCPB for compatible clients.
+ * plus an optional upgrade-friendly, two-mode MCPB for compatible clients.
  *
  * Output: release/photoshop-mcp-digital-painting-<version>.mcpb
  * (MCPB: manifest.json + server/; Windows ZIP: server/ + installation notes)
  * Run: npm run build:mcpb
  */
 import { execFileSync, execSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import {
   copyFileSync,
   cpSync,
@@ -85,10 +86,17 @@ function main(): void {
   mkdirSync(RELEASE_DIR, { recursive: true });
 
   const manifest = JSON.parse(readFileSync(MANIFEST_SRC, 'utf8')) as Record<string, unknown>;
+  if (manifest.name !== pkg.name) throw new Error('MCPB upgrade identity must match the established product name');
   manifest.version = pkg.version;
   writeFileSync(join(STAGING, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
+  copyFileSync(join(ROOT, 'mcpb', 'UPGRADE.md'), join(STAGING, 'UPGRADE.md'));
+  run('npx -y @anthropic-ai/mcpb validate manifest.json', STAGING);
 
   cpSync(join(ROOT, 'dist'), join(SERVER_DIR, 'dist'), { recursive: true });
+  // The same entry point and extension identity work across upgrades. The
+  // launcher keeps state and the UXP registration path outside the bundle.
+  copyFileSync(join(ROOT, 'mcpb', 'launch.cjs'), join(SERVER_DIR, 'launch.cjs'));
+  copyFileSync(join(ROOT, 'mcpb', 'uxp-sync.cjs'), join(SERVER_DIR, 'uxp-sync.cjs'));
   // Retain the previous local integration alias in the source repository for
   // existing deployments, but publish only neutral PaintPilot mode names.
   for (const extension of ['.js', '.js.map', '.d.ts', '.d.ts.map']) {
@@ -141,7 +149,7 @@ function main(): void {
   rmSync(windowsZip, { force: true });
 
   console.log(`Packing ${outFile}…`);
-  packArchive(outFile, ['manifest.json', 'server']);
+  packArchive(outFile, ['manifest.json', 'server', 'UPGRADE.md']);
   copyFileSync(outFile, stableFile);
 
   copyFileSync(join(ROOT, 'docs', 'RELEASE-INSTALL.md'), join(STAGING, 'INSTALL.md'));
@@ -155,9 +163,17 @@ function main(): void {
   console.log(`Packing both-mode Windows ZIP ${windowsZip}…`);
   packArchive(windowsZip, ['server', 'INSTALL.md', 'RELEASE-NOTES.md']);
 
+  // Reproduce checksums for every versioned release artifact in the same
+  // build; users must not rely on a stale SHA256SUMS from an older preview.
+  const checksums = [outFile, windowsZip, stableFile].map(file => {
+    const digest = createHash('sha256').update(readFileSync(file)).digest('hex');
+    return `${digest}  ${file.split(/[\\/]/).at(-1)}`;
+  });
+  writeFileSync(join(RELEASE_DIR, 'SHA256SUMS.txt'), checksums.join('\n') + '\n', 'utf8');
+
   rmSync(STAGING, { recursive: true, force: true });
   console.log(`PaintPilot Windows ZIP ready (Painting Mode + Photoshop Tools): ${windowsZip}`);
-  console.log(`Optional direct-tools MCPB ready: ${outFile} (+ ${stableFile})`);
+  console.log(`Optional upgrade-friendly, two-mode MCPB ready: ${outFile} (+ ${stableFile})`);
   console.log('Independent Digital Painting Edition bundle built for local/source distribution.');
 }
 

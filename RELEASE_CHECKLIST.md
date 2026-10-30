@@ -112,6 +112,19 @@ The draft public notes are in
 
 ## Post-release
 
+- [ ] For a newer MCPB, retain the historical `manifest.name`; increase the
+      product version so the host can treat it as an upgrade rather than a new
+      extension. Validate with the official `mcpb` CLI and inspect SHA256SUMS.
+- [ ] Upgrade a private-installed MCPB on a clean host: verify whether its
+      extension settings persist (host-specific), that mode selection survives,
+      and that the UXP manifest continues to be registered at the stable
+      `%LOCALAPPDATA%\PaintPilot\uxp-plugin` path.
+- [ ] Complete UXP Reload (or Unload/Load after permission changes), verify
+      bridge fingerprint parity and preserve controller/journal and backup data
+      in `%LOCALAPPDATA%\PaintPilot`. Never run old/new MCPB concurrently.
+- [ ] Check the extracted MCPB's launcher exports exactly 39 Painting tools or
+      135 direct tools for the current release surface, with the required Guard
+      policy; run real Photoshop acceptance using a disposable document.
 - [ ] Verify GitHub release assets/source links.
 - [ ] Install once using the public release instructions rather than the developer checkout.
 - [ ] From that public installation, confirm `npm run deployment:health` is `current` for the installed Plugins child/UXP pair before re-running a disposable live Photoshop smoke test.

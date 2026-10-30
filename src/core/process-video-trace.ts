@@ -120,7 +120,8 @@ function cleanText(value: unknown): string | undefined {
 }
 
 export function processVideoTraceSettingsPath(): string {
-  return DEFAULT_PROCESS_VIDEO_TRACE_SETTINGS_PATH;
+  return process.env.PAINTPILOT_PROCESS_VIDEO_TRACE_SETTINGS_FILE?.trim()
+    || DEFAULT_PROCESS_VIDEO_TRACE_SETTINGS_PATH;
 }
 
 export function readProcessVideoTraceSetting(options: {

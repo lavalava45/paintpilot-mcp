@@ -2,10 +2,10 @@
   "$schema": "https://raw.githubusercontent.com/anthropics/mcpb/main/schemas/mcpb-manifest-v0.4.schema.json",
   "manifest_version": "0.4",
   "name": "photoshop-mcp-digital-painting",
-  "display_name": "PaintPilot — Photoshop Tools",
+  "display_name": "PaintPilot — Photoshop MCP",
   "version": "1.8.0-preview.1",
-  "description": "PaintPilot Photoshop Tools: direct Photoshop commands through MCP and UXP on Windows.",
-  "long_description": "PaintPilot Photoshop Tools is the direct-command mode of the independently maintained PaintPilot Photoshop automation product. It uses MCP and the Photoshop UXP companion without the artistic painting Guard workflow. For both Painting Mode and Photoshop Tools, install the PaintPilot Windows ZIP instead. PaintPilot is not affiliated with or endorsed by Adobe Inc. Provenance and licensing are documented in NOTICE and LICENSE.",
+  "description": "PaintPilot on Windows: choose guarded AI Painting Mode or direct Photoshop Tools through a local UXP companion.",
+  "long_description": "One PaintPilot MCPB includes both alternative modes: Photoshop Tools (default, direct layer and document commands) or experimental Painting Mode (Art Director, Painter, Critic, guarded visual checkpoints). Change the mode in extension settings and restart its MCP connection. Adobe Photoshop and a one-time UXP Developer Tool setup are required. The launcher synchronizes the UXP companion to a stable PaintPilot-managed location in LOCALAPPDATA; after a companion upgrade, reload the existing UXP plugin. MCPB auto-updating depends on the host; privately installed extensions may require manual installation of each new version. PaintPilot is independent from Adobe Inc. See LICENSE and NOTICE.",
   "author": {
     "name": "lavalava45",
     "url": "https://github.com/lavalava45/paintpilot-mcp"
@@ -27,31 +27,32 @@
   ],
   "server": {
     "type": "node",
-    "entry_point": "server/dist/photoshop-tools.js",
+    "entry_point": "server/launch.cjs",
     "mcp_config": {
       "command": "node",
       "args": [
-        "${__dirname}/server/dist/photoshop-tools.js"
+        "${__dirname}/server/launch.cjs"
       ],
       "env": {
-        "PHOTOSHOP_GUARD_MODE": "off",
+        "PAINTPILOT_MODE": "${user_config.mode}",
         "LOG_LEVEL": "${user_config.logLevel}",
         "PHOTOSHOP_PATH": "${user_config.photoshopPath}"
       }
     }
   },
   "user_config": {
+    "mode": {
+      "type": "string",
+      "title": "PaintPilot mode",
+      "description": "Enter tools for direct Photoshop editing (default), or painting for guarded experimental AI painting. Restart the connection after changing mode.",
+      "default": "tools",
+      "required": true
+    },
     "logLevel": {
       "type": "string",
       "title": "Log level",
       "description": "0=DEBUG, 1=INFO, 2=WARN, 3=ERROR",
-      "default": "1",
-      "enum": [
-        "0",
-        "1",
-        "2",
-        "3"
-      ]
+      "default": "1"
     },
     "photoshopPath": {
       "type": "string",

@@ -1,4 +1,5 @@
 import { fileURLToPath } from 'node:url';
+import path from 'node:path';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { wrapToolHandler } from '../errors/envelope.js';
@@ -25,6 +26,8 @@ export interface PhotoshopMCPServerOptions {
 }
 
 function runtimePath(relative: string): string {
+  const externalRoot = process.env.PAINTPILOT_RUNTIME_ROOT?.trim();
+  if (externalRoot) return path.join(externalRoot, relative);
   return fileURLToPath(new URL(`../../.photoshop-runtime/${relative}`, import.meta.url));
 }
 
