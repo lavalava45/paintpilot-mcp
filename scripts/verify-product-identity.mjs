@@ -26,6 +26,9 @@ const notice = existsSync(noticePath) ? read('NOTICE') : '';
 if (packageJson.name !== PRODUCT_NAME) {
   failures.push(`package.json name must be ${PRODUCT_NAME}`);
 }
+if (manifest.version !== packageJson.version || serverJson.version !== packageJson.version) {
+  failures.push('package.json, server.json and MCPB manifest must use the same release version');
+}
 if (!Array.isArray(packageJson.files) || !packageJson.files.includes('NOTICE')) {
   failures.push('package.json files must include NOTICE');
 }

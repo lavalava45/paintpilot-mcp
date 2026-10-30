@@ -3,7 +3,7 @@
   "manifest_version": "0.4",
   "name": "photoshop-mcp-digital-painting",
   "display_name": "PaintPilot — Photoshop MCP",
-  "version": "1.8.0-preview.1",
+  "version": "1.8.0-preview.2",
   "description": "PaintPilot on Windows: choose guarded AI Painting Mode or direct Photoshop Tools through a local UXP companion.",
   "long_description": "One PaintPilot MCPB includes both alternative modes: Photoshop Tools (default, direct layer and document commands) or experimental Painting Mode (Art Director, Painter, Critic, guarded visual checkpoints). Change the mode in extension settings and restart its MCP connection. Adobe Photoshop and a one-time UXP Developer Tool setup are required. The launcher synchronizes the UXP companion to a stable PaintPilot-managed location in LOCALAPPDATA; after a companion upgrade, reload the existing UXP plugin. MCPB auto-updating depends on the host; privately installed extensions may require manual installation of each new version. PaintPilot is independent from Adobe Inc. See LICENSE and NOTICE.",
   "author": {

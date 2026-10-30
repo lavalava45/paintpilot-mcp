@@ -216,12 +216,12 @@ recognition block-in → preview → shape/value → preview → form → previe
 
 ## Install from source
 
-**MCPB upgrade work (next release):** PaintPilot is preparing a single Windows MCPB
-with both modes and a stable `%LOCALAPPDATA%\PaintPilot` data/UXP location.
-The already published `1.8.0-preview.1` MCPB remains **Photoshop Tools only**;
-do not treat an untagged candidate as its replacement. See the
-[MCPB installation and upgrade guide](mcpb/UPGRADE.md) for the future
-two-mode package, UXP reload requirements and host-dependent update behavior.
+**MCPB upgrade work (preview.2 release candidate):** A two-mode Windows MCPB
+is prepared with stable `%LOCALAPPDATA%\PaintPilot` data and UXP locations.
+The published `1.8.0-preview.1` MCPB remains **Photoshop Tools only**;
+do not treat an untagged or locally built `preview.2` candidate as a public
+release. See the [MCPB installation and upgrade guide](mcpb/UPGRADE.md)
+and [preview.2 release notes](docs/DEVELOPER-PREVIEW-RELEASE-NOTES-1.8.0-preview.2.md).
 
 Install **this repository from GitHub**. Historical upstream packages and registry identities are separate projects and do not distribute Digital Painting Edition; see [`NOTICE`](NOTICE).
 

@@ -153,7 +153,11 @@ function main(): void {
   copyFileSync(outFile, stableFile);
 
   copyFileSync(join(ROOT, 'docs', 'RELEASE-INSTALL.md'), join(STAGING, 'INSTALL.md'));
-  copyFileSync(join(ROOT, 'docs', 'DEVELOPER-PREVIEW-RELEASE-NOTES.md'), join(STAGING, 'RELEASE-NOTES.md'));
+  // Reject a release with stale notes from another version; do not silently
+  // copy the previous preview's claims into the new public ZIP.
+  const versionNotes = join(ROOT, 'docs', `DEVELOPER-PREVIEW-RELEASE-NOTES-${pkg.version}.md`);
+  assertExists(versionNotes, `release notes for ${pkg.version}`);
+  copyFileSync(versionNotes, join(STAGING, 'RELEASE-NOTES.md'));
   const packagedNotesPath = join(STAGING, 'RELEASE-NOTES.md');
   const packagedNotes = readFileSync(packagedNotesPath, 'utf8')
     .replace('[RELEASE-INSTALL.md](RELEASE-INSTALL.md)', '[INSTALL.md](INSTALL.md)')

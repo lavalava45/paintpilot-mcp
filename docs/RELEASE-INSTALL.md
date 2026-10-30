@@ -1,4 +1,4 @@
-# PaintPilot 1.8.0-preview.1 — installation (Windows)
+# PaintPilot 1.8.0-preview.2 — installation (Windows, release candidate)
 
 PaintPilot is an independent Photoshop automation product with **two modes**:
 Painting Mode and Photoshop Tools. Both use the same Windows release archive
@@ -7,7 +7,7 @@ and Adobe Photoshop UXP companion.
 ## Installation
 
 1. Install **Node.js 18 or later**, Adobe Photoshop and Adobe UXP Developer Tool.
-2. Extract **`paintpilot-windows-1.8.0-preview.1.zip`** to a permanent folder.
+2. Extract **`paintpilot-windows-1.8.0-preview.2.zip`** to a permanent folder.
    Keep `server/node_modules`, `server/dist` and `server/uxp-plugin` together.
    The archive contains compiled JavaScript and production dependencies: you
    do **not** need to install npm/pnpm packages or compile it.
@@ -83,7 +83,13 @@ reconcile the document and layer state before continuing guarded work.
 - Guarded local glow has contract-level verification; final independent live
   Photoshop acceptance is pending. See `RELEASE-NOTES.md` for limitations.
 - The `.mcpb` file is an optional alternate installation format for
-  MCPB-compatible clients. Its manifest boots the **Photoshop Tools** mode.
-  For access to both modes, use the Windows ZIP above.
+  MCPB-compatible clients. Starting with **preview.2**, the bundle lets you
+  select either **Photoshop Tools** (default) or **Painting Mode** in its
+  extension settings. It installs a UXP companion at the stable
+  `%LOCALAPPDATA%\PaintPilot\uxp-plugin` location; register that manifest in
+  Adobe UXP Developer Tool once. After updates, reload the companion as
+  explained in `mcpb/UPGRADE.md` (also inside the MCPB).
+  The ZIP continues to use its own `server/uxp-plugin` path, independent of
+  the MCPB-managed copy.
 - License and attribution are in `server/LICENSE`, `server/NOTICE` and
   `server/THIRD_PARTY_NOTICES.md`.

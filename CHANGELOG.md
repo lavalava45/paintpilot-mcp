@@ -1,5 +1,16 @@
 # Changelog
 
+- 2026-10-30 — **1.8.0-preview.2 candidate; not yet a published release.**
+  Prepare a version-incremented, two-mode MCPB with a stable UXP companion,
+  persistent user data outside the host extraction directory, validated mode
+  switching and an explicit manual-upgrade procedure. Preserve the previously
+  published `preview.1` ZIP/MCPB and version their release documentation
+  separately; package builds must reject stale release notes. Include the
+  evidence-bound Art Director pending-frame fix, host-Stop admission behavior,
+  and Glama offline catalog regression gate. Final tag, GitHub assets,
+  host-managed upgrade test and Photoshop live acceptance are separate
+  release gates and must not be inferred from source or package unit tests.
+
 - 2026-10-20 — **PaintPilot 1.8.0-preview.1 (release packaging candidate; not tagged).**
   Synchronize product version in package metadata, server metadata and MCPB
   manifest. Ship one Windows ZIP with two first-class product modes:
