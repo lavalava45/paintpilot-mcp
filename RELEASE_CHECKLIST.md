@@ -35,6 +35,14 @@ source changes create a new candidate SHA that must be checked again.
 The draft public notes are in
 [`docs/DEVELOPER-PREVIEW-RELEASE-NOTES.md`](docs/DEVELOPER-PREVIEW-RELEASE-NOTES.md).
 
+**1.8.0-preview.2 candidate, 2026-10-30:** the independently extracted
+two-mode MCPB and Windows ZIP passed offline stdio smoke and SHA-256 checks;
+`verify:canonical` passed 2428 tests in 224 files. This is **not a public
+release**. Before tagging, require successful Windows packaging CI and a
+real installed-host upgrade/reload/disposable-Photoshop acceptance. See
+[`docs/MCPB-UPGRADE-IMPLEMENTATION.md`](docs/MCPB-UPGRADE-IMPLEMENTATION.md)
+and the versioned `preview.2` release notes.
+
 ## Repository
 
 - [ ] Project repository remote is configured as `origin`.

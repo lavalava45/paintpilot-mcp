@@ -1,6 +1,8 @@
 # PaintPilot MCPB upgrades — implementation and acceptance
 
-**30 October 2026 — candidate engineering work. Not an announced public release.**
+**30 October 2026 — candidate engineering work. The public `preview.2`
+release has NOT been published.** Only `1.8.0-preview.1` is available on
+GitHub Releases, and its MCPB remains direct Photoshop Tools only.
 
 ## Product objective
 
@@ -88,3 +90,44 @@ server from within a running Photoshop mutation.
   to a publisher signature.
 
 User-facing instructions: [`mcpb/UPGRADE.md`](../mcpb/UPGRADE.md).
+
+## Final local candidate review — 2026-10-30
+
+- The source version was raised consistently to **`1.8.0-preview.2`** in
+  `package.json`, `server.json`, and `mcpb/manifest.json`; this is a
+  **candidate number, not a released Git tag**.
+- Root source commit for the independently packaged candidate:
+  `2a90862ab4b05db243df3430f0b70ccff22364b5`. Three focused commits
+  include Guard and host Stop regression fixes, the Glama/Linux discovery CI
+  gate plus a Windows MCPB package/ZIP/checksum CI job, and versioned
+  packaging/release documentation.
+- Full local `npm run verify:canonical` **PASS**: 224 Vitest files, 2428
+  tests, plus the other canonical gates. ESLint reported 0 errors and
+  201 existing warnings; the historical live-evidence ledger verified 21
+  entries, with 2 ignored historical records unavailable.
+- `npm run test:mcpb-upgrade`: **4/4 PASS**; official MCPB manifest validation
+  **PASS**. The new builder refuses to copy previous-preview release notes
+  into the ZIP. Product identity now requires version parity.
+- Final `npm run build:mcpb`: **PASS**. Both final archives were independently
+  extracted and started over MCP stdio (direct tools 135, guarded painting 39,
+  5 prompts each; guarded raw mutations denied). They report the matching
+  `preview.2` version, include current installation instructions and
+  preserve an external managed UXP/data path.
+- Built local artifacts (not Git-tracked or published):
+  - `release/photoshop-mcp-digital-painting-1.8.0-preview.2.mcpb`:
+    `4f38f0b474215366fbdcaa3f5b9ca210025a58b5712fcc9e2ed1a9026aec7f21`
+  - `release/paintpilot-windows-1.8.0-preview.2.zip`:
+    `78a921717f6674f82bdd46f55271915b46170ffea3fc352f2d209a99089b5cb9`
+  - Stable unversioned local MCPB alias: same bytes and SHA-256 as versioned
+    MCPB. The checksum file matches all three.
+- Previously published `preview.1` local versioned ZIP/MCPB hashes still
+  match their GitHub release asset digests, and those old files were not
+  overwritten.
+
+**Not yet qualified:** a real supported desktop host updating an installed
+`preview.1` extension to `preview.2` with preserved user configuration;
+the UXP companion's one-time registration and Reload across that upgrade;
+a disposable Photoshop edit through the installed upgrade; and successful
+final GitHub Windows packaging CI on the pushed commit. These remain
+mandatory before tagging and publishing the new MCPB as a working upgrade.
+The candidate is unsigned (checksums do not establish publisher identity).
