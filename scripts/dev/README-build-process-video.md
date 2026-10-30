@@ -10,11 +10,8 @@
 scripts/dev/build-process-video.mjs
 ```
 
-Запускать удобнее всего **из корня репозитория**:
-
-```text
-E:\Downloads\devspace-test\experiments\photoshop-mcp-digital-painting
-```
+Запускать удобнее всего **из корня репозитория PaintPilot**. Путь
+к нему зависит от того, куда вы клонировали проект.
 
 ## Базовый запуск
 

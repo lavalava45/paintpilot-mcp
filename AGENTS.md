@@ -1,5 +1,12 @@
 # AGENTS.md — Photoshop MCP Digital Painting Edition
 
+**Glama registry compatibility is a release gate.** The four catalog-enabling commits
+from `chore/glama-introspection` were consolidated in `c6d38e4`. Preserve their
+Linux-safe MCP introspection, Docker/packaging, licensing and full-history CI
+contracts. Before removing or refactoring them, follow `docs/GLAMA-ACCEPTANCE.md`
+and validate against the public Glama listing. Different commit hashes after a
+squash do not mean the changes are absent.
+
 ## Development priority and test budget (2026-10-11)
 
 **User outcome comes first: visible improvement in a real Photoshop image.**
@@ -866,10 +873,12 @@ ChatGPT agent
 The external controller/daemon route has been deleted after dependency/replacement proof.
 Backward compatibility with that provider chain is not a requirement.
 
-In the current Windows workspace, the project source lives at:
+The project source lives in the canonical PaintPilot Git checkout.
+Its directory is machine-specific; use the repository root rather than
+embedding one developer's absolute Windows path:
 
 ```text
-E:\Downloads\devspace-test\experiments\photoshop-mcp-digital-painting
+<PaintPilot repository root>
 ```
 
 and the server entry after `npm run build:server` is this repository's `dist/index.js`.

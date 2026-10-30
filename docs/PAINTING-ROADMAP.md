@@ -169,8 +169,8 @@ qualification; retain the first-city baseline for comparison.
 [first-run environment audit](archive/2026-10/painting-baseline-20261014/FIRST_CITY_ENVIRONMENT_AUDIT.md),
 [commit/file indexes and build logs](archive/2026-10/painting-baseline-20261014/),
 [SHA-256 manifest](archive/2026-10/painting-baseline-20261014/ARTIFACTS.sha256).
-The full-history bundle is at
-E:/Downloads/devspace-test/_archives/paintpilot-first-city-baseline-20261014/POST_FIRST_CITY_FULL_HISTORY.bundle;
+The full-history bundle is stored locally (not tracked by Git) at
+`_local-archives/paintpilot-first-city-baseline-20261014/POST_FIRST_CITY_FULL_HISTORY.bundle`;
 all six commits remain reachable through the local and GitHub annotated tag
 **[artist-post-first-city-20261014](https://github.com/lavalava45/paintpilot-mcp/tree/artist-post-first-city-20261014)**
 (target `fac85ea`). Keep the tag, bundle, catalog and exact patches available
@@ -273,8 +273,7 @@ and [component-rendering contract](component-rendering.md).
 ## Canonical Git and filesystem consolidation — remaining work only
 
 **Target:** one permanent maintained local branch and checkout:
-**digital-painting**, in
-E:/Downloads/devspace-test/experiments/photoshop-mcp-digital-painting.
+**digital-painting**, at the canonical local PaintPilot repository root.
 Temporary experiments must use uniquely named worktrees and branches, with
 mandatory cleanup after test acceptance. Preserve historical commits through
 tags/bundles, not permanent competing development branches.
@@ -291,7 +290,7 @@ tags/bundles, not permanent competing development branches.
   archival tags/bundles, then propose a separate decision about deleting the
   branch names. Neither branch is currently approved for deletion.
   Exact remote history and branch-deletion receipts are archived at
-  `E:/Downloads/devspace-test/_archives/paintpilot-temp-folders-closure-20261015/`.
+  `_local-archives/paintpilot-temp-folders-closure-20261015/` (local, not published).
 - [ ] **One deployed runtime:** verify COS plugin launch path, MCP build
   fingerprint, loaded UXP source and Git checkout agree after future
   deployments. Do not infer creative equivalence from deployment health.

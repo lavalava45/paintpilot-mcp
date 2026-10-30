@@ -17,5 +17,56 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: pnpm install --no-frozen-lockfile
+      - run: pnpm install --frozen-lockfile
       - run: pnpm run verify:canonical
+      # Glama runs the server in Linux without Photoshop: catalog introspection must stay functional.
+      - name: Verify Glama offline MCP introspection
+        run: node scripts/dev/test-offline-introspection.mjs
+
+  mcpb-package:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: pnpm install --frozen-lockfile
+      - run: npm run test:mcpb-upgrade
+      - run: npm run build:mcpb
+      - name: Verify extracted MCPB, release documentation and archive SHA-256
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $archive = "release/photoshop-mcp-digital-painting-$version.mcpb"
+          $extract = Join-Path $env:RUNNER_TEMP 'paintpilot-mcpb-extracted'
+          [IO.Compression.ZipFile]::ExtractToDirectory((Resolve-Path $archive), $extract)
+          $manifest = Get-Content (Join-Path $extract 'manifest.json') -Raw | ConvertFrom-Json
+          if ($manifest.version -ne $version) { throw 'MCPB manifest version mismatch' }
+          node scripts/verify-mcpb-release.mjs $extract
+          if ($LASTEXITCODE -ne 0) { throw 'Extracted MCPB smoke failed' }
+          $zip = "release/paintpilot-windows-$version.zip"
+          $zipExtract = Join-Path $env:RUNNER_TEMP 'paintpilot-windows-extracted'
+          [IO.Compression.ZipFile]::ExtractToDirectory((Resolve-Path $zip), $zipExtract)
+          $notes = Get-Content (Join-Path $zipExtract 'RELEASE-NOTES.md') -Raw
+          $install = Get-Content (Join-Path $zipExtract 'INSTALL.md') -Raw
+          if (!$notes.Contains($version) -or !$install.Contains($version)) {
+            throw 'Packaged release documentation does not match the version'
+          }
+          foreach ($line in Get-Content 'release/SHA256SUMS.txt') {
+            if ($line -notmatch '^([a-f0-9]{64})\s+([^/\\]+)$') { throw "Invalid SHA line: $line" }
+            $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path 'release' $Matches[2])).Hash.ToLowerInvariant()
+            if ($actual -ne $Matches[1]) { throw "SHA mismatch: $($Matches[2])" }
+          }
+      - name: Retain verified candidate archives (not a public release)
+        uses: actions/upload-artifact@v4
+        with:
+          name: paintpilot-mcpb-candidate
+          path: |
+            release/photoshop-mcp-digital-painting-*.mcpb
+            release/paintpilot-windows-*.zip
+            release/SHA256SUMS.txt
+          retention-days: 14
