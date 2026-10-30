@@ -26,6 +26,7 @@ Independently maintained MCP system for AI-driven digital painting and evidence-
 [![Platform](https://img.shields.io/badge/Platform-Windows-lightgrey.svg)]()
 [![PaintPilot on Glama](https://glama.ai/mcp/servers/lavalava45/paintpilot-mcp/badges/score.svg)](https://glama.ai/mcp/servers/lavalava45/paintpilot-mcp)
 [![Listed on mcpservers.org](https://mcpservers.org/badge.svg)](https://mcpservers.org/servers/lavalava45/paintpilot-mcp)
+[![PaintPilot on LobeHub](https://lobehub.com/badge/mcp/lavalava45-paintpilot-mcp)](https://lobehub.com/mcp/lavalava45-paintpilot-mcp)
 
 > Independently maintained project. Not affiliated with or endorsed by Adobe Inc.
 
@@ -236,6 +237,8 @@ npm run build:server
 ### Two ways to connect to Photoshop
 
 Both modes use the **same build** and Photoshop UXP companion. Add a local stdio server in an MCP-compatible client with `node` as the command and the absolute script path below as its argument.
+
+**MCP directory installation note (including LobeHub):** An automatically inferred configuration such as `node dist/index.js` with a relative path is not a reliable installation recipe for PaintPilot: MCP clients may run from a different working directory, and it does not distinguish the two modes. Install and load the Photoshop UXP companion as described below, then use **one** of the absolute-path configurations here instead.
 
 **1. PaintPilot Painting Mode.** Choose this for AI-driven painting with Art Director, Painter, Critic, visual reviews, journaling and Guard-controlled changes. Mutating operations go through `photoshop_guard_cycle_auto`.
 
