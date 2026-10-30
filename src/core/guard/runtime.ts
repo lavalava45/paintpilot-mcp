@@ -3114,7 +3114,11 @@ export class EmbeddedGuardRuntime {
     }
     let result: Record<string, unknown>;
     try {
-      result = await this.cycle(input, undefined, { dispatchMode: 'auto' });
+      // COS retires its per-invocation Stop token when this MCP call returns.
+      // Detached jobs would outlive that authority and fail their next mutation
+      // check. Keep execution inside the call; every command still probes Stop.
+      const dispatchMode = this.requireHostStop || this.hostStopProbe ? 'sync' : 'auto';
+      result = await this.cycle(input, undefined, { dispatchMode });
     } catch (error) {
       if (documentId) {
         try {

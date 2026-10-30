@@ -160,6 +160,46 @@ function rebindPendingGlanceToRestoredFrame(art, frame) {
     },
   };
 }
+// A later accepted Painter operation can supersede a pending artistic frame
+// without being a rollback. Allow review of those newer pixels ONLY when the
+// durable operation journal proves an unbroken accepted-frame lineage to the
+// pending boundary. Do not silently transfer review debt to unrelated pixels.
+function rebindPendingGlanceToVerifiedSuccessor(art, frame, suppliedGlance, documentId, readRecord) {
+  const pending = art?.whole_image_glance;
+  const pendingId = textOrUndefined(pending?.required_operation_id);
+  const pendingSha = textOrUndefined(pending?.required_frame_sha256)?.toLowerCase();
+  const currentId = textOrUndefined(frame?.operation_id);
+  const currentSha = textOrUndefined(frame?.sha256)?.toLowerCase();
+  if (!pending?.due || !pendingId || !pendingSha || !currentId || !currentSha
+    || (pendingId === currentId && pendingSha === currentSha)
+    || textOrUndefined(suppliedGlance?.operation_id) !== currentId
+    || textOrUndefined(suppliedGlance?.frame_sha256)?.toLowerCase() !== currentSha
+    || frame?.accepted !== true || !materializedEvidenceMatches(frame)) return art;
+  const pendingRecord = readRecord(pendingId);
+  if (!pendingRecord?.visual || pendingRecord.phase !== 'completed'
+    || pendingRecord.failed || pendingRecord.rolled_back
+    || pendingRecord.current_frame_authority === false
+    || pendingRecord.verdict?.disposition !== 'accept'
+    || pendingRecord.args?.document_id !== documentId
+    || textOrUndefined(pendingRecord.preview?.sha256)?.toLowerCase() !== pendingSha
+    || !materializedEvidenceMatches(pendingRecord.preview)) return art;
+  const visited = new Set();
+  let cursor = currentId;
+  for (let depth = 0; depth < 128 && cursor && !visited.has(cursor); depth++) {
+    if (cursor === pendingId) return rebindPendingGlanceToRestoredFrame(art, frame);
+    visited.add(cursor);
+    const record = readRecord(cursor);
+    if (!record?.visual || record.phase !== 'completed' || record.failed
+      || record.rolled_back || record.current_frame_authority === false
+      || record.verdict?.disposition !== 'accept'
+      || record.args?.document_id !== documentId
+      || !materializedEvidenceMatches(record.preview)) return art;
+    if (cursor === currentId && textOrUndefined(record.preview?.sha256)?.toLowerCase() !== currentSha) return art;
+    cursor = textOrUndefined(record.frame_parent_operation_id)
+      ?? textOrUndefined(record.baseline_preview_source_operation_id);
+  }
+  return art;
+}
 function restoredBoundedUndoState(current, recovery, record, frame, review) {
   const incarnation = normalizeDocumentInstanceWitness(current.document_instance?.host_witness)?.token
     ?? current.document_instance?.bootstrap_operation_id ?? null;
@@ -3544,7 +3584,15 @@ export class SessionStore {
       const glanceContext = rollbackRecord?.visual === true && !!rollbackRecord.verdict
         && materializedEvidenceMatches(current.current_frame)
         ? { ...current, art_director: rebindPendingGlanceToRestoredFrame(current.art_director, current.current_frame) }
-        : current;
+        : input?.whole_image_glance
+          ? {
+              ...current,
+              art_director: rebindPendingGlanceToVerifiedSuccessor(
+                current.art_director, current.current_frame, input.whole_image_glance, documentId,
+                id => this.read(id)
+              ),
+            }
+          : current;
       const glanceRecord = this.normalizeWholeImageGlance(
         input?.whole_image_glance,
         { directive_id: directiveId, reviewed_at: now },

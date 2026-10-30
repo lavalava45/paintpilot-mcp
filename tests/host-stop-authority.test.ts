@@ -21,6 +21,43 @@ describe('host Stop authority', () => {
 });
 
 describe('host Stop at the Photoshop command boundary', () => {
+  it.each([false, true])('keeps per-call host authority alive through execution (Stop between commands: %s)', async (stopBetweenCommands) => {
+    let callActive = true;
+    let stopped = false;
+    let executed = 0;
+    let deferred: Promise<unknown> | undefined;
+    const runtime = Object.create(EmbeddedGuardRuntime.prototype) as any;
+    runtime.requireHostStop = true;
+    runtime.hostStopProbe = async () => callActive
+      ? { source: 'cos-host-stop', authoritative: true, state: stopped ? 'stopped' : 'running' }
+      : undefined;
+    runtime.registry = {
+      get: () => ({ tool: { inputSchema: { properties: {} } } }),
+      execute: async () => { executed++; return { content: [] }; },
+    };
+    const execute = async () => {
+      await runtime.invoke('photoshop_paint_strokes', {}, 1000);
+      stopped = stopBetweenCommands;
+      await runtime.invoke('photoshop_paint_strokes', {}, 1000);
+      return { ok: true };
+    };
+    // COS retires the call token as soon as the outer MCP response returns.
+    // Model the normal auto-job handoff, not a stopped Photoshop document.
+    runtime.cycle = async (_input: unknown, _job: unknown, options: { dispatchMode: string }) => {
+      if (options.dispatchMode === 'sync') return execute();
+      deferred = new Promise(resolve => setTimeout(resolve, 0)).then(execute).catch(error => error);
+      return { mode: 'photoshop-guard-async', state: 'starting' };
+    };
+    let failure: unknown;
+    try { await runtime.cycleAuto({}); } catch (error) { failure = error; }
+    finally { callActive = false; }
+    await deferred;
+    expect(executed).toBe(stopBetweenCommands ? 1 : 2);
+    if (stopBetweenCommands) expect(String(failure)).toContain('cos_host_stop_active');
+    else expect(failure).toBeUndefined();
+    expect(deferred).toBeUndefined();
+  });
+
   it('allows the stock-COS Guard executor without a fork-only host probe, while retaining PaintPilot admission', async () => {
     let executed = 0;
     let checked = 0;

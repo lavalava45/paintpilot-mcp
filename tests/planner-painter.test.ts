@@ -2023,6 +2023,67 @@ describe('Art Director / Painter controller contract', () => {
     });
   });
 
+  it('reviews a newer exact frame when accepted journal lineage proves it superseded the pending frame', () => {
+    const s = store();
+    const original = seedClassifiedFrame(s, 'pending-roof-boundary', 1);
+    s.setArtDirectorState({ document_id: 42, action: 'review', directive: directive('roof-review', 8) });
+    s.updatePaintingState(42, state => ({
+      ...state,
+      art_director: { ...state.art_director, whole_image_glance: {
+        due: true, reason: 'global_change',
+        required_operation_id: original.operation_id, required_frame_sha256: original.sha256,
+        required_relations: ['occlusion/depth'], history: [],
+      } },
+    }));
+    const newer = seedClassifiedFrame(s, 'newer-accepted-roof-boundary', 2);
+    const newerRecord = s.read(newer.operation_id);
+    s.write({ ...newerRecord, baseline_preview_source_operation_id: original.operation_id });
+    const glance = {
+      trigger: 'global_change',
+      observation: 'The new exact full-frame preview preserves the roof-to-bracket overlap.',
+      operation_id: newer.operation_id,
+      frame_sha256: newer.sha256,
+      relationship_audit: { checks: [{ relation: 'occlusion/depth', status: 'pass' }] },
+    };
+    // An old-frame assertion must still be rejected, even with valid ancestry.
+    expect(() => s.setArtDirectorState({
+      document_id: 42, action: 'review', directive: directive('roof-review-new', 8),
+      whole_image_glance: { ...glance, operation_id: original.operation_id, frame_sha256: original.sha256 },
+    })).toThrow(/whole_image_glance evidence is stale/);
+    const reviewed = s.setArtDirectorState({
+      document_id: 42, action: 'review', directive: directive('roof-review-new', 8),
+      whole_image_glance: glance,
+    });
+    expect(reviewed.art_director.whole_image_glance).toMatchObject({
+      due: false, reason: null,
+      history: [{ operation_id: newer.operation_id, frame_sha256: newer.sha256 }],
+    });
+  });
+
+  it('rejects a claimed successor when exact preview evidence is damaged', () => {
+    const s = store();
+    const old = seedClassifiedFrame(s, 'authentic-boundary', 1);
+    s.setArtDirectorState({ document_id: 42, action: 'review', directive: directive('verified-lineage', 8) });
+    s.updatePaintingState(42, state => ({
+      ...state, art_director: { ...state.art_director, whole_image_glance: {
+        due: true, reason: 'global_change',
+        required_operation_id: old.operation_id, required_frame_sha256: old.sha256,
+        required_relations: ['occlusion/depth'],
+      } },
+    }));
+    const newest = seedClassifiedFrame(s, 'invalid-evidence', 2);
+    s.write({ ...s.read(newest.operation_id), baseline_preview_source_operation_id: old.operation_id });
+    writeFileSync(newest.path, 'damaged-frame-bytes');
+    expect(() => s.setArtDirectorState({
+      document_id: 42, action: 'review', directive: directive('verified-lineage-v2', 8),
+      whole_image_glance: {
+        trigger: 'global_change', observation: 'Cannot certify the damaged preview.',
+        operation_id: newest.operation_id, frame_sha256: newest.sha256,
+        relationship_audit: { checks: [{ relation: 'occlusion/depth', status: 'pass' }] },
+      },
+    })).toThrow(/operation_id must match the exact pending artistic frame/);
+  });
+
   it('never migrates a pending review to a different frame without verified rollback provenance', () => {
     const s = store();
     const oldFrame = seedClassifiedFrame(s, 'unrelated-old', 1);
